@@ -1,0 +1,292 @@
+{
+  "version": "0.3.0",
+  "status": "candidate-pending-live-host-verification",
+  "runtime": "Node.js 24",
+  "files": [
+    {
+      "path": ".dockerignore",
+      "size": 121,
+      "sha256": "9c5e68d9606f454e10a6a84c31cd3f609e7cf21d5c1998b73ea117bbe713d699"
+    },
+    {
+      "path": "LICENSE",
+      "size": 1089,
+      "sha256": "a41bf0e7f66598a74481580ba6082b84c928e2464b8c0b6c08fd41450e17eb04"
+    },
+    {
+      "path": "README.ko.md",
+      "size": 8213,
+      "sha256": "c82a94c1c33f946f17ef9e15496a581efe234a6d5c950cecd9e98273502213c6"
+    },
+    {
+      "path": "THIRD_PARTY_NOTICES.json",
+      "size": 633450,
+      "sha256": "36ed629f996056d143d2d1376d1000e1c9e6c4e799ee7b2fabb796d5b5740204"
+    },
+    {
+      "path": "app.mjs",
+      "size": 16513,
+      "sha256": "b3623affd9512b8d5374cf13d78c45530acf497fc86c77082e13d46c6406ebc9"
+    },
+    {
+      "path": "artifacts.mjs",
+      "size": 5841,
+      "sha256": "6a48602fbf666a1c7fede2df8ae9f270442ed897aa24af10998b5baa3f3c61c9"
+    },
+    {
+      "path": "bridge.mjs",
+      "size": 2887,
+      "sha256": "aa484cbb1869272b9d1407813d1a1fdace2d5ae1ec24c1aa73e9c894c6c0c11c"
+    },
+    {
+      "path": "config/bridge.env.example",
+      "size": 398,
+      "sha256": "734fb07733c315793fc48a865a08b08187e84c358b6fb3424bbf4791fb3d79c9"
+    },
+    {
+      "path": "config/config.example.toml",
+      "size": 614,
+      "sha256": "07527b354d1cd0c990d9875f30f1a85a6279ea9a53d3bc1805129d98504c38e1"
+    },
+    {
+      "path": "config/docker.example.env",
+      "size": 73,
+      "sha256": "1cc096b5437f61d34f3e78a08122119fa3a677d6b7bb1b3775a272d04cd659f7"
+    },
+    {
+      "path": "config/ssh-approval-bridge.service",
+      "size": 421,
+      "sha256": "39e468d9e00bb2b92d2199eea7b4b4bb8650d70033885935886493b83f08b198"
+    },
+    {
+      "path": "core.mjs",
+      "size": 7918,
+      "sha256": "e8cda3b81c7c8e7733e8119d4916f3b32b79347d9c37ff90a4f6c08a7a66bba6"
+    },
+    {
+      "path": "docker/Dockerfile",
+      "size": 1546,
+      "sha256": "0f53d1c256b7065834c3de5ec81f4b7312505db344767c1f9665f861220e1fa9"
+    },
+    {
+      "path": "docker/compose.yaml",
+      "size": 1013,
+      "sha256": "33c2b28e185d9370f21c66f6bc9049249945343ef768771008d412bb3c7eb704"
+    },
+    {
+      "path": "helper/file-helper.py",
+      "size": 8611,
+      "sha256": "dd5844be42f9b11e24b56327f4407ef3702d38f00f53f3f211490dea78ff2a2d"
+    },
+    {
+      "path": "package-lock.json",
+      "size": 98559,
+      "sha256": "18aa8085c0e17c6723fe67b06ada7eb546859df0b7a2846f41fb93dc4827ae87"
+    },
+    {
+      "path": "package.json",
+      "size": 562,
+      "sha256": "dd257ba0aae3ab269d2b5e69cffb2a79cc864ed48242e183d2d53877699969fb"
+    },
+    {
+      "path": "scripts/compose-update.sh",
+      "size": 1893,
+      "sha256": "9bb7e40ecbd9ab35d685385dc80b11e3a4e3e677bd12e26ffc34a409c9fd0562"
+    },
+    {
+      "path": "scripts/docker-secrets.py",
+      "size": 1608,
+      "sha256": "df82fcb8256e0c4b6e2bf4314eda1e9298c796d2494fe781bd2b25bf06934ceb"
+    },
+    {
+      "path": "scripts/generate-secrets.mjs",
+      "size": 1118,
+      "sha256": "f46c3aafb03f1951a9c0fb97d05e269cee349eff77eaf9fe9a1abe2ff9a7d68c"
+    },
+    {
+      "path": "scripts/install.sh",
+      "size": 9023,
+      "sha256": "f08951468ece2a0b831c6d647e1d15b548c89d38c15009d6a944d4fc8684a50a"
+    },
+    {
+      "path": "scripts/maintenance.mjs",
+      "size": 1129,
+      "sha256": "22e03bd721cefc0e725b9d2f4a7ae64e5944dfbded2b4b0870a0f2239d66f618"
+    },
+    {
+      "path": "scripts/notices.mjs",
+      "size": 1104,
+      "sha256": "c83421ceaf671eccf9468844066eaf87e0706dffb7805fc71aba697b6875af0c"
+    },
+    {
+      "path": "scripts/package.py",
+      "size": 2761,
+      "sha256": "91d43165c6159b06f67825a5aecd19c87924cf083080dbf6dc1f92a900ff41f2"
+    },
+    {
+      "path": "scripts/prepare-docker.sh",
+      "size": 3938,
+      "sha256": "cb198fec8175e52485d8d5db3e6d584f50e781ba474526927627b1201fe62c83"
+    },
+    {
+      "path": "scripts/rollback.sh",
+      "size": 1962,
+      "sha256": "18be495472a7ef93dfe8570979f696610957e1d87587e9c0f0a8c1833cfed4a3"
+    },
+    {
+      "path": "scripts/status.sh",
+      "size": 297,
+      "sha256": "2b7a115f6e1d658651893961336156fa535157abaea57f97aac373665efdadd8"
+    },
+    {
+      "path": "scripts/verify.mjs",
+      "size": 1326,
+      "sha256": "6a7e4d82906dbdceb281e782aa5e4a4baae0ce88c63837a4cc43ccaae0b5b5eb"
+    },
+    {
+      "path": "secrets.mjs",
+      "size": 1134,
+      "sha256": "66cb62dee46a176123500435e11003cd360f3599cebcabc897bed1343b7b5aba"
+    },
+    {
+      "path": "test/Dockerfile",
+      "size": 533,
+      "sha256": "096a1b9ccabb23f31e28db984f170beb90c19c6a751a9dddeb87f8997004ab42"
+    },
+    {
+      "path": "test/PLAN.md",
+      "size": 1547,
+      "sha256": "5df8695cb66431250eb8b88085040decdd5b857f67f4fc24608c00a9d8c1dee1"
+    },
+    {
+      "path": "test/artifacts.test.mjs",
+      "size": 2381,
+      "sha256": "2e397f89bdedf8f2238e53559263bec1cf2ac11b6233d4f6660ae9d4a2687278"
+    },
+    {
+      "path": "test/compose-driver.Dockerfile",
+      "size": 362,
+      "sha256": "a2031893fa6267c43031fe931f5da6c47ed480cb907a7e782f2fcbe0bb1becf5"
+    },
+    {
+      "path": "test/compose-driver.sh",
+      "size": 2789,
+      "sha256": "d9261dad7c29fa6680720235770f6e5c125644e4cdccb9407b5c4a6b73e0d1e9"
+    },
+    {
+      "path": "test/compose-runtime.ps1",
+      "size": 2177,
+      "sha256": "95c9a25008d329986cea98edded11a5299a749de60e390c74f0fd99e7a1f5fe8"
+    },
+    {
+      "path": "test/container-test.sh",
+      "size": 2820,
+      "sha256": "ef930db696a7d0e9717c048c8ff8999f911324aa6353592af5b942741d0f8880"
+    },
+    {
+      "path": "test/core.test.mjs",
+      "size": 4318,
+      "sha256": "ab1f8f826988cd74ef26e646681cebbe3d096eca19a43f1c8e3b5b491eb2e8aa"
+    },
+    {
+      "path": "test/docker-runtime.ps1",
+      "size": 4719,
+      "sha256": "907b35dfb2c77f4873e64c3e94e19e0dd03e3a3ad6fae9c8f806b75ac4692ad7"
+    },
+    {
+      "path": "test/docker-tests.ps1",
+      "size": 1719,
+      "sha256": "995b7feb6d3c1d88d3b0c31d6ec8ab98eddd1d487f3105ebf0fc4e957f594e07"
+    },
+    {
+      "path": "test/http-races.test.mjs",
+      "size": 3772,
+      "sha256": "1e5e239ca7f392d20389ce9befbfb6d4c44d0ffa1f053e79a72ca2d2b9a17add"
+    },
+    {
+      "path": "test/http.test.mjs",
+      "size": 4378,
+      "sha256": "3b28ef9730f6e156706010da987358542078d17e9f9ad1f283044e4d7d58e674"
+    },
+    {
+      "path": "test/maintenance.test.mjs",
+      "size": 2527,
+      "sha256": "6d9628b474cab98b4462c046db31f3cbfa78205506b86fda4f1e6a0bb1c924ee"
+    },
+    {
+      "path": "test/malformed-server.fixture.mjs",
+      "size": 1148,
+      "sha256": "8adea1835119089bfa1d24129a14154ebc35966f92aaf75c766e03e4b5fe0583"
+    },
+    {
+      "path": "test/secrets.test.mjs",
+      "size": 964,
+      "sha256": "a55395bf664e17a5c6988a535f2134366721cbaeb8ed234578b445622769217a"
+    },
+    {
+      "path": "test/ssh-roundtrip.mjs",
+      "size": 5799,
+      "sha256": "0b47f4ca0a781234d8280e97b5a4b229b5d95470c68454673e6ed8c686494829"
+    },
+    {
+      "path": "test/test_helper.py",
+      "size": 3283,
+      "sha256": "ebbb781d2bc5f9edc63f79048c0880a7fc495df7dec5c7eff11ae315ec281c6b"
+    },
+    {
+      "path": "test/transfer-failure.test.mjs",
+      "size": 918,
+      "sha256": "b5fdc1aa90fa96f6916a26f33265acabd29d8b3a3e9c7852da56b7b36476522f"
+    },
+    {
+      "path": "transfers.mjs",
+      "size": 4506,
+      "sha256": "bc4a534143dc7c287b53e513a5bcacddd6aa098ab3e00d361abbb568e03820d2"
+    },
+    {
+      "path": "ui/build.mjs",
+      "size": 518,
+      "sha256": "6a86abe5d478bdac25b1dbd599b3049fe8a73ca61e6bd70bdac13197dadaa18c"
+    },
+    {
+      "path": "ui/card.html",
+      "size": 1008,
+      "sha256": "4efa4c414ef77018e867979f25fae23694ae9a94990ea0ce16266de13405e6d7"
+    },
+    {
+      "path": "ui/card.js",
+      "size": 9077,
+      "sha256": "48c7a977d94d7513106d082a379300f350c4e6252b5ee1cb7d326344219fbdb3"
+    },
+    {
+      "path": "ui/dist/card.html",
+      "size": 513066,
+      "sha256": "3dfc14bd47a4a4316ca025d7eb45c77ca1ea6090cbf7154f3ec35048b78631a5"
+    },
+    {
+      "path": "ui/package-lock.json",
+      "size": 22297,
+      "sha256": "2e8658927a39f4becee6849855bd704b52813eaf6519b5f2844330faa1225302"
+    },
+    {
+      "path": "ui/package.json",
+      "size": 393,
+      "sha256": "1eb93b91126de3b2d117fa427b2d5c9e3e8698c2476980b1571bdc0b465914d0"
+    },
+    {
+      "path": "vendor/ssh-mcp-2.18.0.tgz",
+      "size": 197672,
+      "sha256": "beab008f3013c318b0f5a963dfa3d261bffbfdcc994175c1ec59094e4e31cf9f"
+    },
+    {
+      "path": "web/app.js",
+      "size": 1844,
+      "sha256": "1df831676ae783e3e59c285b5957946ccdad10488fc2c1a0ea2a0d82087b24bc"
+    },
+    {
+      "path": "web/index.html",
+      "size": 707,
+      "sha256": "1fcaabfe1d1c6312354b3eed55ed2d961f7941444bda5a21cd56d69883b72003"
+    }
+  ]
+}

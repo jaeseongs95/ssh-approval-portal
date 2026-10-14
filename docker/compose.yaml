@@ -1,0 +1,30 @@
+name: ssh-approval-portal
+services:
+  bridge:
+    image: ${BRIDGE_IMAGE:-ssh-approval-portal:0.3.0}
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    user: "${BRIDGE_UID:?Run prepare-docker.sh first}:${BRIDGE_GID:?Run prepare-docker.sh first}"
+    network_mode: host
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 360s
+    environment:
+      HOME: /var/lib/ssh-mcp
+      BRIDGE_SECRET_ENV_FILE: /run/secrets/bridge_config
+    secrets: [bridge_config]
+    volumes:
+      - /var/lib/ssh-mcp/.ssh:/var/lib/ssh-mcp/.ssh:ro
+      - /var/lib/ssh-mcp/.config/ssh-mcp:/var/lib/ssh-mcp/.config/ssh-mcp:ro
+      - /var/lib/ssh-mcp/.local/share/ssh-mcp:/var/lib/ssh-mcp/.local/share/ssh-mcp
+      - /var/lib/ssh-mcp/transfers:/var/lib/ssh-mcp/transfers
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+secrets:
+  bridge_config:
+    file: /etc/ssh-approval-portal/docker-secrets.env

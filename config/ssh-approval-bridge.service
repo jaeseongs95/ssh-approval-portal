@@ -1,0 +1,19 @@
+[Unit]
+Description=SSH Approval Portal
+After=network.target ssh.service
+
+[Service]
+Type=simple
+User=mcpbridge
+Group=mcpbridge
+WorkingDirectory=/var/lib/ssh-mcp/app
+EnvironmentFile=/etc/ssh-mcp-approval-bridge.env
+ExecStart=/opt/ssh-approval/node/bin/node /var/lib/ssh-mcp/app/approval-bridge/bridge.mjs
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,11 @@
+node_modules/
+ui/node_modules/
+dist/
+**/__pycache__/
+*.log
+.env
+*.pem
+*.key
+docker/*.env
+test/*-results.json
+ssh-approval-portal-0.3.0/

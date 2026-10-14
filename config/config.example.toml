@@ -1,0 +1,31 @@
+[defaults]
+defaultProfile = "aws-local"
+commandTimeoutMs = 60000
+transferMaxBytes = 67108864
+transferTimeoutMs = 300000
+
+[[profiles]]
+name = "aws-local"
+host = "127.0.0.1"
+port = 22
+user = "mcpops"
+auth = "key"
+keyRef = "/var/lib/ssh-mcp/.ssh/id_ed25519"
+trustedHostKey = "HOST_KEY_FINGERPRINT"
+group = "prod"
+role = "operator"
+readOnly = false
+announceAgent = false
+
+[[profiles]]
+name = "aws-readonly"
+host = "127.0.0.1"
+port = 22
+user = "mcpops"
+auth = "key"
+keyRef = "/var/lib/ssh-mcp/.ssh/id_ed25519"
+trustedHostKey = "HOST_KEY_FINGERPRINT"
+group = "prod"
+role = "viewer"
+readOnly = true
+announceAgent = false

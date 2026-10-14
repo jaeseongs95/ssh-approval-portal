@@ -1,0 +1,21 @@
+{
+  "name": "ssh-approval-portal",
+  "version": "0.3.0",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24 <25" },
+  "scripts": {
+    "start": "node bridge.mjs",
+    "test": "node --test test/*.test.mjs",
+    "build:ui": "npm --prefix ui ci && npm --prefix ui run build",
+    "package": "python3 scripts/package.py",
+    "verify": "node scripts/verify.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "ssh-mcp": "file:vendor/ssh-mcp-2.18.0.tgz",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {}
+}
