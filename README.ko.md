@@ -2,6 +2,8 @@
 
 명령 승인, 파일 업로드·다운로드와 GPT/Claude MCP Apps UI를 하나의 서버에서 처리합니다. 기존 웹 승인 화면을 유지합니다. 현재 산출물은 실제 호스트 검증 전 candidate입니다.
 
+관리자 Cloudflare·Google·GitHub 로그인 설정은 [한국어 안내](docs/admin-login.ko.md) 또는 [English guide](docs/admin-login.en.md)를 확인하세요. 기본 인증은 기존 토큰 방식이며, 실제 제공자 설정·로그인 시험 후 Access 모드를 명시적으로 활성화합니다.
+
 ## 설치
 
 Ubuntu 22.04/24.04 x86_64·arm64, 인터넷 연결, 서버 관리자 터미널이 필요합니다. Node 24를 전용 경로에 설치하며 시스템 Node를 교체하지 않습니다.

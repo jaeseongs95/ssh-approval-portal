@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { ApprovalQueue, Tickets, routeCommand, validateCommand, equalSecret, idValid, remotePath, hash } from './core.mjs';
 import { Artifacts, CHUNK_BYTES, MAX_BYTES } from './artifacts.mjs';
 import { Transfers } from './transfers.mjs';
+import { createAdminAccess } from './admin-access.mjs';
 
 const outputSchema = z.object({}).passthrough();
 const id = z.string().regex(/^[a-f0-9]{48}$/);
@@ -16,11 +17,12 @@ const refused = () => ({ isError: true, content: [{ type: 'text', text: 'Request
 const json = (res, status, value) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }); res.end(JSON.stringify(value)); };
 const authenticated = (req, secret) => equalSecret(/^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1], secret);
 
-export async function createApplication({ registry, classify, executeCommand, audit, transferRoot, env = process.env, uiHtml }) {
+export async function createApplication({ registry, classify, executeCommand, audit, transferRoot, env = process.env, uiHtml, accessKeySet }) {
   const URI = `ui://ssh-approval/card-${hash(uiHtml)}.html`;
   const mcpToken = env.BRIDGE_MCP_TOKEN, adminToken = env.BRIDGE_ADMIN_TOKEN;
   const adminOrigin = env.BRIDGE_ADMIN_ORIGIN;
   if (!mcpToken || !adminToken || equalSecret(mcpToken, adminToken) || !/^https:\/\/[^/]+$/.test(adminOrigin ?? '')) throw Error('Configure distinct tokens and one HTTPS admin origin');
+  const adminAccess = createAdminAccess(env, accessKeySet);
   const signer = new Tickets(env.BRIDGE_UI_TICKET_KEY);
   const enabled = env.BRIDGE_UI_ENABLED === 'true';
   const prefix = env.BRIDGE_UI_TOOL_PREFIX ?? 'ssh-approval-bridge_';
@@ -127,7 +129,7 @@ export async function createApplication({ registry, classify, executeCommand, au
     return server;
   }
   const mcpHttp = createServer(async (req, res) => {
-    if (req.url === '/health' && req.method === 'GET') return json(res, 200, { healthy: true, version: '0.3.0', uiEnabled: enabled, busy: queue.busy() || activeReads > 0, pending: queue.list().length, maintenance: queue.maintenance });
+    if (req.url === '/health' && req.method === 'GET') return json(res, 200, { healthy: true, version: '0.3.0', uiEnabled: enabled, adminAuthMode: adminAccess.mode, busy: queue.busy() || activeReads > 0, pending: queue.list().length, maintenance: queue.maintenance });
     if (req.url !== '/mcp' || !authenticated(req, mcpToken)) return json(res, 401, { error: 'Unauthorized' });
     if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true, maxMessageSize: 1024 * 1024 });
@@ -141,6 +143,11 @@ export async function createApplication({ registry, classify, executeCommand, au
   const adminHttp = createServer(async (req, res) => {
     try {
       const url = new URL(req.url, adminOrigin);
+      // Local deployment tooling keeps its server-only token; it cannot approve jobs in Access mode.
+      const maintenance = ['/api/maintenance/reserve', '/api/maintenance/release'].includes(url.pathname);
+      if (maintenance && !authenticated(req, adminToken)) return json(res, 401, { error: 'Unauthorized' });
+      if (!maintenance && adminAccess.mode === 'access' && !await adminAccess.authenticated(req)) return json(res, 401, { error: 'Unauthorized' });
+      if (req.method === 'GET' && url.pathname === '/api/session') return json(res, 200, { mode: adminAccess.mode });
       const match = /^\/downloads\/([a-f0-9]{48})\/([a-f0-9]{32})$/.exec(url.pathname);
       if (match && ['GET', 'HEAD'].includes(req.method)) {
         const x = store.get(match[1]), cap = url.searchParams.get('ticket');
@@ -159,9 +166,9 @@ export async function createApplication({ registry, classify, executeCommand, au
       }
       if (req.method === 'GET' && ['/', '/app.js'].includes(url.pathname)) {
         res.writeHead(200, { 'Content-Type': url.pathname === '/' ? 'text/html; charset=utf-8' : 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'", 'Referrer-Policy': 'no-referrer' });
-        return res.end(url.pathname === '/' ? webHtml : webJs);
+        return res.end(url.pathname === '/' ? webHtml.replace('data-auth-mode="token"', `data-auth-mode="${adminAccess.mode}"`) : webJs);
       }
-      if (!authenticated(req, adminToken)) return json(res, 401, { error: 'Unauthorized' });
+      if (!maintenance && adminAccess.mode === 'token' && !authenticated(req, adminToken)) return json(res, 401, { error: 'Unauthorized' });
       if (req.method === 'GET' && url.pathname === '/api/pending') return json(res, 200, queue.list());
       if (req.method === 'GET' && url.pathname === '/api/requests') return json(res, 200, [...queue.jobs.keys()].map(id => queue.get(id)));
       const single = /^\/api\/([a-f0-9]{48})$/.exec(url.pathname);

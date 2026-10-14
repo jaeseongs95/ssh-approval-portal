@@ -1,6 +1,7 @@
 const el = id => document.getElementById(id);
 const korean = (navigator.language ?? 'en').toLowerCase().startsWith('ko');
 const locale = korean ? 'ko-KR' : 'en-US';
+const accessMode = document.body?.dataset.authMode === 'access';
 const en = {
   '승인 대기': 'Awaiting approval', '실행 중': 'Running', '완료': 'Completed', '실패': 'Failed', '거부': 'Denied', '만료': 'Expired',
   '명령 실행': 'Command', '파일 업로드': 'File upload', '파일 다운로드': 'File download', '요청 실패': 'Request failed',
@@ -10,6 +11,8 @@ const en = {
   '연결됨': 'Connected', '마지막 갱신': 'Last refreshed', '10초마다 갱신': 'Refreshes every 10 seconds', '연결 확인 필요': 'Check connection',
   '요청 목록을 연결해 주세요': 'Connect to view requests', '관리자 토큰을 입력하고 요청 조회를 누르세요.': 'Enter your administrator token and refresh requests.',
   '처리 이력을 한눈에': 'Your approval history', '실행 중인 요청부터 완료된 결과까지 확인할 수 있습니다.': 'View running requests and completed results.', '관리자 토큰': 'Administrator token',
+  '본인 계정으로 연결됨': 'Connected with your account', 'Cloudflare Access에서 확인한 본인 계정으로 요청을 처리합니다.': 'Manage requests with your owner account verified by Cloudflare Access.',
+  '로그인이 만료되었거나 접근할 수 없습니다. 다시 로그인해 주세요.': 'Your session expired or access was denied. Please sign in again.',
 };
 const t = value => korean ? value : en[value] ?? value;
 document.documentElement.lang = korean ? 'ko' : 'en';
@@ -27,7 +30,8 @@ function empty(parent, title, note) {
 }
 function error(message = '') { el('error').textContent = message; el('error').hidden = !message; }
 async function api(path, method = 'GET') {
-  const r = await fetch(path, { method, headers: { Authorization: 'Bearer ' + el('token').value } });
+  const r = await fetch(path, { method, credentials: 'same-origin', headers: accessMode ? {} : { Authorization: 'Bearer ' + el('token').value } });
+  if (accessMode && r.status === 401) { el('sign-in').hidden = false; throw Error(t('로그인이 만료되었거나 접근할 수 없습니다. 다시 로그인해 주세요.')); }
   const value = await r.json(); if (!r.ok) throw Error(value.error ?? t('요청 실패')); return value;
 }
 async function load(force = false) {
@@ -106,3 +110,9 @@ el('load').onclick = () => load(true);
 el('token').addEventListener('keydown', event => { if (event.key === 'Enter') load(true); });
 empty(el('jobs'), t('요청 목록을 연결해 주세요'), t('관리자 토큰을 입력하고 요청 조회를 누르세요.'));
 empty(el('history'), t('처리 이력을 한눈에'), t('실행 중인 요청부터 완료된 결과까지 확인할 수 있습니다.'));
+if (accessMode) {
+  el('token').hidden = true;
+  el('auth-label').textContent = t('본인 계정으로 연결됨'); el('auth-label').removeAttribute('for');
+  el('auth-note').textContent = t('Cloudflare Access에서 확인한 본인 계정으로 요청을 처리합니다.');
+  load();
+}

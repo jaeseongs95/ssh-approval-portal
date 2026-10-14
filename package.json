@@ -4,7 +4,9 @@
   "license": "MIT",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=24 <25" },
+  "engines": {
+    "node": ">=24 <25"
+  },
   "scripts": {
     "start": "node bridge.mjs",
     "test": "node --test test/*.test.mjs",
@@ -14,8 +16,8 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",
+    "jose": "6.2.12",
     "ssh-mcp": "file:vendor/ssh-mcp-2.18.0.tgz",
     "zod": "4.4.3"
-  },
-  "devDependencies": {}
+  }
 }

@@ -15,8 +15,8 @@
     },
     {
       "path": "README.ko.md",
-      "size": 8213,
-      "sha256": "c82a94c1c33f946f17ef9e15496a581efe234a6d5c950cecd9e98273502213c6"
+      "size": 8525,
+      "sha256": "26e2116ff8837a02744e1148b765761527d580aa9611322b0075d51385818863"
     },
     {
       "path": "THIRD_PARTY_NOTICES.json",
@@ -24,9 +24,14 @@
       "sha256": "36ed629f996056d143d2d1376d1000e1c9e6c4e799ee7b2fabb796d5b5740204"
     },
     {
+      "path": "admin-access.mjs",
+      "size": 1981,
+      "sha256": "b90d56a8da7f1dbfa046e3619d992a1d28ac32695342a73116fc1e95edbb4f3b"
+    },
+    {
       "path": "app.mjs",
-      "size": 16531,
-      "sha256": "8fb1889e0ce2062393bc32ac8b7398d107452df440197d8f780eb12d3fbd0954"
+      "size": 17399,
+      "sha256": "121c1789434bf2cb45cfbfbcddbd656e6f9fc83395ea5414872476c3f1a427b6"
     },
     {
       "path": "artifacts.mjs",
@@ -40,8 +45,8 @@
     },
     {
       "path": "config/bridge.env.example",
-      "size": 398,
-      "sha256": "734fb07733c315793fc48a865a08b08187e84c358b6fb3424bbf4791fb3d79c9"
+      "size": 669,
+      "sha256": "6f638c3b54296a6149b00b10a0e41ce5c8ca7d8a0ae04cc32499e7367f968c4c"
     },
     {
       "path": "config/config.example.toml",
@@ -74,24 +79,44 @@
       "sha256": "33c2b28e185d9370f21c66f6bc9049249945343ef768771008d412bb3c7eb704"
     },
     {
+      "path": "docs/admin-login.en.md",
+      "size": 4742,
+      "sha256": "55667b0ff1f5bdb7cf90bf9b64a9f1c8ae7c8d737cf208b3d9c93bf77c0efcb0"
+    },
+    {
+      "path": "docs/admin-login.ko.md",
+      "size": 5941,
+      "sha256": "31b8c8db2df6f0da1cc4123a5e31f84406ef47ef1558da6894486a13b9fd0bd2"
+    },
+    {
       "path": "helper/file-helper.py",
       "size": 8611,
       "sha256": "dd5844be42f9b11e24b56327f4407ef3702d38f00f53f3f211490dea78ff2a2d"
     },
     {
       "path": "package-lock.json",
-      "size": 98559,
-      "sha256": "18aa8085c0e17c6723fe67b06ada7eb546859df0b7a2846f41fb93dc4827ae87"
+      "size": 98585,
+      "sha256": "a490e0c93086093598d569a6326d41547daa4cbf6fa8f4ad222f9db47929bf59"
     },
     {
       "path": "package.json",
-      "size": 562,
-      "sha256": "dd257ba0aae3ab269d2b5e69cffb2a79cc864ed48242e183d2d53877699969fb"
+      "size": 565,
+      "sha256": "44ff9b6c762793b9e3fd1697bf941bfb649f64fffd19e8c6a0af302c6ad3d65c"
+    },
+    {
+      "path": "scripts/admin-access-config.mjs",
+      "size": 2364,
+      "sha256": "5bcd8c44f7d3a6274ac30b197993df9b4f06287e886d50211253c1c0e343a468"
     },
     {
       "path": "scripts/compose-update.sh",
       "size": 1893,
       "sha256": "9bb7e40ecbd9ab35d685385dc80b11e3a4e3e677bd12e26ffc34a409c9fd0562"
+    },
+    {
+      "path": "scripts/configure-admin-access.sh",
+      "size": 2453,
+      "sha256": "f68fefd8066bde3c21f50612f459e025ab219293e071c23d0d26fc1c90ab2779"
     },
     {
       "path": "scripts/docker-secrets.py",
@@ -120,8 +145,8 @@
     },
     {
       "path": "scripts/package.py",
-      "size": 2761,
-      "sha256": "91d43165c6159b06f67825a5aecd19c87924cf083080dbf6dc1f92a900ff41f2"
+      "size": 2789,
+      "sha256": "62ac5e272c0a84550460b3774083506f44021f0376c9632a67ef92a3309c5e1a"
     },
     {
       "path": "scripts/prepare-docker.sh",
@@ -145,8 +170,8 @@
     },
     {
       "path": "secrets.mjs",
-      "size": 1134,
-      "sha256": "66cb62dee46a176123500435e11003cd360f3599cebcabc897bed1343b7b5aba"
+      "size": 1240,
+      "sha256": "150831b3dd173e801233c805d197458caa5a1c8ffab85a48d3b15607f5345846"
     },
     {
       "path": "test/Dockerfile",
@@ -157,6 +182,16 @@
       "path": "test/PLAN.md",
       "size": 1547,
       "sha256": "5df8695cb66431250eb8b88085040decdd5b857f67f4fc24608c00a9d8c1dee1"
+    },
+    {
+      "path": "test/admin-access-http.test.mjs",
+      "size": 3816,
+      "sha256": "133cf91240f72bc8c8af30def7a39c4a42f456c535f85faf586075e73429b801"
+    },
+    {
+      "path": "test/admin-access.test.mjs",
+      "size": 3963,
+      "sha256": "286ed24ccb721099937142e667c7d95b32cc9c6b59ed98a76f3bfe8a988ac8b3"
     },
     {
       "path": "test/artifacts.test.mjs",
@@ -285,13 +320,13 @@
     },
     {
       "path": "web/app.js",
-      "size": 8338,
-      "sha256": "d6802dec95df0415c1e51b814f7b53581d5640d18c75ab97b502c145eba462e9"
+      "size": 9307,
+      "sha256": "a41e0bd01ebaee9a366632d791b0483c5574eb71adecca033eb8a6b4b465abef"
     },
     {
       "path": "web/index.html",
-      "size": 8646,
-      "sha256": "521cb816da16064209bafb1cd94c80e6db07d4b106ca4c880b592b71160eb2a2"
+      "size": 8776,
+      "sha256": "9e5f402850fd40443d79b16c0ea01348274cb614df70a43486e23085c4f631b2"
     }
   ]
 }

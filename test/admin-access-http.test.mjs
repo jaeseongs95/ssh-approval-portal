@@ -1,0 +1,38 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { generateKeyPair, SignJWT, createLocalJWKSet, exportJWK } from 'jose';
+import { createApplication } from '../app.mjs';
+const listen = server => new Promise(resolve => server.listen(0,'127.0.0.1',resolve));
+
+test('Access web requires signed owner, cookie POST origin and separate maintenance token; no credential disclosure', async () => {
+  const root=await mkdtemp(join(tmpdir(),'ssh-access-'));
+  const {privateKey,publicKey}=await generateKeyPair('RS256');
+  const issuer='https://fixture.cloudflareaccess.com',aud='a'.repeat(64),origin='https://admin.example.test';
+  const env={BRIDGE_MCP_TOKEN:'fixture-mcp',BRIDGE_ADMIN_TOKEN:'fixture-admin',BRIDGE_UI_TICKET_KEY:'b'.repeat(64),BRIDGE_ADMIN_ORIGIN:origin,BRIDGE_ADMIN_AUTH_MODE:'access',BRIDGE_ACCESS_TEAM_DOMAIN:issuer,BRIDGE_ACCESS_AUD:aud,BRIDGE_ACCESS_OWNER_EMAILS:'owner@example.test'};
+  let calls=0;
+  const app=await createApplication({registry:{getProfile:name=>({host:'127.0.0.1',port:22,user:'fixture',readOnly:name==='aws-readonly'}),closeAll:async()=>{}},classify:()=>({class:'privileged'}),executeCommand:async()=>{calls++;return{content:[{type:'text',text:'fixture result'}]}},audit:()=>{},transferRoot:root,env,uiHtml:'<html></html>',accessKeySet:createLocalJWKSet({keys:[{...await exportJWK(publicKey),kid:'fixture'}]})});
+  const token=await new SignJWT({email:'owner@example.test',type:'app'}).setProtectedHeader({alg:'RS256',kid:'fixture'}).setIssuer(issuer).setAudience(aud).setSubject('owner').setIssuedAt().setExpirationTime('5m').sign(privateKey);
+  const owner={'cf-access-jwt-assertion':token,Origin:origin};
+  try {
+    await listen(app.adminHttp);await listen(app.mcpHttp);const url=`http://127.0.0.1:${app.adminHttp.address().port}`;
+    for(const path of ['/','/app.js','/api/session','/api/requests','/downloads/'+'1'.repeat(48)+'/'+'2'.repeat(32)])assert.equal((await fetch(url+path,{headers:{Authorization:'Bearer fixture-admin','cf-access-authenticated-user-email':'owner@example.test'}})).status,401,path);
+    const html=await(await fetch(url,{headers:owner})).text();assert.match(html,/data-auth-mode="access"/);assert.ok(!html.includes(token));
+    const session=await(await fetch(url+'/api/session',{headers:owner})).json();assert.deepEqual(session,{mode:'access'});
+    const job=app.queue.submit('sudo fixture');assert.equal(calls,0);
+    const action=url+`/api/${job.id}/approve`;
+    assert.equal((await fetch(action,{method:'POST',headers:{...owner,Origin:'https://evil.test'}})).status,403);
+    assert.equal((await fetch(action,{method:'POST',headers:{...owner,Origin:''}})).status,403);
+    assert.equal((await fetch(action,{method:'POST',headers:{Authorization:'Bearer fixture-admin',Origin:origin}})).status,401);
+    assert.equal((await fetch(action,{method:'POST',headers:owner})).status,200);await app.queue.wait(job.id);assert.equal(calls,1);
+    assert.equal((await fetch(action,{method:'POST',headers:owner})).status,409);assert.equal(calls,1);
+    const result=await(await fetch(url+'/api/requests',{headers:owner})).text();for(const secret of [token,'fixture-admin',env.BRIDGE_UI_TICKET_KEY])assert.ok(!result.includes(secret));
+    const maintenance=url+'/api/maintenance/';
+    assert.equal((await fetch(maintenance+'reserve',{method:'POST',headers:owner})).status,401);
+    const server={Authorization:'Bearer fixture-admin',Origin:origin};
+    assert.equal((await fetch(maintenance+'reserve',{method:'POST',headers:server})).status,200);
+    assert.equal((await fetch(maintenance+'release',{method:'POST',headers:server})).status,200);
+  }finally{await app.close();await rm(root,{recursive:true});}
+});
