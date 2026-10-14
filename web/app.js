@@ -45,6 +45,7 @@ async function load() {
       const actions = text(body, 'div', '', 'actions');
       if (job.state === 'pending') for (const action of ['approve', 'deny']) {
         const b = text(actions, 'button', action === 'approve' ? '승인·실행' : '거부', action === 'approve' ? 'primary' : 'secondary reject');
+        b.disabled = deciding;
         b.onclick = async () => {
           if (deciding) return; deciding = true; error();
           for (const button of el('jobs').querySelectorAll('button')) button.disabled = true;
@@ -73,13 +74,13 @@ async function load() {
     }
     el('connection').classList.add('connected'); el('connection-text').textContent = '연결됨';
     el('updated').textContent = `마지막 갱신 ${new Date().toLocaleTimeString('ko-KR')} · 2초마다 갱신`; error();
-    if (!polling) polling = setInterval(() => { if (!document.hidden && !deciding) load(); }, 2000);
+    if (!polling) polling = setInterval(() => { if (!document.hidden) load(); }, 2000);
   } catch (e) {
     error(e.message); el('connection').classList.remove('connected'); el('connection-text').textContent = '연결 확인 필요';
     clearInterval(polling); polling = null;
   } finally { loading = false; el('load').disabled = false; }
 }
-el('load').onclick = () => { if (!deciding) load(); };
-el('token').addEventListener('keydown', event => { if (event.key === 'Enter' && !deciding) load(); });
+el('load').onclick = load;
+el('token').addEventListener('keydown', event => { if (event.key === 'Enter') load(); });
 empty(el('jobs'), '요청 목록을 연결해 주세요', '관리자 토큰을 입력하고 요청 조회를 누르세요.');
 empty(el('history'), '처리 이력을 한눈에', '실행 중인 요청부터 완료된 결과까지 확인할 수 있습니다.');
