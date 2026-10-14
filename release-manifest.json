@@ -255,18 +255,18 @@
     },
     {
       "path": "ui/card.html",
-      "size": 1008,
-      "sha256": "4efa4c414ef77018e867979f25fae23694ae9a94990ea0ce16266de13405e6d7"
+      "size": 6203,
+      "sha256": "f00f44a2fa825ffb3677f3a2dfdf2eb7b53d3635dd629f8c30c14b8fd0d75f0f"
     },
     {
       "path": "ui/card.js",
-      "size": 9077,
-      "sha256": "48c7a977d94d7513106d082a379300f350c4e6252b5ee1cb7d326344219fbdb3"
+      "size": 11220,
+      "sha256": "9c37aff769650e331da43b1b3ebca2e2600182fbc307975c9c56f49c1e7138f6"
     },
     {
       "path": "ui/dist/card.html",
-      "size": 498142,
-      "sha256": "89575662f5cbd6a9383fb5fc953fd4170e07103c2bac9d0c4086be921d5997e7"
+      "size": 504898,
+      "sha256": "2d8c3da223e09d04f0d50a4220947f7d01ca501ef95669d75496faa9c51bd20c"
     },
     {
       "path": "ui/package-lock.json",

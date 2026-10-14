@@ -2,6 +2,7 @@ import { App } from '@modelcontextprotocol/ext-apps';
 const app = new App({ name: 'SSH Approval Portal', version: '0.3.0' }, { availableDisplayModes: ['inline', 'fullscreen'] });
 const el = id => document.getElementById(id);
 let privateData = {}, job = null, transfer = null, chosenFile = null, polling = null, uploading = false;
+let renderedJob = '', viewRevision = 0;
 const states = { pending: '승인 대기', running: '실행 중', completed: '완료', failed: '실패', denied: '거부됨', expired: '만료됨' };
 async function call(name, args) {
   const value = await app.callServerTool({ name: (privateData.namespace ?? 'ssh-approval-bridge_') + name, arguments: args });
@@ -25,26 +26,58 @@ function received(result) {
   if (meta) privateData = { ...privateData, ...meta };
   if (!value) return;
   if (value.probe) {
+    renderedJob = ''; job = null; transfer = null; clearInterval(polling);
+    delete el('status').dataset.state;
     el('status').textContent = '표시 시험 — 명령은 실행되지 않습니다';
     el('details').replaceChildren(); text(el('details'), 'pre', meta?.privateMarker ?? 'UI 전용 메타데이터를 받지 못했습니다');
     el('controls').replaceChildren(); return;
   }
-  if (value.transfer) { transfer = value.transfer; job = null; renderTransfer(); return; }
+  if (value.transfer) { renderedJob = ''; transfer = value.transfer; job = null; renderTransfer(); return; }
   if (value.id && value.state) { job = value; transfer = null; renderJob(); }
 }
 async function refresh() {
   if (!job) return;
-  const result = await call('get-request-status', { id: job.id });
+  const requestId = job.id, revision = viewRevision;
+  const result = await call('get-request-status', { id: requestId });
+  if (revision !== viewRevision || job?.id !== requestId) return;
   if (result.structuredContent?.error) { clearInterval(polling); el('status').textContent = '요청을 찾을 수 없습니다. 재시작으로 유실됐을 수 있습니다.'; el('controls').replaceChildren(); return; }
   received(result);
 }
 function renderJob() {
+  const view = JSON.stringify([job, privateData.uiEnabled, !!privateData.approvalTicket, !!privateData.viewTicket]);
+  // Keep the same DOM, focused button and host height during unchanged status polls.
+  if (view === renderedJob) return;
+  renderedJob = view;
+  viewRevision++;
+  el('status').dataset.state = job.state;
   el('status').textContent = states[job.state] ?? job.state;
   el('details').replaceChildren(); el('controls').replaceChildren();
-  text(el('details'), 'p', `${job.target} · ${job.id} · 만료 ${new Date(job.expiresAt).toLocaleString()}`);
-  text(el('details'), 'pre', job.kind === 'command' ? job.command : JSON.stringify(job.operation, null, 2));
-  if (job.result) text(el('details'), 'pre', job.result.content?.map(x => x.text ?? '').join('\n') || JSON.stringify(job.result.structuredContent ?? job.result));
-  if (job.kind !== 'command' && job.result?.structuredContent) text(el('details'), 'pre', JSON.stringify(job.result.structuredContent, null, 2));
+  const meta = text(el('details'), 'div', ''); meta.className = 'request-meta';
+  text(meta, 'p', `대상 서버 · ${job.target}`);
+  const info = text(meta, 'details', ''); text(info, 'summary', '요청 정보');
+  text(info, 'p', `요청 ${job.id}`).className = 'request-id';
+  text(info, 'p', `승인 만료 ${new Date(job.expiresAt).toLocaleString()}`);
+  text(el('details'), 'p', job.kind === 'command' ? '실행할 명령' : '파일 전송 내용').className = 'section-label';
+  if (job.kind === 'command') text(el('details'), 'pre', job.command);
+  else {
+    const op = job.operation, result = job.result?.structuredContent;
+    const list = text(el('details'), 'dl', ''); list.className = 'operation-fields';
+    for (const [label, value] of [
+      ['방향', job.kind === 'upload' ? 'PC → 서버' : '서버 → PC'],
+      ['파일명', op.fileName ?? result?.fileName ?? op.remotePath.split('/').pop()],
+      ['서버 경로', op.remotePath], ['크기', op.size ?? result?.size], ['SHA-256', op.sha256 ?? result?.sha256],
+      ['sudo 사용', op.elevate ? '예' : '아니요'], ...(job.kind === 'upload' ? [['덮어쓰기', op.overwrite ? '예' : '아니요']] : []),
+    ]) {
+      if (value === undefined) continue;
+      text(list, 'dt', label); const entry = text(list, 'dd', label === '크기' ? `${value.toLocaleString()} 바이트` : value);
+      if (label === 'SHA-256') entry.className = 'hash';
+    }
+  }
+  if (job.result && job.kind === 'command') {
+    text(el('details'), 'p', '실행 결과').className = 'section-label';
+    text(el('details'), 'pre', job.result.content?.map(x => x.text ?? '').join('\n') || JSON.stringify(job.result.structuredContent ?? job.result));
+  }
+  if (job.result?.isError && job.kind !== 'command') text(el('details'), 'pre', job.result.content?.map(x => x.text ?? '').join('\n') ?? '파일 전송에 실패했습니다.');
   if (job.auditError) text(el('details'), 'p', job.auditError);
   if (job.state === 'pending') for (const action of ['approve', 'deny']) button(el('controls'), action === 'approve' ? '승인·실행' : '거부', async () => {
     received(await call('ui-decide-request', { id: job.id, action, ticket: privateData.approvalTicket }));
@@ -73,6 +106,7 @@ function renderJob() {
   else app.updateModelContext({ structuredContent: { requestId: job.id, kind: job.kind, state: job.state, result: job.result } }).catch(() => {});
 }
 function renderTransfer() {
+  delete el('status').dataset.state;
   clearInterval(polling); el('details').replaceChildren(); el('controls').replaceChildren();
   el('status').textContent = transfer.direction === 'upload' ? '파일 업로드 준비' : '파일 다운로드 준비';
   const label = text(el('details'), 'label', '서버의 절대 파일 경로');
@@ -116,7 +150,13 @@ function renderTransfer() {
   if (!privateData.uiEnabled) text(el('details'), 'p', 'UI 동작은 클라이언트 검증 후 활성화됩니다.');
 }
 app.ontoolresult = received;
-app.onhostcontextchanged = context => { if (context.theme) document.documentElement.style.colorScheme = context.theme; };
+function applyTheme(context) {
+  if (!context?.theme) return;
+  document.documentElement.style.colorScheme = context.theme;
+  document.documentElement.dataset.theme = context.theme;
+}
+app.onhostcontextchanged = applyTheme;
 app.onteardown = async () => { clearInterval(polling); privateData = {}; chosenFile = null; return {}; };
 el('web').onclick = async event => { if (event.isTrusted && privateData.webUrl) await app.openLink({ url: privateData.webUrl }); };
 await app.connect();
+applyTheme(app.getHostContext());
