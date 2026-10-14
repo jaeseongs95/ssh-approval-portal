@@ -285,13 +285,13 @@
     },
     {
       "path": "web/app.js",
-      "size": 1844,
-      "sha256": "1df831676ae783e3e59c285b5957946ccdad10488fc2c1a0ea2a0d82087b24bc"
+      "size": 6038,
+      "sha256": "e61efcd68271ab85698bcb7e69a2542935a19ff9e6358b6d78e523201e0f140f"
     },
     {
       "path": "web/index.html",
-      "size": 707,
-      "sha256": "1fcaabfe1d1c6312354b3eed55ed2d961f7941444bda5a21cd56d69883b72003"
+      "size": 8067,
+      "sha256": "9bf7f16ff82a345c85e3159ea398a55136285b03d497279e1103802a28fd5b61"
     }
   ]
 }

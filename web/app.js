@@ -1,28 +1,85 @@
 const el = id => document.getElementById(id);
+const states = { pending: '승인 대기', running: '실행 중', completed: '완료', failed: '실패', denied: '거부', expired: '만료' };
+const kinds = { command: '명령 실행', upload: '파일 업로드', download: '파일 다운로드' };
+let polling = null, loading = false, deciding = false, rendered = '';
+function text(parent, tag, value, className = '') {
+  const node = document.createElement(tag); node.textContent = value; node.className = className; parent.append(node); return node;
+}
+function empty(parent, title, note) {
+  const box = text(parent, 'div', '', 'empty'); text(box, 'span', '—', 'empty-mark'); text(box, 'strong', title); text(box, 'p', note);
+}
+function error(message = '') { el('error').textContent = message; el('error').hidden = !message; }
 async function api(path, method = 'GET') {
   const r = await fetch(path, { method, headers: { Authorization: 'Bearer ' + el('token').value } });
   const value = await r.json(); if (!r.ok) throw Error(value.error ?? '요청 실패'); return value;
 }
 async function load() {
+  if (loading) return;
+  loading = true; el('load').disabled = true;
   try {
-    const jobs = await api('/api/requests'); el('jobs').replaceChildren();
+    const jobs = await api('/api/requests');
+    const fingerprint = JSON.stringify(jobs);
+    if (fingerprint !== rendered) {
+    const open = new Set([...el('history').querySelectorAll('details[open]')].map(x => x.dataset.requestId));
+    el('jobs').replaceChildren(); el('history').replaceChildren();
+    const pending = jobs.filter(job => job.state === 'pending').length;
+    el('pending-count').textContent = pending; el('history-count').textContent = jobs.length - pending;
     for (const job of jobs.reverse()) {
-      const box = document.createElement('article'), title = document.createElement('p'), details = document.createElement('pre');
-      title.textContent = `${job.target} · ${job.kind} · ${job.state} · ${job.id}`;
-      details.textContent = job.kind === 'command' ? job.command : JSON.stringify(job.operation, null, 2);
-      box.append(title, details);
+      const waiting = job.state === 'pending', parent = waiting ? el('jobs') : el('history');
+      const box = document.createElement(waiting ? 'article' : 'details'); box.className = 'request' + (waiting ? '' : ' history-item');
+      const command = job.kind === 'command' ? job.command : JSON.stringify(job.operation, null, 2);
+      let body = box;
+      if (!waiting) {
+        box.dataset.requestId = job.id; box.open = open.has(job.id);
+        const summary = text(box, 'summary', ''); const head = text(summary, 'div', '', 'summary-head');
+        text(head, 'span', '›', 'chevron'); text(head, 'span', kinds[job.kind] ?? job.kind, 'kind');
+        text(head, 'span', states[job.state] ?? job.state, `badge ${job.state}`);
+        text(summary, 'span', command, 'preview'); body = text(box, 'div', '', 'history-body');
+      } else {
+        const head = text(box, 'div', '', 'request-top'); text(head, 'span', kinds[job.kind] ?? job.kind, 'kind'); text(head, 'span', '승인 대기', 'badge pending');
+      }
+      text(body, 'p', job.target, 'target'); text(body, 'pre', command, 'command');
+      const meta = text(body, 'div', '', 'meta'); text(meta, 'span', `요청 ${job.id}`, 'request-id');
+      const time = waiting ? job.expiresAt : job.finishedAt ?? job.createdAt;
+      text(meta, 'span', `${waiting ? '만료' : job.finishedAt ? '처리 완료' : '요청'} ${new Date(time).toLocaleString('ko-KR')}`);
+      const actions = text(body, 'div', '', 'actions');
       if (job.state === 'pending') for (const action of ['approve', 'deny']) {
-        const b = document.createElement('button'); b.textContent = action === 'approve' ? '승인·실행' : '거부';
-        b.onclick = async () => { b.disabled = true; try { await api(`/api/${job.id}/${action}`, 'POST'); await load(); } catch (e) { title.textContent = e.message; b.disabled = false; } }; box.append(b);
+        const b = text(actions, 'button', action === 'approve' ? '승인·실행' : '거부', action === 'approve' ? 'primary' : 'secondary reject');
+        b.onclick = async () => {
+          if (deciding) return; deciding = true; error();
+          for (const button of el('jobs').querySelectorAll('button')) button.disabled = true;
+          try { await api(`/api/${job.id}/${action}`, 'POST'); await load(); }
+          catch (e) { error(e.message); }
+          finally { deciding = false; for (const button of el('jobs').querySelectorAll('button')) button.disabled = false; }
+        };
       }
-      if (job.result) { const result = document.createElement('pre'); result.textContent = JSON.stringify(job.result, null, 2); box.append(result); }
+      if (job.result) {
+        text(body, 'p', '실행 결과', 'output-label');
+        const blocks = job.result.content?.filter(x => x.type === 'text');
+        const output = blocks?.length ? blocks.map(x => x.text ?? '').join('\n') : JSON.stringify(job.result.structuredContent ?? job.result, null, 2);
+        text(body, 'pre', output, 'output');
+      }
+      if (job.auditError) text(body, 'p', job.auditError, 'error');
       if (job.state === 'completed' && job.kind === 'download') {
-        const b = document.createElement('button'); b.textContent = '파일 저장'; b.onclick = async () => {
-          try { const r = await api(`/api/${job.id}/download`, 'POST'); location.assign(r.downloadUrl); } catch (e) { title.textContent = e.message; }
-        }; box.append(b);
+        const b = text(actions, 'button', '파일 저장', 'secondary'); b.onclick = async () => {
+          try { const r = await api(`/api/${job.id}/download`, 'POST'); location.assign(r.downloadUrl); } catch (e) { error(e.message); }
+        };
       }
-      el('jobs').append(box);
+      if (!actions.childElementCount) actions.remove(); parent.append(box);
     }
-  } catch (e) { el('jobs').textContent = e.message; }
+    if (!pending) empty(el('jobs'), '대기 중인 요청이 없습니다', '새 승인 요청이 들어오면 여기에 표시됩니다.');
+    if (jobs.length === pending) empty(el('history'), '아직 승인 이력이 없습니다', '승인·거부된 요청의 상태와 결과가 여기에 표시됩니다.');
+    rendered = fingerprint;
+    }
+    el('connection').classList.add('connected'); el('connection-text').textContent = '연결됨';
+    el('updated').textContent = `마지막 갱신 ${new Date().toLocaleTimeString('ko-KR')} · 2초마다 갱신`; error();
+    if (!polling) polling = setInterval(() => { if (!document.hidden && !deciding) load(); }, 2000);
+  } catch (e) {
+    error(e.message); el('connection').classList.remove('connected'); el('connection-text').textContent = '연결 확인 필요';
+    clearInterval(polling); polling = null;
+  } finally { loading = false; el('load').disabled = false; }
 }
-el('load').onclick = load;
+el('load').onclick = () => { if (!deciding) load(); };
+el('token').addEventListener('keydown', event => { if (event.key === 'Enter' && !deciding) load(); });
+empty(el('jobs'), '요청 목록을 연결해 주세요', '관리자 토큰을 입력하고 요청 조회를 누르세요.');
+empty(el('history'), '처리 이력을 한눈에', '실행 중인 요청부터 완료된 결과까지 확인할 수 있습니다.');
