@@ -26,7 +26,7 @@ cleanup() {
   trap - EXIT
   set +e
   if [[ $rc != 0 && $changed == 1 ]]; then
-    if cp -a -- "$backup" "$env_file" && systemctl restart ssh-approval-bridge.service && wait_restored; then
+    if cp -a -- "$backup" "$env_file" && systemctl reset-failed ssh-approval-bridge.service && systemctl restart ssh-approval-bridge.service && wait_restored; then
       echo "Configuration restored from $backup" >&2
     else echo "Restore failed. Administrator recovery needed: $backup" >&2; fi
   fi
@@ -51,6 +51,7 @@ chown --reference="$env_file" "$stage"
 chmod 0600 "$stage"
 mv -f -- "$stage" "$env_file"
 changed=1
+systemctl reset-failed ssh-approval-bridge.service
 systemctl restart ssh-approval-bridge.service
 for attempt in {1..20}; do
   if curl -fsS http://127.0.0.1:39124/health 2>/dev/null | python3 -c 'import json,sys; v=json.load(sys.stdin); assert v.get("healthy") is True and v.get("adminAuthMode")=="access"' 2>/dev/null; then

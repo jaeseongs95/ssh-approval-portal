@@ -115,8 +115,8 @@
     },
     {
       "path": "scripts/configure-admin-access.sh",
-      "size": 2872,
-      "sha256": "aa4d1ee209d17f7ca414f38c247eb4e1015613366e6f75f8c1cf72194fe5c659"
+      "size": 2977,
+      "sha256": "9b11285e9f49c74a2ae9eb79743138565129ad20dae539fb5433aca1f52de407"
     },
     {
       "path": "scripts/docker-secrets.py",
