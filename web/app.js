@@ -18,7 +18,7 @@ if (!korean) for (const node of document.querySelectorAll('[data-en]')) node.tex
 el('token').placeholder = el('token').ariaLabel = t('관리자 토큰');
 const states = Object.fromEntries(Object.entries({ pending: '승인 대기', running: '실행 중', completed: '완료', failed: '실패', denied: '거부', expired: '만료' }).map(([key,value]) => [key,t(value)]));
 const kinds = Object.fromEntries(Object.entries({ command: '명령 실행', upload: '파일 업로드', download: '파일 다운로드' }).map(([key,value]) => [key,t(value)]));
-let polling = null, loading = false, deciding = false, rendered = '';
+let polling = null, loading = null, deciding = false, rendered = '';
 function text(parent, tag, value, className = '') {
   const node = document.createElement(tag); node.textContent = value; node.className = className; parent.append(node); return node;
 }
@@ -30,9 +30,14 @@ async function api(path, method = 'GET') {
   const r = await fetch(path, { method, headers: { Authorization: 'Bearer ' + el('token').value } });
   const value = await r.json(); if (!r.ok) throw Error(value.error ?? t('요청 실패')); return value;
 }
-async function load() {
-  if (loading) return;
-  loading = true; el('load').disabled = true;
+async function load(force = false) {
+  if (loading) {
+    await loading;
+    if (force === true) return load(true);
+    return;
+  }
+  let settled;
+  loading = new Promise(resolve => { settled = resolve; }); el('load').disabled = true;
   try {
     const jobs = await api('/api/requests');
     const fingerprint = JSON.stringify(jobs);
@@ -66,7 +71,7 @@ async function load() {
         b.onclick = async () => {
           if (deciding) return; deciding = true; error();
           for (const button of el('jobs').querySelectorAll('button')) button.disabled = true;
-          try { await api(`/api/${job.id}/${action}`, 'POST'); await load(); }
+          try { await api(`/api/${job.id}/${action}`, 'POST'); await load(true); }
           catch (e) { error(e.message); }
           finally { deciding = false; for (const button of el('jobs').querySelectorAll('button')) button.disabled = false; }
         };
@@ -95,9 +100,9 @@ async function load() {
   } catch (e) {
     error(e.message); el('connection').classList.remove('connected'); el('connection-text').textContent = t('연결 확인 필요');
     clearInterval(polling); polling = null;
-  } finally { loading = false; el('load').disabled = false; }
+  } finally { loading = null; el('load').disabled = false; settled(); }
 }
-el('load').onclick = load;
-el('token').addEventListener('keydown', event => { if (event.key === 'Enter') load(); });
+el('load').onclick = () => load(true);
+el('token').addEventListener('keydown', event => { if (event.key === 'Enter') load(true); });
 empty(el('jobs'), t('요청 목록을 연결해 주세요'), t('관리자 토큰을 입력하고 요청 조회를 누르세요.'));
 empty(el('history'), t('처리 이력을 한눈에'), t('실행 중인 요청부터 완료된 결과까지 확인할 수 있습니다.'));
