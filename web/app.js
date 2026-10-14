@@ -73,8 +73,8 @@ async function load() {
     rendered = fingerprint;
     }
     el('connection').classList.add('connected'); el('connection-text').textContent = '연결됨';
-    el('updated').textContent = `마지막 갱신 ${new Date().toLocaleTimeString('ko-KR')} · 2초마다 갱신`; error();
-    if (!polling) polling = setInterval(() => { if (!document.hidden) load(); }, 2000);
+    el('updated').textContent = `마지막 갱신 ${new Date().toLocaleTimeString('ko-KR')} · 10초마다 갱신`; error();
+    if (!polling) polling = setInterval(() => { if (!document.hidden) load(); }, 10000);
   } catch (e) {
     error(e.message); el('connection').classList.remove('connected'); el('connection-text').textContent = '연결 확인 필요';
     clearInterval(polling); polling = null;

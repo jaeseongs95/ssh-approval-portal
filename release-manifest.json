@@ -285,8 +285,8 @@
     },
     {
       "path": "web/app.js",
-      "size": 6015,
-      "sha256": "d1261ab429a18a2e8de3b58f1c9ca554347aeb8cba99ba9bd4298fa1fde868db"
+      "size": 6017,
+      "sha256": "41b938b87358ec98de22cd71331438d36d25c80596db1907f818287ddd4b2666"
     },
     {
       "path": "web/index.html",
