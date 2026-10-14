@@ -20,15 +20,15 @@
 </head>
 <body>
   <main class="shell">
-    <header class="topbar"><div class="brand"><span class="mark" aria-hidden="true">›_</span>SSH Approval Portal</div><div id="connection" class="connection"><span class="dot" aria-hidden="true"></span><span id="connection-text">연결 전</span></div></header>
-    <div class="intro"><p class="eyebrow">서버 작업 승인</p><h1>SSH 승인·실행</h1><p class="subtitle">명령과 파일 전송 내용을 확인하세요. 승인한 요청은 한 번만 실행됩니다.</p></div>
-    <div class="auth"><div><label class="auth-label" for="token">관리자 연결</label><p class="auth-note">관리자 토큰으로 요청 목록을 조회합니다.</p></div><div class="auth-controls"><input id="token" type="password" placeholder="관리자 토큰" aria-label="관리자 토큰" autocomplete="off" spellcheck="false"><button id="load" class="primary">요청 조회</button></div></div>
+    <header class="topbar"><div class="brand"><span class="mark" aria-hidden="true">›_</span>SSH Approval Portal</div><div id="connection" class="connection"><span class="dot" aria-hidden="true"></span><span id="connection-text" data-en="Not connected">연결 전</span></div></header>
+    <div class="intro"><p class="eyebrow" data-en="SERVER OPERATIONS">서버 작업 승인</p><h1 data-en="SSH approvals and execution">SSH 승인·실행</h1><p class="subtitle" data-en="Review commands and file transfers. Each approved request runs once.">명령과 파일 전송 내용을 확인하세요. 승인한 요청은 한 번만 실행됩니다.</p></div>
+    <div class="auth"><div><label class="auth-label" for="token" data-en="Administrator connection">관리자 연결</label><p class="auth-note" data-en="Enter your administrator token to view requests.">관리자 토큰으로 요청 목록을 조회합니다.</p></div><div class="auth-controls"><input id="token" type="password" placeholder="관리자 토큰" aria-label="관리자 토큰" autocomplete="off" spellcheck="false"><button id="load" class="primary" data-en="Refresh requests">요청 조회</button></div></div>
     <p id="error" class="error" role="alert" hidden></p>
     <div class="grid">
-      <section aria-labelledby="pending-heading"><div class="section-head"><h2 id="pending-heading">승인 대기목록<span id="pending-count" class="count">0</span></h2><span class="section-note">승인 전에는 실행되지 않습니다</span></div><div id="jobs"></div></section>
-      <section aria-labelledby="history-heading"><div class="section-head"><h2 id="history-heading">승인 이력<span id="history-count" class="count">0</span></h2><span class="section-note">펼쳐서 결과 확인</span></div><div id="history"></div><p class="auth-note">완료 후 1시간 동안 표시됩니다. 서버 재시작 시 초기화됩니다.</p></section>
+      <section aria-labelledby="pending-heading"><div class="section-head"><h2 id="pending-heading"><span data-en="Pending approvals">승인 대기목록</span><span id="pending-count" class="count">0</span></h2><span class="section-note" data-en="Nothing runs before approval">승인 전에는 실행되지 않습니다</span></div><div id="jobs"></div></section>
+      <section aria-labelledby="history-heading"><div class="section-head"><h2 id="history-heading"><span data-en="Approval history">승인 이력</span><span id="history-count" class="count">0</span></h2><span class="section-note" data-en="Expand to view results">펼쳐서 결과 확인</span></div><div id="history"></div><p class="auth-note" data-en="Results remain for one hour after completion and are cleared on restart.">완료 후 1시간 동안 표시됩니다. 서버 재시작 시 초기화됩니다.</p></section>
     </div>
-    <p id="updated" class="footer">연결 후 목록이 자동으로 갱신됩니다.</p>
+    <p id="updated" class="footer" data-en="Requests refresh automatically after connecting.">연결 후 목록이 자동으로 갱신됩니다.</p>
   </main>
   <script src="/app.js" defer></script>
 </body>
