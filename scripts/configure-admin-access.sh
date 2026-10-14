@@ -32,6 +32,7 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 "$node" "$active/scripts/admin-access-config.mjs" "$env_file" "$work/proposed.env"
+[[ -f "$work/proposed.env" && ! -L "$work/proposed.env" ]] || { echo 'Configuration staging did not complete.' >&2; exit 1; }
 [[ $(sha256sum "$env_file" | cut -d' ' -f1) == "$before" ]] || { echo 'Configuration changed during setup; start again.' >&2; exit 1; }
 "$node" "$active/scripts/maintenance.mjs" reserve
 reserved=1

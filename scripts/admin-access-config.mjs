@@ -1,6 +1,5 @@
 import { readFile, writeFile, lstat } from 'node:fs/promises';
 import { createInterface } from 'node:readline/promises';
-import { pathToFileURL } from 'node:url';
 import { accessConfiguration } from '../admin-access.mjs';
 import { loadSecrets } from '../secrets.mjs';
 
@@ -13,7 +12,7 @@ export function updateAccessSettings(text, values) {
   return kept + (kept.endsWith(newline) ? '' : newline) + keys.map(key => `${key}=${normalized[key]}`).join(newline) + newline;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (import.meta.main) {
   const [source, destination] = process.argv.slice(2);
   if (!['/etc/ssh-mcp-approval-bridge.env','/etc/ssh-approval-portal/docker-secrets.env'].includes(source) || !destination?.startsWith('/')) throw Error('Use a managed secret file and absolute staging file');
   const stat = await lstat(source);

@@ -105,8 +105,8 @@
     },
     {
       "path": "scripts/admin-access-config.mjs",
-      "size": 2364,
-      "sha256": "5bcd8c44f7d3a6274ac30b197993df9b4f06287e886d50211253c1c0e343a468"
+      "size": 2264,
+      "sha256": "04c6109983b7d469c604a9f6bc96e93a9b66d401d96d2afaca71706fa574e006"
     },
     {
       "path": "scripts/compose-update.sh",
@@ -115,8 +115,8 @@
     },
     {
       "path": "scripts/configure-admin-access.sh",
-      "size": 2453,
-      "sha256": "f68fefd8066bde3c21f50612f459e025ab219293e071c23d0d26fc1c90ab2779"
+      "size": 2579,
+      "sha256": "c2a0365caf1501f6c4abcfabebe81a5f5b0ebf4c46a84be5a8e540b5818fe1a3"
     },
     {
       "path": "scripts/docker-secrets.py",
