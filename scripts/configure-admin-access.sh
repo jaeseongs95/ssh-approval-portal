@@ -14,12 +14,19 @@ reserved=0
 changed=0
 backup=
 stage=
+wait_restored() {
+  for attempt in {1..20}; do
+    if curl -fsS http://127.0.0.1:39124/health 2>/dev/null | python3 -c 'import json,sys; assert json.load(sys.stdin).get("healthy") is True' 2>/dev/null; then return 0; fi
+    sleep 1
+  done
+  return 1
+}
 cleanup() {
   rc=$?
   trap - EXIT
   set +e
   if [[ $rc != 0 && $changed == 1 ]]; then
-    if cp -a -- "$backup" "$env_file" && systemctl restart ssh-approval-bridge.service; then
+    if cp -a -- "$backup" "$env_file" && systemctl restart ssh-approval-bridge.service && wait_restored; then
       echo "Configuration restored from $backup" >&2
     else echo "Restore failed. Administrator recovery needed: $backup" >&2; fi
   fi
@@ -46,7 +53,7 @@ mv -f -- "$stage" "$env_file"
 changed=1
 systemctl restart ssh-approval-bridge.service
 for attempt in {1..20}; do
-  if curl -fsS http://127.0.0.1:39124/health | python3 -c 'import json,sys; v=json.load(sys.stdin); assert v.get("healthy") is True and v.get("adminAuthMode")=="access"'; then
+  if curl -fsS http://127.0.0.1:39124/health 2>/dev/null | python3 -c 'import json,sys; v=json.load(sys.stdin); assert v.get("healthy") is True and v.get("adminAuthMode")=="access"' 2>/dev/null; then
     code=$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:39125/api/session)
     [[ "$code" == 401 ]] || { echo 'Unauthenticated administrator request was not rejected.' >&2; exit 1; }
     echo "Owner Access mode enabled. Backup: $backup"
