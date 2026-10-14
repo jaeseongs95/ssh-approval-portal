@@ -25,8 +25,8 @@
     },
     {
       "path": "app.mjs",
-      "size": 16513,
-      "sha256": "b3623affd9512b8d5374cf13d78c45530acf497fc86c77082e13d46c6406ebc9"
+      "size": 16531,
+      "sha256": "8fb1889e0ce2062393bc32ac8b7398d107452df440197d8f780eb12d3fbd0954"
     },
     {
       "path": "artifacts.mjs",
@@ -239,14 +239,19 @@
       "sha256": "b5fdc1aa90fa96f6916a26f33265acabd29d8b3a3e9c7852da56b7b36476522f"
     },
     {
+      "path": "test/ui-bundle.test.mjs",
+      "size": 1053,
+      "sha256": "7c1d7bb47e00df7739a5632a061d55888a4be08222bf075bac03378cd9030ded"
+    },
+    {
       "path": "transfers.mjs",
       "size": 4506,
       "sha256": "bc4a534143dc7c287b53e513a5bcacddd6aa098ab3e00d361abbb568e03820d2"
     },
     {
       "path": "ui/build.mjs",
-      "size": 518,
-      "sha256": "6a86abe5d478bdac25b1dbd599b3049fe8a73ca61e6bd70bdac13197dadaa18c"
+      "size": 524,
+      "sha256": "b6f282140ef50f8c4189a523b9b83a59fdd17040121648961469252f91d343fc"
     },
     {
       "path": "ui/card.html",
@@ -260,8 +265,8 @@
     },
     {
       "path": "ui/dist/card.html",
-      "size": 513066,
-      "sha256": "3dfc14bd47a4a4316ca025d7eb45c77ca1ea6090cbf7154f3ec35048b78631a5"
+      "size": 498142,
+      "sha256": "89575662f5cbd6a9383fb5fc953fd4170e07103c2bac9d0c4086be921d5997e7"
     },
     {
       "path": "ui/package-lock.json",

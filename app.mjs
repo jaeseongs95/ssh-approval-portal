@@ -8,7 +8,6 @@ import { ApprovalQueue, Tickets, routeCommand, validateCommand, equalSecret, idV
 import { Artifacts, CHUNK_BYTES, MAX_BYTES } from './artifacts.mjs';
 import { Transfers } from './transfers.mjs';
 
-const URI = 'ui://ssh-approval/card.html';
 const outputSchema = z.object({}).passthrough();
 const id = z.string().regex(/^[a-f0-9]{48}$/);
 const ticket = z.string().min(1).max(8192);
@@ -18,6 +17,7 @@ const json = (res, status, value) => { res.writeHead(status, { 'Content-Type': '
 const authenticated = (req, secret) => equalSecret(/^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1], secret);
 
 export async function createApplication({ registry, classify, executeCommand, audit, transferRoot, env = process.env, uiHtml }) {
+  const URI = `ui://ssh-approval/card-${hash(uiHtml)}.html`;
   const mcpToken = env.BRIDGE_MCP_TOKEN, adminToken = env.BRIDGE_ADMIN_TOKEN;
   const adminOrigin = env.BRIDGE_ADMIN_ORIGIN;
   if (!mcpToken || !adminToken || equalSecret(mcpToken, adminToken) || !/^https:\/\/[^/]+$/.test(adminOrigin ?? '')) throw Error('Configure distinct tokens and one HTTPS admin origin');
