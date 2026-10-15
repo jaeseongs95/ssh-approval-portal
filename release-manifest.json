@@ -35,8 +35,8 @@
     },
     {
       "path": "config/settings-contract.json",
-      "size": 3129,
-      "sha256": "19e7ca18877c02a9c8db5c82996a4cf3d89a4c20b1df1a71381ac08da3f1d1db"
+      "size": 3462,
+      "sha256": "85bbbe0306995867c838e17c1219479ccd6d2d8abbb0604c609ef11a3bca9f95"
     },
     {
       "path": "config/ssh-approval-bridge.service",
@@ -230,8 +230,8 @@
     },
     {
       "path": "src/adapters/config/settings.mjs",
-      "size": 2285,
-      "sha256": "77cdc83203fd923ea641854ac6db829ee429848201cceaf30c990cccdffe055d"
+      "size": 2735,
+      "sha256": "141157ee3954ab2146df1f2935066616b761289c15b8d57d4c00827ccf3839c9"
     },
     {
       "path": "src/adapters/http/protocol.mjs",

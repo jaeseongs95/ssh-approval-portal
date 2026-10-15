@@ -1,6 +1,7 @@
 import settingsContract from '../../../config/settings-contract.json' with { type: 'json' };
 import { MAX_BYTES } from '../../contracts/ports.mjs';
 import { equalSecret } from '../security/tickets.mjs';
+import { domainToASCII, domainToUnicode } from 'node:url';
 
 export { settingsContract };
 
@@ -8,6 +9,12 @@ export function validateOrigin(value) {
   if (typeof value !== 'string' || value.length > settingsContract.originMaxBytes) throw Error('Configure one canonical HTTPS administrator origin');
   let url;
   try { url = new URL(value); } catch { throw Error('Configure one canonical HTTPS administrator origin'); }
+  // Some Node patch builds preserve malformed ACE labels; require a real decode and canonical round trip.
+  for (const label of url.hostname.split('.')) {
+    if (!label.startsWith('xn--')) continue;
+    const unicode = domainToUnicode(label);
+    if (!unicode || unicode === label || domainToASCII(unicode) !== label) throw Error('Configure one canonical HTTPS administrator origin');
+  }
   if (typeof value !== 'string' || !new RegExp(settingsContract.originPattern).test(value) ||
       url.protocol !== 'https:' || url.origin !== value || (url.port && (Number(url.port) < 1 || Number(url.port) > 65535))) {
     throw Error('Configure one canonical HTTPS administrator origin');
