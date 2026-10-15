@@ -19,5 +19,5 @@ COPY --from=build /app /opt/portal
 WORKDIR /opt/portal
 ENV HOME=/var/lib/ssh-mcp
 USER 10001:10001
-HEALTHCHECK --interval=10s --timeout=3s --start-period=20s --retries=3 CMD ["node", "scripts/healthcheck.mjs"]
+HEALTHCHECK --interval=10s --timeout=10s --start-period=20s --retries=3 CMD ["node", "scripts/healthcheck.mjs"]
 CMD ["node", "bridge.mjs"]

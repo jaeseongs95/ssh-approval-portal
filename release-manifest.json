@@ -50,8 +50,8 @@
     },
     {
       "path": "docker/Dockerfile",
-      "size": 1543,
-      "sha256": "110574f4a5a9f00d159fbb66cc68e66efe0a12f9bc79a4f0fa57a71795c30b3f"
+      "size": 1544,
+      "sha256": "d1321e947148c405867d3b62c53cf61b3e75c343bfd2d0e7b2e5726fbdf227aa"
     },
     {
       "path": "docs/admin-login.en.md",
