@@ -45,8 +45,8 @@
     },
     {
       "path": "docker/compose.yaml",
-      "size": 1013,
-      "sha256": "33c2b28e185d9370f21c66f6bc9049249945343ef768771008d412bb3c7eb704"
+      "size": 1128,
+      "sha256": "91ba1be2a3afb6ae99444977a7fe656874867dac6eb29506d20ff1e35cbcb98e"
     },
     {
       "path": "docker/Dockerfile",

@@ -14,6 +14,9 @@ services:
     init: true
     restart: unless-stopped
     stop_grace_period: 360s
+    # Keep the probe process budget when rolling back to older image metadata.
+    healthcheck:
+      timeout: 10s
     environment:
       HOME: /var/lib/ssh-mcp
       BRIDGE_SECRET_ENV_FILE: /run/secrets/bridge_config
