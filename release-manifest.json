@@ -460,8 +460,8 @@
     },
     {
       "path": "test/mcp-contracts.test.mjs",
-      "size": 10705,
-      "sha256": "ed37d02b0fcd7f57d254c915dee4bc80cae6c8d950b57b15f4c2607f6ee6b568"
+      "size": 10921,
+      "sha256": "b0faa5f67e4469729b3ed93e8ec75ea3ca8ee991c0bd136c92172a3dfe4d0604"
     },
     {
       "path": "test/PLAN.md",

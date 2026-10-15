@@ -30,7 +30,9 @@ async function fixture(overrides = {}) {
   await new Promise(resolve => adapters.adminHttp.listen(0, '127.0.0.1', resolve));
   const mcpBase = `http://127.0.0.1:${adapters.mcpHttp.address().port}`, adminBase = `http://127.0.0.1:${adapters.adminHttp.address().port}`;
   const client = new Client({ name: 'contract-client', version: '1' });
-  await client.connect(new StreamableHTTPClientTransport(new URL(mcpBase + '/mcp'), { requestInit: { headers: { Authorization: 'Bearer contract-mcp' } } }));
+  // SDK schema compilation shares this fixture's event loop and can outlast HTTP idle sockets.
+  // Use fresh connections for these RPC contract checks; production HTTP settings stay unchanged.
+  await client.connect(new StreamableHTTPClientTransport(new URL(mcpBase + '/mcp'), { requestInit: { headers: { Authorization: 'Bearer contract-mcp', Connection: 'close' } } }));
   return { client, calls, commands, pending, source, adapters, mcpBase, adminBase,
     call: (name, args = {}) => client.callTool({ name, arguments: args }),
     async close() { await client.close(); await Promise.all([adapters.mcpHttp, adapters.adminHttp].map(server => new Promise(resolve => server.close(resolve)))); } };
