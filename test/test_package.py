@@ -53,6 +53,8 @@ class PackageContract(unittest.TestCase):
     def test_layered_sources_and_bundles_resolve_from_extracted_package(self):
         self.write('src/.env', 'not-for-package=synthetic')
         self.write('web/operator.key', 'not-for-package')
+        self.write('test/stale-results.json', '{"result":"outdated synthetic evidence"}')
+        self.write('test/fixtures/config.json', '{"synthetic":true}')
         archives, _ = packager.package(self.root)
         extracted = Path(self.temporary.name) / 'extracted'
         with zipfile.ZipFile(archives[1]) as archive:
@@ -63,6 +65,8 @@ class PackageContract(unittest.TestCase):
                 self.assertIn(prefix + name, names)
             self.assertNotIn(prefix + 'src/.env', names)
             self.assertNotIn(prefix + 'web/operator.key', names)
+            self.assertNotIn(prefix + 'test/stale-results.json', names)
+            self.assertIn(prefix + 'test/fixtures/config.json', names)
             archive.extractall(extracted)
         root = extracted / 'ssh-approval-portal-0.3.0'
         result = self.run_node(root / 'scripts/check-package-imports.mjs')

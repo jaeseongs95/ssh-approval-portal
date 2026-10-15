@@ -77,7 +77,7 @@ sudo bash scripts/install.sh --admin-origin https://ssh-approve.example.com --gr
 
 ## Docker Compose 배포
 
-운영 대상은 Ubuntu 22.04/24.04의 Docker Engine과 Compose v2입니다. 중계기는 비 root 사용자, 읽기 전용 root filesystem과 capability 제거 설정으로 실행합니다. SSH 계정·sudo·파일 helper는 대상 서버에 준비하며 컨테이너에 `--privileged`나 Docker socket을 주지 않습니다.
+운영 대상은 Ubuntu 22.04/24.04의 Docker Engine과 Compose v2입니다. 중계기는 비 root 사용자, 읽기 전용 root filesystem과 capability 제거 설정으로 실행합니다. SSH 계정·sudo·파일 helper는 대상 서버에 준비하며 컨테이너에 `--privileged`나 Docker socket을 주지 않습니다. `scripts/prepare-docker.sh`도 공유 `scripts/ensure-node-runtime.sh`로 호스트의 `/opt/ssh-approval/node`에 Node 24 런타임을 준비하며 시스템 Node를 교체하지 않습니다.
 
 ```sh
 sudo bash scripts/prepare-docker.sh --admin-origin https://ssh-approve.example.com --grant-sudo-all

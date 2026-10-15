@@ -19,14 +19,14 @@ restore() {
   cp -a -- "$backup/compose.env" "$env_file"
   failed=0
   BRIDGE_IMAGE="$old_image" "${compose[@]}" up -d --no-build --wait --wait-timeout 30 || failed=1
-  sed -i "s|^BRIDGE_IMAGE=.*|BRIDGE_IMAGE=$old_image|" "$env_file" || failed=1
+  python3 "$source_dir/scripts/compose-env.py" image "$env_file" "$old_image" || failed=1
   BRIDGE_IMAGE="$old_image" "${compose[@]}" exec -T bridge node scripts/maintenance.mjs release || failed=1
   echo "Compose update failed. Prior image restore attempted; failures=$failed; backup=$backup" >&2
   exit "$rc"
 }
 trap restore EXIT
 BRIDGE_IMAGE="$image" "${compose[@]}" up -d --no-build --wait --wait-timeout 30
-sed -i "s|^BRIDGE_IMAGE=.*|BRIDGE_IMAGE=$image|" "$env_file"
+python3 "$source_dir/scripts/compose-env.py" image "$env_file" "$image"
 BRIDGE_IMAGE="$image" "${compose[@]}" exec -T bridge node scripts/maintenance.mjs release
 trap - EXIT
 echo "Compose running image: $image; rollback image: $old_image; backup=$backup"

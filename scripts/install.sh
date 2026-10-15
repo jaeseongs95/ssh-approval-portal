@@ -47,28 +47,13 @@ maintenance_node=$runtime/bin/node
 release_maintenance() {
   if [[ "$maintenance_reserved" == 1 ]]; then "$maintenance_node" "$source_dir/scripts/maintenance.mjs" release || true; fi
 }
-runtime_stage=
-early_cleanup() { release_maintenance; if [[ -n "$runtime_stage" ]]; then rm -rf -- "$runtime_stage"; fi; }
-trap early_cleanup EXIT
+trap release_maintenance EXIT
 if systemctl is-active --quiet ssh-approval-bridge.service; then
   [[ -x "$maintenance_node" ]] || { echo 'Stop the legacy service in the administrator terminal before updating' >&2; exit 1; }
   "$maintenance_node" "$source_dir/scripts/maintenance.mjs" reserve
   maintenance_reserved=1
 fi
-if [[ ! -x "$runtime/bin/node" ]]; then
-  runtime_stage=$(mktemp -d /opt/ssh-approval/.node-stage.XXXXXXXX)
-  node_version=24.21.0
-  node_archive=node-v${node_version}-linux-${architecture}.tar.xz
-  curl -fsS --proto '=https' "https://nodejs.org/dist/v${node_version}/$node_archive" -o "$runtime_stage/$node_archive"
-  curl -fsS --proto '=https' "https://nodejs.org/dist/v${node_version}/SHASUMS256.txt" -o "$runtime_stage/SHASUMS256.txt"
-  (cd "$runtime_stage"; grep "  $node_archive\$" SHASUMS256.txt | sha256sum -c -)
-  tar -xJf "$runtime_stage/$node_archive" -C "$runtime_stage"
-  mv -- "$runtime_stage/node-v${node_version}-linux-${architecture}" "$runtime"
-  rm -rf -- "$runtime_stage"
-  runtime_stage=
-fi
-export PATH="$runtime/bin:$PATH"
-[[ $(node -p 'process.versions.node.split(".")[0]') == 24 ]] || { echo 'Node 24 required' >&2; exit 1; }
+source "$source_dir/scripts/ensure-node-runtime.sh"
 node "$source_dir/scripts/verify.mjs" "$source_dir"
 stamp=$(date -u +%Y%m%dT%H%M%SZ)-$$
 backup=$app/backups/$stamp

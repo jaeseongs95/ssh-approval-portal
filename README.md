@@ -77,7 +77,7 @@ Signing out stops automatic refresh and clears the displayed requests. Access mo
 
 ## Docker Compose deployment
 
-The deployment target is Docker Engine with Compose v2 on Ubuntu 22.04/24.04. The bridge runs as a non-root user with a read-only root filesystem and dropped capabilities. Prepare the SSH account, sudo permissions, and file helper on the target server. Do not grant the container `--privileged` or access to the Docker socket.
+The deployment target is Docker Engine with Compose v2 on Ubuntu 22.04/24.04. The bridge runs as a non-root user with a read-only root filesystem and dropped capabilities. Prepare the SSH account, sudo permissions, and file helper on the target server. Do not grant the container `--privileged` or access to the Docker socket. `scripts/prepare-docker.sh` also uses the shared `scripts/ensure-node-runtime.sh` to prepare a host Node 24 runtime in `/opt/ssh-approval/node` without replacing the system Node installation.
 
 ```sh
 sudo bash scripts/prepare-docker.sh --admin-origin https://ssh-approve.example.com --grant-sudo-all

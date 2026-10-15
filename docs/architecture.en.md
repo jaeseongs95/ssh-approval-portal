@@ -24,7 +24,7 @@ The artifact store owns reservation, completion, release, and download completio
 
 Preserve MCP tool names, public Job fields, error distinctions, and app-only card tools. Approval and download capabilities stay in their existing private delivery channel, outside public output schemas. Register top-level object output schemas accepted by the SDK and validate actual response variants in presenters. Preserve the timing distinction between an MCP running response and the website waiting for completion.
 
-Administrator authentication defaults to `token`. Preserve the separate requirements for owner login, file-download capabilities, and maintenance tokens in `access` mode. `config/settings-contract.json` holds defaults and allowed keys; JavaScript and Python consumers share origin and port validation. Port defaults are 39124/39125, with a supported range of 1–65535.
+Administrator authentication defaults to `token`. Preserve the separate requirements for owner login, file-download capabilities, and maintenance tokens in `access` mode. `config/settings-contract.json` holds defaults and allowed keys; JavaScript and Python consumers share origin and port validation. Port defaults are 39124/39125, with a supported range of 1–65535. Origin validation uses Node 24's WHATWG URL implementation as its single authority; Python's `settings_contract.validate_origin` also calls `scripts/validate-origin.mjs` without a shell and supplies the value only on stdin.
 
 Card file selection and progress belong to their current view. Earlier asynchronous work must not overwrite a later view. Periodic web refresh must not unnecessarily erase another request's focus, selection, or scroll. Verify these behaviors in a real browser separately.
 

@@ -13,9 +13,9 @@ while [[ $# -gt 0 ]]; do
 done
 . /etc/os-release
 [[ "$ID" == ubuntu && "$VERSION_ID" =~ ^(22.04|24.04)$ ]] || { echo 'Ubuntu 22.04/24.04 required' >&2; exit 1; }
-for executable in python3 ssh-keygen sshd sudo flock curl; do
+for executable in python3 ssh-keygen sshd sudo flock curl xz; do
   if ! command -v "$executable" >/dev/null; then
-    apt-get update; DEBIAN_FRONTEND=noninteractive apt-get install -y python3 openssh-server sudo util-linux curl ca-certificates; break
+    apt-get update; DEBIAN_FRONTEND=noninteractive apt-get install -y python3 openssh-server sudo util-linux curl ca-certificates xz-utils; break
   fi
 done
 base=/var/lib/ssh-mcp
@@ -27,6 +27,7 @@ install -d -m 0755 "$base/app"
 exec 9>"$base/.portal-install.lock"; flock -n 9
 if systemctl is-active --quiet ssh-approval-bridge.service; then echo 'Finish requests and stop the native service before preparing Docker' >&2; exit 1; fi
 if command -v docker >/dev/null && docker ps --format '{{.Names}}' | grep -Fxq ssh-approval-portal-bridge-1; then echo 'Stop the existing Compose bridge safely before preparing its host files' >&2; exit 1; fi
+source "$source_dir/scripts/ensure-node-runtime.sh"
 id mcpbridge >/dev/null 2>&1 || useradd --system --home-dir "$base" --shell /usr/sbin/nologin mcpbridge
 id mcpops >/dev/null 2>&1 || useradd --create-home --shell /bin/bash --password '*' mcpops
 install -d -o mcpbridge -g mcpbridge -m 0700 "$base/.config/ssh-mcp" "$base/.ssh" "$base/.local/share/ssh-mcp" "$base/transfers"

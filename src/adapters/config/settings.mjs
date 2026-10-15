@@ -5,6 +5,7 @@ import { equalSecret } from '../security/tickets.mjs';
 export { settingsContract };
 
 export function validateOrigin(value) {
+  if (typeof value !== 'string' || value.length > settingsContract.originMaxBytes) throw Error('Configure one canonical HTTPS administrator origin');
   let url;
   try { url = new URL(value); } catch { throw Error('Configure one canonical HTTPS administrator origin'); }
   if (typeof value !== 'string' || !new RegExp(settingsContract.originPattern).test(value) ||

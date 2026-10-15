@@ -35,6 +35,8 @@ def collect_files(root):
         if not directory.is_dir():
             raise ValueError('Missing package source directory: ' + folder)
         for path in directory.rglob('*'):
+            if folder == 'test' and path.name.endswith('-results.json'):
+                continue
             if any(part in ('node_modules', '__pycache__', '.git') or part.startswith('.') for part in path.relative_to(directory).parts):
                 continue
             if path.is_symlink():

@@ -43,10 +43,16 @@ systemctl is-enabled --quiet ssh-approval-bridge.service
 test "$(systemctl show ssh-mcp.service -p LoadState --value)" = not-found
 cd "$active"
 node scripts/check-package-imports.mjs
-node --test test/*.test.mjs
+if [[ $(uname -m) == aarch64 ]]; then
+  echo 'Node suite runner: --test-concurrency=1 (ARM fixture; assertions unchanged, no retries)'
+  node --test --test-concurrency=1 test/*.test.mjs
+else
+  node --test test/*.test.mjs
+fi
 python3 test/test_helper.py
 python3 test/test_upload_sources.py
 python3 test/test_settings_contract.py
+python3 test/test_compose_env.py
 python3 test/test_package.py
 sed -i 's/^BRIDGE_UI_ENABLED=false$/BRIDGE_UI_ENABLED=true/' /etc/ssh-mcp-approval-bridge.env
 systemctl restart ssh-approval-bridge.service

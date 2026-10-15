@@ -1,38 +1,39 @@
 #!/usr/bin/env python3
 """Non-secret configuration policy shared by deployment and runtime adapters."""
-import ipaddress
 import json
 import os
 from pathlib import Path
 import re
 import stat
 import sys
-from urllib.parse import urlsplit
+import shutil
+import subprocess
 
 contract = json.loads((Path(__file__).resolve().parents[1] / 'config/settings-contract.json').read_text(encoding='utf-8'))
 defaults = contract['defaults']
 
 
 def validate_origin(value):
-    if not isinstance(value, str) or not re.fullmatch(contract['originPattern'], value):
-        raise ValueError('Configure one canonical HTTPS administrator origin')
-    parsed = urlsplit(value)
-    host = parsed.hostname
-    port = parsed.port
-    if not host or port == 443 or port == 0:
-        raise ValueError('Configure one canonical HTTPS administrator origin')
-    if ':' in host:
-        canonical_host = '[' + ipaddress.IPv6Address(host).compressed + ']'
-    else:
-        canonical_host = host
-        if re.fullmatch(r'(?:[0-9]+|0x[0-9a-f]*)', host.rstrip('.').split('.')[-1]):
-            canonical_host = str(ipaddress.IPv4Address(host))
-        for label in host.rstrip('.').split('.'):
-            if label.startswith('xn--'):
-                label.encode('ascii').decode('idna')
-    canonical = 'https://' + canonical_host + (':' + str(port) if port is not None else '')
-    if canonical != value:
-        raise ValueError('Configure one canonical HTTPS administrator origin')
+    try:
+        if not isinstance(value, str):
+            raise ValueError()
+        encoded = value.encode('utf-8')
+        if not encoded or len(encoded) > contract['originMaxBytes']:
+            raise ValueError()
+        # Trust the administrator-owned managed runtime first, otherwise the host's PATH.
+        # Neither the executable nor script path is selected from the configuration value.
+        managed = Path('/opt/ssh-approval/node/bin/node')
+        node = str(managed) if managed.is_file() else shutil.which('node')
+        if not node:
+            raise ValueError()
+        child_env = {key: item for key, item in os.environ.items() if key not in ('NODE_OPTIONS', 'NODE_PATH')}
+        result = subprocess.run([node, str(Path(__file__).with_name('validate-origin.mjs'))], input=encoded,
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=5, shell=False, env=child_env)
+        # The trusted CLI bounds output before writing; also reject any unexpected response here.
+        if result.returncode or len(result.stdout) > contract['originMaxBytes'] or result.stdout != encoded:
+            raise ValueError()
+    except (OSError, ValueError, subprocess.SubprocessError):
+        raise ValueError('Configure one canonical HTTPS administrator origin') from None
     return value
 
 

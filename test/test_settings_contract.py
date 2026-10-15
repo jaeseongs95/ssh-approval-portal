@@ -3,6 +3,8 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
+import subprocess
 
 spec = importlib.util.spec_from_file_location('settings_contract', Path(__file__).resolve().parents[1] / 'scripts/settings_contract.py')
 settings = importlib.util.module_from_spec(spec)
@@ -19,6 +21,33 @@ class SettingsContract(unittest.TestCase):
                     else:
                         with self.assertRaises((ValueError, OSError)):
                             validator(vector['value'])
+
+    def test_origin_adapter_uses_stdin_and_checks_exact_bounded_output(self):
+        value = 'https://xn--fa-hia.example'
+        good = subprocess.CompletedProcess([], 0, stdout=value.encode('utf-8'))
+        with patch.object(settings.Path, 'is_file', return_value=False), patch.object(settings.shutil, 'which', return_value='/trusted/node'), patch.object(settings.subprocess, 'run', return_value=good) as run:
+            self.assertEqual(settings.validate_origin(value), value)
+            args, options = run.call_args
+            self.assertEqual(args[0], ['/trusted/node', str(Path(settings.__file__).with_name('validate-origin.mjs'))])
+            self.assertEqual(options['input'], value.encode('utf-8'))
+            self.assertIs(options['shell'], False)
+            self.assertEqual(options['timeout'], 5)
+            self.assertNotIn('NODE_OPTIONS', options['env'])
+            self.assertNotIn('NODE_PATH', options['env'])
+        with patch.object(settings.Path, 'is_file', return_value=True), patch.object(settings.subprocess, 'run', return_value=good) as run:
+            self.assertEqual(settings.validate_origin(value), value)
+            self.assertEqual(run.call_args.args[0][0], str(Path('/opt/ssh-approval/node/bin/node')))
+        for response in [subprocess.CompletedProcess([], 1, stdout=b''), subprocess.CompletedProcess([], 0, stdout=b'https://different.example'), subprocess.CompletedProcess([], 0, stdout=value.encode('utf-8') + b'\n'), subprocess.CompletedProcess([], 0, stdout=b'x' * (settings.contract['originMaxBytes'] + 1))]:
+            with self.subTest(returncode=response.returncode, size=len(response.stdout)), patch.object(settings.subprocess, 'run', return_value=response):
+                with self.assertRaisesRegex(ValueError, '^Configure one canonical HTTPS administrator origin$'):
+                    settings.validate_origin(value)
+        with patch.object(settings.subprocess, 'run', side_effect=subprocess.TimeoutExpired('node', 5)):
+            with self.assertRaisesRegex(ValueError, '^Configure one canonical HTTPS administrator origin$'):
+                settings.validate_origin(value)
+        with patch.object(settings.subprocess, 'run') as run:
+            with self.assertRaises(ValueError):
+                settings.validate_origin('x' * (settings.contract['originMaxBytes'] + 1))
+            run.assert_not_called()
 
     def test_ports_parse_private_settings_without_evaluation(self):
         with tempfile.TemporaryDirectory() as root:

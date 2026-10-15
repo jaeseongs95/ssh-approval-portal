@@ -7,7 +7,7 @@ export BRIDGE_COMPOSE_ENV_FILE=/work/compose.env
 export BRIDGE_COMPOSE_OVERRIDE=/work/override.yaml
 mkdir /work
 starting_image=${TEST_BASELINE_IMAGE:-$TEST_IMAGE}
-printf 'BRIDGE_UID=%s\nBRIDGE_GID=%s\nBRIDGE_IMAGE=%s\n' "$TEST_UID" "$TEST_GID" "$starting_image" > "$BRIDGE_COMPOSE_ENV_FILE"
+printf 'BRIDGE_UID=%s\nBRIDGE_GID=%s\nexport BRIDGE_IMAGE : "%s" # preserved administrator syntax\n' "$TEST_UID" "$TEST_GID" "$starting_image" > "$BRIDGE_COMPOSE_ENV_FILE"
 cat > "$BRIDGE_COMPOSE_OVERRIDE" <<YAML
 services:
   bridge:
@@ -50,10 +50,12 @@ trap '"${compose[@]}" down || true' EXIT
 baseline_id=$(docker inspect "$("${compose[@]}" ps -q bridge)" --format '{{.Image}}')
 before=$(sha256sum "$TEST_SECRET_SOURCE/docker-secrets.env")
 bash scripts/compose-update.sh "$TEST_IMAGE"
+[[ $("${compose[@]}" config --images) == "$TEST_IMAGE" ]]
 "${compose[@]}" exec -T bridge node test/delivery-runtime.mjs
 "${compose[@]}" exec -T bridge node test/ssh-roundtrip.mjs
 if [[ -n ${TEST_BASELINE_IMAGE:-} ]]; then
   bash scripts/compose-update.sh "$baseline_id"
+  [[ $("${compose[@]}" config --images) == "$baseline_id" ]]
   [[ $(docker inspect "$("${compose[@]}" ps -q bridge)" --format '{{.Image}}') == "$baseline_id" ]]
   [[ $(sha256sum "$TEST_SECRET_SOURCE/docker-secrets.env") == "$before" ]]
   bash scripts/compose-update.sh "$TEST_IMAGE"
@@ -73,6 +75,7 @@ printf 'FROM %s\nCMD ["node","test/broken-start.fixture.mjs"]\n' "$TEST_IMAGE" >
 broken=$TEST_PROJECT:broken
 docker build --label "io.ssh-approval.solid-task=$TEST_TASK_TAG" -t "$broken" /work/broken
 if bash scripts/compose-update.sh "$broken"; then echo 'Broken image update unexpectedly succeeded' >&2; exit 1; fi
+[[ $("${compose[@]}" config --images) == "$old" ]]
 [[ $(docker inspect "$("${compose[@]}" ps -q bridge)" --format '{{.Image}}') == "$old" ]]
 [[ $(sha256sum "$TEST_SECRET_SOURCE/docker-secrets.env") == "$before" ]]
 "${compose[@]}" exec -T bridge node test/delivery-runtime.mjs

@@ -9,9 +9,35 @@ import sys
 import tempfile
 
 
-def prepare(path, uid, gid):
-    if not uid.isdecimal() or int(uid) < 1 or not gid.isdecimal():
-        raise ValueError('Expected a non-root UID and numeric GID')
+def assignments(text):
+    """Locate dotenv values without evaluating interpolation or changing other bytes."""
+    end = 0
+    pattern = r'^[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*[=:][ \t]*([^\r\n]*)'
+    for match in re.finditer(pattern, text, re.M):
+        if match.start() < end:
+            continue  # An apparent assignment inside a quoted multiline value.
+        start = match.start(2)
+        raw = match[2]
+        if raw.startswith(("'", '"')):
+            quote, end = raw[0], start + 1
+            while end < len(text):
+                if text[end] == '\\':
+                    end += 2
+                elif text[end] == quote:
+                    end += 1
+                    break
+                else:
+                    end += 1
+            else:
+                raise ValueError('Unterminated quoted Compose environment value')
+        else:
+            comment = re.search(r'[ \t]+#', raw)
+            value = raw[:comment.start()] if comment else raw
+            end = start + len(value.rstrip(' \t'))
+        yield match[1], start, end
+
+
+def load_file(path):
     path = Path(path)
     existing = None
     if path.exists() or path.is_symlink():
@@ -22,17 +48,10 @@ def prepare(path, uid, gid):
             text = source.read()
     else:
         text = ''
-    newline = '\r\n' if '\r\n' in text else '\n'
-    for name, value in [('BRIDGE_UID', uid), ('BRIDGE_GID', gid)]:
-        if re.search(r'^' + name + '=', text, re.M):
-            text = re.sub(r'^' + name + r'=[^\r\n]*', name + '=' + value, text, flags=re.M)
-        else:
-            if text and not text.endswith(('\n', '\r')):
-                text += newline
-            text += name + '=' + value + newline
-    if not re.search(r'^BRIDGE_IMAGE=', text, re.M):
-        version = json.loads((Path(__file__).resolve().parents[1] / 'package.json').read_text(encoding='utf-8'))['version']
-        text += 'BRIDGE_IMAGE=ssh-approval-portal:' + version + newline
+    return path, existing, text
+
+
+def write_file(path, existing, text):
     fd, temporary = tempfile.mkstemp(prefix='.compose.', dir=path.parent)
     try:
         with os.fdopen(fd, 'w', encoding='utf-8', newline='') as output:
@@ -48,7 +67,47 @@ def prepare(path, uid, gid):
             os.unlink(temporary)
 
 
+def prepare(path, uid, gid):
+    if not uid.isdecimal() or int(uid) < 1 or not gid.isdecimal():
+        raise ValueError('Expected a non-root UID and numeric GID')
+    path, existing, text = load_file(path)
+    newline = '\r\n' if '\r\n' in text else '\n'
+    entries = list(assignments(text))
+    names = {name for name, _, _ in entries}
+    values = {'BRIDGE_UID': uid, 'BRIDGE_GID': gid}
+    for name, start, end in reversed(entries):
+        if name in values:
+            text = text[:start] + values[name] + text[end:]
+    if 'BRIDGE_IMAGE' not in names:
+        version = json.loads((Path(__file__).resolve().parents[1] / 'package.json').read_text(encoding='utf-8'))['version']
+        values['BRIDGE_IMAGE'] = 'ssh-approval-portal:' + version
+    for name, value in values.items():
+        if name not in names:
+            if text and not text.endswith(('\n', '\r')):
+                text += newline
+            text += name + '=' + value + newline
+    write_file(path, existing, text)
+
+
+def update_image(path, image):
+    if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._:/@-]+', image):
+        raise ValueError('Invalid image reference')
+    path, existing, text = load_file(path)
+    entries = [entry for entry in assignments(text) if entry[0] == 'BRIDGE_IMAGE']
+    for _, start, end in reversed(entries):
+        text = text[:start] + image + text[end:]
+    if not entries:
+        newline = '\r\n' if '\r\n' in text else '\n'
+        if text and not text.endswith(('\n', '\r')):
+            text += newline
+        text += 'BRIDGE_IMAGE=' + image + newline
+    write_file(path, existing, text)
+
+
 if __name__ == '__main__':
     if len(sys.argv) != 4:
-        raise ValueError('Usage: compose-env.py FILE UID GID')
-    prepare(*sys.argv[1:])
+        raise ValueError('Usage: compose-env.py FILE UID GID | compose-env.py image FILE IMAGE')
+    if sys.argv[1] == 'image':
+        update_image(sys.argv[2], sys.argv[3])
+    else:
+        prepare(*sys.argv[1:])

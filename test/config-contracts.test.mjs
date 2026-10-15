@@ -8,6 +8,8 @@ import { loadSecrets, parseSecretText } from '../src/adapters/config/secrets.mjs
 import { authorizeAdminRequest } from '../src/adapters/security/admin-policy.mjs';
 import { generateSecrets } from '../scripts/generate-secrets.mjs';
 import { checkHealth } from '../scripts/healthcheck.mjs';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 const origin = 'https://admin.example.test';
 const env = { BRIDGE_MCP_TOKEN: 'fixture-mcp', BRIDGE_ADMIN_TOKEN: 'fixture-admin', BRIDGE_ADMIN_ORIGIN: origin };
@@ -28,6 +30,19 @@ test('canonical origin and supported port vectors are identical configuration co
   assert.equal(custom.mcpPort, 40001); assert.equal(custom.adminPort, 40002);
   for (const { value, valid } of settingsContract.originVectors) if (!valid) assert.throws(() => parseSettings({ ...env, BRIDGE_ADMIN_ORIGIN: value }));
   assert.throws(() => parseSettings({ ...env, BRIDGE_ADMIN_TOKEN: env.BRIDGE_MCP_TOKEN }));
+  assert.throws(() => validateOrigin('https://' + 'a'.repeat(settingsContract.originMaxBytes)));
+});
+
+test('Node24 origin CLI delegates to the same validator with bounded exact stdin and stdout', () => {
+  const script = fileURLToPath(new URL('../scripts/validate-origin.mjs', import.meta.url));
+  const vectors = settingsContract.originVectors.filter(x => x.value.includes('xn--'));
+  for (const { value, valid } of [...vectors, { value: 'x'.repeat(settingsContract.originMaxBytes + 1), valid: false }]) {
+    const result = spawnSync(process.execPath, [script], { input: value, encoding: 'utf8', timeout: 5000, maxBuffer: settingsContract.originMaxBytes + 256 });
+    assert.ifError(result.error);
+    assert.equal(result.status, valid ? 0 : 1, JSON.stringify(value.slice(0, 80)));
+    assert.equal(result.stdout, valid ? value : '');
+    assert.equal(result.stderr, valid ? '' : 'Origin validation failed.\n');
+  }
 });
 
 test('admin authorization preserves mode, maintenance, Origin and capability exception matrix', async () => {
