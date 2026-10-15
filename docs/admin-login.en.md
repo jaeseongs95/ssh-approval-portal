@@ -35,6 +35,7 @@ Keep the existing Tunnel route to loopback port39125 and Access protection. The 
 
 ## Acceptance and recovery
 
+- **Sign out** in the top right stops polling, clears displayed requests and navigates to the [Cloudflare Access logout endpoint](https://developers.cloudflare.com/cloudflare-one/faq/authentication-faq/#how-do-end-users-log-out-of-an-application-protected-by-access). In token mode it only clears this tab's entered token and returns to the initial page. It does not revoke the server token or cancel running work.
 - Test Cloudflare, Google and GitHub in separate fresh browser sessions. Pending requests, history and results must appear without a token field.
 - Reject unapproved accounts, unauthenticated requests and wrong-application assertions. Approval/denial POSTs require the exact same Origin.
 - Decision/manual refreshes are immediate, periodic refresh is10seconds, and browser `ko*` selects Korean; all other locales select English.

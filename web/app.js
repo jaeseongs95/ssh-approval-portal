@@ -13,6 +13,7 @@ const en = {
   '처리 이력을 한눈에': 'Your approval history', '실행 중인 요청부터 완료된 결과까지 확인할 수 있습니다.': 'View running requests and completed results.', '관리자 토큰': 'Administrator token',
   '본인 계정으로 연결됨': 'Connected with your account', 'Cloudflare Access에서 확인한 본인 계정으로 요청을 처리합니다.': 'Manage requests with your owner account verified by Cloudflare Access.',
   '로그인이 만료되었거나 접근할 수 없습니다. 다시 로그인해 주세요.': 'Your session expired or access was denied. Please sign in again.',
+  '로그아웃되었습니다.': 'You have signed out.',
 };
 const t = value => korean ? value : en[value] ?? value;
 document.documentElement.lang = korean ? 'ko' : 'en';
@@ -21,7 +22,7 @@ if (!korean) for (const node of document.querySelectorAll('[data-en]')) node.tex
 el('token').placeholder = el('token').ariaLabel = t('관리자 토큰');
 const states = Object.fromEntries(Object.entries({ pending: '승인 대기', running: '실행 중', completed: '완료', failed: '실패', denied: '거부', expired: '만료' }).map(([key,value]) => [key,t(value)]));
 const kinds = Object.fromEntries(Object.entries({ command: '명령 실행', upload: '파일 업로드', download: '파일 다운로드' }).map(([key,value]) => [key,t(value)]));
-let polling = null, loading = null, deciding = false, rendered = '';
+let polling = null, loading = null, deciding = false, rendered = '', signedOut = false;
 function text(parent, tag, value, className = '') {
   const node = document.createElement(tag); node.textContent = value; node.className = className; parent.append(node); return node;
 }
@@ -30,11 +31,15 @@ function empty(parent, title, note) {
 }
 function error(message = '') { el('error').textContent = message; el('error').hidden = !message; }
 async function api(path, method = 'GET') {
+  if (signedOut) throw Error(t('로그아웃되었습니다.'));
   const r = await fetch(path, { method, credentials: 'same-origin', headers: accessMode ? {} : { Authorization: 'Bearer ' + el('token').value } });
   if (accessMode && r.status === 401) { el('sign-in').hidden = false; throw Error(t('로그인이 만료되었거나 접근할 수 없습니다. 다시 로그인해 주세요.')); }
-  const value = await r.json(); if (!r.ok) throw Error(value.error ?? t('요청 실패')); return value;
+  const value = await r.json();
+  if (signedOut) throw Error(t('로그아웃되었습니다.'));
+  if (!r.ok) throw Error(value.error ?? t('요청 실패')); return value;
 }
 async function load(force = false) {
+  if (signedOut) return;
   if (loading) {
     await loading;
     if (force === true) return load(true);
@@ -44,6 +49,7 @@ async function load(force = false) {
   loading = new Promise(resolve => { settled = resolve; }); el('load').disabled = true;
   try {
     const jobs = await api('/api/requests');
+    if (signedOut) return;
     const fingerprint = JSON.stringify(jobs);
     if (fingerprint !== rendered) {
     const open = new Set([...el('history').querySelectorAll('details[open]')].map(x => x.dataset.requestId));
@@ -99,19 +105,28 @@ async function load(force = false) {
     rendered = fingerprint;
     }
     el('connection').classList.add('connected'); el('connection-text').textContent = t('연결됨');
+    el('logout').hidden = false;
     el('updated').textContent = `${t('마지막 갱신')} ${new Date().toLocaleTimeString(locale)} · ${t('10초마다 갱신')}`; error();
     if (!polling) polling = setInterval(() => { if (!document.hidden) load(); }, 10000);
   } catch (e) {
     error(e.message); el('connection').classList.remove('connected'); el('connection-text').textContent = t('연결 확인 필요');
     clearInterval(polling); polling = null;
-  } finally { loading = null; el('load').disabled = false; settled(); }
+  } finally { loading = null; el('load').disabled = signedOut; settled(); }
 }
+el('logout').onclick = () => {
+  signedOut = true; clearInterval(polling); polling = null;
+  el('token').value = ''; el('jobs').replaceChildren(); el('history').replaceChildren();
+  el('pending-count').textContent = el('history-count').textContent = '0';
+  el('logout').disabled = el('load').disabled = true;
+  location.replace(accessMode ? '/cdn-cgi/access/logout' : '/');
+};
 el('load').onclick = () => load(true);
 el('token').addEventListener('keydown', event => { if (event.key === 'Enter') load(true); });
 empty(el('jobs'), t('요청 목록을 연결해 주세요'), t('관리자 토큰을 입력하고 요청 조회를 누르세요.'));
 empty(el('history'), t('처리 이력을 한눈에'), t('실행 중인 요청부터 완료된 결과까지 확인할 수 있습니다.'));
 if (accessMode) {
   el('token').hidden = true;
+  el('logout').hidden = false;
   el('auth-label').textContent = t('본인 계정으로 연결됨'); el('auth-label').removeAttribute('for');
   el('auth-note').textContent = t('Cloudflare Access에서 확인한 본인 계정으로 요청을 처리합니다.');
   load();

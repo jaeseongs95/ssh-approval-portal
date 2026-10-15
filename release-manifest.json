@@ -80,13 +80,13 @@
     },
     {
       "path": "docs/admin-login.en.md",
-      "size": 4742,
-      "sha256": "55667b0ff1f5bdb7cf90bf9b64a9f1c8ae7c8d737cf208b3d9c93bf77c0efcb0"
+      "size": 5157,
+      "sha256": "2afba86de416296579a2978d88e6a03967e695dad4b71d3f8230496c749d8fd7"
     },
     {
       "path": "docs/admin-login.ko.md",
-      "size": 5941,
-      "sha256": "31b8c8db2df6f0da1cc4123a5e31f84406ef47ef1558da6894486a13b9fd0bd2"
+      "size": 6441,
+      "sha256": "26e6b7f500005fda98797ff61e8ab9521069ef65811341f3ad18647814557f19"
     },
     {
       "path": "helper/file-helper.py",
@@ -279,6 +279,11 @@
       "sha256": "7c1d7bb47e00df7739a5632a061d55888a4be08222bf075bac03378cd9030ded"
     },
     {
+      "path": "test/web-session.test.mjs",
+      "size": 8625,
+      "sha256": "43fc7b9844e9ff21de7be203e035a8bfd5d2727ee6fee0a9cbac5a6483590ac6"
+    },
+    {
       "path": "transfers.mjs",
       "size": 4506,
       "sha256": "bc4a534143dc7c287b53e513a5bcacddd6aa098ab3e00d361abbb568e03820d2"
@@ -320,13 +325,13 @@
     },
     {
       "path": "web/app.js",
-      "size": 9307,
-      "sha256": "a41e0bd01ebaee9a366632d791b0483c5574eb71adecca033eb8a6b4b465abef"
+      "size": 10013,
+      "sha256": "901c3282f209cb4d3f6fe3f2fb948f6dce56ee6c74440c97b87ed64d55369828"
     },
     {
       "path": "web/index.html",
-      "size": 8776,
-      "sha256": "9e5f402850fd40443d79b16c0ea01348274cb614df70a43486e23085c4f631b2"
+      "size": 8961,
+      "sha256": "b5be7b31f80d978fbe4a84b2a3a7e0d834cccfd2e53bb135a707df5a3c7adef4"
     }
   ]
 }

@@ -35,6 +35,7 @@ Cloudflare Tunnel은 현재 loopback `39125` 경로와 Access 보호를 유지�
 
 ## 실제 수용 시험과 복구
 
+- 화면 오른쪽 위의 **로그아웃**은 자동 조회를 멈추고 표시 중인 요청을 비운 뒤 [Cloudflare Access의 로그아웃 경로](https://developers.cloudflare.com/cloudflare-one/faq/authentication-faq/#how-do-end-users-log-out-of-an-application-protected-by-access)로 이동합니다. 토큰 방식에서는 이 탭의 입력 토큰만 지우고 초기 화면으로 돌아갑니다. 서버 토큰을 폐기하거나 이미 실행 중인 작업을 취소하지는 않습니다.
 - Cloudflare·Google·GitHub 각각 새 브라우저 세션에서 로그인해 대기 목록·이력·카드 실행 결과가 보이는지 확인합니다. 관리자 토큰 입력란이 없어야 합니다.
 - 허용하지 않은 계정, 로그인 없는 요청, 잘못된 앱의 JWT는 거부되어야 합니다. 승인·거부 POST는 같은 출처만 허용합니다.
 - 승인·거부 후 즉시 조회하고 자동 조회는 10초입니다. 브라우저 언어가 `ko`이면 한국어, 그 외에는 영어입니다.
