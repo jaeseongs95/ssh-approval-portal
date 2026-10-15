@@ -19,7 +19,10 @@ for executable in python3 ssh-keygen sshd sudo flock curl; do
   fi
 done
 base=/var/lib/ssh-mcp
-if curl -fsS http://127.0.0.1:39124/health >/dev/null 2>&1; then echo 'A bridge is running: finish requests and stop it before host preparation' >&2; exit 1; fi
+for secret_file in /etc/ssh-mcp-approval-bridge.env /etc/ssh-approval-portal/docker-secrets.env; do
+  probe_port=$(python3 "$source_dir/scripts/settings_contract.py" port "$secret_file" mcp)
+  if curl -fsS "http://127.0.0.1:$probe_port/health" >/dev/null 2>&1; then echo 'A bridge is running: finish requests and stop it before host preparation' >&2; exit 1; fi
+done
 install -d -m 0755 "$base/app"
 exec 9>"$base/.portal-install.lock"; flock -n 9
 if systemctl is-active --quiet ssh-approval-bridge.service; then echo 'Finish requests and stop the native service before preparing Docker' >&2; exit 1; fi
@@ -54,7 +57,6 @@ if [[ "$grant_sudo" == 1 && ! -e "$grant" ]]; then
 fi
 install -d -o root -g mcpbridge -m 0750 /etc/ssh-approval-portal
 python3 "$source_dir/scripts/docker-secrets.py" "$origin"
-printf 'BRIDGE_UID=%s\nBRIDGE_GID=%s\nBRIDGE_IMAGE=ssh-approval-portal:0.3.0\n' "$(id -u mcpbridge)" "$(id -g mcpbridge)" > /etc/ssh-approval-portal/compose.env
-chmod 0600 /etc/ssh-approval-portal/compose.env
+python3 "$source_dir/scripts/compose-env.py" /etc/ssh-approval-portal/compose.env "$(id -u mcpbridge)" "$(id -g mcpbridge)"
 systemctl enable --now ssh.service
 echo 'Docker host prepared. Keys/settings/sudo were preserved. Use /etc/ssh-approval-portal/compose.env with Compose.'

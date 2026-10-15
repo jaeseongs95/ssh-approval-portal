@@ -4,7 +4,7 @@ import { EventEmitter } from 'node:events';
 import { request as httpRequest } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
 import { PassThrough, Readable } from 'node:stream';
-import { createFileSource } from '../file-source.mjs';
+import { createFileSource } from '../src/adapters/sources/file-source.mjs';
 
 // Component plan: inspect/open -> URL/SSRF, pinned transport, byte bounds, lifecycle,
 // generic errors. Injected DNS/HTTPS remove real DNS, TLS and host integration.
@@ -34,6 +34,16 @@ function fixture({ status = 200, headers = {}, chunks = [Buffer.from([0, 255, 1]
   return { source, options: () => options, count: () => requestCount, destroyed: () => destroyed, incoming: () => incoming };
 }
 const collect = async stream => { const chunks = []; for await (const bytes of stream) chunks.push(bytes); return Buffer.concat(chunks); };
+
+test('bound source supplies a neutral capability without exposing its signed URL', async () => {
+  const f = fixture();
+  const bound = f.source.bind(url);
+  assert.deepEqual(bound.inspect(), { sourceHost: hostname, allowed: true });
+  assert.equal(JSON.stringify(bound).includes('SECRET_URL'), false);
+  const opened = await bound.open();
+  assert.deepEqual(await collect(opened.stream), Buffer.from([0, 255, 1]));
+  assert.deepEqual(f.source.bind('https://other.example.test/').inspect(), { sourceHost: 'other.example.test', allowed: false });
+});
 
 test('inspect is offline, requires exact allowed host and rejects ambiguous or unsafe URLs', async () => {
   let dnsCalls = 0;

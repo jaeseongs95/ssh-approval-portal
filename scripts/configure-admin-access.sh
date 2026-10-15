@@ -14,9 +14,11 @@ reserved=0
 changed=0
 backup=
 stage=
+restore_stage=
+admin_port=$(python3 "$active/scripts/settings_contract.py" port "$env_file" admin)
 wait_restored() {
   for attempt in {1..20}; do
-    if curl -fsS http://127.0.0.1:39124/health 2>/dev/null | python3 -c 'import json,sys; assert json.load(sys.stdin).get("healthy") is True' 2>/dev/null; then return 0; fi
+    if "$node" "$active/scripts/healthcheck.mjs" "$env_file" 2>/dev/null; then return 0; fi
     sleep 1
   done
   return 1
@@ -26,13 +28,15 @@ cleanup() {
   trap - EXIT
   set +e
   if [[ $rc != 0 && $changed == 1 ]]; then
-    if cp -a -- "$backup" "$env_file" && systemctl reset-failed ssh-approval-bridge.service && systemctl restart ssh-approval-bridge.service && wait_restored; then
+    restore_stage=$(mktemp /etc/.ssh-admin-access-restore.XXXXXXXX)
+    if cp -a -- "$backup" "$restore_stage" && sync -f "$restore_stage" && mv -f -- "$restore_stage" "$env_file" && systemctl reset-failed ssh-approval-bridge.service && systemctl restart ssh-approval-bridge.service && wait_restored; then
       echo "Configuration restored from $backup" >&2
     else echo "Restore failed. Administrator recovery needed: $backup" >&2; fi
   fi
   if [[ $reserved == 1 ]]; then "$node" "$active/scripts/maintenance.mjs" release || true; fi
   rm -f -- "$work/proposed.env"
   if [[ -n "$stage" ]]; then rm -f -- "$stage"; fi
+  if [[ -n "$restore_stage" ]]; then rm -f -- "$restore_stage"; fi
   rmdir -- "$work"
   exit "$rc"
 }
@@ -45,17 +49,19 @@ trap 'exit 130' INT TERM
 reserved=1
 backup=/etc/ssh-mcp-approval-bridge.env.before-access.$(date -u +%Y%m%dT%H%M%SZ).$$
 cp -a -- "$env_file" "$backup"
+sync -f "$backup"
 stage=$(mktemp /etc/.ssh-admin-access.XXXXXXXX)
 cp -- "$work/proposed.env" "$stage"
 chown --reference="$env_file" "$stage"
 chmod 0600 "$stage"
+sync -f "$stage"
 mv -f -- "$stage" "$env_file"
 changed=1
 systemctl reset-failed ssh-approval-bridge.service
 systemctl restart ssh-approval-bridge.service
 for attempt in {1..20}; do
-  if curl -fsS http://127.0.0.1:39124/health 2>/dev/null | python3 -c 'import json,sys; v=json.load(sys.stdin); assert v.get("healthy") is True and v.get("adminAuthMode")=="access"' 2>/dev/null; then
-    code=$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:39125/api/session)
+  if "$node" "$active/scripts/healthcheck.mjs" "$env_file" access 2>/dev/null; then
+    code=$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:$admin_port/api/session")
     [[ "$code" == 401 ]] || { echo 'Unauthenticated administrator request was not rejected.' >&2; exit 1; }
     echo "Owner Access mode enabled. Backup: $backup"
     echo 'Test Cloudflare, Google and GitHub login in the browser; no administrator token entry is required.'

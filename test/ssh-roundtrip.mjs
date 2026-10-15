@@ -1,14 +1,16 @@
 import assert from 'node:assert/strict';
-import { readFile, writeFile } from 'node:fs/promises';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { loadSecrets } from '../src/adapters/config/secrets.mjs';
+import { parseSettings } from '../src/adapters/config/settings.mjs';
 
 // Runs only inside the isolated Docker test server, with its synthetic credentials.
-const lines = (await readFile(process.env.BRIDGE_TEST_ENV_FILE ?? '/etc/ssh-mcp-approval-bridge.env', 'utf8')).split('\n');
-const settings = Object.fromEntries(lines.filter(x => /^[A-Z_]+=/.test(x)).map(x => { const at = x.indexOf('='); return [x.slice(0, at), x.slice(at + 1).replace(/^['"]|['"]$/g, '')]; }));
+const settings = await loadSecrets({ file: process.env.BRIDGE_TEST_ENV_FILE ?? '/etc/ssh-mcp-approval-bridge.env' });
+const ports = parseSettings(settings);
+const runPrefix = `portal-${randomBytes(12).toString('hex')}-`;
 const client = new Client({ name: 'isolated-test-host', version: '1' });
-await client.connect(new StreamableHTTPClientTransport(new URL('http://127.0.0.1:39124/mcp'), { requestInit: { headers: { Authorization: 'Bearer ' + settings.BRIDGE_MCP_TOKEN } } }));
+await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${ports.mcpPort}/mcp`), { requestInit: { headers: { Authorization: 'Bearer ' + settings.BRIDGE_MCP_TOKEN } } }));
 const call = async (name, args = {}) => { const value = await client.callTool({ name, arguments: args }); assert.ok(!value.isError, 'MCP operation failed: ' + name); return value; };
 const digest = data => createHash('sha256').update(data).digest('hex');
 const delay = () => new Promise(resolve => setTimeout(resolve, 100));
@@ -35,7 +37,7 @@ try {
   assert.equal(racingRead.isError, true, 'Read bypassed the shared operation lock');
   await wait(delayed.id);
   for (const [name, bytes, elevate] of [['normal.bin', Buffer.from([0, 255, 1, 128]), false], ['한글.bin', Buffer.from('binary\0한글'), true], ['empty.bin', Buffer.alloc(0), false], ['text.txt', Buffer.from('UTF-8 한글\n'), false], ['folder.zip', Buffer.from('UEsFBgAAAAAAAAAAAAAAAAAAAAAAAA==', 'base64'), false], ['limit.bin', Buffer.alloc(64 * 1024 * 1024, 0xa5), false]]) {
-    const remotePath = elevate ? '/root/' + name : '/home/mcpops/' + name;
+    const remotePath = (elevate ? '/root/' : '/home/mcpops/') + runPrefix + name;
     const transfer = { direction: 'upload', remotePath, elevate, overwrite: false };
     const card = await call('show-file-transfer', transfer);
     const started = await call('ui-upload-begin', { transfer, ticket: card._meta.sshApproval.bootstrapTicket, fileName: name, size: bytes.length, sha256: digest(bytes) });
@@ -53,16 +55,16 @@ try {
     const view = await call('show-approval', { id: request.id });
     const link = await call('ui-download-link', { id: request.id, ticket: view._meta.sshApproval.viewTicket });
     const remoteUrl = new URL(link._meta.sshApproval.downloadUrl);
-    const localUrl = new URL(remoteUrl.pathname + remoteUrl.search, 'http://127.0.0.1:39125');
+    const localUrl = new URL(remoteUrl.pathname + remoteUrl.search, `http://127.0.0.1:${ports.adminPort}`);
     const response = await fetch(localUrl); assert.equal(response.status, 200);
     assert.deepEqual(Buffer.from(await response.arrayBuffer()), bytes);
     assert.equal((await fetch(localUrl)).status, 409, 'Download URL was replayable');
   }
-  const rootOld = '/root/portal-preserve.bin';
-  await approve((await call('run-command', { command: "sudo -n sh -c 'printf root-old > /root/portal-preserve.bin'" })).structuredContent);
+  const rootOld = `/root/${runPrefix}portal-preserve.bin`;
+  await approve((await call('run-command', { command: `sudo -n sh -c 'printf root-old > ${rootOld}'` })).structuredContent);
   const download = (await call('request-download', { remotePath: rootOld, elevate: true })).structuredContent;
   await approve(download);
-  const config = { direction: 'upload', remotePath: '/home/mcpops/too-big.bin', elevate: false, overwrite: false };
+  const config = { direction: 'upload', remotePath: `/home/mcpops/${runPrefix}too-big.bin`, elevate: false, overwrite: false };
   const card = await call('show-file-transfer', config);
   const excessive = await client.callTool({ name: 'ui-upload-begin', arguments: { transfer: config, ticket: card._meta.sshApproval.bootstrapTicket, fileName: 'too-big.bin', size: 64 * 1024 * 1024 + 1, sha256: '0'.repeat(64) } });
   assert.equal(excessive.isError, true);

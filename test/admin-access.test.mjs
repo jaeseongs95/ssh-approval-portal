@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPair, SignJWT, createLocalJWKSet, exportJWK } from 'jose';
-import { accessConfiguration, createAdminAccess } from '../admin-access.mjs';
+import { accessConfiguration, createAdminAccess } from '../src/adapters/security/admin-access.mjs';
 import { updateAccessSettings } from '../scripts/admin-access-config.mjs';
 const env = { BRIDGE_ADMIN_AUTH_MODE: 'access', BRIDGE_ACCESS_TEAM_DOMAIN: 'https://fixture.cloudflareaccess.com', BRIDGE_ACCESS_AUD: 'a'.repeat(64), BRIDGE_ACCESS_OWNER_EMAILS: 'Owner@example.test' };
 const { privateKey, publicKey } = await generateKeyPair('RS256');

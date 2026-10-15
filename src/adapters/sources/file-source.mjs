@@ -23,7 +23,14 @@ export function createFileSource({ hosts, maxBytes = 64 * 1024 * 1024, timeoutMs
       return url;
     } catch { throw refused(); }
   };
-  return {
+  const provider = {
+    bind(downloadUrl) {
+      const policy = provider.inspect(downloadUrl);
+      return Object.freeze({
+        inspect: () => ({ sourceHost: policy.hostname, allowed: policy.allowed }),
+        open: options => provider.open(downloadUrl, options),
+      });
+    },
     inspect(downloadUrl) { const url = parse(downloadUrl); return { hostname: url.hostname, allowed: allowed.has(url.hostname) }; },
     async open(downloadUrl, { signal } = {}) {
       const url = parse(downloadUrl);
@@ -84,4 +91,5 @@ export function createFileSource({ hosts, maxBytes = 64 * 1024 * 1024, timeoutMs
       });
     },
   };
+  return provider;
 }

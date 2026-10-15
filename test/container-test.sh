@@ -1,58 +1,78 @@
 #!/usr/bin/env bash
 set -euo pipefail
 wait_healthy() {
+  local mcp_port
+  mcp_port=$(python3 /source/scripts/settings_contract.py port /etc/ssh-mcp-approval-bridge.env mcp)
   for attempt in {1..30}; do
-    if curl -fsS http://127.0.0.1:39124/health >/dev/null 2>&1; then return 0; fi
+    if curl -fsS "http://127.0.0.1:$mcp_port/health" >/dev/null 2>&1; then return 0; fi
     sleep 1
   done
   return 1
 }
+latest_backup() { find /var/lib/ssh-mcp/app/backups -mindepth 1 -maxdepth 1 -type d | sort | tail -n1; }
 cd /source
-bash scripts/install.sh --admin-origin https://example.test --grant-sudo-all
+if [[ ${TEST_HAS_BASELINE:-0} == 1 ]]; then
+  bash /baseline/scripts/install.sh --admin-origin https://example.test --grant-sudo-all
+  systemctl stop ssh-approval-bridge.service
+  python3 test/delivery-fixture.py docker-settings /etc/ssh-mcp-approval-bridge.env
+  sed -i '/^\[Service\]/a Environment=BRIDGE_DELIVERY_FIXTURE=preserved' /etc/systemd/system/ssh-approval-bridge.service
+  systemctl daemon-reload; systemctl restart ssh-approval-bridge.service
+  wait_healthy
+  baseline_active=$(readlink -f /var/lib/ssh-mcp/app/approval-bridge)
+  python3 test/delivery-fixture.py capture /root/baseline-state.json
+  bash scripts/install.sh
+  python3 test/delivery-fixture.py assert-preserved /root/baseline-state.json
+  upgrade_backup=$(latest_backup)
+else
+  bash scripts/install.sh --admin-origin https://example.test --grant-sudo-all
+  systemctl stop ssh-approval-bridge.service
+  python3 test/delivery-fixture.py docker-settings /etc/ssh-mcp-approval-bridge.env
+  systemctl restart ssh-approval-bridge.service
+  wait_healthy
+fi
 node scripts/verify.mjs .
 active=$(readlink -f /var/lib/ssh-mcp/app/approval-bridge)
+python3 test/delivery-fixture.py capture /root/candidate-state.json
 env_before=$(sha256sum /etc/ssh-mcp-approval-bridge.env | cut -d' ' -f1)
-key_before=$(sha256sum /var/lib/ssh-mcp/.ssh/id_ed25519 | cut -d' ' -f1)
-grant_before=$(sha256sum /etc/sudoers.d/90-mcpops-approval-bridge | cut -d' ' -f1)
 bash scripts/install.sh
 [[ $(readlink -f /var/lib/ssh-mcp/app/approval-bridge) == "$active" ]]
 [[ $(sha256sum /etc/ssh-mcp-approval-bridge.env | cut -d' ' -f1) == "$env_before" ]]
-[[ $(sha256sum /var/lib/ssh-mcp/.ssh/id_ed25519 | cut -d' ' -f1) == "$key_before" ]]
-[[ $(sha256sum /etc/sudoers.d/90-mcpops-approval-bridge | cut -d' ' -f1) == "$grant_before" ]]
+python3 test/delivery-fixture.py assert-preserved /root/candidate-state.json
+reinstall_backup=$(latest_backup)
 systemctl is-enabled --quiet ssh-approval-bridge.service
 test "$(systemctl show ssh-mcp.service -p LoadState --value)" = not-found
 cd "$active"
+node scripts/check-package-imports.mjs
 node --test test/*.test.mjs
 python3 test/test_helper.py
+python3 test/test_upload_sources.py
+python3 test/test_settings_contract.py
+python3 test/test_package.py
 sed -i 's/^BRIDGE_UI_ENABLED=false$/BRIDGE_UI_ENABLED=true/' /etc/ssh-mcp-approval-bridge.env
 systemctl restart ssh-approval-bridge.service
 wait_healthy
 node test/ssh-roundtrip.mjs
-backup=$(find /var/lib/ssh-mcp/app/backups -mindepth 1 -maxdepth 1 -type d | sort | tail -n1)
-bash /source/scripts/rollback.sh "$backup"
-systemctl is-active --quiet ssh-approval-bridge.service
-# A syntactically valid but unbootable candidate must restore the healthy release.
+if [[ ${TEST_HAS_BASELINE:-0} == 1 ]]; then
+  bash /source/scripts/rollback.sh "$upgrade_backup"
+  [[ $(readlink -f /var/lib/ssh-mcp/app/approval-bridge) == "$baseline_active" ]]
+  python3 /source/test/delivery-fixture.py assert-preserved /root/baseline-state.json
+  bash /source/scripts/install.sh
+else
+  bash /source/scripts/rollback.sh "$reinstall_backup"
+fi
+python3 /source/test/delivery-fixture.py assert-preserved /root/candidate-state.json
+# The fixture produces a valid manifest whose bridge fails during actual startup.
 cp -a /source /root/failing-release
-printf '\nthrow Error("synthetic startup failure");\n' >> /root/failing-release/bridge.mjs
-python3 - <<'PY'
-import json, hashlib, pathlib
-root = pathlib.Path('/root/failing-release')
-manifest = root / 'release-manifest.json'
-data = json.loads(manifest.read_text())
-for item in data['files']:
-    raw = (root / item['path']).read_bytes()
-    item.update(size=len(raw), sha256=hashlib.sha256(raw).hexdigest())
-manifest.write_text(json.dumps(data) + '\n')
-PY
+python3 /source/test/delivery-fixture.py break-release /root/failing-release
 if bash /root/failing-release/scripts/install.sh; then
   echo 'Broken candidate unexpectedly installed' >&2; exit 1
 fi
 [[ $(readlink -f /var/lib/ssh-mcp/app/approval-bridge) == "$active" ]]
 [[ $(sha256sum /etc/ssh-mcp-approval-bridge.env | cut -d' ' -f1) == "$env_before" ]]
-[[ $(sha256sum /etc/sudoers.d/90-mcpops-approval-bridge | cut -d' ' -f1) == "$grant_before" ]]
+python3 /source/test/delivery-fixture.py assert-preserved /root/candidate-state.json
 systemctl is-active --quiet ssh-approval-bridge.service
-curl -fsS http://127.0.0.1:39124/health >/dev/null
+wait_healthy
 systemctl restart ssh-approval-bridge.service
 wait_healthy
-curl -fsS http://127.0.0.1:39124/health >/dev/null
-echo 'INSTALL, REINSTALL, SECRET/KEY/SUDO PRESERVATION, SSH BYTE ROUNDTRIP, ROLLBACK, FAILED-START RECOVERY, RESTART: PASS'
+node /source/test/delivery-runtime.mjs
+echo "INSTALL, CUSTOM PORTS, REINSTALL, SETTINGS/KEY/SUDO/UNIT/AUDIT PRESERVATION, SSH ROUNDTRIP, ROLLBACK, FAILED-START RECOVERY: PASS; baseline=${TEST_HAS_BASELINE:-0}"

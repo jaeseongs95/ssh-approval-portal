@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "defaults": {
+    "BRIDGE_UI_ENABLED": "false",
+    "BRIDGE_UI_TOOL_PREFIX": "ssh-approval-bridge_",
+    "BRIDGE_HOST_KEY_MODE": "tofu",
+    "BRIDGE_TRANSFER_MAX_BYTES": "67108864",
+    "BRIDGE_TRANSFER_BUDGET_BYTES": "536870912",
+    "BRIDGE_MCP_PORT": "39124",
+    "BRIDGE_ADMIN_PORT": "39125",
+    "BRIDGE_ADMIN_AUTH_MODE": "token",
+    "BRIDGE_UPLOAD_SOURCE_HOSTS": ""
+  },
+  "allowedKeys": [
+    "BRIDGE_MCP_TOKEN", "BRIDGE_ADMIN_TOKEN", "BRIDGE_UI_TICKET_KEY", "BRIDGE_ADMIN_ORIGIN",
+    "BRIDGE_UI_ENABLED", "BRIDGE_UI_TOOL_PREFIX", "BRIDGE_HOST_KEY_MODE", "BRIDGE_TRANSFER_MAX_BYTES",
+    "BRIDGE_TRANSFER_BUDGET_BYTES", "BRIDGE_CONFIG_PATH", "BRIDGE_AUDIT_PATH", "BRIDGE_TRANSFER_ROOT",
+    "BRIDGE_MCP_PORT", "BRIDGE_ADMIN_PORT", "BRIDGE_ADMIN_AUTH_MODE", "BRIDGE_ACCESS_TEAM_DOMAIN",
+    "BRIDGE_ACCESS_AUD", "BRIDGE_ACCESS_OWNER_EMAILS", "BRIDGE_UPLOAD_SOURCE_HOSTS"
+  ],
+  "originPattern": "^https://(?:\\[[0-9a-f:]+\\]|[a-z0-9._-]+)(?::[1-9][0-9]{0,4})?$",
+  "originVectors": [
+    {"value":"https://admin.example.test","valid":true},
+    {"value":"https://admin.example.test:4443","valid":true},
+    {"value":"https://127.0.0.1","valid":true},
+    {"value":"https://[::1]:4443","valid":true},
+    {"value":"https://localhost","valid":true},
+    {"value":"http://admin.example.test","valid":false},
+    {"value":"https://admin.example.test/","valid":false},
+    {"value":"https://admin.example.test?mode=owner","valid":false},
+    {"value":"https://admin.example.test#owner","valid":false},
+    {"value":"https://owner@admin.example.test","valid":false},
+    {"value":"https://ADMIN.example.test","valid":false},
+    {"value":"https://admin.example.test:443","valid":false},
+    {"value":"https://admin.example.test:04443","valid":false},
+    {"value":"https://admin.example.test:65536","valid":false},
+    {"value":"https://admin.example.test:0","valid":false},
+    {"value":"https://127.1","valid":false},
+    {"value":"https://2130706433","valid":false},
+    {"value":"https://0x7f000001","valid":false},
+    {"value":"https://1.2.3.256","valid":false},
+    {"value":"https://host.123","valid":false},
+    {"value":"https://0x","valid":false},
+    {"value":"https://[0:0:0:0:0:0:0:1]","valid":false},
+    {"value":"https://admin.example.test\n","valid":false},
+    {"value":"https://admin.example.test\\evil","valid":false}
+  ],
+  "portVectors": [
+    {"value":"1","valid":true}, {"value":"65535","valid":true},
+    {"value":"39124","valid":true}, {"value":"0","valid":false},
+    {"value":"65536","valid":false}, {"value":"-1","valid":false},
+    {"value":"1.5","valid":false}, {"value":"1e3","valid":false},
+    {"value":" 39124 ","valid":false}, {"value":"","valid":false}
+  ]
+}

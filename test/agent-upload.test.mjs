@@ -8,7 +8,7 @@ import { request as httpRequest } from 'node:http';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { createApplication } from '../app.mjs';
-import { hash } from '../core.mjs';
+import { hash } from '../src/domain/validation.mjs';
 
 const file = { download_url: 'https://files.example.test/source?signature=URL_SECRET_SENTINEL', file_id: 'FILE_REFERENCE_SENTINEL' };
 const bytes = Buffer.from('FILE_BYTES_NEVER_IN_MODEL\0\xff');
@@ -29,7 +29,7 @@ async function fixture({ open, allowed = true, enabled = true, auditFail = false
     } } });
   application.transfers.upload = async operation => {
     const fd = await application.store.verified(operation.artifactId); await fd.close();
-    calls.push(operation); return { content: [{ type: 'text', text: 'published' }] };
+    calls.push(operation); return { failed: false, texts: ['published'] };
   };
   await listen(application.mcpHttp); await listen(application.adminHttp);
   const client = new Client({ name: 'isolated-file-host', version: '1' });
@@ -93,7 +93,7 @@ test('source/audit/queue rejection cleans private staging and never echoes sourc
     const f = await fixture(config);
     try {
       const result = await f.call(); assert.equal(result.isError, true); noPayloadLeak(result);
-      assert.equal(f.calls.length, 0); assert.equal(f.application.store.reserved, 0); assert.equal(f.application.store.items.size, 0);
+      assert.equal(f.calls.length, 0); assert.equal(f.application.store.reserved, 0); assert.equal(f.application.store.size, 0);
       assert.deepEqual(await readdir(f.root), []); assert.equal(f.application.queue.jobs.size, 0);
     } finally { await f.close(); }
   }
@@ -134,7 +134,7 @@ test('HTTP disconnect and application shutdown abort imports and release quota w
     try {
       await waitFor(() => f.opened === 1);
       if (stop === 'disconnect') request.destroy(); else await f.application.close();
-      await call; await waitFor(() => aborted && f.application.store.items.size === 0);
+      await call; await waitFor(() => aborted && f.application.store.size === 0);
       assert.equal(f.application.store.reserved, 0); assert.equal(f.application.queue.jobs.size, 0); assert.equal(f.calls.length, 0);
       assert.deepEqual(await readdir(f.root), []);
     } finally {

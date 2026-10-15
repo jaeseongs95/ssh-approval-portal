@@ -2,7 +2,11 @@
 
 `request-upload` stages a file supplied by a supported client, measures its size and SHA-256, and queues an immutable upload approval. The agent can supply the file reference, but the owner must approve the card or website before the remote destination changes. Files are never executed and ZIP archives are never extracted.
 
-The implementation uses ChatGPT's official `openai/fileParams` contract. Actual client delivery and server access to the temporary file URL require separate verification. Do not claim automatic file delivery in Claude or another client until its contract works in that environment. The existing card file picker remains available. [Official file input contract](https://developers.openai.com/plugins/reference#file-apis)
+The implementation uses ChatGPT's official `openai/fileParams` contract. `download_url` and `file_id` are required; `mime_type` and `file_name` are optional. An actual ChatGPT file input reached `upload-source-not-configured` and returned the provider hostname. Provider retrieval, approval, and an SSH round trip remain unverified. [Official file input contract](https://developers.openai.com/plugins/reference#file-apis)
+
+The actual Claude test supplied `file_uuid` and an empty `download_url`, failing input validation. Do not turn `file_uuid` into an invented download URL or treat it as an Anthropic Files API `file_id`. The same Claude sandbox's destination HTTPS connection was blocked by a proxy CONNECT 403. No automatic Claude upload path is provided; use the existing card file picker.
+
+Claude Team and Enterprise organization owners can configure code-execution access to specific domains in `Organization settings > Capabilities`. Custom-domain settings are not guaranteed for personal Free, Pro, or Max plans. A working MCP connection does not establish sandbox egress permission. Do not describe a sandbox push path as supported until domain access and actual raw-byte transfer have each been demonstrated. [Claude file creation and network settings](https://support.claude.com/en/articles/12111783-create-and-edit-files-with-claude)
 
 ## Initial connection
 

@@ -1,19 +1,32 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { runInNewContext } from 'node:vm';
-const source = readFileSync(new URL('../web/app.js', import.meta.url), 'utf8');
+import { createWebController } from '../web/src/controller.js';
+import { createWebState } from '../web/src/state.js';
+import { createWebView } from '../web/src/view.js';
+import { createWebApi } from '../web/src/http.js';
+import { createWebI18n } from '../web/src/i18n.js';
 const html = readFileSync(new URL('../web/index.html', import.meta.url), 'utf8');
 function harness(language, access = false, jobs) {
   class Node {
     constructor(tag) { this.tag=tag;this.children=[];this.dataset={};this.value='';this.classList={add(){},remove(){}}; }
-    append(node) { node.parent=this;this.children.push(node); }
-    replaceChildren(...nodes) { this.children=nodes; }
-    querySelectorAll() { return []; }
+    append(node) { this.insertBefore(node,null); }
+    insertBefore(node,before) {
+      node.remove(); const at=before===null?this.children.length:this.children.indexOf(before);
+      assert.ok(at>=0,'DOM insertion anchor must belong to this parent');
+      node.parent=this;this.children.splice(at,0,node);
+    }
+    replaceChildren(...nodes) { for(const node of [...this.children])node.remove();for(const node of nodes)this.append(node); }
+    get firstChild() { return this.children[0]??null; }
+    get nextSibling() { return this.parent?.children[this.parent.children.indexOf(this)+1]??null; }
+    querySelectorAll(selector) {
+      const descendants=this.children.flatMap(node=>[node,...node.querySelectorAll('*')]);
+      return selector==='*'?descendants:descendants.filter(node=>selector==='button'?node.tag==='button':selector==='details[open]'?node.tag==='details'&&node.open:false);
+    }
     addEventListener(type, fn) { this[type]=fn; }
     removeAttribute() {}
     get childElementCount() { return this.children.length; }
-    remove() { this.parent.children=this.parent.children.filter(x=>x!==this); }
+    remove() { if(this.parent){this.parent.children=this.parent.children.filter(x=>x!==this);this.parent=null;} }
   }
   const roots=Object.fromEntries(['token','load','logout','error','history','jobs','pending-count','history-count','connection','connection-text','updated','auth-label','auth-note','sign-in'].map(id=>[id,new Node('root')]));
   const logout=html.match(/<button id="logout"[^>]*data-en="([^"]+)"[^>]*>([^<]+)<\/button>/);
@@ -23,14 +36,17 @@ function harness(language, access = false, jobs) {
   const timers=[],requests=[],navigations=[],cleared=[];
   let deferredGet, deferredPost;
   const payload=jobs??[{id:'1'.repeat(48),kind:'command',state:'pending',target:'fixture@localhost',command:'echo 한글 원문',expiresAt:1800000000000}];
-  runInNewContext(source,{document,navigator:{language},console,Date,JSON,location:{assign:path=>navigations.push(path),replace:path=>navigations.push(path)},clearInterval:id=>cleared.push(id),setInterval:(fn,ms)=>{timers.push({fn,ms});return timers.length},fetch:async(path,opts)=>{
+  const i18n=createWebI18n(language),state=createWebState(access),view=createWebView({document,i18n});
+  const api=createWebApi({accessMode:access,getToken:view.token,isSignedOut:()=>state.signedOut,unauthorized:view.unauthorized,t:i18n.t,fetch:async(path,opts)=>{
     requests.push({path,method:opts.method,headers:opts.headers,credentials:opts.credentials});if(opts.method==='POST')payload[0].state=path.endsWith('/deny')?'denied':'completed';
     const value=path==='/api/requests'?JSON.parse(JSON.stringify(payload)):path.endsWith('/download')?{downloadUrl:'/downloads/fixture'}:{state:payload[0].state};
     if(opts.method==='GET' && deferredGet){const next=deferredGet;deferredGet=null;await next.promise;}
     if(opts.method==='POST' && deferredPost){const next=deferredPost;deferredPost=null;await next.promise;}
     return {ok:true,json:async()=>value};
   }});
-  return {roots,document,timers,requests,navigations,cleared,deferNextGet(){let release;deferredGet={promise:new Promise(resolve=>release=resolve)};return release;},deferNextPost(){let release;deferredPost={promise:new Promise(resolve=>release=resolve)};return release;},allText(node){return [node.textContent??'',...node.children.map(n=>this.allText(n))].join('\n')}};
+  const controller=createWebController({state,view,api,document,location:{assign:path=>navigations.push(path),replace:path=>navigations.push(path)},timers:{clearInterval:id=>cleared.push(id),setInterval:(fn,ms)=>{timers.push({fn,ms});return timers.length}}});
+  controller.start();
+  return {roots,document,timers,requests,navigations,cleared,payload,controller,deferNextGet(){let release;deferredGet={promise:new Promise(resolve=>release=resolve)};return release;},deferNextPost(){let release;deferredPost={promise:new Promise(resolve=>release=resolve)};return release;},allText(node){return [node.textContent??'',...node.children.map(n=>this.allText(n))].join('\n')}};
 }
 const settle=()=>new Promise(resolve=>setImmediate(resolve));
 test('English web labels, ten-second automatic timer and immediate manual/action refresh',async()=>{
@@ -110,4 +126,21 @@ test('late download POST cannot navigate away from logout or restore requests',a
     h.timers[0].fn();await settle();assert.equal(h.requests.length,before);
     assert.equal(h.roots.history.children.length,0);assert.equal(h.roots.jobs.children.length,0);
   }
+});
+
+test('unrelated request changes preserve existing nodes, expanded history and output state',async()=>{
+  const h=harness('en-US',false,[
+    {id:'1'.repeat(48),kind:'command',state:'pending',target:'fixture',command:'unchanged command',expiresAt:1800000000000},
+    {id:'2'.repeat(48),kind:'command',state:'completed',target:'fixture',command:'history command',createdAt:1800000000000,result:{content:[{type:'text',text:'unchanged output'}]}},
+  ]);
+  await h.controller.load();
+  const pending=h.roots.jobs.children[0],history=h.roots.history.children[0];history.open=true;
+  const output=history.children.find(x=>x.className==='history-body').children.find(x=>x.className==='output');output.scrollTop=42;
+  await h.controller.load();
+  assert.equal(h.roots.jobs.children[0],pending);assert.equal(h.roots.history.children[0],history);
+  h.payload.push({id:'3'.repeat(48),kind:'command',state:'running',target:'fixture',command:'unrelated change',createdAt:1800000000000});
+  await h.controller.load();
+  assert.equal(h.roots.jobs.children[0],pending,'unrelated arrival must not replace the pending button subtree');
+  assert.equal(h.roots.history.children[1],history,'existing history is not detached when a new result precedes it');
+  assert.equal(history.open,true);assert.equal(output.scrollTop,42);
 });

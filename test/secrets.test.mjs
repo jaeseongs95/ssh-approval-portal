@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadSecrets } from '../secrets.mjs';
+import { loadSecrets } from '../src/adapters/config/secrets.mjs';
 test('Compose secret files bind into server settings without shell evaluation or public payload', async () => {
   const root = await mkdtemp(join(tmpdir(), 'ssh-secrets-')); const file = join(root, 'secrets');
   try {

@@ -7,9 +7,11 @@ import re
 import socket
 import stat
 import sys
+from settings_contract import parse_env
 
 
 def update_source_hosts(text, raw):
+    parse_env(text)
     if not isinstance(raw, str) or any(char in raw for char in '\r\n\0'):
         raise ValueError('Use comma-separated exact hostnames')
     hosts = []

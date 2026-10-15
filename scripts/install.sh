@@ -29,9 +29,12 @@ unit=/etc/systemd/system/ssh-approval-bridge.service
 helper=/usr/local/libexec/ssh-approval-file-helper
 grant=/etc/sudoers.d/90-mcpops-approval-bridge
 runtime=/opt/ssh-approval/node
-if ! systemctl is-active --quiet ssh-approval-bridge.service && curl -fsS http://127.0.0.1:39124/health >/dev/null 2>&1; then
-  echo 'A non-native bridge is running. Reserve maintenance and stop Compose before native installation.' >&2; exit 1
-fi
+for secret_file in "$env_file" /etc/ssh-approval-portal/docker-secrets.env; do
+  probe_port=$(python3 "$source_dir/scripts/settings_contract.py" port "$secret_file" mcp)
+  if ! systemctl is-active --quiet ssh-approval-bridge.service && curl -fsS "http://127.0.0.1:$probe_port/health" >/dev/null 2>&1; then
+    echo 'A non-native bridge is running. Reserve maintenance and stop Compose before native installation.' >&2; exit 1
+  fi
+done
 if command -v docker >/dev/null && [[ -n $(docker ps --filter label=com.docker.compose.project=ssh-approval-portal --filter label=com.docker.compose.service=bridge -q) ]]; then
   echo 'Compose bridge is running: stop it safely before native installation.' >&2; exit 1
 fi
@@ -85,8 +88,10 @@ systemctl is-active --quiet ssh-approval-bridge.service && touch "$backup/was-ru
 grant_created=0
 activated=0
 wait_healthy() {
+  local mcp_port
+  mcp_port=$(python3 "$source_dir/scripts/settings_contract.py" port "$env_file" mcp) || return 1
   for attempt in {1..20}; do
-    if curl -fsS http://127.0.0.1:39124/health >/dev/null 2>&1 && systemctl is-active --quiet ssh-approval-bridge.service; then return 0; fi
+    if curl -fsS "http://127.0.0.1:$mcp_port/health" >/dev/null 2>&1 && systemctl is-active --quiet ssh-approval-bridge.service; then return 0; fi
     sleep 1
   done
   return 1
@@ -144,6 +149,7 @@ if [[ ! -d "$release" ]]; then
   cp -a -- "$source_dir"/. "$stage"/
   (cd "$stage"; npm ci --omit=dev --ignore-scripts)
   node --check "$stage/bridge.mjs"
+  node "$stage/scripts/check-package-imports.mjs"
   chown -R root:mcpbridge "$stage"
   find "$stage" -type d -exec chmod 0750 {} +
   find "$stage" -type f -exec chmod 0640 {} +

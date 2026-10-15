@@ -1,11 +1,13 @@
-import { loadSecrets } from '../secrets.mjs';
+import { loadSecrets } from '../src/adapters/config/secrets.mjs';
+import { parseSettings } from '../src/adapters/config/settings.mjs';
 const action = process.argv[2];
 if (!['reserve', 'release'].includes(action)) throw Error('Expected reserve or release');
 const settings = await loadSecrets(process.env, process.env.BRIDGE_SECRET_ENV_FILE ?? '/etc/ssh-mcp-approval-bridge.env');
+const { adminPort } = parseSettings(settings);
 const token = settings.BRIDGE_ADMIN_TOKEN, origin = settings.BRIDGE_ADMIN_ORIGIN;
 if (!token || !origin) throw Error('Missing administrator configuration');
 try {
-  const response = await fetch('http://127.0.0.1:39125/api/maintenance/' + action, {
+  const response = await fetch(`http://127.0.0.1:${adminPort}/api/maintenance/${action}`, {
     method: 'POST', headers: { Authorization: 'Bearer ' + token, Origin: origin }, signal: AbortSignal.timeout(5000),
   });
   if (!response.ok) throw Error('Maintenance refused');

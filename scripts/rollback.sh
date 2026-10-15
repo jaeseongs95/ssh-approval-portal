@@ -20,11 +20,12 @@ done
 next=$app/.rollback-next.$$
 ln -s -- "$previous" "$next"; mv -Tf -- "$next" "$app/approval-bridge"
 systemctl daemon-reload; systemctl restart ssh-approval-bridge.service
+mcp_port=$(python3 "$source_dir/scripts/settings_contract.py" port /etc/ssh-mcp-approval-bridge.env mcp)
 for attempt in {1..30}; do
-  if curl -fsS http://127.0.0.1:39124/health >/dev/null 2>&1 && systemctl is-active --quiet ssh-approval-bridge.service; then break; fi
+  if curl -fsS "http://127.0.0.1:$mcp_port/health" >/dev/null 2>&1 && systemctl is-active --quiet ssh-approval-bridge.service; then break; fi
   sleep 1
 done
-curl -fsS http://127.0.0.1:39124/health >/dev/null
+curl -fsS "http://127.0.0.1:$mcp_port/health" >/dev/null
 systemctl is-active --quiet ssh-approval-bridge.service
 trap - EXIT
 echo "Restored: $previous"

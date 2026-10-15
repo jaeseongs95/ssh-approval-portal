@@ -19,3 +19,16 @@ test('packaged UI inline module remains valid JavaScript after HTML embedding',(
     rmSync(work,{recursive:true,force:true});
   }
 });
+
+test('web bundle is standalone JavaScript for the existing script route',()=>{
+  const script=readFileSync(new URL('../web/dist/app.js',import.meta.url),'utf8');
+  assert.doesNotMatch(script,/^\s*import\s/m,'web route must not require additional source-module routes');
+  const work=mkdtempSync(join(tmpdir(),'ssh-web-script-'));
+  try{
+    const file=join(work,'app.js');writeFileSync(file,script);
+    const result=spawnSync(process.execPath,['--check',file],{encoding:'utf8',windowsHide:true});
+    assert.equal(result.status,0,result.stderr);
+  }finally{
+    assert.equal(dirname(resolve(work)),resolve(tmpdir()));rmSync(work,{recursive:true,force:true});
+  }
+});

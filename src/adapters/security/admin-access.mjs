@@ -1,7 +1,8 @@
 import { createRemoteJWKSet, jwtVerify } from 'jose';
+import { settingsContract } from '../config/settings.mjs';
 
 export function accessConfiguration(env) {
-  const mode = env.BRIDGE_ADMIN_AUTH_MODE ?? 'token';
+  const mode = env.BRIDGE_ADMIN_AUTH_MODE ?? settingsContract.defaults.BRIDGE_ADMIN_AUTH_MODE;
   if (!['token', 'access'].includes(mode)) throw Error('Invalid administrator authentication mode');
   if (mode === 'token') return { mode };
   const issuer = env.BRIDGE_ACCESS_TEAM_DOMAIN;

@@ -6,8 +6,9 @@ import { request } from 'node:http';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { finished } from 'node:stream/promises';
 import { createApplication } from '../app.mjs';
-import { hash } from '../core.mjs';
+import { hash } from '../src/domain/validation.mjs';
 test('malformed raw HTTP target is contained; isolated server remains healthy', async () => {
   const child = fork(new URL('./malformed-server.fixture.mjs', import.meta.url), [], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
   try {
@@ -31,14 +32,16 @@ test('one download URL is claimed before verification await; simultaneous replay
   try {
     await new Promise(resolve => app.adminHttp.listen(0, '127.0.0.1', resolve));
     const data = Buffer.from([0, 255, 1]);
-    const artifact = await app.store.begin({ remotePath: '/tmp/race.bin', fileName: 'race.bin', size: data.length, sha256: hash(data) });
-    await app.store.chunk(artifact.id, 0, data.toString('base64')); await app.store.finish(artifact.id);
-    artifact.expiresAt = Date.now() + 3600000;
-    app.transfers.download = async () => ({ structuredContent: { artifactId: artifact.id, fileName: artifact.fileName } });
+    const reserved = app.store.reserveDownload({ remotePath: '/tmp/race.bin', fileName: 'race.bin', elevate: false });
+    const artifact = await app.store.receiveDownload(reserved.id, { size: data.length, sha256: hash(data) }, async writable => {
+      writable.end(data); await finished(writable);
+    });
+    app.transfers.download = async () => ({ failed: false, texts: [], data: { artifactId: artifact.id, fileName: artifact.fileName } });
     const job = app.queue.submitOperation({ kind: 'download', remotePath: '/tmp/race.bin', elevate: false }); app.queue.start(job.id, true); await app.queue.wait(job.id);
     const base = `http://127.0.0.1:${app.adminHttp.address().port}`;
     const reply = await fetch(`${base}/api/${job.id}/download`, { method: 'POST', headers: { Authorization: 'Bearer fixture-admin', Origin: 'https://example.test' } });
     const url = new URL((await reply.json()).downloadUrl); const local = base + url.pathname + url.search;
+    const head = await fetch(local, { method: 'HEAD' }); assert.equal(head.status, 200); assert.equal(await head.text(), '');
     const real = app.store.verified.bind(app.store); let entered, release, checks = 0;
     const begun = new Promise(resolve => { entered = resolve; }), barrier = new Promise(resolve => { release = resolve; });
     app.store.verified = async id => { checks++; entered(); await barrier; return real(id); };

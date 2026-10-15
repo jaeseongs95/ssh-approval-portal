@@ -10,6 +10,7 @@
   "scripts": {
     "start": "node bridge.mjs",
     "test": "node --test test/*.test.mjs",
+    "test:browser": "node --test test/browser/*.test.mjs",
     "build:ui": "npm --prefix ui ci && npm --prefix ui run build",
     "package": "python3 scripts/package.py",
     "verify": "node scripts/verify.mjs"
@@ -19,5 +20,8 @@
     "jose": "6.2.12",
     "ssh-mcp": "file:vendor/ssh-mcp-2.18.0.tgz",
     "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "playwright": "1.62.1"
   }
 }

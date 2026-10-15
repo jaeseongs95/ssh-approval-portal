@@ -2,7 +2,11 @@
 
 `request-upload`는 지원되는 클라이언트가 전달한 파일을 중계기에 임시 저장하고, 실측 크기와 SHA-256을 확정해 업로드 승인 대기에 등록합니다. 에이전트가 파일 선택 단계를 대신할 수 있지만 서버 경로에 반영하려면 소유자의 카드 또는 웹 승인이 필요합니다. 파일 실행과 ZIP 압축 해제는 하지 않습니다.
 
-현재 구현은 ChatGPT의 공식 `openai/fileParams` 계약을 사용합니다. 실제 클라이언트에서 이 계약이 전달되는지, 임시 파일 주소에 서버가 접근할 수 있는지는 별도 검증이 필요합니다. Claude와 다른 클라이언트의 자동 파일 전달은 지원이 확인된 경우에만 사용하며, 기존 카드의 PC 파일 선택은 계속 사용할 수 있습니다. [공식 파일 입력 계약](https://developers.openai.com/plugins/reference#file-apis)
+현재 구현은 ChatGPT의 공식 `openai/fileParams` 계약을 사용합니다. 필수 필드는 `download_url`·`file_id`, 선택 필드는 `mime_type`·`file_name`입니다. 실제 ChatGPT 파일 입력은 `upload-source-not-configured`와 공급자 hostname 반환까지 도달했지만 공급자 파일 가져오기·승인·SSH 왕복은 아직 확인되지 않았습니다. [공식 파일 입력 계약](https://developers.openai.com/plugins/reference#file-apis)
+
+실제 Claude 시험에서는 `file_uuid`와 빈 `download_url`을 보내 입력 검증에 실패했습니다. `file_uuid`를 다운로드 주소로 바꾸거나 Anthropic Files API의 `file_id`로 간주하지 않습니다. 같은 Claude 샌드박스의 대상 HTTPS 연결은 proxy CONNECT 403으로 차단됐습니다. 현재 Claude 자동 업로드 경로는 제공하지 않으며 기존 카드의 PC 파일 선택을 사용합니다.
+
+Claude Team·Enterprise의 조직 소유자는 `Organization settings > Capabilities`에서 코드 실행의 특정 도메인 접근을 설정할 수 있습니다. 개인 Free·Pro·Max에서 임의 도메인 추가가 가능하다고 보장하지 않습니다. MCP 연결 성공은 샌드박스 egress 허용을 뜻하지 않습니다. 도메인 접근과 실제 원본 바이트 전송이 별도로 입증되기 전에는 샌드박스 push 경로를 지원으로 표시하지 않습니다. [Claude 파일 생성과 네트워크 설정](https://support.claude.com/en/articles/12111783-create-and-edit-files-with-claude)
 
 ## 첫 연결
 

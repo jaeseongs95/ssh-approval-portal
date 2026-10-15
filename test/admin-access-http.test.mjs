@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { generateKeyPair, SignJWT, createLocalJWKSet, exportJWK } from 'jose';
 import { createApplication } from '../app.mjs';
+import { createHash } from 'node:crypto';
 const listen = server => new Promise(resolve => server.listen(0,'127.0.0.1',resolve));
 
 test('Access web requires signed owner, cookie POST origin and separate maintenance token; no credential disclosure', async () => {
@@ -29,6 +30,21 @@ test('Access web requires signed owner, cookie POST origin and separate maintena
     assert.equal((await fetch(action,{method:'POST',headers:owner})).status,200);await app.queue.wait(job.id);assert.equal(calls,1);
     assert.equal((await fetch(action,{method:'POST',headers:owner})).status,409);assert.equal(calls,1);
     const result=await(await fetch(url+'/api/requests',{headers:owner})).text();for(const secret of [token,'fixture-admin',env.BRIDGE_UI_TICKET_KEY])assert.ok(!result.includes(secret));
+    const bytes=Buffer.from([0,255,7]),fileName='fixture.bin';
+    const artifact=await app.store.begin({fileName,remotePath:'/tmp/fixture.bin',size:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')});
+    await app.store.append(artifact.id,0,bytes);await app.store.finish(artifact.id);
+    app.transfers.download=async()=>({failed:false,texts:[],data:{artifactId:artifact.id,fileName}});
+    const fileJob=app.queue.submitOperation({kind:'download',remotePath:'/tmp/fixture.bin',elevate:false});app.queue.start(fileJob.id,true);await app.queue.wait(fileJob.id);
+    const linkReply=await fetch(url+`/api/${fileJob.id}/download`,{method:'POST',headers:owner});assert.equal(linkReply.status,200);
+    const link=new URL((await linkReply.json()).downloadUrl),local=url+link.pathname+link.search;
+    assert.equal((await fetch(local)).status,401,'file capability alone does not replace owner login in Access mode');
+    assert.equal((await fetch(local,{headers:{Authorization:'Bearer fixture-admin'}})).status,401);
+    assert.equal((await fetch(local,{method:'HEAD',headers:owner})).status,200,'owner HEAD verifies without consuming');
+    const changed=new URL(local);changed.searchParams.set('ticket','forged');
+    assert.equal((await fetch(changed,{headers:owner})).status,409,'owner still needs a valid file capability');
+    const download=await fetch(local,{headers:owner});assert.equal(download.status,200);assert.deepEqual(Buffer.from(await download.arrayBuffer()),bytes);
+    assert.equal((await fetch(local,{headers:owner})).status,409,'owner GET consumes the capability once');
+    await app.store.remove(artifact.id);
     const maintenance=url+'/api/maintenance/';
     assert.equal((await fetch(maintenance+'reserve',{method:'POST',headers:owner})).status,401);
     const server={Authorization:'Bearer fixture-admin',Origin:origin};

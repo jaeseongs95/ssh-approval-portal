@@ -1,17 +1,19 @@
 # SSH Approval Portal 0.3.0
 
-[한국어](README.ko.md) · [Administrator sign-in](docs/admin-login.en.md) · [Agent file uploads](docs/agent-upload.en.md)
+[한국어](README.ko.md) · [Administrator sign-in](docs/admin-login.en.md) · [Agent file uploads](docs/agent-upload.en.md) · [Architecture and compatibility](docs/architecture.en.md)
 
 An MCP server for reviewing and approving SSH commands and file transfers. It provides MCP Apps cards for ChatGPT and Claude alongside a web administrator interface. Each bridge currently connects to one SSH target. Multi-server support is still at the design stage and is not implemented.
 
-The current version is a **0.3.0 candidate**. Verification of the existing approval cards and PC file picker is separate from verification of the new agent-upload candidate.
+The current version is a **0.3.0 candidate**. Responsibilities are separated into domain, application, and adapter layers while preserving approval rules. Existing client tests, agent-upload observations, and local validation of the restructuring are recorded separately.
 
 | Area | Verified scope and remaining limits |
 | --- | --- |
 | ChatGPT web | Actual card approval, denial, and PC file upload/download round trips have been confirmed. |
 | Claude desktop app | Actual card approval, denial, and PC file upload/download round trips have been confirmed. |
 | ChatGPT desktop and Claude web | Full functionality has not been verified in these clients. |
-| New `request-upload` candidate | Passed 47 local tests, actual public HTTPS retrieval, simulated owner approval, and an actual SSH file round trip. Actual platform `openai/fileParams` and Library delivery remain **NOT_RUN**. |
+| ChatGPT `request-upload` | An actual file input reached `upload-source-not-configured` and returned the provider hostname. This observation does not establish provider retrieval, approval, or an SSH round trip. |
+| Claude automatic file delivery | The actual test supplied `file_uuid` and an empty `download_url`, failing input validation. Its sandbox HTTPS connection to the destination was also blocked by a proxy CONNECT 403. Automatic transfer is unsupported. |
+| Local restructuring | Consult the separate validation record for this change's integration results. The earlier candidate's 47 local tests do not establish that the current change passes. |
 
 The file-provider hostname allowlist starts empty. Card approval defaults to `BRIDGE_UI_ENABLED=false`, and web administrator authentication defaults to `BRIDGE_ADMIN_AUTH_MODE=token`. Successful tests of an existing client flow do not establish that the new agent-upload path or another platform works.
 
@@ -28,7 +30,7 @@ The main tools are listed below. The `ui-*` tools are card-only; approval ticket
 | `get-request-status` and `show-approval` | Retrieve request status and display an approval/denial card. |
 | `show-file-transfer` | Displays a card for choosing a PC file to upload or saving a remote file. |
 | `request-download` | Downloads an ordinary file or requests approval for a sudo download. |
-| `request-upload` | Stages a file input from a supported client and queues an upload for approval. Actual platform delivery remains unverified. |
+| `request-upload` | Stages a ChatGPT/OpenAI file input with `download_url` and `file_id`, then queues an upload for approval. A Claude `file_uuid` alone cannot satisfy this input. |
 | `show-ui-probe` | Checks card and private-metadata delivery without running a command or file. |
 
 For PC uploads, choose a file in the card and set its destination path, overwrite flag, and sudo flag. The bridge fixes the received bytes' SHA-256 and these settings in the approval request. The new `request-upload` path uses the same approval process. It does not fetch a file until an administrator verifies and allows the provider's exact hostname. See the [agent-upload guide](docs/agent-upload.en.md) for setup and client limits. Do not substitute login cookies, arbitrary URLs, or file bytes pasted into a conversation.
@@ -57,9 +59,9 @@ Version 0.3 updates and rollbacks reserve maintenance through the administrator 
 
 ## Connection and card checks
 
-- MCP listens on localhost port 39124 at `/mcp`; the web administrator interface uses localhost port 39125.
+- MCP defaults to localhost port 39124 at `/mcp`; the web administrator interface defaults to localhost port 39125. Set `BRIDGE_MCP_PORT` and `BRIDGE_ADMIN_PORT` in the protected configuration to ports from 1–65535. Maintenance and startup checks use those same values.
 - Connect HTTPS domains through Cloudflare Tunnel or an equivalent service. Bind `BRIDGE_MCP_TOKEN` to the Cloudflare Portal upstream Bearer credential and keep an owner-only access policy. Do not bind the administrator token to the upstream.
-- `BRIDGE_ADMIN_ORIGIN` must match the web administrator HTTPS origin. To use another SSH server, configure both read and write profiles for the same server and account, verify and pin its public host key, and prepare the file helper and private remote staging directory on that target.
+- `BRIDGE_ADMIN_ORIGIN` must exactly match the canonical HTTPS administrator origin, with a lowercase hostname and no path, trailing slash, query, fragment, or user information. To use another SSH server, configure both read and write profiles for the same server and account, verify and pin its public host key, and prepare the file helper and private remote staging directory on that target.
 - Keep the server ID `ssh-approval-bridge` in the Portal's ordinary tool mode. If tool aliases change, check `BRIDGE_UI_TOOL_PREFIX` and the UI tool mapping. Refresh the tools in ChatGPT and connect Claude to the same owner-only Portal URL.
 - Call `show-ui-probe`. Confirm that the private marker appears in the card but not in model responses or context. Check each client's UI resource, `_meta`, and app-only tool delivery as well.
 - `BRIDGE_UI_ENABLED=false` is the default. Complete the intended environment's tests and an independent audit before changing the root environment setting to true and restarting the service. Do not enable card approval on an unverified platform.
@@ -83,7 +85,7 @@ sudo docker compose --env-file /etc/ssh-approval-portal/compose.env -f docker/co
 sudo docker compose --env-file /etc/ssh-approval-portal/compose.env -f docker/compose.yaml up -d --wait
 ```
 
-To migrate an existing server to Compose, finish requests and stop `ssh-approval-bridge.service` first. Apply the verified native updater first if the installed helper differs. Check that the new Compose service is healthy before disabling automatic startup of the old native unit. Running both deployments on the same server conflicts on ports 39124/39125. Neither deployment installs the original `ssh-mcp.service`.
+To migrate an existing server to Compose, finish requests and stop `ssh-approval-bridge.service` first. Apply the verified native updater first if the installed helper differs. Check that the new Compose service is healthy before disabling automatic startup of the old native unit. Running both deployments on the same server with the same configured ports causes a conflict. The defaults are 39124/39125. Neither deployment installs the original `ssh-mcp.service`.
 
 For prebuilt images, check the actual tag and architecture in the release asset's `VALIDATION.json` first. Load the archive with `sudo docker load -i IMAGE.tar`, set `BRIDGE_IMAGE` in `/etc/ssh-approval-portal/compose.env` to that tag, and add `--no-build` to the Compose startup command above. Images include Node 24.21.0, locked dependencies, and the UI. Choose the correct amd64 or arm64 image. ARM64 emulation tests do not replace tests on physical ARM hardware.
 
@@ -94,11 +96,15 @@ Prepare the new image, then run `sudo bash scripts/compose-update.sh IMAGE_TAG_O
 ## Verification and status
 
 ```sh
-npm ci --ignore-scripts && npm test
+npm ci --ignore-scripts
+npm run build:ui
+npm test
+npx playwright install chromium
+npm run test:browser
 python3 test/test_helper.py
 sudo bash scripts/status.sh
 ```
 
-Build the UI with its separate `ui` dependencies without upgrading the server SDK. `test/docker-tests.ps1` creates and cleans up isolated Ubuntu containers with synthetic data. Record actual client card/file-save tests, platform file-input tests, and physical ARM hardware tests as complete only when each has its own execution evidence.
+Build the UI with its separate `ui` dependencies without upgrading the server SDK. Rebuild distributable assets with `npm run build:ui` after changing UI or web modules. See the [architecture guide](docs/architecture.en.md) and [verification plan](test/PLAN.md) for boundaries, compatibility, and future test requirements. `test/docker-tests.ps1` creates and cleans up isolated Ubuntu containers with synthetic data. Record actual client card/file-save tests, platform file-input tests, and physical ARM hardware tests as complete only when each has its own execution evidence.
 
 Verify the release's `release-manifest.json` and `SHA256SUMS`. Packages exclude node_modules, actual configuration, tokens, private keys, and user sessions. Read the candidate's test records together with the verification limits above. Publishing and Cloudflare configuration changes are not performed automatically.

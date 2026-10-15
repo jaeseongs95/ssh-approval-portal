@@ -14,20 +14,23 @@ reserved=0
 changed=0
 backup=
 stage=
-healthy() { curl -fsS http://127.0.0.1:39124/health 2>/dev/null | python3 -c 'import json,sys; assert json.load(sys.stdin).get("healthy") is True' 2>/dev/null; }
+restore_stage=
+healthy() { "$node" "$active/scripts/healthcheck.mjs" "$env_file" 2>/dev/null; }
 wait_healthy() { for attempt in {1..20}; do if healthy; then return 0; fi; sleep 1; done; return 1; }
 cleanup() {
   rc=$?
   trap - EXIT
   set +e
   if [[ $rc != 0 && $changed == 1 ]]; then
-    if cp -a -- "$backup" "$env_file" && systemctl reset-failed ssh-approval-bridge.service && systemctl restart ssh-approval-bridge.service && wait_healthy; then
+    restore_stage=$(mktemp /etc/.ssh-upload-sources-restore.XXXXXXXX)
+    if cp -a -- "$backup" "$restore_stage" && sync -f "$restore_stage" && mv -f -- "$restore_stage" "$env_file" && systemctl reset-failed ssh-approval-bridge.service && systemctl restart ssh-approval-bridge.service && wait_healthy; then
       echo "Configuration restored from $backup" >&2
     else echo "Restore failed. Administrator recovery needed: $backup" >&2; fi
   fi
   if [[ $reserved == 1 ]]; then "$node" "$active/scripts/maintenance.mjs" release || true; fi
   rm -f -- "$work/proposed.env"
   if [[ -n "$stage" ]]; then rm -f -- "$stage"; fi
+  if [[ -n "$restore_stage" ]]; then rm -f -- "$restore_stage"; fi
   rmdir -- "$work"
   exit "$rc"
 }
@@ -39,10 +42,12 @@ python3 "$active/scripts/configure-upload-sources.py" "$env_file" "$work/propose
 reserved=1
 backup=/etc/ssh-mcp-approval-bridge.env.before-upload-sources.$(date -u +%Y%m%dT%H%M%SZ).$$
 cp -a -- "$env_file" "$backup"
+sync -f "$backup"
 stage=$(mktemp /etc/.ssh-upload-sources.XXXXXXXX)
 cp -- "$work/proposed.env" "$stage"
 chown --reference="$env_file" "$stage"
 chmod 0600 "$stage"
+sync -f "$stage"
 mv -f -- "$stage" "$env_file"
 changed=1
 systemctl reset-failed ssh-approval-bridge.service
