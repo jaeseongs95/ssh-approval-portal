@@ -6,6 +6,10 @@ import { idValid, remotePath, hash } from './core.mjs';
 
 export const CHUNK_BYTES = 256 * 1024;
 export const MAX_BYTES = 64 * 1024 * 1024;
+const validateUpload = meta => {
+  remotePath(meta.remotePath);
+  if (typeof meta.fileName !== 'string' || !meta.fileName || meta.fileName.length > 255 || /[\x00-\x1f\x7f/\\]/.test(meta.fileName)) throw Error('Invalid filename');
+};
 export class Artifacts {
   constructor(root, { maxBytes = MAX_BYTES, budget = 512 * 1024 * 1024, now = () => Date.now() } = {}) {
     Object.assign(this, { root, maxBytes, budget, now }); this.items = new Map(); this.reserved = 0;
@@ -30,12 +34,42 @@ export class Artifacts {
     this.reserved += meta.size; this.items.set(id, item); return item;
   }
   async begin(meta) {
-    remotePath(meta.remotePath);
-    if (typeof meta.fileName !== 'string' || !meta.fileName || meta.fileName.length > 255 || /[\x00-\x1f\x7f/\\]/.test(meta.fileName)) throw Error('Invalid filename');
+    validateUpload(meta);
     if (!/^[a-f0-9]{64}$/.test(meta.sha256)) throw Error('Invalid file hash');
     const item = this.allocate({ fileName: meta.fileName, remotePath: meta.remotePath, size: meta.size, sha256: meta.sha256, overwrite: meta.overwrite === true, elevate: meta.elevate === true });
     try { const fd = await open(item.path, 'wx', 0o600); await fd.close(); } catch (err) { await this.remove(item.id); throw err; }
     return item;
+  }
+  async importFile(meta, openSource, { signal } = {}) {
+    validateUpload(meta); signal?.throwIfAborted();
+    // Reserve the full file limit before any await; unknown-length responses cannot overbook staging.
+    const item = this.allocate({ fileName: meta.fileName, remotePath: meta.remotePath, size: this.maxBytes,
+      overwrite: meta.overwrite === true, elevate: meta.elevate === true });
+    item.busy = true;
+    let fd, source;
+    try {
+      fd = await open(item.path, 'wx', 0o600);
+      source = await openSource();
+      const digest = createHash('sha256'); let received = 0;
+      for await (const bytes of source.stream) {
+        signal?.throwIfAborted();
+        if (!(bytes instanceof Uint8Array) || received + bytes.length > this.maxBytes) throw Error('Invalid or excessive source bytes');
+        await fd.writeFile(bytes); digest.update(bytes); received += bytes.length;
+      }
+      signal?.throwIfAborted();
+      if (source.expectedSize != null && received !== source.expectedSize) throw Error('Incomplete source file');
+      this.reserved -= item.size - received;
+      item.size = item.received = received; item.sha256 = digest.digest('hex');
+      await fd.close(); fd = null;
+      item.busy = false;
+      await this.finish(item.id);
+      signal?.throwIfAborted();
+      return item;
+    } catch (err) {
+      try { if (fd) await fd.close(); }
+      finally { item.pinned = false; await this.remove(item.id); }
+      throw err;
+    } finally { item.busy = false; source?.close(); }
   }
   get(id) {
     if (!idValid(id)) throw Error('Invalid transfer ID');

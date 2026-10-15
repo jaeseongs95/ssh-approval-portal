@@ -10,7 +10,7 @@ import re
 
 root = pathlib.Path(__file__).resolve().parents[1]
 files = []
-for name in ['package.json', 'package-lock.json', 'bridge.mjs', 'app.mjs', 'admin-access.mjs', 'core.mjs', 'artifacts.mjs', 'transfers.mjs', 'secrets.mjs', 'README.ko.md', 'LICENSE', 'THIRD_PARTY_NOTICES.json', '.dockerignore']:
+for name in ['package.json', 'package-lock.json', 'bridge.mjs', 'app.mjs', 'admin-access.mjs', 'file-source.mjs', 'core.mjs', 'artifacts.mjs', 'transfers.mjs', 'secrets.mjs', 'README.md', 'README.ko.md', 'LICENSE', 'THIRD_PARTY_NOTICES.json', '.dockerignore']:
     files.append(root / name)
 for folder in ['scripts', 'config', 'helper', 'vendor', 'test', 'web', 'docker', 'docs']:
     files.extend(p for p in (root / folder).rglob('*') if p.is_file() and '__pycache__' not in p.parts and (folder != 'test' or p.suffix in ('.mjs', '.py', '.sh', '.ps1', '.md', '.Dockerfile') or p.name == 'Dockerfile'))

@@ -1,7 +1,104 @@
-# SSH Approval Portal
+# SSH Approval Portal 0.3.0
 
-SSH 명령을 확인하고 승인한 뒤 실행하며, 파일을 업로드·다운로드하는 MCP 서버입니다. ChatGPT·Claude용 MCP Apps 카드와 기존 웹 승인 화면을 함께 제공합니다.
+[한국어](README.ko.md) · [Administrator sign-in](docs/admin-login.en.md) · [Agent file uploads](docs/agent-upload.en.md)
 
-네이티브 설치 패키지와 Docker Compose 배포를 지원합니다. 자세한 절차와 검증 범위는 [한국어 안내](README.ko.md)를 확인하세요.
+An MCP server for reviewing and approving SSH commands and file transfers. It provides MCP Apps cards for ChatGPT and Claude alongside a web administrator interface. Each bridge currently connects to one SSH target. Multi-server support is still at the design stage and is not implemented.
 
-현재 버전은 **0.3.0 후보**입니다. 실제 GPT·Claude의 UI·메타데이터 전달과 파일 저장 시험이 끝나기 전에는 배포 가능 상태로 판정하지 않습니다. UI 승인은 기본 비활성화이며 기존 웹 승인 기능은 유지합니다.
+The current version is a **0.3.0 candidate**. Verification of the existing approval cards and PC file picker is separate from verification of the new agent-upload candidate.
+
+| Area | Verified scope and remaining limits |
+| --- | --- |
+| ChatGPT web | Actual card approval, denial, and PC file upload/download round trips have been confirmed. |
+| Claude desktop app | Actual card approval, denial, and PC file upload/download round trips have been confirmed. |
+| ChatGPT desktop and Claude web | Full functionality has not been verified in these clients. |
+| New `request-upload` candidate | Passed 47 local tests, actual public HTTPS retrieval, simulated owner approval, and an actual SSH file round trip. Actual platform `openai/fileParams` and Library delivery remain **NOT_RUN**. |
+
+The file-provider hostname allowlist starts empty. Card approval defaults to `BRIDGE_UI_ENABLED=false`, and web administrator authentication defaults to `BRIDGE_ADMIN_AUTH_MODE=token`. Successful tests of an existing client flow do not establish that the new agent-upload path or another platform works.
+
+## Approval and file transfers
+
+Ordinary read-only operations and ordinary downloads without sudo run immediately. Every other command, upload, overwrite, and sudo transfer requires the owner's approval in a card or the website and then runs once. No upload bytes are sent to the target server, and no destination file is changed, before approval.
+
+The main tools are listed below. The `ui-*` tools are card-only; approval tickets are not exposed in model responses.
+
+| Tool | Behavior |
+| --- | --- |
+| `read-command` | Runs commands classified as read-only. |
+| `run-command` | Runs read-only commands immediately and queues other commands for approval. |
+| `get-request-status` and `show-approval` | Retrieve request status and display an approval/denial card. |
+| `show-file-transfer` | Displays a card for choosing a PC file to upload or saving a remote file. |
+| `request-download` | Downloads an ordinary file or requests approval for a sudo download. |
+| `request-upload` | Stages a file input from a supported client and queues an upload for approval. Actual platform delivery remains unverified. |
+| `show-ui-probe` | Checks card and private-metadata delivery without running a command or file. |
+
+For PC uploads, choose a file in the card and set its destination path, overwrite flag, and sudo flag. The bridge fixes the received bytes' SHA-256 and these settings in the approval request. The new `request-upload` path uses the same approval process. It does not fetch a file until an administrator verifies and allows the provider's exact hostname. See the [agent-upload guide](docs/agent-upload.en.md) for setup and client limits. Do not substitute login cookies, arbitrary URLs, or file bytes pasted into a conversation.
+
+The single-file limit is 64 MiB, and the default staging budget is 512 MiB. Set `BRIDGE_TRANSFER_MAX_BYTES` to no more than 64 MiB and `BRIDGE_TRANSFER_BUDGET_BYTES` to at least the single-file limit. Directories, links, and device files are rejected. Send a folder as a ZIP file; the server does not automatically extract it or execute uploaded files. File snapshots and downloads do not mask their bytes. Download links expire after 10 minutes and are single-use; request a new link in the card if saving fails.
+
+An overwrite is not reported as complete if the existing file's ownership, mode, or extended attributes cannot be preserved. New files use mode 0600; sudo uploads are owned by root. Changes to the request, file, or server, expiry, and requests lost on restart require a new approval. Connection failures and operations with an uncertain publication result are not retried automatically.
+
+## Native installation and updates
+
+Requires Ubuntu 22.04/24.04 on x86_64 or arm64, an internet connection, and an administrator terminal on the server. Node 24 is installed in a dedicated path without replacing the system Node installation.
+
+```sh
+tar -xzf ssh-approval-portal-0.3.0.tar.gz
+cd ssh-approval-portal-0.3.0
+sudo bash scripts/install.sh --admin-origin https://ssh-approve.example.com --grant-sudo-all
+```
+
+`--grant-sudo-all` grants `mcpops` unrestricted passwordless sudo. This applies to other sessions using that SSH account as well as the approval bridge. Omit the option to use ordinary account permissions. Existing sudo configuration is neither rewritten nor removed.
+
+To update an existing server, run `sudo bash scripts/install.sh` from the new package. Finish or deny pending and running requests first. Existing settings, tokens, and SSH keys are preserved; the first update adds a UI signing key if the installation has none. Restore the previous version with `sudo bash scripts/rollback.sh BACKUP`, using the backup path printed by the installer.
+
+User changes to an existing unit are preserved. An ExecStart outside the managed pattern is not overwritten automatically. The original `ssh-mcp.service` is not installed.
+
+Version 0.3 updates and rollbacks reserve maintenance through the administrator API first. Running or pending requests and incomplete uploads prevent the reservation. Once reserved, new reads, approvals, and transfers are blocked. Version 0.2 has no maintenance API: finish requests, run `sudo systemctl stop ssh-approval-bridge.service` in the administrator terminal, and then install. If the installer is forcibly terminated while maintenance is reserved, release it with `sudo /opt/ssh-approval/node/bin/node scripts/maintenance.mjs release`.
+
+## Connection and card checks
+
+- MCP listens on localhost port 39124 at `/mcp`; the web administrator interface uses localhost port 39125.
+- Connect HTTPS domains through Cloudflare Tunnel or an equivalent service. Bind `BRIDGE_MCP_TOKEN` to the Cloudflare Portal upstream Bearer credential and keep an owner-only access policy. Do not bind the administrator token to the upstream.
+- `BRIDGE_ADMIN_ORIGIN` must match the web administrator HTTPS origin. To use another SSH server, configure both read and write profiles for the same server and account, verify and pin its public host key, and prepare the file helper and private remote staging directory on that target.
+- Keep the server ID `ssh-approval-bridge` in the Portal's ordinary tool mode. If tool aliases change, check `BRIDGE_UI_TOOL_PREFIX` and the UI tool mapping. Refresh the tools in ChatGPT and connect Claude to the same owner-only Portal URL.
+- Call `show-ui-probe`. Confirm that the private marker appears in the card but not in model responses or context. Check each client's UI resource, `_meta`, and app-only tool delivery as well.
+- `BRIDGE_UI_ENABLED=false` is the default. Complete the intended environment's tests and an independent audit before changing the root environment setting to true and restarting the service. Do not enable card approval on an unverified platform.
+- Administrator secrets are stored in `/etc/ssh-mcp-approval-bridge.env` with mode 0600. Do not send their values to chat or command output. Actual keys and tokens are not included in the package.
+
+## Web administrator interface and sign-in
+
+The website displays pending requests, history, and execution results. After connecting, it refreshes every 10 seconds while the page is visible. Manual refreshes and approval/denial actions refresh immediately. Browser languages starting with `ko` use Korean; all other languages use English.
+
+Administrator-token authentication is the default. Cloudflare, Google, and GitHub sign-in are **web administrator sign-in through Cloudflare Access**; they do not replace SSH login or MCP connection authentication. Configure and test the providers and actual sign-in before explicitly enabling Access mode. See the [administrator sign-in guide](docs/admin-login.en.md) for setup, access restrictions, and recovery.
+
+Signing out stops automatic refresh and clears the displayed requests. Access mode signs out through Cloudflare Access; token mode clears the token entered in the current tab. It does not revoke server tokens or cancel an operation that is already running.
+
+## Docker Compose deployment
+
+The deployment target is Docker Engine with Compose v2 on Ubuntu 22.04/24.04. The bridge runs as a non-root user with a read-only root filesystem and dropped capabilities. Prepare the SSH account, sudo permissions, and file helper on the target server. Do not grant the container `--privileged` or access to the Docker socket.
+
+```sh
+sudo bash scripts/prepare-docker.sh --admin-origin https://ssh-approve.example.com --grant-sudo-all
+sudo docker compose --env-file /etc/ssh-approval-portal/compose.env -f docker/compose.yaml build
+sudo docker compose --env-file /etc/ssh-approval-portal/compose.env -f docker/compose.yaml up -d --wait
+```
+
+To migrate an existing server to Compose, finish requests and stop `ssh-approval-bridge.service` first. Apply the verified native updater first if the installed helper differs. Check that the new Compose service is healthy before disabling automatic startup of the old native unit. Running both deployments on the same server conflicts on ports 39124/39125. Neither deployment installs the original `ssh-mcp.service`.
+
+For prebuilt images, check the actual tag and architecture in the release asset's `VALIDATION.json` first. Load the archive with `sudo docker load -i IMAGE.tar`, set `BRIDGE_IMAGE` in `/etc/ssh-approval-portal/compose.env` to that tag, and add `--no-build` to the Compose startup command above. Images include Node 24.21.0, locked dependencies, and the UI. Choose the correct amd64 or arm64 image. ARM64 emulation tests do not replace tests on physical ARM hardware.
+
+Tokens are provided through `/run/secrets/bridge_config`, not Compose environment variables. The host source is `/etc/ssh-approval-portal/docker-secrets.env`, readable only by the service account. SSH keys and configuration are mounted read-only; audit data and transfer staging use separate writable mounts. Linux host networking preserves the existing localhost SSH and Cloudflare Tunnel paths.
+
+Prepare the new image, then run `sudo bash scripts/compose-update.sh IMAGE_TAG_OR_DIGEST`. The updater reserves maintenance to block new execution before switching and returns to the previous image ID if startup checks fail. Pass the printed previous image ID to the same script to roll back. Do not indiscriminately remove images, transfer staging, or secrets with `docker compose down -v`. When rolling back to an older image that does not recognize the new upload setting, also restore a protected configuration backup compatible with that version.
+
+## Verification and status
+
+```sh
+npm ci --ignore-scripts && npm test
+python3 test/test_helper.py
+sudo bash scripts/status.sh
+```
+
+Build the UI with its separate `ui` dependencies without upgrading the server SDK. `test/docker-tests.ps1` creates and cleans up isolated Ubuntu containers with synthetic data. Record actual client card/file-save tests, platform file-input tests, and physical ARM hardware tests as complete only when each has its own execution evidence.
+
+Verify the release's `release-manifest.json` and `SHA256SUMS`. Packages exclude node_modules, actual configuration, tokens, private keys, and user sessions. Read the candidate's test records together with the verification limits above. Publishing and Cloudflare configuration changes are not performed automatically.

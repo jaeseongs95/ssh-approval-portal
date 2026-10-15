@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
+import { posix } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
@@ -8,6 +9,7 @@ import { ApprovalQueue, Tickets, routeCommand, validateCommand, equalSecret, idV
 import { Artifacts, CHUNK_BYTES, MAX_BYTES } from './artifacts.mjs';
 import { Transfers } from './transfers.mjs';
 import { createAdminAccess } from './admin-access.mjs';
+import { createFileSource } from './file-source.mjs';
 
 const outputSchema = z.object({}).passthrough();
 const id = z.string().regex(/^[a-f0-9]{48}$/);
@@ -17,7 +19,7 @@ const refused = () => ({ isError: true, content: [{ type: 'text', text: 'Request
 const json = (res, status, value) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }); res.end(JSON.stringify(value)); };
 const authenticated = (req, secret) => equalSecret(/^Bearer (.+)$/.exec(req.headers.authorization ?? '')?.[1], secret);
 
-export async function createApplication({ registry, classify, executeCommand, audit, transferRoot, env = process.env, uiHtml, accessKeySet }) {
+export async function createApplication({ registry, classify, executeCommand, audit, transferRoot, env = process.env, uiHtml, accessKeySet, uploadSource }) {
   const URI = `ui://ssh-approval/card-${hash(uiHtml)}.html`;
   const mcpToken = env.BRIDGE_MCP_TOKEN, adminToken = env.BRIDGE_ADMIN_TOKEN;
   const adminOrigin = env.BRIDGE_ADMIN_ORIGIN;
@@ -30,6 +32,8 @@ export async function createApplication({ registry, classify, executeCommand, au
   const maxBytes = Number(env.BRIDGE_TRANSFER_MAX_BYTES ?? MAX_BYTES), budget = Number(env.BRIDGE_TRANSFER_BUDGET_BYTES ?? 512 * 1024 * 1024);
   if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0 || maxBytes > MAX_BYTES || !Number.isSafeInteger(budget) || budget < maxBytes) throw Error('Invalid staging limits');
   const store = new Artifacts(transferRoot, { maxBytes, budget }); await store.init();
+  const source = uploadSource ?? createFileSource({ hosts: (env.BRIDGE_UPLOAD_SOURCE_HOSTS ?? '').split(',').filter(Boolean), maxBytes });
+  const shutdown = new AbortController(), imports = new Set();
   const reader = registry.getProfile('aws-readonly'), writer = registry.getProfile('aws-local');
   if (!reader.readOnly || writer.readOnly || ['host', 'port', 'user'].some(k => reader[k] !== writer[k])) throw Error('Expected matching writable and read-only SSH targets');
   const target = `${writer.user}@${writer.host}:${writer.port}`;
@@ -71,19 +75,49 @@ export async function createApplication({ registry, classify, executeCommand, au
     const cap = signer.issue('file', `${x.id}:${x.sha256}:${nonce}`, Math.min(expiresAt, x.expiresAt));
     return `${adminOrigin}/downloads/${x.id}/${nonce}?ticket=${encodeURIComponent(cap)}`;
   };
-  function mcpServer() {
+  function mcpServer(requestSignal) {
     const server = new McpServer({ name: 'SSH Approval Portal', version: '0.3.0' });
     server.registerResource('SSH approval card', URI, { mimeType: 'text/html;profile=mcp-app' }, async () => ({ contents: [{ uri: URI, mimeType: 'text/html;profile=mcp-app', text: uiHtml, _meta: { ui: { csp: { connectDomains: [], resourceDomains: [] }, prefersBorder: true } } }] }));
-    const tool = (name, schema, handler, { ui = false, appOnly = false, description = name, readOnly = false } = {}) => server.registerTool(name, {
-      description, inputSchema: schema, outputSchema, annotations: { readOnlyHint: readOnly, destructiveHint: !readOnly },
-      _meta: (ui || appOnly) ? { ui: { ...(ui ? { resourceUri: URI } : {}), visibility: appOnly ? ['app'] : ['model', 'app'] } } : undefined,
-    }, async args => { try { return await handler(args); } catch { return refused(); } });
+    const tool = (name, schema, handler, { ui = false, appOnly = false, description = name, readOnly = false, meta, openWorld = false } = {}) => server.registerTool(name, {
+      description, inputSchema: schema, outputSchema, annotations: { readOnlyHint: readOnly, destructiveHint: !readOnly, ...(openWorld ? { openWorldHint: true } : {}) },
+      _meta: (ui || appOnly || meta) ? { ...meta, ...((ui || appOnly) ? { ui: { ...(ui ? { resourceUri: URI } : {}), visibility: appOnly ? ['app'] : ['model', 'app'] } } : {}) } : undefined,
+    }, async (args, extra) => {
+      try { return await handler(args, { ...extra, signal: AbortSignal.any([shutdown.signal, requestSignal, extra?.signal].filter(Boolean)) }); }
+      catch { return refused(); }
+    });
     tool('read-command', { command: z.string().min(1).max(2000) }, ({ command }) => readCommand(command), { readOnly: true, description: 'Execute proven read-only commands immediately.' });
     tool('run-command', { command: z.string().min(1).max(2000) }, async ({ command }) => {
       const result = await routeCommand(command, classify, readCommand, queue); return result?.content ? result : publicResult(result);
     }, { description: 'Run read-only immediately; queue all other commands for approval. If pending, call show-approval with its id to show the owner the approval card.' });
     tool('request-safe-command', { command: z.string().min(1).max(2000) }, ({ command }) => publicResult(queue.submit(command, true)), { description: 'Legacy safe-only owner approval request.' });
     tool('get-request-status', { id }, ({ id }) => publicResult(queue.get(id) ?? { error: 'Unknown request; server may have restarted' }), { readOnly: true });
+    tool('request-upload', {
+      file: z.object({ download_url: z.string().min(1).max(16384), file_id: z.string().min(1).max(1024), mime_type: z.string().max(255).optional(), file_name: z.string().max(255).optional() }).strict(),
+      remotePath: z.string().max(4096), overwrite: z.boolean().default(false), elevate: z.boolean().default(false),
+    }, async ({ file, remotePath: path, overwrite, elevate }, { signal }) => {
+      remotePath(path); signal.throwIfAborted();
+      if (queue.maintenance || imports.size >= 2) throw Error('Maintenance or file imports busy');
+      const policy = source.inspect(file.download_url);
+      if (!policy.allowed) return { ...publicResult({ error: 'upload-source-not-configured', sourceHost: policy.hostname,
+        message: 'File was not fetched or queued. An administrator must configure this exact file-provider hostname; the card file picker remains available.' }), isError: true };
+      const work = (async () => {
+        let artifact, submitted = false;
+        try {
+          artifact = await store.importFile({ fileName: file.file_name ?? posix.basename(path), remotePath: path, overwrite, elevate },
+            () => source.open(file.download_url, { signal }), { signal });
+          signal.throwIfAborted();
+          const job = queue.submitOperation({ kind: 'upload', artifactId: artifact.id, remotePath: artifact.remotePath,
+            fileName: artifact.fileName, size: artifact.size, sha256: artifact.sha256, overwrite: artifact.overwrite, elevate: artifact.elevate }, elevate ? 'privileged' : 'safe');
+          submitted = true;
+          return { ...publicResult(job), _meta: { sshApproval: privateView(job) } };
+        } finally {
+          if (artifact && !submitted) { artifact.pinned = false; artifact.expiresAt = Date.now(); await store.remove(artifact.id); }
+        }
+      })();
+      imports.add(work);
+      try { return await work; } finally { imports.delete(work); }
+    }, { ui: true, openWorld: true, meta: { 'openai/fileParams': ['file'] },
+      description: 'Stage a platform-authorized user or agent-created file and queue owner approval. Use the host file input, never file bytes, cookies or invented download URLs. No remote file is written before owner approval. If the host cannot pass file inputs, use show-file-transfer and its file picker. A source-not-configured result reports only the hostname for administrator setup.' });
     tool('show-ui-probe', {}, () => ({ ...publicResult({ probe: 'SSH_UI_PUBLIC_PROBE', uiEnabled: enabled }), _meta: { sshApproval: { privateMarker: 'SSH_UI_PRIVATE_PROBE_NOT_FOR_MODEL', uiEnabled: false, namespace: prefix, webUrl: adminOrigin } } }), { ui: true, readOnly: true, description: 'Display a harmless UI compatibility probe. No command, approval ticket or file data.' });
     tool('show-approval', { id }, ({ id }) => {
       const job = queue.get(id); if (!job) throw Error('Unknown request');
@@ -133,10 +167,14 @@ export async function createApplication({ registry, classify, executeCommand, au
     if (req.url !== '/mcp' || !authenticated(req, mcpToken)) return json(res, 401, { error: 'Unauthorized' });
     if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true, maxMessageSize: 1024 * 1024 });
-    const server = mcpServer();
+    const disconnect = new AbortController();
+    const aborted = () => disconnect.abort();
+    const closed = () => { if (!res.writableEnded) aborted(); };
+    req.once('aborted', aborted); res.once('close', closed);
+    const server = mcpServer(disconnect.signal);
     try { await server.connect(transport); await transport.handleRequest(req, res); }
     catch { if (!res.headersSent) json(res, 500, { error: 'MCP request failed' }); }
-    finally { await server.close().catch(() => {}); }
+    finally { req.off('aborted', aborted); res.off('close', closed); await server.close().catch(() => {}); }
   });
   const webHtml = await readFile(new URL('./web/index.html', import.meta.url), 'utf8');
   const webJs = await readFile(new URL('./web/app.js', import.meta.url), 'utf8');
@@ -193,7 +231,8 @@ export async function createApplication({ registry, classify, executeCommand, au
   }, 30_000); timer.unref();
   return { mcpHttp, adminHttp, queue, store, transfers, mcpServer, enabled,
     async close() {
-      queue.maintenance = true; clearInterval(timer);
+      queue.maintenance = true; clearInterval(timer); shutdown.abort();
+      await Promise.allSettled([...imports]);
       await Promise.all([mcpHttp, adminHttp].map(server => new Promise(resolve => server.close(resolve))));
       await queue.active?.completion;
       await registry.closeAll();
