@@ -49,7 +49,7 @@ def collect_files(root):
     return sorted(set(files))
 
 
-def package(root, output=None):
+def package(root, output=None, *, release=False):
     root = Path(root).resolve()
     files = collect_files(root)
     version = json.loads((root / 'package.json').read_text(encoding='utf-8'))['version']
@@ -60,7 +60,7 @@ def package(root, output=None):
             raise ValueError('Private key in package')
         entries.append({'path': path.relative_to(root).as_posix(), 'size': len(data),
                         'sha256': hashlib.sha256(data).hexdigest()})
-    manifest = {'version': version, 'status': 'candidate-pending-live-host-verification',
+    manifest = {'version': version, 'status': 'release' if release else 'candidate-pending-live-host-verification',
                 'runtime': 'Node.js 24', 'files': entries}
     manifest_path = root / 'release-manifest.json'
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n', encoding='utf-8', newline='\n')
@@ -87,5 +87,9 @@ def package(root, output=None):
 
 
 if __name__ == '__main__':
-    _, checksums = package(Path(__file__).resolve().parents[1])
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--release', action='store_true', help='Mark an independently reviewed release package')
+    args = parser.parse_args()
+    _, checksums = package(Path(__file__).resolve().parents[1], release=args.release)
     print(checksums, end='')

@@ -1,6 +1,6 @@
 {
-  "version": "0.3.0",
-  "status": "candidate-pending-live-host-verification",
+  "version": "1.0.0",
+  "status": "release",
   "runtime": "Node.js 24",
   "files": [
     {
@@ -16,7 +16,7 @@
     {
       "path": "bridge.mjs",
       "size": 1282,
-      "sha256": "a1a8847f862c0f6c8ee4ac9525d559beeafd4e892ace0836e1d4c3a3beb1a445"
+      "sha256": "b07d0e2d14a0e5ff151d8e57d164d01892059a7f2cbd9d8f2e6fa30dd7c795d8"
     },
     {
       "path": "config/bridge.env.example",
@@ -31,7 +31,7 @@
     {
       "path": "config/docker.example.env",
       "size": 73,
-      "sha256": "1cc096b5437f61d34f3e78a08122119fa3a677d6b7bb1b3775a272d04cd659f7"
+      "sha256": "f755bd9ff16a4f963d1afec423503f3433a9aaddabed2b1f41043a52e36b62e3"
     },
     {
       "path": "config/settings-contract.json",
@@ -46,12 +46,12 @@
     {
       "path": "docker/compose.yaml",
       "size": 1128,
-      "sha256": "91ba1be2a3afb6ae99444977a7fe656874867dac6eb29506d20ff1e35cbcb98e"
+      "sha256": "0d1aece260c36b84522b0b8a6ed5349f5578780fac9f21afd81ebf4156f6a907"
     },
     {
       "path": "docker/Dockerfile",
       "size": 1544,
-      "sha256": "d1321e947148c405867d3b62c53cf61b3e75c343bfd2d0e7b2e5726fbdf227aa"
+      "sha256": "a1d0f8cff5d77fb039c6f2083bf23fd32b5d87caad6be70b2ff7c63265c1a997"
     },
     {
       "path": "docs/admin-login.en.md",
@@ -75,13 +75,13 @@
     },
     {
       "path": "docs/architecture.en.md",
-      "size": 4701,
-      "sha256": "abd978d8842033631cbc5ad3242ac2938a96f4b263349cde9fd7e41a85eb916c"
+      "size": 4690,
+      "sha256": "82dd2195518248898096bb86f1d101efaa6c9b6c632afe82f898f94e7bc4e462"
     },
     {
       "path": "docs/architecture.ko.md",
-      "size": 5131,
-      "sha256": "71fc84e12cb9ee8bb5eea103c37a66125976deb057311a3d96da2936af559507"
+      "size": 5117,
+      "sha256": "ee6086136ec246c7e18f6aa500d383f6ab25d25c16c0dad268a4b1a119dd3d53"
     },
     {
       "path": "helper/file-helper.py",
@@ -96,22 +96,22 @@
     {
       "path": "package-lock.json",
       "size": 100102,
-      "sha256": "653f65de0ef370e428888e81be6859f8a295a8f4aacc2357d4a68fd94ecf210e"
+      "sha256": "9cab398f2d973e3f59f5d19e6ff8a746a4816a5b4eb346f78e260b2a4ba30b6b"
     },
     {
       "path": "package.json",
       "size": 679,
-      "sha256": "43da2e07e064bfc41551e645b744e281f8b13d25afcfae21002b3d7ef8dc543f"
+      "sha256": "8aeda99f1f7034ab93f15ae9eee605600b56ab0b3876d38c86b70c1381a829cc"
     },
     {
       "path": "README.ko.md",
-      "size": 15592,
-      "sha256": "c9e87e740d59783bd3e53ad17892d8c31c26dd1fd01d5e62e5a7b5904e330ea4"
+      "size": 15835,
+      "sha256": "299e0d6f2079b0eda9621b1fcbf681df44b00386a9be30f06d323a11cd71de27"
     },
     {
       "path": "README.md",
-      "size": 13994,
-      "sha256": "27fd0a2a63be6f5105ea26f7c7b35aadf488a4f9ad9748119d30c965482612dd"
+      "size": 14232,
+      "sha256": "01bb58115009c3703db5355425a0f2053e0c33501ca4015572a82854f241c565"
     },
     {
       "path": "scripts/admin-access-config.mjs",
@@ -171,7 +171,7 @@
     {
       "path": "scripts/install.sh",
       "size": 8468,
-      "sha256": "f97d5670c401bbb42b1d40407c0ebd6a28cfe7a054ec5890524b2312965ba0fb"
+      "sha256": "9387c9710dd3128894277f2263cbaec1587fbecb986460a8479c97cdec1ad662"
     },
     {
       "path": "scripts/maintenance.mjs",
@@ -185,8 +185,8 @@
     },
     {
       "path": "scripts/package.py",
-      "size": 4392,
-      "sha256": "85a13f8c6e8f3375d47473a7fcde5d977bac3dbb69552a11bee36921947702f6"
+      "size": 4661,
+      "sha256": "4fd5a361aed75f931353ba2cd48690d307c3523550ca4065ccf6760ba4e782e4"
     },
     {
       "path": "scripts/prepare-docker.sh",
@@ -246,12 +246,12 @@
     {
       "path": "src/adapters/http/protocol.mjs",
       "size": 5847,
-      "sha256": "53f0b5d7b9b4f50a86c658b15b02430893d84aaa6917cc5196ad992fa70fcdfd"
+      "sha256": "e0e76422778d01eb484e3562c79f9b40a403ad102094f6996b4540de89b98af9"
     },
     {
       "path": "src/adapters/mcp/server.mjs",
       "size": 8869,
-      "sha256": "183f3792a0eeaa68e1bee92be64a6bd0adb916d0421f773842bfbf5c938ee93b"
+      "sha256": "36cfeabf22ad1fa6f0d7b3ece2ad9cd425a8bfaf1aad7fc681527b762089ee26"
     },
     {
       "path": "src/adapters/presentation/capabilities.mjs",
@@ -391,7 +391,7 @@
     {
       "path": "test/compose-runtime.ps1",
       "size": 3772,
-      "sha256": "de36d33279a7144e38ada6d36d1d5efee16c57a64b692b4c5dd9ddb06a575317"
+      "sha256": "ba15a962b79d7d8570459ea77450cac6047937287904028894ab244077dc2e61"
     },
     {
       "path": "test/config-contracts.test.mjs",
@@ -421,12 +421,12 @@
     {
       "path": "test/docker-runtime.ps1",
       "size": 6076,
-      "sha256": "8f14d1c2c116fd70062f3f365962eb9322366b903ddecc75398ad77cc65a0019"
+      "sha256": "580ae0e6cdfb4f9f93c9910542e1a4dc9e40950f10ca209d014bc2a86364d927"
     },
     {
       "path": "test/docker-tests.ps1",
       "size": 2624,
-      "sha256": "2534498c7b96bd010fd8c0bff31290abcef76e5a1d5d6cf2bd7668288d05e213"
+      "sha256": "6be749bba1f526826754e5eefb2f4564925e2626230ef3f7b68a0d68a6098e21"
     },
     {
       "path": "test/Dockerfile",
@@ -475,8 +475,8 @@
     },
     {
       "path": "test/PLAN.md",
-      "size": 5031,
-      "sha256": "5679dca8a0d398b5a7f31e8de7d885e19da86f0584449291f132e887b8bf36f7"
+      "size": 5152,
+      "sha256": "0471ce8b57375444106bce52553aa9c692230393a913259cffb0fb445b025655"
     },
     {
       "path": "test/secrets.test.mjs",
@@ -506,7 +506,7 @@
     {
       "path": "test/test_compose_env.py",
       "size": 5476,
-      "sha256": "984ff7fcb887ac7ac26be6b6f044d639e6e0669e1abc8bb0cd4e3d81bf86889f"
+      "sha256": "ad81930172857ca25a4dd077ca4d2fc50052fce47b8ff0a219f5c190ec0a236d"
     },
     {
       "path": "test/test_helper.py",
@@ -566,7 +566,7 @@
     {
       "path": "ui/dist/card.html",
       "size": 511329,
-      "sha256": "a1c3b2c46f5b8b4b08d7be017bdf740ec7b9da98b1b7e8ae2f369f3b355529e0"
+      "sha256": "1e41caacd71b5764c8a919bfa014abbd08ac0f72f30bcbc9e762681113912cc8"
     },
     {
       "path": "ui/package-lock.json",
@@ -586,7 +586,7 @@
     {
       "path": "ui/src/host.js",
       "size": 1399,
-      "sha256": "d4a7ccc0ca5949e0ec3b0889b7a2ac6e2ed57197bb5740a410d04e402e462503"
+      "sha256": "a09d3f902b2fd4a8b96a0ff14c3c1accd589372338bbffa831d7d99d7690cae4"
     },
     {
       "path": "ui/src/i18n.js",

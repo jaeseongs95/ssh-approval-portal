@@ -1,7 +1,7 @@
 import { App } from '@modelcontextprotocol/ext-apps';
 
 export function createCardHost(t) {
-  const app = new App({ name: 'SSH Approval Portal', version: '0.3.0' }, { availableDisplayModes: ['inline', 'fullscreen'] });
+  const app = new App({ name: 'SSH Approval Portal', version: '1.0.0' }, { availableDisplayModes: ['inline', 'fullscreen'] });
   return {
     async call(name, args, namespace = 'ssh-approval-bridge_') {
       const result = await app.callServerTool({ name: namespace + name, arguments: args });

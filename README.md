@@ -1,10 +1,10 @@
-# SSH Approval Portal 0.3.0
+# SSH Approval Portal 1.0.0
 
 [한국어](README.ko.md) · [Administrator sign-in](docs/admin-login.en.md) · [Agent file uploads](docs/agent-upload.en.md) · [Architecture and compatibility](docs/architecture.en.md)
 
 An MCP server for reviewing and approving SSH commands and file transfers. It provides MCP Apps cards for ChatGPT and Claude alongside a web administrator interface. Each bridge currently connects to one SSH target. Multi-server support is still at the design stage and is not implemented.
 
-The current version is a **0.3.0 candidate**. Responsibilities are separated into domain, application, and adapter layers while preserving approval rules. Existing client tests, agent-upload observations, and local validation of the restructuring are recorded separately.
+The current version is **1.0.0**. Responsibilities are separated into domain, application, and adapter layers while preserving approval rules. Existing client tests, agent-upload observations, and local validation of the restructuring are recorded separately.
 
 | Area | Verified scope and remaining limits |
 | --- | --- |
@@ -13,7 +13,7 @@ The current version is a **0.3.0 candidate**. Responsibilities are separated int
 | ChatGPT desktop and Claude web | Full functionality has not been verified in these clients. |
 | ChatGPT `request-upload` | An actual file input reached `upload-source-not-configured` and returned the provider hostname. This observation does not establish provider retrieval, approval, or an SSH round trip. |
 | Claude automatic file delivery | The actual test supplied `file_uuid` and an empty `download_url`, failing input validation. Its sandbox HTTPS connection to the destination was also blocked by a proxy CONNECT 403. Automatic transfer is unsupported. |
-| Local restructuring | Consult the separate validation record for this change's integration results. The earlier candidate's 47 local tests do not establish that the current change passes. |
+| Restructuring validation | The non-ARM implementation passed two independent final reviews against Node 94/Linux Python 21 tests, browser regressions, amd64 installation, updates, rollback, Compose, and real SSH roundtrip evidence. The release `VALIDATION.json` records the scope of the 1.0.0 version-change checks. |
 
 The file-provider hostname allowlist starts empty. `BRIDGE_UPLOAD_SOURCE_HOSTS` accepts a comma-separated mix of exact hostnames and leading `*.domain` patterns, for example `files.example.test,*.downloads.example.test` (fictional). A pattern covers one or more subdomain labels at any depth, excludes the apex domain, and matches at a dot boundary. Bare `*`, other wildcard placements, URLs, IP addresses and ports are rejected. Choosing a wildcard means trusting every subdomain it covers; do not broadly allow a shared CDN without verifying that trust scope. Card approval defaults to `BRIDGE_UI_ENABLED=false`, and web administrator authentication defaults to `BRIDGE_ADMIN_AUTH_MODE=token`. Successful tests of an existing client flow do not establish that the new agent-upload path or another platform works.
 
@@ -41,11 +41,11 @@ An overwrite is not reported as complete if the existing file's ownership, mode,
 
 ## Native installation and updates
 
-Requires Ubuntu 22.04/24.04 on x86_64 or arm64, an internet connection, and an administrator terminal on the server. Node 24 is installed in a dedicated path without replacing the system Node installation.
+This release is validated for Ubuntu 22.04/24.04 on x86_64. The ARM64 installation path remains available, but validation is deferred to a later enhancement. An internet connection and an administrator terminal on the server are required. Node 24 is installed in a dedicated path without replacing the system Node installation.
 
 ```sh
-tar -xzf ssh-approval-portal-0.3.0.tar.gz
-cd ssh-approval-portal-0.3.0
+tar -xzf ssh-approval-portal-1.0.0.tar.gz
+cd ssh-approval-portal-1.0.0
 sudo bash scripts/install.sh --admin-origin https://ssh-approve.example.com --grant-sudo-all
 ```
 

@@ -1,10 +1,10 @@
-# SSH Approval Portal 0.3.0
+# SSH Approval Portal 1.0.0
 
 [English](README.md) · [관리자 로그인](docs/admin-login.ko.md) · [에이전트 파일 업로드](docs/agent-upload.ko.md) · [구조와 호환성](docs/architecture.ko.md)
 
 SSH 명령과 파일 전송을 사용자가 확인하고 승인할 수 있는 MCP 서버입니다. ChatGPT·Claude의 MCP Apps 카드와 웹 관리자 화면을 함께 제공합니다. 현재 중계기 하나는 SSH 대상 하나에 연결합니다. 다중 서버 지원은 아직 설계 단계이며 구현된 기능이 아닙니다.
 
-현재 버전은 **0.3.0 후보**입니다. 승인 규칙을 유지하며 도메인·애플리케이션·어댑터의 세 계층으로 책임을 분리합니다. 기존 클라이언트 시험, 새 에이전트 업로드 관측과 구조 변경의 로컬 검증은 구분해 기록합니다.
+현재 버전은 **1.0.0**입니다. 승인 규칙을 유지하며 도메인·애플리케이션·어댑터의 세 계층으로 책임을 분리합니다. 기존 클라이언트 시험, 새 에이전트 업로드 관측과 구조 변경의 로컬 검증은 구분해 기록합니다.
 
 | 구분 | 확인한 범위와 남은 제약 |
 | --- | --- |
@@ -13,7 +13,7 @@ SSH 명령과 파일 전송을 사용자가 확인하고 승인할 수 있는 MC
 | ChatGPT 데스크톱·Claude 웹 | 전체 기능을 실제 클라이언트에서 확인하지 않았습니다. |
 | ChatGPT `request-upload` | 실제 파일 입력이 `upload-source-not-configured` 응답과 공급자 hostname 반환까지 도달했습니다. 공급자 파일 가져오기·승인·SSH 왕복은 이 관측으로 확인되지 않았습니다. |
 | Claude 자동 파일 전달 | 실제 시험에서 `file_uuid`와 빈 `download_url`이 전달되어 입력 검증에 실패했습니다. 샌드박스의 대상 HTTPS 연결도 proxy CONNECT 403으로 차단됐습니다. 자동 전송은 지원하지 않습니다. |
-| 로컬 구조 변경 | 현재 변경의 통합 시험 결과는 별도 검증 기록으로 확인해야 합니다. 과거 후보의 47개 로컬 시험을 현재 변경의 통과 근거로 쓰지 않습니다. |
+| 구조 변경 검증 | 비ARM 구현은 Node 94개·Linux Python 21개, 브라우저 회귀, amd64 설치·업데이트·복원·Compose와 실제 SSH 파일 왕복 근거를 대조하고 독립 최종 검토 2건을 통과했습니다. 1.0.0 버전 변경분의 검증 범위는 릴리스의 `VALIDATION.json`에 기록합니다. |
 
 파일 공급자 허용 목록의 기본값은 비어 있습니다. `BRIDGE_UPLOAD_SOURCE_HOSTS`에는 정확한 hostname과 앞에 `*.`가 붙은 domain 패턴을 쉼표로 구분해 함께 입력할 수 있습니다. 예를 들어 `files.example.test,*.downloads.example.test`는 가상 주소를 사용한 설정 예입니다. 패턴은 점 경계를 기준으로 한 단계 이상의 모든 깊이 하위 도메인에 일치하며, 기준 domain 자체는 포함하지 않습니다. 단독 `*`, 다른 위치의 wildcard, URL·IP 주소·포트는 거부합니다. wildcard를 선택하면 포함되는 모든 하위 호스트를 신뢰하게 되므로, 신뢰 범위를 확인하지 않은 공유 CDN을 넓게 허용하지 않습니다. 카드 승인은 `BRIDGE_UI_ENABLED=false`, 웹 관리자 인증은 `BRIDGE_ADMIN_AUTH_MODE=token`이 기본값입니다. 기존 클라이언트 시험의 성공을 새 에이전트 업로드나 다른 플랫폼의 성공으로 해석하지 않습니다.
 
@@ -41,11 +41,11 @@ PC 파일은 카드에서 고르고 목적지 경로·덮어쓰기·sudo를 지�
 
 ## 네이티브 설치와 업데이트
 
-Ubuntu 22.04/24.04 x86_64·arm64, 인터넷 연결과 서버 관리자 터미널이 필요합니다. Node 24는 전용 경로에 설치하며 시스템 Node를 교체하지 않습니다.
+이번 릴리스의 검증 대상은 Ubuntu 22.04/24.04 x86_64입니다. ARM64 설치 경로는 남아 있지만 검증은 후속 고도화로 보류했습니다. 인터넷 연결과 서버 관리자 터미널이 필요합니다. Node 24는 전용 경로에 설치하며 시스템 Node를 교체하지 않습니다.
 
 ```sh
-tar -xzf ssh-approval-portal-0.3.0.tar.gz
-cd ssh-approval-portal-0.3.0
+tar -xzf ssh-approval-portal-1.0.0.tar.gz
+cd ssh-approval-portal-1.0.0
 sudo bash scripts/install.sh --admin-origin https://ssh-approve.example.com --grant-sudo-all
 ```
 

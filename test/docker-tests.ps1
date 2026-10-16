@@ -2,7 +2,7 @@ param(
   [string[]]$Versions = @('22.04','24.04'),
   [ValidateSet('amd64','arm64')][string]$Architecture = 'amd64',
   [string]$TaskTag = ('solid-' + [Guid]::NewGuid().ToString('N').Substring(0,10)),
-  [string]$CandidateArchive = (Join-Path (Split-Path -Parent $PSScriptRoot) 'dist/ssh-approval-portal-0.3.0.tar.gz'),
+  [string]$CandidateArchive = (Join-Path (Split-Path -Parent $PSScriptRoot) 'dist/ssh-approval-portal-1.0.0.tar.gz'),
   [string]$BaselineArchive = '',
   [string]$BaselineSha256 = '',
   [string]$ImagePrefix = 'ssh-portal-test',

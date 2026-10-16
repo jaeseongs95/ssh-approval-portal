@@ -34,7 +34,7 @@ node scripts/verify.mjs
 
 파일 helper는 Linux 임시 디렉터리에서 실제 바이너리·빈 파일 업다운로드, overwrite=false, mode와 SHA 불일치 시 기존 파일 보존, symlink·FIFO·디렉터리 거부를 확인합니다. root/sudo 경계는 격리된 설치 시험으로 따로 확인합니다.
 
-Ubuntu 22.04/24.04의 네이티브·Docker·Compose는 fresh·update·reinstall·failed-start·rollback과 실제 격리 SSH 파일 왕복을 확인합니다. 각 검증은 합성 설정·데이터를 사용하고 현재 운영 서비스나 자격을 사용하지 않습니다. Windows·WSL·ARM64 에뮬레이션과 실제 ARM 하드웨어 결과를 구분합니다. 실행하지 않은 환경은 NOT_RUN으로 남깁니다.
+Ubuntu 22.04/24.04의 네이티브·Docker·Compose는 fresh·update·reinstall·failed-start·rollback과 실제 격리 SSH 파일 왕복을 확인합니다. 각 검증은 합성 설정·데이터를 사용하고 현재 운영 서비스나 자격을 사용하지 않습니다. 현재 1.0.0 릴리스 범위는 amd64이며 ARM64 검증은 사용자 지시로 후속 고도화에 이관했습니다. Windows·WSL·ARM64 에뮬레이션과 실제 ARM 하드웨어 결과를 구분합니다. 실행하지 않은 환경은 NOT_RUN으로 남깁니다.
 
 ## 에이전트 파일 입력과 실제 클라이언트
 

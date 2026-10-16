@@ -2,7 +2,7 @@
 
 [한국어](architecture.ko.md) · [README](../README.md)
 
-This document describes responsibilities and validation requirements for the 0.3.0 restructuring candidate. The presence of files or a new structure does not establish passing integration tests, real-client acceptance, or deployment validation.
+This document describes responsibilities and validation requirements for the 1.0.0 architecture. The presence of files or a new structure does not establish passing integration tests, real-client acceptance, or deployment validation.
 
 ## Three layers and composition
 

@@ -14,5 +14,5 @@ const app = await createApplication({ registry, classify, executeCommand, audit,
   transferRoot: env.BRIDGE_TRANSFER_ROOT ?? '/var/lib/ssh-mcp/transfers' });
 app.mcpHttp.listen(settings.mcpPort, '127.0.0.1');
 app.adminHttp.listen(settings.adminPort, '127.0.0.1');
-console.error('SSH Approval Portal 0.3.0 listening on loopback; UI actions ' + (app.enabled ? 'enabled' : 'disabled (probe only)'));
+console.error('SSH Approval Portal 1.0.0 listening on loopback; UI actions ' + (app.enabled ? 'enabled' : 'disabled (probe only)'));
 for (const signal of ['SIGTERM', 'SIGINT']) process.once(signal, async () => { await app.close(); process.exit(0); });

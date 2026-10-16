@@ -16,7 +16,7 @@ function decodeChunk(data) {
 export function createMcpAdapter({ queue, commands, files, settings, capabilities, uiHtml, bindFileSource, shutdownSignal }) {
   const URI = `ui://ssh-approval/card-${hash(uiHtml)}.html`;
   return function mcpServer(requestSignal) {
-    const server = new McpServer({ name: 'SSH Approval Portal', version: '0.3.0' });
+    const server = new McpServer({ name: 'SSH Approval Portal', version: '1.0.0' });
     server.registerResource('SSH approval card', URI, { mimeType: 'text/html;profile=mcp-app' }, async () => ({ contents: [{ uri: URI, mimeType: 'text/html;profile=mcp-app', text: uiHtml, _meta: { ui: { csp: { connectDomains: [], resourceDomains: [] }, prefersBorder: true } } }] }));
     const tool = (name, schema, outputSchema, handler, { ui = false, appOnly = false, description = name, readOnly = false, meta, openWorld = false } = {}) => server.registerTool(name, {
       description, inputSchema: schema, outputSchema, annotations: { readOnlyHint: readOnly, destructiveHint: !readOnly, ...(openWorld ? { openWorldHint: true } : {}) },
