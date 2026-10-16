@@ -6,7 +6,7 @@
     {
       "path": ".dockerignore",
       "size": 121,
-      "sha256": "9c5e68d9606f454e10a6a84c31cd3f609e7cf21d5c1998b73ea117bbe713d699"
+      "sha256": "61e0ef6e04f04c51fe2acea84fbd63b3197ce9bca3e8e86ee821cd01b9584201"
     },
     {
       "path": "app.mjs",
@@ -105,13 +105,13 @@
     },
     {
       "path": "README.ko.md",
-      "size": 15835,
-      "sha256": "299e0d6f2079b0eda9621b1fcbf681df44b00386a9be30f06d323a11cd71de27"
+      "size": 15872,
+      "sha256": "5e208837e9ecb72cae5302b3a99a2265a56d30e81e856eff2fbb56474846a24e"
     },
     {
       "path": "README.md",
-      "size": 14232,
-      "sha256": "01bb58115009c3703db5355425a0f2053e0c33501ca4015572a82854f241c565"
+      "size": 14269,
+      "sha256": "8e70a33d7f10047de696fce10852facdb83d59a949de069b4b5ca96ef3dc6cfe"
     },
     {
       "path": "scripts/admin-access-config.mjs",
@@ -515,8 +515,8 @@
     },
     {
       "path": "test/test_package.py",
-      "size": 4911,
-      "sha256": "59bed82dfe21d4ce1b802b9d74991436e22d4bd101d43f2bec81756e6cf28ce9"
+      "size": 7050,
+      "sha256": "eafdd34f71256b4c2141ac6ee232ffe3b4e4a55ecfb782dd87fdeab9cc5a909a"
     },
     {
       "path": "test/test_settings_contract.py",

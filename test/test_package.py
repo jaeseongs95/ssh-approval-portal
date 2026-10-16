@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 import zipfile
@@ -87,6 +88,36 @@ class PackageContract(unittest.TestCase):
         result = self.run_node(script, self.root)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('Source missing from manifest', result.stderr)
+
+    def test_source_release_can_prepare_default_docker_archive(self):
+        dockerfile = (SOURCE / 'docker/Dockerfile').read_text(encoding='utf-8')
+        archive_name = next(line.split('=', 1)[1] for line in dockerfile.splitlines()
+                            if line.startswith('ARG PACKAGE_ARCHIVE='))
+        # The default build must admit its archive, rather than only test overrides.
+        rules = (SOURCE / '.dockerignore').read_text(encoding='utf-8').splitlines()
+        self.assertIn('!' + archive_name, rules, 'Default Docker archive is excluded from build context')
+        command = 'python3 scripts/package.py --release'
+        for readme in ('README.md', 'README.ko.md'):
+            self.assertIn(command, (SOURCE / readme).read_text(encoding='utf-8'),
+                          'Extracted source Docker instructions omit archive preparation')
+        source = Path(self.temporary.name) / 'release-source'
+        for path in packager.collect_files(SOURCE):
+            target = source / path.relative_to(SOURCE)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(path, target)
+        archives, _ = packager.package(source, release=True)
+        extracted = Path(self.temporary.name) / 'clean-extracted'
+        with zipfile.ZipFile(archives[1]) as archive:
+            archive.extractall(extracted)
+        version = json.loads((source / 'package.json').read_text(encoding='utf-8'))['version']
+        root = extracted / ('ssh-approval-portal-' + version)
+        self.assertFalse((root / archive_name).exists(), 'Release must not recursively embed its distribution')
+        result = subprocess.run([sys.executable, str(root / 'scripts/package.py'), '--release'],
+                                capture_output=True, text=True, timeout=20)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((root / archive_name).is_file(), 'Documented preparation did not supply Docker COPY input')
+        self.assertEqual((root / 'release-manifest.json').read_bytes(),
+                         (source / 'release-manifest.json').read_bytes())
 
 
 if __name__ == '__main__':
