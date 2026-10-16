@@ -22,6 +22,17 @@ async function card(page, server) {
   await page.evaluate(() => window.fixture.transfer('/tmp/A'));
   await page.locator('input[type=file]').setInputFiles({ name: 'fixture.bin', mimeType: 'application/octet-stream', buffer: Buffer.from([1, 2, 3, 4]) });
 }
+
+test('approval card labels actual automatic approval and removes it for owner approval', async () => browserFixture(async (page, server) => {
+  await page.goto(server.origin + '/fixture/card'); await page.waitForFunction(() => window.fixture);
+  await page.evaluate(() => window.fixture.receive({ structuredContent: { id: 'automatic-fixture', kind: 'command', state: 'failed',
+    command: 'id', target: 'fixture', expiresAt: 2000000000000, approvalMode: 'automatic' }, _meta: { sshApproval: { uiEnabled: true } } }));
+  await page.getByText('자동승인', { exact: true }).waitFor();
+  assert.equal(await page.locator('#status').textContent(), '실패');
+  await page.evaluate(() => window.fixture.receive({ structuredContent: { id: 'owner-fixture', kind: 'command', state: 'completed',
+    command: 'id', target: 'fixture', expiresAt: 2000000000000, approvalMode: 'owner' }, _meta: { sshApproval: { uiEnabled: true } } }));
+  assert.equal(await page.getByText('자동승인', { exact: true }).count(), 0);
+}, 'ko-KR'));
 test('UI-S-01 selected file cannot cross a card replacement', async () => browserFixture(async (page, server) => {
   await card(page, server); await page.evaluate(() => window.fixture.transfer('/tmp/B'));
   assert.equal(await page.locator('input[type=file]').evaluate(node => node.files.length), 0);

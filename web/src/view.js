@@ -34,6 +34,7 @@ export function createWebView({ document, i18n }) {
       const summary = text(box, 'summary', ''); const head = text(summary, 'div', '', 'summary-head');
       text(head, 'span', '›', 'chevron'); text(head, 'span', kinds[job.kind] ?? job.kind, 'kind');
       text(head, 'span', `${job.targetDisplayName ?? targetName}${job.targetId ? ` [${job.targetId}]` : ''}`, 'summary-target');
+      if (job.approvalMode === 'automatic') text(head, 'span', korean ? '자동승인' : 'Automatically approved', 'badge automatic-approval');
       text(head, 'span', states[job.state] ?? job.state, `badge ${job.state}`);
       text(summary, 'span', command, 'preview'); body = text(box, 'div', '', 'history-body');
     } else {

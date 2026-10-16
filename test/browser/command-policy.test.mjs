@@ -37,7 +37,9 @@ test('owner edits command names in the actual bundled page and sees policy execu
     await page.getByText('정책 revision 1 · 저장됨', { exact: true }).waitFor();
     const { job } = await app.targets.commands.run('sudo id'); await app.targets.drain();
     assert.equal(app.queue.get(job.id).state, 'completed');
-    await page.locator('#load').click(); await page.locator(`[data-request-id="${job.id}"] summary`).click();
+    await page.locator('#load').click();
+    await page.locator(`[data-request-id="${job.id}"] summary`).getByText('자동승인', { exact: true }).waitFor();
+    await page.locator(`[data-request-id="${job.id}"] summary`).click();
     await page.getByText('사전 승인 명령셋에 일치', { exact: true }).waitFor();
     assert.equal(await names.inputValue(), 'ls\nsudo');
   } finally { await browser?.close(); await app?.close(); await rm(root, { recursive: true, force: true }); }

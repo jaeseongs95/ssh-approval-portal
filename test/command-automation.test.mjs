@@ -48,11 +48,11 @@ async function fixture(t, options = {}) {
 test('command set ignores arguments; risky arguments and nested execution do not inherit that authority', async t => {
   const f = await fixture(t); await f.policy({});
   for (const command of ['ls /tmp', 'ls -la /var', 'sudo id']) {
-    const job = await f.run(command); assert.equal(job.state, 'completed'); assert.equal(job.decision.reasonCode, 'command_set');
+    const job = await f.run(command); assert.equal(job.state, 'completed'); assert.equal(job.decision.reasonCode, 'command_set'); assert.equal(job.approvalMode, 'automatic');
   }
   assert.equal(f.inputs.length, 0);
   for (const command of ['ls $(touch /tmp/x)', 'rm -rf /tmp/x', 'sudo rm -rf /tmp/x']) {
-    const job = await f.run(command); assert.equal(job.state, 'pending'); assert.equal(job.decision.reasonCode, 'observation_only');
+    const job = await f.run(command); assert.equal(job.state, 'pending'); assert.equal(job.decision.reasonCode, 'observation_only'); assert.equal(job.approvalMode, undefined);
   }
   assert.equal(f.executions.length, 3); assert.equal(f.inputs.length, 3);
   assert.equal(inspectCommand('sudo id', classifyCommand).risky, false);
@@ -62,6 +62,7 @@ test('model OR path executes sudo and unmatched commands only with measured prov
   const f = await fixture(t); await f.policy({ commands: [], modelExecution: true, thresholds: { jev: threshold('jev-1.13.0') } });
   const job = await f.run('sudo systemctl restart synthetic.service');
   assert.equal(job.state, 'completed'); assert.equal(job.decision.reasonCode, 'model_passed');
+  assert.equal(job.approvalMode, 'automatic');
   assert.equal(f.executions[0].command, 'sudo systemctl restart synthetic.service');
   assert.deepEqual(Object.keys(f.inputs[0]).sort(), ['command', 'context', 'environment', 'target']);
   assert.doesNotMatch(JSON.stringify(f.inputs), /commands|threshold|preapprov|fixture-owner|127\.0\.0\.1/);
@@ -110,7 +111,7 @@ test('request keys survive restart, reject changed arguments, and never replay c
   const again = await f.run('sudo id', key); assert.equal(again.id, job.id); assert.equal(f.executions.length, 1);
   await assert.rejects(f.run('sudo pwd', key), /conflict/);
   await f.restart();
-  assert.equal((await f.run('sudo id', key)).id, job.id); assert.equal(f.executions.length, 1);
+  const restored = await f.run('sudo id', key); assert.equal(restored.id, job.id); assert.equal(restored.approvalMode, 'automatic'); assert.equal(f.executions.length, 1);
 });
 
 test('durable admission restores interrupted evaluation/execution as unknown and pending as expired', async t => {
@@ -181,6 +182,7 @@ test('execution admission audit failure cannot dispatch a preapproved command', 
   const f = await fixture(t, { audit: event => { if (event.action === 'policy-execution-started') throw Error('audit unavailable'); } });
   await f.policy({}); const job = await f.run('sudo id');
   assert.equal(job.state, 'pending'); assert.equal(job.decision.reasonCode, 'execution_busy'); assert.equal(f.executions.length, 0);
+  assert.equal(job.approvalMode, undefined);
 });
 
 test('unknown elevated programs and interpreter carriers route to independent evaluation', async t => {
@@ -189,4 +191,11 @@ test('unknown elevated programs and interpreter carriers route to independent ev
     assert.equal((await f.run(command)).state, 'pending');
   }
   assert.equal(f.inputs.length, 4); assert.equal(f.executions.length, 0);
+});
+
+test('owner approval remains distinguishable from automatic approval after review', async t => {
+  const f = await fixture(t); await f.policy({ commands: [] });
+  const job = await f.run('sudo id'); assert.equal(job.approvalMode, undefined);
+  f.app.queue.start(job.id); await f.app.queue.wait(job.id);
+  assert.equal(f.app.queue.get(job.id).approvalMode, 'owner');
 });

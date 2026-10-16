@@ -26,6 +26,8 @@ Jev는 기존 로컬 시크릿 참조와 `BRIDGE_JEV_ENABLED=true`를 사용한�
 
 `run-command`는 `evaluating` 또는 실행·승인 상태의 요청 ID를 반환한다. `get-request-status`로 확인하고 `pending`일 때만 승인 카드를 표시한다. 모델 위험·불확실·실패·기준 미설정은 사용자 승인으로 보낸다. 카드와 관리자 화면에는 판단 사유·평가자·점수를 표시한다.
 
+실제 실행 승인 시 `approvalMode`를 `automatic` 또는 `owner`로 기록한다. 카드와 관리자 이력은 `automatic`일 때 **자동승인**을 표시하고 실행 중·완료·실패 상태는 별도로 유지한다. 자동 실행 후보라는 이유만으로 승인 대기 요청을 자동승인으로 표시하지 않는다. 이 정보는 재시작 후에도 보존한다.
+
 관리자 전용 `GET /api/command-policy`는 revision·대상 바인딩을 반환한다. `POST /api/command-policy`는 `{expectedRevision,policy:{targets:[...]}}`를 받는다. 각 대상은 `targetId,targetRevision,profile,commands,deniedCommands,externalDisclosure,modelExecution,fallback,thresholds`를 가진다. MCP에는 정책 변경 도구가 없다. 기존 소유자 인증과 정확한 Origin을 요구하며 stale revision·다른 대상 바인딩은 거절한다. 정책 변경 후 진행 중인 이전 자동 결정은 폐기한다.
 
 선택 입력 `requestKey`는 16~128자의 영문·숫자·`_.:-`로 구성한다. 같은 키와 같은 대상·프로필·명령은 기존 상태를 반환하고, 내용이 다르면 충돌이다. 키를 생략한 새 호출은 새 실행 요청이다. 자동화가 꺼져 있으면 키 입력을 거절한다.

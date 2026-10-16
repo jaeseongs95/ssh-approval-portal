@@ -13,6 +13,7 @@ const operation = z.discriminatedUnion('kind', [
 const jobFields = {
   id: identifier, kind: z.enum(['command', 'upload', 'download']), operation,
   command: z.string().optional(), profile: z.string(), commandClass: z.string(), target: z.string(), state,
+  approvalMode: z.enum(['automatic', 'owner']).optional(),
   createdAt: z.number(), expiresAt: z.number(), finishedAt: z.number().optional(), result: legacyOutcome.optional(), auditError: z.string().optional(),
 };
 const jobSchema = z.object(jobFields).passthrough();
@@ -53,6 +54,7 @@ export function presentJob(job) {
   const value = { id: job.id, kind: job.kind, operation: { ...job.operation }, command: job.command,
     ...(job.targetId === undefined ? {} : { targetId: job.targetId, targetRevision: job.targetRevision, targetDisplayName: job.targetDisplayName, hostKey: job.hostKey }),
     ...(job.decision ? { decision: structuredClone(job.decision) } : {}), profile: job.profile, commandClass: job.commandClass, target: job.target, state: job.state,
+    ...(job.approvalMode ? { approvalMode: job.approvalMode } : {}),
     createdAt: job.createdAt, expiresAt: job.expiresAt, finishedAt: job.finishedAt,
     result: job.result === undefined ? undefined : presentOutcome(job.result), auditError: job.auditError };
   jobSchema.parse(value);

@@ -40,6 +40,7 @@ export class ApprovalQueue {
     return { id: job.id, kind: job.operation.kind, operation: { ...job.operation }, command: job.operation.command,
       ...Object.fromEntries(['targetId', 'targetRevision', 'targetDisplayName', 'hostKey'].filter(key => job[key] !== undefined).map(key => [key, job[key]])),
       ...(job.decision ? { decision: structuredClone(job.decision) } : {}), profile: job.profile, commandClass: job.commandClass, target: job.target, state: job.state,
+      ...(job.approvalMode ? { approvalMode: job.approvalMode } : {}),
       createdAt: job.createdAt, expiresAt: job.expiresAt, finishedAt: job.finishedAt, result: job.result, auditError: job.auditError };
   }
   subject(id) {
@@ -101,10 +102,11 @@ export class ApprovalQueue {
     if (job.operation.kind === 'command') validateCommand(job.operation.command, this.classify);
     if (job.operation.kind === 'command') this.beforeCommandStart?.(this.public(job));
     const release = this.claimExecution();
+    const approvalMode = authority === COMMAND_AUTHORITY || automatic ? 'automatic' : 'owner';
     try {
-      this.audit({ action: authority === COMMAND_AUTHORITY ? 'policy-execution-started' : automatic ? 'read-started' : 'approved', ...this.public(job) });
-      job.state = 'running'; job.persist?.(this.public(job));
-    } catch (error) { if (job.state === 'running') { job.state = 'unknown'; job.finishedAt = this.now(); } release(); throw error; }
+      this.audit({ action: authority === COMMAND_AUTHORITY ? 'policy-execution-started' : automatic ? 'read-started' : 'approved', ...this.public(job), approvalMode });
+      job.approvalMode = approvalMode; job.state = 'running'; job.persist?.(this.public(job));
+    } catch (error) { delete job.approvalMode; if (job.state === 'running') { job.state = 'unknown'; job.finishedAt = this.now(); } release(); throw error; }
     this.active = job;
     // The claim and audit complete synchronously before any external side effect.
     job.completion = Promise.resolve().then(async () => {

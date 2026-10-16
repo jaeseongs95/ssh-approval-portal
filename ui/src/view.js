@@ -24,6 +24,7 @@ export function createCardView({ document, i18n }) {
   }
   function job(job, meta, actions) {
     clear(); identity(meta); status(states[job.state] ?? job.state, job.state);
+    if (job.approvalMode === 'automatic') text(el('details'), 'p', korean ? '자동승인' : 'Automatically approved', 'badge automatic-approval');
     const infoBox = text(el('details'), 'div', '', 'request-meta');
     text(infoBox, 'p', `${t('대상 서버')} · ${job.target}`);
     const info = text(infoBox, 'details', ''); text(info, 'summary', t('요청 정보'));
