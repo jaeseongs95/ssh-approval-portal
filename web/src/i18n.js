@@ -2,6 +2,7 @@ export function createWebI18n(language = 'en') {
 const korean = language.toLowerCase().startsWith('ko');
 const locale = korean ? 'ko-KR' : 'en-US';
 const en = {
+  '위험 평가 중': 'Assessing risk', '실행 결과 불명': 'Execution outcome unknown',
   '등록됨': 'Registered', '사용 중지': 'Disabled',
   '실행 중인 요청이 없습니다': 'No running requests',
   '승인 후 실행 중인 명령과 파일 전송이 표시됩니다.': 'Approved commands and file transfers in progress appear here.',
@@ -21,7 +22,7 @@ const en = {
   '로그아웃되었습니다.': 'You have signed out.',
 };
 const t = value => korean ? value : en[value] ?? value;
-const states = Object.fromEntries(Object.entries({ pending: '승인 대기', running: '실행 중', completed: '완료', failed: '실패', denied: '거부', expired: '만료' }).map(([key,value]) => [key,t(value)]));
+const states = Object.fromEntries(Object.entries({ pending: '승인 대기', evaluating: '위험 평가 중', unknown: '실행 결과 불명', running: '실행 중', completed: '완료', failed: '실패', denied: '거부', expired: '만료' }).map(([key,value]) => [key,t(value)]));
 const kinds = Object.fromEntries(Object.entries({ command: '명령 실행', upload: '파일 업로드', download: '파일 다운로드' }).map(([key,value]) => [key,t(value)]));
 return { t, korean, locale, states, kinds };
 }

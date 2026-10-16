@@ -1,7 +1,7 @@
 export function createWebApi({ fetch, accessMode, getToken, isSignedOut, unauthorized, t }) {
-  return async function api(path, method = 'GET') {
+  return async function api(path, method = 'GET', body) {
     if (isSignedOut()) throw Error(t('로그아웃되었습니다.'));
-    const response = await fetch(path, { method, credentials: 'same-origin', headers: accessMode ? {} : { Authorization: 'Bearer ' + getToken() } });
+    const response = await fetch(path, { method, credentials: 'same-origin', headers: { ...(accessMode ? {} : { Authorization: 'Bearer ' + getToken() }), ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
     if (isSignedOut()) throw Error(t('로그아웃되었습니다.'));
     if (accessMode && response.status === 401) {
       unauthorized(); throw Error(t('로그인이 만료되었거나 접근할 수 없습니다. 다시 로그인해 주세요.'));

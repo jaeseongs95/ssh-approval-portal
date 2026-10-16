@@ -46,6 +46,7 @@ export function parseSettings(env) {
   const maxBytes = Number(value('BRIDGE_TRANSFER_MAX_BYTES')), budget = Number(value('BRIDGE_TRANSFER_BUDGET_BYTES'));
   if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0 || maxBytes > MAX_BYTES || !Number.isSafeInteger(budget) || budget < maxBytes) throw Error('Invalid staging limits');
   if (!['true', 'false'].includes(value('BRIDGE_JEV_ENABLED'))) throw Error('Invalid Jev switch');
+  if (!['true', 'false'].includes(value('BRIDGE_COMMAND_AUTOMATION'))) throw Error('Invalid command automation switch');
   const jevMaxCalls = Number(value('BRIDGE_JEV_MAX_CALLS'));
   if (!/^[1-9][0-9]*$/.test(value('BRIDGE_JEV_MAX_CALLS')) || !Number.isSafeInteger(jevMaxCalls) || jevMaxCalls > 10000) throw Error('Invalid Jev call budget');
   const secretStoreDir = value('BRIDGE_SECRET_STORE_DIR'), jevKeyRef = value('BRIDGE_JEV_KEY_REF');
@@ -55,6 +56,7 @@ export function parseSettings(env) {
   return Object.freeze({ mcpToken, adminToken, adminOrigin,
     targets: parseTargets(value('BRIDGE_TARGETS'), value('BRIDGE_DEFAULT_TARGET')),
     jevEnabled: value('BRIDGE_JEV_ENABLED') === 'true', jevMaxCalls,
+    commandAutomation: value('BRIDGE_COMMAND_AUTOMATION') === 'true',
     secretStoreDir, jevKeyRef,
     defaultTarget: value('BRIDGE_DEFAULT_TARGET') || undefined,
     bridgeDisplayName: displayName(value('BRIDGE_DISPLAY_NAME')) || new URL(adminOrigin).host,

@@ -57,7 +57,7 @@ export function createTargetRouter(runtimes, { defaultTarget, legacy, store, aud
     legacy, select, jobOwner, artifactOwner, queue,
     list: () => ({ targets: runtimes.map(({ id, displayName, enabled }) => ({ id, displayName, enabled, isDefault: id === defaultTarget })), defaultTarget: defaultTarget ?? null }),
     canonicalTransfer(args) { const runtime = select(args.target); return legacy && args.target === undefined ? args : { ...args, target: runtime.id }; },
-    commands: { read: (command, target) => select(target).commands.read(command), run: (command, target) => select(target).commands.run(command), busy: () => runtimes.some(runtime => runtime.commands.busy()) },
+    commands: { read: (command, target) => select(target).commands.read(command), run: (command, target, requestKey) => select(target).commands.run(command, requestKey), busy: () => runtimes.some(runtime => runtime.commands.busy()) },
     files: {
       requestUpload: (args, options) => select(args.target).files.requestUpload(args, options),
       requestDownload: args => select(args.target).files.requestDownload(args),

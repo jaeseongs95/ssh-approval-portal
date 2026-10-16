@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 const identifier = z.string().regex(/^[a-f0-9]{48}$/);
-const state = z.enum(['pending', 'running', 'completed', 'failed', 'denied', 'expired']);
+const state = z.enum(['pending', 'evaluating', 'running', 'completed', 'failed', 'denied', 'expired', 'unknown']);
 const content = z.array(z.object({ type: z.literal('text'), text: z.string() }));
 const outcome = z.object({ failed: z.boolean(), texts: z.array(z.string()), data: z.object({}).passthrough().optional() });
 const legacyOutcome = z.object({ content, isError: z.boolean().optional(), structuredContent: z.object({}).passthrough().optional() }).passthrough();
@@ -52,7 +52,7 @@ export function presentOutcome(value) {
 export function presentJob(job) {
   const value = { id: job.id, kind: job.kind, operation: { ...job.operation }, command: job.command,
     ...(job.targetId === undefined ? {} : { targetId: job.targetId, targetRevision: job.targetRevision, targetDisplayName: job.targetDisplayName, hostKey: job.hostKey }),
-    profile: job.profile, commandClass: job.commandClass, target: job.target, state: job.state,
+    ...(job.decision ? { decision: structuredClone(job.decision) } : {}), profile: job.profile, commandClass: job.commandClass, target: job.target, state: job.state,
     createdAt: job.createdAt, expiresAt: job.expiresAt, finishedAt: job.finishedAt,
     result: job.result === undefined ? undefined : presentOutcome(job.result), auditError: job.auditError };
   jobSchema.parse(value);

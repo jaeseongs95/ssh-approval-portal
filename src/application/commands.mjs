@@ -7,7 +7,7 @@ import { validateCommand } from '../domain/validation.mjs';
  * @param {{queue:import('../domain/approval-queue.mjs').ApprovalQueue, classify:(command:string)=>{class:string}, executeCommand:(profile:string,command:string)=>Promise<OperationOutcome>, audit:(event:Object)=>void, target:string, readProfile:string}} ports
  * @returns {{read:(command:string)=>Promise<OperationOutcome>,run:(command:string)=>Promise<{type:'immediate',outcome:OperationOutcome}|{type:'job',job:import('../contracts/ports.mjs').Job}>,busy:()=>boolean}}
  */
-export function createCommandService({ queue, classify, executeCommand, audit, target, readProfile, claimExecution = () => () => {} }) {
+export function createCommandService({ queue, classify, executeCommand, audit, target, readProfile, claimExecution = () => () => {}, automation }) {
   let activeReads = 0;
   const idleWaiters = [];
   const read = async command => {
@@ -34,12 +34,16 @@ export function createCommandService({ queue, classify, executeCommand, audit, t
   };
   return {
     read,
-    async run(command) {
+    async run(command, requestKey) {
+      validateCommand(command, classify);
+      if (automation) return automation.run(command, requestKey);
+      if (requestKey !== undefined) throw Error('Request keys require command automation');
       return validateCommand(command, classify).class === 'read-only'
         ? { type: 'immediate', outcome: await read(command) }
         : { type: 'job', job: queue.submit(command) };
     },
-    busy: () => activeReads > 0,
-    drain: () => activeReads ? new Promise(resolve => idleWaiters.push(resolve)) : Promise.resolve(),
+    busy: () => activeReads > 0 || (automation?.busy() ?? false),
+    reading: () => activeReads > 0,
+    drain: async () => { await automation?.drain(); if (activeReads) await new Promise(resolve => idleWaiters.push(resolve)); },
   };
 }

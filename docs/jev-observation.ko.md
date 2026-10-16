@@ -1,5 +1,7 @@
 # Jev 명령 위험 관측·평가
 
+이 문서는 v1 관측·평가 계약을 설명한다. 선택적인 명령셋·v2 위험 평가 실행 경로는 [명령 자동 실행](command-automation.ko.md)을 따른다. v1 후보 임계값과 평가 결과는 v2 자동 실행의 검증 근거로 승계하지 않는다.
+
 4단계의 구현은 독립 평가 도구입니다. 중계기·관리자 화면·MCP 승인 큐에는 연결하지 않습니다. Jev 응답이나 `candidateMatch`가 실행 권한을 만들지 않으며, `automaticExecutionEnabled`와 `stage5Ready`는 항상 `false`입니다. 기존 명령·파일 승인 동작은 그대로입니다.
 
 ## AGS·AIK와의 역할

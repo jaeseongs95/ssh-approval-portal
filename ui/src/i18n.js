@@ -2,6 +2,7 @@ export function createCardI18n(language = 'en') {
 const korean = language.toLowerCase().startsWith('ko');
 const locale = korean ? 'ko-KR' : 'en-US';
 const en = {
+  '위험 평가 중': 'Assessing risk', '실행 결과 불명': 'Execution outcome unknown',
   '대상 ID': 'Target ID', '설정 revision': 'Configuration revision', '호스트 키': 'Host key', '전체 대상': 'All targets',
   '대상 선택에 실패했습니다. 다시 열어 주세요.': 'Could not select the target. Reopen the file card.',
   '중계기': 'Bridge', '대상 서버': 'Target server', '서버 식별': 'Server identity',
@@ -21,7 +22,7 @@ const en = {
   '중계기 전송': 'Uploading to bridge', 'UI 동작은 클라이언트 검증 후 활성화됩니다.': 'UI actions are enabled after client verification.',
 };
 const t = value => korean ? value : en[value] ?? value;
-const states = Object.fromEntries(Object.entries({ pending: '승인 대기', running: '실행 중', completed: '완료', failed: '실패', denied: '거부됨', expired: '만료됨' }).map(([key,value]) => [key,t(value)]));
+const states = Object.fromEntries(Object.entries({ pending: '승인 대기', evaluating: '위험 평가 중', unknown: '실행 결과 불명', running: '실행 중', completed: '완료', failed: '실패', denied: '거부됨', expired: '만료됨' }).map(([key,value]) => [key,t(value)]));
 
 return { t, korean, locale, states };
 }

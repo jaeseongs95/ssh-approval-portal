@@ -29,12 +29,12 @@ export function createMcpAdapter({ queue, commands, files, settings, capabilitie
     });
     tool('list-targets', {}, outputSchemas.targets, () => publicResult(targets?.list() ?? { targets: [{ id: 'default', displayName: settings.targetDisplayName ?? 'SSH', enabled: true, isDefault: true }], defaultTarget: 'default' }, outputSchemas.targets), { readOnly: true, description: 'List administrator-registered SSH target IDs and display names. Unknown or disabled targets are refused; an omitted target uses only the configured fixed default.' });
     tool('read-command', { target, command: z.string().min(1).max(2000) }, outputSchemas.immediate, async ({ command, target }) => immediateResult(await commands.read(command, target), identity(target)), { readOnly: true, description: 'Execute proven read-only commands immediately.' });
-    tool('run-command', { target, command: z.string().min(1).max(2000) }, outputSchemas.run, async ({ command, target }) => {
-      const result = await commands.run(command, target);
+    tool('run-command', { target, command: z.string().min(1).max(2000), requestKey: z.string().regex(/^[A-Za-z0-9_.:-]{16,128}$/).optional() }, outputSchemas.run, async ({ command, target, requestKey }) => {
+      const result = await commands.run(command, target, requestKey);
       if (result.type === 'immediate') return immediateResult(result.outcome, identity(target));
       if (result.type !== 'job') throw Error('Invalid command result');
       return jobResult(result.job);
-    }, { description: 'Run read-only immediately; queue all other commands for approval. If pending, call show-approval with its id to show the owner the approval card.' });
+    }, { description: 'Run a command under server policy. With administrator command automation enabled, match command names, evaluate risky or unmatched commands, and execute only under configured authority; otherwise use owner approval. requestKey provides durable replay protection only when automation is enabled. Poll evaluating/running requests; show-approval only when pending. Never invent model scores or approval evidence.' });
     tool('request-safe-command', { target, command: z.string().min(1).max(2000) }, outputSchemas.job, ({ command, target }) => jobResult(queue.submit(command, true, target)), { description: 'Legacy safe-only owner approval request.' });
     tool('get-request-status', { id }, outputSchemas.status, ({ id }) => statusResult(queue.get(id)), { readOnly: true });
     tool('assess-request-risk', { id, externalDisclosureApproved: z.literal(true), context: z.string().max(4096).default('') }, outputSchemas.safety,

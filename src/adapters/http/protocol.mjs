@@ -9,7 +9,7 @@ const json = (res, status, value) => { res.writeHead(status, { 'Content-Type': '
 
 const escapeHtml = value => value.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
 
-export function createProtocolAdapters({ queue, commands, files, store, lifecycle, settings, signer, adminAccess, authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal, targets, requestSafety }) {
+export function createProtocolAdapters({ queue, commands, files, store, lifecycle, settings, signer, adminAccess, authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal, targets, requestSafety, commandPolicy }) {
   const capabilities = createCapabilities({ queue, store, signer, settings, targets });
   const mcpServer = createMcpAdapter({ queue, commands, files, settings, capabilities, uiHtml, bindFileSource, shutdownSignal, targets, requestSafety });
   const mcpHttp = createServer(async (req, res) => {
@@ -43,6 +43,15 @@ export function createProtocolAdapters({ queue, commands, files, store, lifecycl
       const visible = jobs => filter.length ? jobs.filter(job => (job.targetId ?? 'default') === filter[0]) : jobs;
       if (req.method === 'GET' && url.pathname === '/api/targets') return json(res, 200, targets?.list() ?? { targets: [{ id: 'default', displayName: settings.targetDisplayName ?? 'SSH', enabled: true, isDefault: true }], defaultTarget: 'default' });
       if (req.method === 'GET' && url.pathname === '/api/session') return json(res, 200, { mode: adminAccess.mode });
+      if (url.pathname === '/api/command-policy' && commandPolicy) {
+        if (req.method === 'GET') return json(res, 200, commandPolicy.get());
+        if (req.method === 'POST') {
+          const chunks = []; let size = 0;
+          for await (const chunk of req) { size += chunk.length; if (size > 65536) throw Error('Policy too large'); chunks.push(chunk); }
+          const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+          return json(res, 200, commandPolicy.set(body.policy, body.expectedRevision));
+        }
+      }
       const match = /^\/downloads\/([a-f0-9]{48})\/([a-f0-9]{32})$/.exec(url.pathname);
       if (match && ['GET', 'HEAD'].includes(req.method)) {
         const item = capabilities.claimDownload(match[1], match[2], url.searchParams.get('ticket'), req.method);
@@ -57,7 +66,7 @@ export function createProtocolAdapters({ queue, commands, files, store, lifecycl
       }
       if (req.method === 'GET' && ['/', '/app.js'].includes(url.pathname)) {
         res.writeHead(200, { 'Content-Type': url.pathname === '/' ? 'text/html; charset=utf-8' : 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'", 'Referrer-Policy': 'no-referrer' });
-        return res.end(url.pathname === '/' ? webHtml.replace('data-auth-mode="token"', () => `data-auth-mode="${adminAccess.mode}" data-multi-target="${settings.targets ? 'true' : 'false'}" data-bridge-display-name="${escapeHtml(settings.bridgeDisplayName)}" data-target-display-name="${escapeHtml(settings.targetDisplayName)}"`)
+        return res.end(url.pathname === '/' ? webHtml.replace('data-auth-mode="token"', () => `data-auth-mode="${adminAccess.mode}" data-command-automation="${Boolean(commandPolicy)}" data-multi-target="${settings.targets ? 'true' : 'false'}" data-bridge-display-name="${escapeHtml(settings.bridgeDisplayName)}" data-target-display-name="${escapeHtml(settings.targetDisplayName)}"`)
           .replace('<title>SSH 승인 · Approval Portal</title>', () => `<title>${escapeHtml(settings.bridgeDisplayName)} · ${escapeHtml(settings.targetDisplayName)} · SSH Approval Portal</title>`) : webJs);
       }
       if (req.method === 'GET' && url.pathname === '/api/pending') return json(res, 200, visible(queue.list()).map(presentJob));

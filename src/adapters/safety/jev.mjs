@@ -5,7 +5,7 @@ const RESPONSE_LIMIT = 64 * 1024;
 const unavailable = reason => ({ status: 'unavailable', reason });
 
 /** Fixed endpoint, no retries/redirects, one outstanding request per adapter. */
-export function createJevAssessor({ apiKey, fetchImpl = globalThis.fetch, timeoutMs = 10_000 } = {}) {
+export function createJevAssessor({ apiKey, fetchImpl = globalThis.fetch, timeoutMs = 10_000, question = SAFETY_QUESTION } = {}) {
   if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30_000) throw Error('Invalid Jev timeout');
   let busy = false;
   return {
@@ -14,7 +14,7 @@ export function createJevAssessor({ apiKey, fetchImpl = globalThis.fetch, timeou
       if (busy) return unavailable('busy');
       let state;
       try { state = safetyInput(input); } catch { return unavailable('invalid_input'); }
-      const body = JSON.stringify({ model: SAFETY_PROTOCOL.model, state, questions: { risk: SAFETY_QUESTION } });
+      const body = JSON.stringify({ model: SAFETY_PROTOCOL.model, state, questions: { risk: question } });
       if (Buffer.byteLength(body) > 24 * 1024) return unavailable('input_too_large');
       busy = true;
       const controller = new AbortController();

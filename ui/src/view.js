@@ -1,3 +1,4 @@
+import { decisionText } from './decision.js';
 export function createCardView({ document, i18n }) {
   const { t, korean, locale, states } = i18n;
   const el = id => document.getElementById(id);
@@ -49,6 +50,7 @@ export function createCardView({ document, i18n }) {
         text(list, 'dd', label === '크기' ? `${value.toLocaleString(locale)} ${t('바이트')}` : value, label === 'SHA-256' ? 'hash' : '');
       }
     }
+    if (job.decision) text(el('details'), 'p', decisionText(job.decision, korean));
     if (job.result && job.kind === 'command') {
       text(el('details'), 'p', t('실행 결과'), 'section-label');
       text(el('details'), 'pre', job.result.content?.map(x => x.text ?? '').join('\n') || JSON.stringify(job.result.structuredContent ?? job.result));

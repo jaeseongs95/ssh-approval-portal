@@ -1,3 +1,4 @@
+import { decisionText } from '../../ui/src/decision.js';
 export function createWebView({ document, i18n }) {
   const { t, korean, locale, states, kinds } = i18n;
   const el = id => document.getElementById(id);
@@ -40,6 +41,7 @@ export function createWebView({ document, i18n }) {
     }
     text(body, 'p', `${t('중계기')} · ${bridgeName} / ${t('대상 서버')} · ${job.targetDisplayName ?? targetName}${job.targetId ? ` [${job.targetId}]` : ''} (${job.target})`, 'target');
     if (job.targetId) text(body, 'p', `${t('설정 revision')} · ${job.targetRevision} / ${t('호스트 키')} · ${job.hostKey}`, 'target'); text(body, 'pre', command, 'command');
+    if (job.decision) text(body, 'p', decisionText(job.decision, korean), 'target');
     const meta = text(body, 'div', '', 'meta'); text(meta, 'span', `${t('요청')} ${job.id}`, 'request-id');
     const time = waiting ? job.expiresAt : job.finishedAt ?? job.createdAt;
     text(meta, 'span', `${t(waiting ? '만료' : job.finishedAt ? '처리 완료' : '요청')} ${new Date(time).toLocaleString(locale)}`);
@@ -110,7 +112,7 @@ export function createWebView({ document, i18n }) {
         previous?.node.remove(); records.set(job.id, record);
       }
       for (const button of record.buttons) button.disabled = deciding;
-      (job.state === 'pending' ? pending : job.state === 'running' ? running : history).push(record.node);
+      (job.state === 'pending' ? pending : ['running', 'evaluating'].includes(job.state) ? running : history).push(record.node);
     }
     reconcile(el('jobs'), pending.length ? pending : [placeholders.pending]);
     reconcile(el('history'), history.length ? history : [placeholders.history]);

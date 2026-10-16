@@ -1,5 +1,7 @@
 # AIK·AGS 임시 연결 시험
 
+이 문서의 합성 fixture와 별개로, 신뢰된 AIK backend가 연결할 수 있는 SSH MCP 어댑터 포트는 [명령 자동 실행](command-automation.ko.md)의 AIK 연결 절에 정의한다. 포트 구현·합성 시험은 실제 AIK 설치물 연동 인증을 뜻하지 않는다.
+
 AIK 리드와 총괄이 확인한 현재 경계에 맞춘 합성 시험이다. 합의된 AIK↔AGS↔SSH 공통 계약과 전용 적합성 시험은 아직 없다. 이 fixture는 제품 구현이나 실제 AIK/AGS 연동 인증을 대신하지 않는다.
 
 - AIK: `AuthorityGateway.request(session, ToolCall)` 형태를 임시 포트로 표현한다. `ToolSession`은 프로세스 내부 객체이며 원격 토큰으로 직렬화하지 않는다. 실제 인가 검사·effect journal·fencing은 구현하지 않는다.
