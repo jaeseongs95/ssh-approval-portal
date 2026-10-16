@@ -112,7 +112,8 @@ test('multi-target web filter retires a delayed old response and updates visible
   await page.goto(server.origin+'/fixture/web'); await page.locator('#target-filter').waitFor({state:'visible'});
   assert.equal(await page.locator('#jobs .request').count(),2);
   let entered, release; const held=new Promise(resolve=>release=resolve), started=new Promise(resolve=>entered=resolve);
-  server.state.beforeRequests=async target=>{if(target==='alpha'){entered();await held;}};
+  // The console now requests one global snapshot; filtering is local to that snapshot.
+  server.state.beforeRequests=async()=>{entered();await held;};
   await page.selectOption('#target-filter','alpha');await started;
   await page.selectOption('#target-filter','beta');
   assert.ok((await page.title()).includes('beta 이름 [beta]')); assert.equal(await page.locator('#jobs .request').count(),0);
@@ -156,4 +157,34 @@ for (const mode of ['beta-success','beta-error','aba-success','aba-error','uncha
     assert.ok(page.url().endsWith('/fixture/web'),'An old selection download must not navigate the replacement view');
     assert.equal(await page.locator('#error').textContent(),'','An old selection error must not be shown in the replacement view');
   }
+}));
+
+test('unified console counts all targets, separates running work, sorts across queues and acts on immutable IDs', async () => browserFixture(async (page, server) => {
+  server.state.multiTarget = true;
+  const on=(id,target,state,createdAt,kind='command')=>({...job(id,state),targetId:target,targetDisplayName:'same name',targetRevision:target+'-v1',hostKey:'SHA256:'+target,createdAt,kind,...(kind==='command'?{}:{operation:{remotePath:'/tmp/same.bin',elevate:false}})});
+  // Grouped target queues deliberately arrive out of chronological order.
+  server.state.jobs=[on('alpha-old','alpha','pending',10),on('alpha-upload','alpha','pending',30,'upload'),on('alpha-done','alpha','completed',11),on('beta-new','beta','pending',20),on('beta-running','beta','running',40,'download'),on('beta-failed','beta','failed',12)];
+  await page.goto(server.origin+'/fixture/web');await page.locator('#server-overview button').first().waitFor();
+  assert.equal(await page.locator('#pending-count').textContent(),'3');
+  assert.equal(await page.locator('#running-count').textContent(),'1');
+  assert.equal(await page.locator('#history-count').textContent(),'2');
+  assert.deepEqual(await page.locator('#jobs .request').evaluateAll(nodes=>nodes.map(n=>n.dataset.requestId)),['alpha-upload','beta-new','alpha-old']);
+  assert.ok((await page.locator('#server-overview button').first().textContent()).includes('Awaiting approval 3 · Running 1 · Failed 1'));
+  assert.ok((await page.locator('#history summary').allTextContents()).every(text=>/same name \[(alpha|beta)\]/.test(text)));
+  const beta=page.locator('#server-overview button[data-target-id=beta]');
+  await beta.click();await page.waitForFunction(()=>document.querySelector('#pending-count').textContent==='1');
+  assert.equal(await beta.getAttribute('aria-pressed'),'true');
+  assert.equal(await page.locator('#jobs .request').getAttribute('data-request-id'),'beta-new');
+  assert.ok((await page.locator('#server-overview button').first().textContent()).includes('Awaiting approval 3'),'Server selection must not shrink global counts');
+  await page.locator('#jobs button').first().click();await page.waitForFunction(()=>document.querySelector('#running-count').textContent==='2');
+  assert.deepEqual(server.state.requests.filter(r=>r.method==='POST'),[{method:'POST',id:'beta-new',action:'approve'}]);
+  await page.selectOption('#target-filter','alpha');await page.waitForFunction(()=>document.querySelector('#pending-count').textContent==='2');
+  await page.locator('#jobs .request[data-request-id=alpha-upload] button').last().click();
+  await page.waitForFunction(()=>document.querySelector('#history-count').textContent==='2');
+  assert.equal(server.state.jobs.find(j=>j.id==='alpha-upload').state,'denied');
+  assert.equal(server.state.jobs.find(j=>j.id==='alpha-old').state,'pending');
+  assert.equal(server.state.jobs.find(j=>j.id==='beta-new').state,'running');
+  await page.setViewportSize({width:390,height:844});
+  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Console fits a narrow browser without horizontal overflow');
+  await page.locator('#logout').click();await page.waitForURL('**/cdn-cgi/access/logout');
 }));

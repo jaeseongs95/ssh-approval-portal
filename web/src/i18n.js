@@ -2,6 +2,9 @@ export function createWebI18n(language = 'en') {
 const korean = language.toLowerCase().startsWith('ko');
 const locale = korean ? 'ko-KR' : 'en-US';
 const en = {
+  '등록됨': 'Registered', '사용 중지': 'Disabled',
+  '실행 중인 요청이 없습니다': 'No running requests',
+  '승인 후 실행 중인 명령과 파일 전송이 표시됩니다.': 'Approved commands and file transfers in progress appear here.',
   '대상 ID': 'Target ID', '설정 revision': 'Configuration revision', '호스트 키': 'Host key', '전체 대상': 'All targets',
   '대상 선택에 실패했습니다. 다시 열어 주세요.': 'Could not select the target. Reopen the file card.',
   '중계기': 'Bridge', '대상 서버': 'Target server', '서버 식별': 'Server identity',

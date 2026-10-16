@@ -7,6 +7,8 @@ export function createWebView({ document, i18n }) {
   const multiTarget = document.body.dataset.multiTarget === 'true';
   let selectionRevision = 0;
   const records = new Map();
+  const serverRecords = new Map();
+  let targetList = [], changeTarget;
   let handlers;
   function text(parent, tag, value, className = '') {
     const node = document.createElement(tag); node.textContent = value; node.className = className; parent.append(node); return node;
@@ -18,6 +20,7 @@ export function createWebView({ document, i18n }) {
   const placeholders = {
     pending: empty(t('대기 중인 요청이 없습니다'), t('새 승인 요청이 들어오면 여기에 표시됩니다.')),
     history: empty(t('아직 승인 이력이 없습니다'), t('승인·거부된 요청의 상태와 결과가 여기에 표시됩니다.')),
+    running: empty(t('실행 중인 요청이 없습니다'), t('승인 후 실행 중인 명령과 파일 전송이 표시됩니다.')),
   };
   function createRecord(job, deciding, previous) {
     const waiting = job.state === 'pending';
@@ -29,6 +32,7 @@ export function createWebView({ document, i18n }) {
       box.open = previous?.node.open ?? false;
       const summary = text(box, 'summary', ''); const head = text(summary, 'div', '', 'summary-head');
       text(head, 'span', '›', 'chevron'); text(head, 'span', kinds[job.kind] ?? job.kind, 'kind');
+      text(head, 'span', `${job.targetDisplayName ?? targetName}${job.targetId ? ` [${job.targetId}]` : ''}`, 'summary-target');
       text(head, 'span', states[job.state] ?? job.state, `badge ${job.state}`);
       text(summary, 'span', command, 'preview'); body = text(box, 'div', '', 'history-body');
     } else {
@@ -66,21 +70,53 @@ export function createWebView({ document, i18n }) {
       else parent.insertBefore(node, cursor);
     }
   }
+  function overview(jobs) {
+    const root = el('server-overview');
+    if (!root) return;
+    const counts = id => {
+      const scoped = id === undefined ? jobs : jobs.filter(job => (job.targetId ?? 'default') === id);
+      return ['pending', 'running', 'failed'].map(state => scoped.filter(job => job.state === state).length);
+    };
+    const selected = el('target-filter')?.value || '';
+    const entries = [{ id: '', displayName: t('전체 대상'), enabled: true }, ...targetList];
+    const nodes = entries.map(target => {
+      const values = counts(target.id || undefined), fingerprint = JSON.stringify([target, values, selected]);
+      let record = serverRecords.get(target.id);
+      if (record?.fingerprint !== fingerprint) {
+        const node = document.createElement('button'); node.type = 'button'; node.className = 'server-card'; node.dataset.targetId = target.id;
+        node.setAttribute('aria-pressed', String(target.id === selected));
+        text(node, 'strong', target.displayName);
+        if (target.id) text(node, 'span', `${target.id} · ${t(target.enabled ? '등록됨' : '사용 중지')}`, 'server-id');
+        text(node, 'span', `${t('승인 대기')} ${values[0]} · ${t('실행 중')} ${values[1]} · ${t('실패')} ${values[2]}`, 'server-counts');
+        node.onclick = () => { if (changeTarget && target.id !== (el('target-filter')?.value || '')) { el('target-filter').value = target.id; changeTarget(); } };
+        if (!changeTarget) node.disabled = true;
+        record = { node, fingerprint }; serverRecords.set(target.id, record);
+      }
+      return record.node;
+    });
+    reconcile(root, nodes); el('overview-section').hidden = false;
+  }
   function render(jobs, deciding = false) {
-    const live = new Set(jobs.map(job => job.id)), pending = [], history = [];
+    overview(jobs);
+    const selected = el('target-filter')?.value;
+    const visible = selected ? jobs.filter(job => (job.targetId ?? 'default') === selected) : jobs;
+    const live = new Set(visible.map(job => job.id)), pending = [], running = [], history = [];
     for (const [id, record] of records) if (!live.has(id)) { record.node.remove(); records.delete(id); }
-    for (const job of [...jobs].reverse()) {
+    // Aggregate queues arrive grouped by target, so insertion order is not chronology.
+    for (const job of [...visible].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0) || a.id.localeCompare(b.id))) {
       let record = records.get(job.id);
       if (record?.fingerprint !== JSON.stringify(job)) {
         const previous = record; record = createRecord(job, deciding, previous);
         previous?.node.remove(); records.set(job.id, record);
       }
       for (const button of record.buttons) button.disabled = deciding;
-      (job.state === 'pending' ? pending : history).push(record.node);
+      (job.state === 'pending' ? pending : job.state === 'running' ? running : history).push(record.node);
     }
     reconcile(el('jobs'), pending.length ? pending : [placeholders.pending]);
     reconcile(el('history'), history.length ? history : [placeholders.history]);
+    if (el('running')) reconcile(el('running'), running.length ? running : [placeholders.running]);
     el('pending-count').textContent = pending.length; el('history-count').textContent = history.length;
+    if (el('running-count')) el('running-count').textContent = running.length;
   }
   function initialize(actions) {
     handlers = actions;
@@ -105,9 +141,10 @@ export function createWebView({ document, i18n }) {
     target: () => el('target-filter')?.value || undefined,
     selectionRevision: () => selectionRevision,
     targets(data, changed) {
+      targetList = data.targets;
       const select = el('target-filter'); select.replaceChildren();
       const all = text(select, 'option', t('전체 대상')); all.value = '';
-      for (const target of data.targets) { const option = text(select, 'option', `${target.displayName} (${target.id})`); option.value = target.id; option.disabled = !target.enabled; }
+      for (const target of data.targets) { const option = text(select, 'option', `${target.displayName} (${target.id})${target.enabled ? '' : ` · ${t('사용 중지')}`}`); option.value = target.id; }
       select.ariaLabel = t('대상 서버'); el('target-filter-label').hidden = false;
       const identify = () => {
         const target = data.targets.find(target => target.id === select.value);
@@ -115,7 +152,11 @@ export function createWebView({ document, i18n }) {
         document.title = `${bridgeName} · ${name} · ${korean ? 'SSH 승인' : 'SSH approvals'}`;
         el('server-identity').textContent = `${t('중계기')} · ${bridgeName} / ${t('대상 서버')} · ${name}`;
       };
-      identify(); select.onchange = () => { selectionRevision++; render([]); identify(); el('error').textContent = ''; el('error').hidden = true; changed(); };
+      identify(); changeTarget = select.onchange = () => {
+        selectionRevision++; render([]); identify();
+        if (el('overview-section')) el('overview-section').hidden = true;
+        el('error').textContent = ''; el('error').hidden = true; changed();
+      };
     },
     token: () => el('token').value,
     unauthorized: () => { el('sign-in').hidden = false; },
@@ -129,6 +170,10 @@ export function createWebView({ document, i18n }) {
     disconnected: () => { el('connection').classList.remove('connected'); el('connection-text').textContent = t('연결 확인 필요'); },
     signedOut: () => {
       el('token').value = ''; el('jobs').replaceChildren(); el('history').replaceChildren(); records.clear();
+      el('running')?.replaceChildren(); el('server-overview')?.replaceChildren(); serverRecords.clear(); targetList = [];
+      if (el('overview-section')) el('overview-section').hidden = true;
+      if (el('target-filter-label')) el('target-filter-label').hidden = true;
+      if (el('running-count')) el('running-count').textContent = '0';
       el('pending-count').textContent = el('history-count').textContent = '0'; el('logout').disabled = el('load').disabled = true;
     },
   };

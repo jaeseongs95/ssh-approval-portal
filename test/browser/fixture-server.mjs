@@ -18,6 +18,14 @@ export async function fixtureServer(root) {
         return;
       }
       if (url.pathname.startsWith('/fixture/download/')) { response.end('Synthetic download delivered'); return; }
+      const decision = /^\/api\/([^/]+)\/(approve|deny)$/.exec(url.pathname);
+      if (decision && request.method === 'POST') {
+        state.requests.push({method:request.method,id:decision[1],action:decision[2]});
+        const job = state.jobs.find(job=>job.id===decision[1]);
+        if (!job || job.state !== 'pending') {response.writeHead(409);response.end('{}');return;}
+        job.state=decision[2]==='approve'?'running':'denied';
+        response.setHeader('Content-Type','application/json');response.end(JSON.stringify(job));return;
+      }
       if (url.pathname === '/api/targets') {
         response.setHeader('Content-Type', 'application/json');response.end(JSON.stringify({ targets: ['alpha','beta'].map(id=>({id,displayName:id+' 이름',enabled:true,isDefault:id==='alpha'})),defaultTarget:'alpha' }));return;
       }

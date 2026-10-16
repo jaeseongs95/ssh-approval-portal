@@ -58,7 +58,7 @@ node "$source_dir/scripts/verify.mjs" "$source_dir"
 stamp=$(date -u +%Y%m%dT%H%M%SZ)-$$
 backup=$app/backups/$stamp
 release_hash=$(sha256sum "$source_dir/release-manifest.json" | cut -c1-16)
-release=$app/releases/1.0.0-$release_hash
+release=$app/releases/1.1.0-$release_hash
 install -d -m 0700 "$app/backups" "$backup"
 for path in "$env_file" "$unit" "$helper"; do
   if [[ -e "$path" ]]; then [[ -f "$path" && ! -L "$path" ]] || { echo 'Expected a regular managed file' >&2; exit 1; }; cp -a -- "$path" "$backup/$(basename "$path")"; fi

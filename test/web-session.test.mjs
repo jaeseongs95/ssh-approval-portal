@@ -28,7 +28,7 @@ function harness(language, access = false, jobs) {
     get childElementCount() { return this.children.length; }
     remove() { if(this.parent){this.parent.children=this.parent.children.filter(x=>x!==this);this.parent=null;} }
   }
-  const roots=Object.fromEntries(['token','load','logout','error','history','jobs','pending-count','history-count','connection','connection-text','updated','auth-label','auth-note','sign-in'].map(id=>[id,new Node('root')]));
+  const roots=Object.fromEntries(['token','load','logout','error','history','jobs','running','running-count','pending-count','history-count','connection','connection-text','updated','auth-label','auth-note','sign-in'].map(id=>[id,new Node('root')]));
   const logout=html.match(/<button id="logout"[^>]*data-en="([^"]+)"[^>]*>([^<]+)<\/button>/);
   assert.ok(logout, 'Logout must be a native keyboard-accessible button in the actual HTML');
   roots.logout.hidden=true;roots.logout.dataset.en=logout[1];roots.logout.textContent=logout[2];
@@ -141,6 +141,7 @@ test('unrelated request changes preserve existing nodes, expanded history and ou
   h.payload.push({id:'3'.repeat(48),kind:'command',state:'running',target:'fixture',command:'unrelated change',createdAt:1800000000000});
   await h.controller.load();
   assert.equal(h.roots.jobs.children[0],pending,'unrelated arrival must not replace the pending button subtree');
-  assert.equal(h.roots.history.children[1],history,'existing history is not detached when a new result precedes it');
+  assert.equal(h.roots.history.children[0],history,'running arrivals do not detach existing terminal history');
+  assert.match(h.allText(h.roots.running),/unrelated change/);
   assert.equal(history.open,true);assert.equal(output.scrollTop,42);
 });

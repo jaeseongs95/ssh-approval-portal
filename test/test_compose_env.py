@@ -48,12 +48,12 @@ class ComposeEnvironment(unittest.TestCase):
             with self.subTest(quote=quote):
                 extra = 'EXTRA=' + quote + 'first\\' + quote + '\nBRIDGE_UID=77\nBRIDGE_IMAGE=not-an-image\nlast' + quote + '\n'
                 self.assert_prepared(extra + 'BRIDGE_UID=11\nBRIDGE_GID=12',
-                                     extra + 'BRIDGE_UID=10001\nBRIDGE_GID=10002\nBRIDGE_IMAGE=ssh-approval-portal:1.0.0\n')
+                                     extra + 'BRIDGE_UID=10001\nBRIDGE_GID=10002\nBRIDGE_IMAGE=ssh-approval-portal:1.1.0\n')
 
     def test_missing_keys_append_without_joining_the_last_line(self):
-        self.assert_prepared('EXTRA=kept', 'EXTRA=kept\nBRIDGE_UID=10001\nBRIDGE_GID=10002\nBRIDGE_IMAGE=ssh-approval-portal:1.0.0\n')
+        self.assert_prepared('EXTRA=kept', 'EXTRA=kept\nBRIDGE_UID=10001\nBRIDGE_GID=10002\nBRIDGE_IMAGE=ssh-approval-portal:1.1.0\n')
         self.assert_prepared('BRIDGE_UID=11\nBRIDGE_GID=12',
-                             'BRIDGE_UID=10001\nBRIDGE_GID=10002\nBRIDGE_IMAGE=ssh-approval-portal:1.0.0\n')
+                             'BRIDGE_UID=10001\nBRIDGE_GID=10002\nBRIDGE_IMAGE=ssh-approval-portal:1.1.0\n')
 
     def test_image_update_replaces_only_values_in_all_supported_assignments(self):
         for declaration in ['BRIDGE_IMAGE=', 'BRIDGE_IMAGE = ', 'BRIDGE_IMAGE: ', 'export BRIDGE_IMAGE = ']:

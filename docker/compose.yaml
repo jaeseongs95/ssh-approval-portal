@@ -1,7 +1,7 @@
 name: ssh-approval-portal
 services:
   bridge:
-    image: ${BRIDGE_IMAGE:-ssh-approval-portal:1.0.0}
+    image: ${BRIDGE_IMAGE:-ssh-approval-portal:1.1.0}
     build:
       context: ..
       dockerfile: docker/Dockerfile

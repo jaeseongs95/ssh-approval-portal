@@ -17,8 +17,9 @@ export function createWebController({ state, view, api, document, location, time
         if (state.signedOut) return;
         view.targets(targets, () => load(true)); state.targetsLoaded = true;
       }
-      context = capture(); const target = context.target;
-      const jobs = await api('/api/requests' + (target ? `?target=${encodeURIComponent(target)}` : ''));
+      context = capture();
+      // One owner-authenticated snapshot feeds both global counts and the local filter.
+      const jobs = await api('/api/requests');
       if (state.signedOut || !current(context)) return;
       view.render(jobs, state.deciding); view.connected(); view.error('');
       if (!state.polling) state.polling = timers.setInterval(() => { if (!document.hidden) load(); }, 10000);
