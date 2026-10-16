@@ -43,6 +43,29 @@ def validate_port(value):
     return int(value)
 
 
+def validate_upload_hosts(value):
+    """Use the same Node24 hostname/pattern contract as the HTTPS source adapter."""
+    try:
+        if not isinstance(value, str) or len(value.encode('utf-8')) > 65536 or any(char in value for char in '\r\n\0'):
+            raise ValueError()
+        managed = Path('/opt/ssh-approval/node/bin/node')
+        node = str(managed) if managed.is_file() else shutil.which('node')
+        if not node:
+            raise ValueError()
+        child_env = {key: item for key, item in os.environ.items() if key not in ('NODE_OPTIONS', 'NODE_PATH')}
+        result = subprocess.run([node, str(Path(__file__).with_name('validate-upload-hosts.mjs'))],
+                                input=value.encode('utf-8'), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                timeout=5, shell=False, env=child_env)
+        if result.returncode or len(result.stdout) > 65536:
+            raise ValueError()
+        canonical = result.stdout.decode('ascii')
+        if any(char in canonical for char in '\r\n\0'):
+            raise ValueError()
+        return canonical.split(',') if canonical else []
+    except (OSError, ValueError, UnicodeError, subprocess.SubprocessError):
+        raise ValueError('Configure exact DNS hostnames or leading *.domain suffixes') from None
+
+
 def parse_env(text):
     settings = {}
     for line in text.split('\n'):

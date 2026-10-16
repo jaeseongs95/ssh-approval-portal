@@ -15,7 +15,7 @@ SSH 명령과 파일 전송을 사용자가 확인하고 승인할 수 있는 MC
 | Claude 자동 파일 전달 | 실제 시험에서 `file_uuid`와 빈 `download_url`이 전달되어 입력 검증에 실패했습니다. 샌드박스의 대상 HTTPS 연결도 proxy CONNECT 403으로 차단됐습니다. 자동 전송은 지원하지 않습니다. |
 | 로컬 구조 변경 | 현재 변경의 통합 시험 결과는 별도 검증 기록으로 확인해야 합니다. 과거 후보의 47개 로컬 시험을 현재 변경의 통과 근거로 쓰지 않습니다. |
 
-파일 공급자 허용 목록은 비어 있고, 카드 승인은 `BRIDGE_UI_ENABLED=false`, 웹 관리자 인증은 `BRIDGE_ADMIN_AUTH_MODE=token`이 기본값입니다. 기존 클라이언트 시험의 성공을 새 에이전트 업로드나 다른 플랫폼의 성공으로 해석하지 않습니다.
+파일 공급자 허용 목록의 기본값은 비어 있습니다. `BRIDGE_UPLOAD_SOURCE_HOSTS`에는 정확한 hostname과 앞에 `*.`가 붙은 domain 패턴을 쉼표로 구분해 함께 입력할 수 있습니다. 예를 들어 `files.example.test,*.downloads.example.test`는 가상 주소를 사용한 설정 예입니다. 패턴은 점 경계를 기준으로 한 단계 이상의 모든 깊이 하위 도메인에 일치하며, 기준 domain 자체는 포함하지 않습니다. 단독 `*`, 다른 위치의 wildcard, URL·IP 주소·포트는 거부합니다. wildcard를 선택하면 포함되는 모든 하위 호스트를 신뢰하게 되므로, 신뢰 범위를 확인하지 않은 공유 CDN을 넓게 허용하지 않습니다. 카드 승인은 `BRIDGE_UI_ENABLED=false`, 웹 관리자 인증은 `BRIDGE_ADMIN_AUTH_MODE=token`이 기본값입니다. 기존 클라이언트 시험의 성공을 새 에이전트 업로드나 다른 플랫폼의 성공으로 해석하지 않습니다.
 
 ## 승인과 파일 전송
 
@@ -33,7 +33,7 @@ SSH 명령과 파일 전송을 사용자가 확인하고 승인할 수 있는 MC
 | `request-upload` | ChatGPT/OpenAI의 `download_url`·`file_id` 파일 입력을 임시 저장한 뒤 업로드 승인 대기에 등록합니다. Claude의 `file_uuid`만으로는 호출할 수 없습니다. |
 | `show-ui-probe` | 명령이나 파일을 실행하지 않고 카드와 비공개 메타데이터 전달을 확인합니다. |
 
-PC 파일은 카드에서 고르고 목적지 경로·덮어쓰기·sudo를 지정합니다. 중계기는 받은 바이트의 SHA-256과 설정을 고정해 승인 요청을 만듭니다. 새 `request-upload` 경로도 같은 승인을 거칩니다. 관리자가 실제 공급자의 정확한 hostname을 확인하고 허용하기 전에는 파일을 가져오지 않습니다. 설정과 클라이언트 제약은 [에이전트 업로드 안내](docs/agent-upload.ko.md)를 확인하세요. 로그인 쿠키, 임의 URL이나 채팅에 붙인 파일 바이트로 대신하지 않습니다.
+PC 파일은 카드에서 고르고 목적지 경로·덮어쓰기·sudo를 지정합니다. 중계기는 받은 바이트의 SHA-256과 설정을 고정해 승인 요청을 만듭니다. 새 `request-upload` 경로도 같은 승인을 거칩니다. 관리자가 실제 공급자를 확인하고 정확한 hostname 또는 앞에 `*.`가 붙은 domain 패턴을 허용하기 전에는 파일을 가져오지 않습니다. 설정과 클라이언트 제약은 [에이전트 업로드 안내](docs/agent-upload.ko.md)를 확인하세요. 로그인 쿠키, 임의 URL이나 채팅에 붙인 파일 바이트로 대신하지 않습니다.
 
 파일 하나의 한도는 64 MiB, 임시 저장 총량의 기본값은 512 MiB입니다. `BRIDGE_TRANSFER_MAX_BYTES`는 64 MiB 이하로, `BRIDGE_TRANSFER_BUDGET_BYTES`는 파일 한도 이상으로 조절할 수 있습니다. 디렉터리·링크·장치 파일은 거부합니다. 폴더는 ZIP으로 전송하며 서버에서 자동으로 압축을 풀거나 파일을 실행하지 않습니다. 파일 스냅샷과 다운로드는 바이트를 마스킹하지 않습니다. 다운로드 링크는 10분·1회용이며 저장에 실패하면 카드에서 재발급합니다.
 
@@ -91,7 +91,7 @@ sudo docker compose --env-file /etc/ssh-approval-portal/compose.env -f docker/co
 
 토큰은 Compose 환경변수가 아니라 `/run/secrets/bridge_config` 파일로 전달합니다. 호스트 원본은 `/etc/ssh-approval-portal/docker-secrets.env`이며 서비스 계정만 읽을 수 있습니다. SSH 키·설정은 읽기 전용으로, audit와 전송 임시 저장은 별도 쓰기 경로로 마운트합니다. Linux host network로 기존 localhost SSH·Cloudflare 터널 경로를 유지합니다.
 
-업데이트할 이미지를 먼저 준비한 뒤 `sudo bash scripts/compose-update.sh IMAGE_TAG_OR_DIGEST`를 실행하세요. 유지보수를 예약해 새 실행을 차단한 뒤 전환하며 시작 검사에 실패하면 이전 이미지 ID로 되돌립니다. 출력에 기록된 이전 이미지 ID를 같은 스크립트에 넘겨 복원할 수 있습니다. 이미지·전송 임시 저장과 시크릿을 `docker compose down -v`로 무조건 삭제하지 마세요. 새 업로드 설정을 모르는 이전 이미지로 복원할 때는 해당 버전에 맞는 보호된 설정 백업도 함께 복원해야 합니다.
+업데이트할 이미지를 먼저 준비한 뒤 `sudo bash scripts/compose-update.sh IMAGE_TAG_OR_DIGEST`를 실행하세요. 유지보수를 예약해 새 실행을 차단한 뒤 전환하며 시작 검사에 실패하면 이전 이미지 ID로 되돌립니다. 출력에 기록된 이전 이미지 ID를 같은 스크립트에 넘겨 복원할 수 있습니다. 이미지·전송 임시 저장과 시크릿을 `docker compose down -v`로 무조건 삭제하지 마세요. exact 목록만 지원하는 이전 버전으로 복원하기 전에는 wildcard를 확인된 정확한 hostname으로 바꾸거나 해당 버전에 맞는 보호된 설정 백업을 복원합니다. `BRIDGE_UPLOAD_SOURCE_HOSTS` 키를 인식해도 wildcard 값까지 지원하는 것은 아닙니다. 키 자체를 모르는 이전 이미지로 돌아갈 때도 호환되는 보호된 설정 백업을 복원해야 합니다.
 
 ## 검증과 상태 확인
 

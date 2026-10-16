@@ -1,43 +1,23 @@
 #!/usr/bin/env python3
-"""Stage only exact file-provider hostnames; never print the managed configuration."""
-import ipaddress
+"""Stage verified exact hosts or *.domain patterns; never print managed secrets."""
 import os
 from pathlib import Path
-import re
-import socket
 import stat
 import sys
-from settings_contract import parse_env
+from settings_contract import parse_env, validate_upload_hosts
 
 
 def update_source_hosts(text, raw):
     parse_env(text)
-    if not isinstance(raw, str) or any(char in raw for char in '\r\n\0'):
-        raise ValueError('Use comma-separated exact hostnames')
-    hosts = []
-    for value in raw.split(',') if raw.strip() else []:
-        host = value.strip().lower()
-        if not host or len(host) > 253 or not all(re.fullmatch(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?', label) for label in host.split('.')):
-            raise ValueError('Use exact DNS hostnames, without URLs, wildcards or credentials')
-        try:
-            ipaddress.ip_address(host)
-        except ValueError:
-            pass
-        else:
-            raise ValueError('IP literals are not file-provider hostnames')
-        try:
-            socket.inet_aton(host)
-        except OSError:
-            pass
-        else:
-            raise ValueError('Numeric IP aliases are not file-provider hostnames')
-        if host not in hosts:
-            hosts.append(host)
+    hosts = validate_upload_hosts(raw)
     newline = '\r\n' if '\r\n' in text else '\n'
     kept = ''.join(line for line in text.splitlines(keepends=True) if not line.startswith('BRIDGE_UPLOAD_SOURCE_HOSTS='))
     if kept and not kept.endswith(('\r', '\n')):
         kept += newline
-    return kept + 'BRIDGE_UPLOAD_SOURCE_HOSTS=' + ','.join(hosts) + newline
+    proposed = kept + 'BRIDGE_UPLOAD_SOURCE_HOSTS=' + ','.join(hosts) + newline
+    if len(proposed.encode('utf-8')) > 65536:
+        raise ValueError('Managed configuration exceeds its size limit')
+    return proposed
 
 
 def read_private_config(path):
@@ -58,12 +38,12 @@ if __name__ == '__main__':
         if source not in ['/etc/ssh-mcp-approval-bridge.env', '/etc/ssh-approval-portal/docker-secrets.env'] or not Path(destination).is_absolute():
             raise ValueError('Use a managed configuration and absolute staging file')
         text = read_private_config(source)
-        hosts = input('Exact verified file-provider hostname(s), comma separated (empty disables): ') if sys.stdin.isatty() else sys.stdin.readline().rstrip('\r\n')
+        hosts = input('Verified exact hostname(s) or *.domain patterns, comma separated (empty disables): ') if sys.stdin.isatty() else sys.stdin.readline().rstrip('\r\n')
         proposed = update_source_hosts(text, hosts)
         fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, 'wb') as output:
             output.write(proposed.encode('utf-8')); output.flush(); os.fsync(output.fileno())
         print('File source settings staged. Existing secrets and authentication were preserved.')
     except Exception:
-        print('File source setup refused; verify exact hostnames and private managed paths.', file=sys.stderr)
+        print('File source setup refused; verify exact hostnames or *.domain patterns and private managed paths.', file=sys.stderr)
         sys.exit(1)

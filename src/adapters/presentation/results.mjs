@@ -64,5 +64,5 @@ export function immediateResult(value) {
   return { ...presentOutcome(value), structuredContent: { state: value.failed ? 'failed' : 'completed', kind: 'command' } };
 }
 export const sourceUnavailable = sourceHost => ({ ...publicResult({ error: 'upload-source-not-configured', sourceHost,
-  message: 'File was not fetched or queued. An administrator must configure this exact file-provider hostname; the card file picker remains available.' }, sourceUnavailableSchema), isError: true });
+  message: 'File was not fetched or queued. An administrator must configure a verified exact hostname or *.domain pattern for this provider; the card file picker remains available.' }, sourceUnavailableSchema), isError: true });
 export const refused = () => ({ isError: true, content: [{ type: 'text', text: 'Request refused or failed. Check authentication, state, limits and permissions.' }] });

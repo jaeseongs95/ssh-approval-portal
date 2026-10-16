@@ -20,8 +20,8 @@
     },
     {
       "path": "config/bridge.env.example",
-      "size": 863,
-      "sha256": "e81452e5ef4ac39dac22943dd2f672d8677703fb4fe47904466b5c597029ccdc"
+      "size": 1029,
+      "sha256": "522ed7831d73421b36c57a1867611123fb3e2e123d4364318e3efce1708c75fa"
     },
     {
       "path": "config/config.example.toml",
@@ -35,8 +35,8 @@
     },
     {
       "path": "config/settings-contract.json",
-      "size": 3462,
-      "sha256": "85bbbe0306995867c838e17c1219479ccd6d2d8abbb0604c609ef11a3bca9f95"
+      "size": 5418,
+      "sha256": "703e76d8e227158ab2512ba2c92614c10adb2920ca495c1844323168e011e1f2"
     },
     {
       "path": "config/ssh-approval-bridge.service",
@@ -65,13 +65,13 @@
     },
     {
       "path": "docs/agent-upload.en.md",
-      "size": 5698,
-      "sha256": "7a952fcbe4fbfe3e345bdb2a37567374d638961b891385661286d0abead30e68"
+      "size": 6624,
+      "sha256": "3e97c1f7f26eaaef2cf80314a2208a0e4b18a1e9cd52b04919672de06b740c5f"
     },
     {
       "path": "docs/agent-upload.ko.md",
-      "size": 6730,
-      "sha256": "9ef0be4ba2012b877639c78e24c4673abcc9de5fc4d35f492bdea1062a00b45e"
+      "size": 8004,
+      "sha256": "61f3e2fe4b04fdc0e9ab98d57443ed0a3c94f26c5451c33b12a87463c6a6078d"
     },
     {
       "path": "docs/architecture.en.md",
@@ -105,13 +105,13 @@
     },
     {
       "path": "README.ko.md",
-      "size": 14581,
-      "sha256": "f3c7c77a3a38d8751ae7d8a5175524b58e7b236650ca437cc378ee0a5584f39e"
+      "size": 15592,
+      "sha256": "c9e87e740d59783bd3e53ad17892d8c31c26dd1fd01d5e62e5a7b5904e330ea4"
     },
     {
       "path": "README.md",
-      "size": 13270,
-      "sha256": "050ba49e588597defe520ade5ef2187ca8b5b6fa934d3f9bf13f83a88a54dbf2"
+      "size": 13994,
+      "sha256": "27fd0a2a63be6f5105ea26f7c7b35aadf488a4f9ad9748119d30c965482612dd"
     },
     {
       "path": "scripts/admin-access-config.mjs",
@@ -140,8 +140,8 @@
     },
     {
       "path": "scripts/configure-upload-sources.py",
-      "size": 3070,
-      "sha256": "c7d9db11ca7f5c82f223a95a33993250089bb049cce8bf016d7056c07934942a"
+      "size": 2342,
+      "sha256": "009b92e272ffcbb70a90ed72be366024aa6c9604d326b4761f89876e7f9dfb3a"
     },
     {
       "path": "scripts/configure-upload-sources.sh",
@@ -200,8 +200,8 @@
     },
     {
       "path": "scripts/settings_contract.py",
-      "size": 3911,
-      "sha256": "4980ebc854181b600a8dd4d87879d8a4fe5381dd00c5d22fa7a17f73497dcd76"
+      "size": 5230,
+      "sha256": "cfc264ebea5828d56ca39f029f896ad3384ec1be23b4b905f501a7f1474163dc"
     },
     {
       "path": "scripts/status.sh",
@@ -212,6 +212,11 @@
       "path": "scripts/validate-origin.mjs",
       "size": 799,
       "sha256": "8fc0472c173d05d5e13d06ab330b16e69875ebceb4f2fb2bd8e862d494f13e3b"
+    },
+    {
+      "path": "scripts/validate-upload-hosts.mjs",
+      "size": 687,
+      "sha256": "46fc193b278cf845833eb06a9fb3fc1c2b1766b9299b4b5532c5fb7debace948"
     },
     {
       "path": "scripts/verify.mjs",
@@ -230,8 +235,13 @@
     },
     {
       "path": "src/adapters/config/settings.mjs",
-      "size": 2735,
-      "sha256": "141157ee3954ab2146df1f2935066616b761289c15b8d57d4c00827ccf3839c9"
+      "size": 2781,
+      "sha256": "75f8d4f83629905802948203d8ab96f859a9e8ac5ef238ea2b1c6e8e85e9d122"
+    },
+    {
+      "path": "src/adapters/config/upload-hosts.mjs",
+      "size": 1334,
+      "sha256": "ab63fda45b7a032ec4a8d851f4108e99f05e30f8de475b35c05f709025f89d12"
     },
     {
       "path": "src/adapters/http/protocol.mjs",
@@ -240,8 +250,8 @@
     },
     {
       "path": "src/adapters/mcp/server.mjs",
-      "size": 8807,
-      "sha256": "70af206da0aa5b87d8e62cdbe11fdf694cdd721b2c536bb3baece7c9be865c42"
+      "size": 8869,
+      "sha256": "183f3792a0eeaa68e1bee92be64a6bd0adb916d0421f773842bfbf5c938ee93b"
     },
     {
       "path": "src/adapters/presentation/capabilities.mjs",
@@ -250,8 +260,8 @@
     },
     {
       "path": "src/adapters/presentation/results.mjs",
-      "size": 5020,
-      "sha256": "586cfbc896ec34c17b0dfae932dfb3243e9ccd9b9cfe5c3213871d796060de8a"
+      "size": 5050,
+      "sha256": "7ef212348a1eea8c52a3060374305f3268bff434d9e10c513fd6923010737e51"
     },
     {
       "path": "src/adapters/security/admin-access.mjs",
@@ -270,8 +280,8 @@
     },
     {
       "path": "src/adapters/sources/file-source.mjs",
-      "size": 6092,
-      "sha256": "d360fa6961b5c1c358fdaed6cfd10697d506facafa47325fc89a5aeff23df0f4"
+      "size": 6241,
+      "sha256": "af53f35f3dbd9673d6225205f1c33d2cefe04b9679f50f2f21effa3a843ae360"
     },
     {
       "path": "src/adapters/ssh/transfers.mjs",
@@ -330,8 +340,8 @@
     },
     {
       "path": "test/agent-upload.test.mjs",
-      "size": 10711,
-      "sha256": "a00ca6a9c94006b88d902895554447d5aa0ad325abd2ce9325bcf1414b745ab4"
+      "size": 12876,
+      "sha256": "53bdb239cdf3047f4bf360f0d26c2d2b5a973646ed61c975e4773d8ad325afed"
     },
     {
       "path": "test/artifacts.test.mjs",
@@ -385,8 +395,8 @@
     },
     {
       "path": "test/config-contracts.test.mjs",
-      "size": 9598,
-      "sha256": "e8b937c4422dfa26823691162995549c4062ae950f7a8855a2fcb8e3edf70255"
+      "size": 11160,
+      "sha256": "a4803b460c65b7bf210501161b19d3428907c7d48d3f8a6cbb0ce069b5d264b9"
     },
     {
       "path": "test/container-test.sh",
@@ -435,8 +445,8 @@
     },
     {
       "path": "test/file-source.test.mjs",
-      "size": 13734,
-      "sha256": "49d8b06fb171e74138cdd7c86fa553b8c426d56085a8e4c11998f31b412d093c"
+      "size": 15999,
+      "sha256": "7a8834e9e791a860e7c03760d4b412e05af85a510888c4351fa31a99c903b6ab"
     },
     {
       "path": "test/http-races.test.mjs",
@@ -510,13 +520,13 @@
     },
     {
       "path": "test/test_settings_contract.py",
-      "size": 4914,
-      "sha256": "b01544252d8e263d5fa30e38b435817299fe8e0176d80fc16ea3a7949e651a16"
+      "size": 5531,
+      "sha256": "37ae3f6f4fc4fdfd83e2ca603ce73dbbb91daba66ef6446ef53f631ab0104a13"
     },
     {
       "path": "test/test_upload_sources.py",
-      "size": 2370,
-      "sha256": "c92c77f9dfc89b64d2aa563b2c405e30e23cbc909cf076e289d627d917a94591"
+      "size": 3214,
+      "sha256": "b34a115a7a23a13ccfc7cb6fb7555c10b084fc6e75d6b40bfc5a0725b37c7739"
     },
     {
       "path": "test/transfer-failure.test.mjs",

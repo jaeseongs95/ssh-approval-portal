@@ -2,6 +2,7 @@ import settingsContract from '../../../config/settings-contract.json' with { typ
 import { MAX_BYTES } from '../../contracts/ports.mjs';
 import { equalSecret } from '../security/tickets.mjs';
 import { domainToASCII, domainToUnicode } from 'node:url';
+import { parseUploadHosts } from './upload-hosts.mjs';
 
 export { settingsContract };
 
@@ -37,7 +38,7 @@ export function parseSettings(env) {
   const maxBytes = Number(value('BRIDGE_TRANSFER_MAX_BYTES')), budget = Number(value('BRIDGE_TRANSFER_BUDGET_BYTES'));
   if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0 || maxBytes > MAX_BYTES || !Number.isSafeInteger(budget) || budget < maxBytes) throw Error('Invalid staging limits');
   return Object.freeze({ mcpToken, adminToken, adminOrigin, uiEnabled: value('BRIDGE_UI_ENABLED') === 'true', prefix, maxBytes, budget,
-    uploadHosts: Object.freeze(value('BRIDGE_UPLOAD_SOURCE_HOSTS').split(',').filter(Boolean)),
+    uploadHosts: Object.freeze(parseUploadHosts(value('BRIDGE_UPLOAD_SOURCE_HOSTS'))),
     mcpPort: validatedPort(value('BRIDGE_MCP_PORT')), adminPort: validatedPort(value('BRIDGE_ADMIN_PORT')),
     readProfile: 'aws-readonly', writeProfile: 'aws-local' });
 }

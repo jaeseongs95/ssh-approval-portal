@@ -12,6 +12,18 @@ spec.loader.exec_module(settings)
 
 
 class SettingsContract(unittest.TestCase):
+    def test_shared_upload_host_vectors(self):
+        for vector in settings.contract['uploadHostVectors']:
+            with self.subTest(value=vector['value']):
+                if vector.get('valid') is False:
+                    with self.assertRaises(ValueError):
+                        settings.validate_upload_hosts(vector['value'])
+                else:
+                    self.assertEqual(settings.validate_upload_hosts(vector['value']), vector['expected'])
+        for invalid in [None, 'x' * 65537]:
+            with self.assertRaises(ValueError):
+                settings.validate_upload_hosts(invalid)
+
     def test_shared_origin_and_port_vectors(self):
         for kind, validator in [('origin', settings.validate_origin), ('port', settings.validate_port)]:
             for vector in settings.contract[kind + 'Vectors']:

@@ -2,6 +2,7 @@ import { lookup } from 'node:dns/promises';
 import { request as httpsRequest } from 'node:https';
 import { BlockList, isIP } from 'node:net';
 import { Transform } from 'node:stream';
+import { matchesUploadHost, validateUploadHostPattern } from '../config/upload-hosts.mjs';
 
 const refused = () => Error('File source refused, expired or unavailable');
 const dnsName = name => typeof name === 'string' && name.length <= 253 && name.split('.').every(label => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label)) && !isIP(name);
@@ -13,8 +14,9 @@ for (const [address, prefix] of [['2001::', 23], ['2001:db8::', 32], ['2002::', 
 const publicAddress = ({ address, family }) => isIP(address) === family && (family === 4 ? !denied.check(address, 'ipv4') : family === 6 && globalV6.check(address, 'ipv6') && !denied.check(address, 'ipv6'));
 
 export function createFileSource({ hosts, maxBytes = 64 * 1024 * 1024, timeoutMs = 60_000, idleTimeoutMs = 15_000, resolve = lookup, request = httpsRequest }) {
-  if (!Array.isArray(hosts) || hosts.some(host => !dnsName(host)) || ![maxBytes, timeoutMs, idleTimeoutMs].every(value => Number.isSafeInteger(value) && value > 0)) throw refused();
-  const allowed = new Set(hosts);
+  if (!Array.isArray(hosts) || ![maxBytes, timeoutMs, idleTimeoutMs].every(value => Number.isSafeInteger(value) && value > 0)) throw refused();
+  let allowed;
+  try { allowed = hosts.map(validateUploadHostPattern); } catch { throw refused(); }
   const parse = value => {
     try {
       if (typeof value !== 'string' || value.length > 8192 || /[\s\\]/.test(value)) throw refused();
@@ -31,10 +33,10 @@ export function createFileSource({ hosts, maxBytes = 64 * 1024 * 1024, timeoutMs
         open: options => provider.open(downloadUrl, options),
       });
     },
-    inspect(downloadUrl) { const url = parse(downloadUrl); return { hostname: url.hostname, allowed: allowed.has(url.hostname) }; },
+    inspect(downloadUrl) { const url = parse(downloadUrl); return { hostname: url.hostname, allowed: matchesUploadHost(url.hostname, allowed) }; },
     async open(downloadUrl, { signal } = {}) {
       const url = parse(downloadUrl);
-      if (!allowed.has(url.hostname)) throw refused();
+      if (!matchesUploadHost(url.hostname, allowed)) throw refused();
       return new Promise((accept, reject) => {
         let req, response, stream, timer, idle, settled = false, closed = false;
         const cleanup = () => {

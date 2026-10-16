@@ -13,13 +13,15 @@ Claude Team and Enterprise organization owners can configure code-execution acce
 1. Verify the installed candidate, synchronize Cloudflare Portal capabilities, and refresh the ChatGPT connection's tools.
 2. Create or attach a file in ChatGPT and ask: “Use `request-upload` to request uploading this file to `/home/mcpops/reviewed-script.py`.” The host must supply an authorized file reference; do not invent a URL or pass cookies.
 3. The initial source allowlist is empty. The tool returns `upload-source-not-configured` and only the source hostname. It neither fetches a file nor queues an approval. An administrator must verify that hostname belongs to the actual file provider. Do not paste the signed URL into chat or logs.
-4. On a native server, run this in the administrator terminal and enter only the verified **exact hostname**. Separate multiple hosts with commas. An empty input disables this ingestion path.
+4. On a native server, run this in the administrator terminal and enter verified **exact hostnames or leading `*.domain` patterns** in `BRIDGE_UPLOAD_SOURCE_HOSTS`. Mix them in one comma-separated list, for example `files.example.test,*.downloads.example.test` (fictional). An empty input disables this ingestion path.
 
 ```sh
 sudo bash /var/lib/ssh-mcp/app/approval-bridge/scripts/configure-upload-sources.sh
 ```
 
 The script verifies installed files and configuration, reserves maintenance, backs up the configuration, and changes only the source allowlist while preserving secrets, SSH keys, and authentication. It attempts restoration if startup checks fail. Complete or deny pending jobs and transfers first.
+
+A leading `*.domain` matches one or more subdomain labels at any depth and excludes the apex: `*.example.com` matches `a.example.com` and `a.b.example.com`, but not `example.com` or `badexample.com`. Matching respects the dot boundary. Bare `*`, wildcards elsewhere, URLs, IP addresses and ports are rejected. A wildcard explicitly trusts every covered subdomain. Verify that entire scope before choosing it; a broad shared-CDN pattern is not automatically recommended, preset or registered.
 
 5. Supply the same file through a fresh host file input. A successful result is `pending`. Check the name, measured size, SHA-256, destination, overwrite and sudo settings in the card before approving. Compare the downloaded file hash with the original to complete a roundtrip test.
 
@@ -28,16 +30,16 @@ A login-protected source link such as `chatgpt.com/api/library/.../download` is 
 ## Limits and cancellation
 
 - Maximum single file: 64 MiB. Default total staging budget: 512 MiB. Each import reserves the maximum file size before starting and reduces the reservation to the measured size after completion. At most two external imports run at once.
-- Only HTTPS/443, exact configured hostnames and public DNS addresses are accepted. Every DNS answer is checked and the connection is pinned to a validated address. Redirects and compressed responses are refused.
+- Only HTTPS/443, hostnames matching configured exact names or leading wildcard patterns, and public DNS addresses are accepted. TLS still verifies the requested hostname. Every DNS answer is checked and the connection is pinned to a validated address. Redirects and compressed responses are refused.
 - Default total deadline: 60 seconds; idle timeout: 15 seconds. HTTP disconnect, service shutdown, errors and size violations remove staging and release reservations. An already-running OS DNS lookup cannot be cancelled, but its late result cannot start a connection.
 - This server uses stateless MCP. A separate logical cancellation POST is not guaranteed to find the running request. Actual HTTP disconnect, service shutdown and deadlines are enforced independently.
 - Existing ten-minute approval expiry and the memory-only queue apply. Restarted requests are never automatically restored or executed.
 
 ## Docker configuration
 
-Containers read the same `BRIDGE_UPLOAD_SOURCE_HOSTS` setting, empty by default. An administrator backs up `/etc/ssh-approval-portal/docker-secrets.env`, adds only verified exact hostnames, and recreates the container through the existing maintenance and Compose update procedure. Do not add a Docker socket or extra runtime privileges.
+Containers read the same `BRIDGE_UPLOAD_SOURCE_HOSTS` setting, empty by default. An administrator backs up `/etc/ssh-approval-portal/docker-secrets.env`, sets verified exact hostnames or leading wildcard patterns in that same comma-separated list, and recreates the container through the existing maintenance and Compose update procedure. Do not add a Docker socket or extra runtime privileges.
 
-When reverting to an older image, check whether it accepts the new configuration key. Restore the matching protected configuration backup when returning to an image without this feature. The native-only setup script does not manage Docker services.
+Before reverting to an exact-only version, replace wildcard entries with verified exact hostnames or restore its matching protected configuration backup. An older version can recognize `BRIDGE_UPLOAD_SOURCE_HOSTS` yet reject wildcard values. Restore a compatible protected backup when returning to an image that does not recognize the key at all. The native-only setup script does not manage Docker services.
 
 ## Verification scope
 

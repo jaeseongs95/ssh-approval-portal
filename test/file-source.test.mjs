@@ -60,7 +60,38 @@ test('inspect is offline, requires exact allowed host and rejects ambiguous or u
   assert.equal(dnsCalls, 0);
   const disabled = createFileSource({ hosts: [] });
   assert.equal(disabled.inspect(url).allowed, false); await assert.rejects(disabled.open(url), rejection);
-  assert.throws(() => createFileSource({ hosts: ['*.example.test'] }), rejection);
+  for (const pattern of ['*', 'files.*.test', '*example.test', '*.localhost', '*.127.0.0.1', '*.2130706433', '*.0x7f000001', '127.0.0.1', '2130706433', 'https://files.example.test', 'files.example.test:443', 'user@files.example.test', 'files.example.test.']) {
+    assert.throws(() => createFileSource({ hosts: [pattern] }), rejection, pattern);
+  }
+});
+
+test('mixed exact and wildcard hosts allow regional rotation and nested hosts with label boundaries', async () => {
+  const hosts = [hostname, '*.upload.example.test'];
+  for (const host of [hostname, 'region-us.upload.example.test', 'region-eu.upload.example.test', 'nested.region-us.upload.example.test']) {
+    const f = fixture({ hosts }), sourceUrl = `https://${host}/file`;
+    assert.deepEqual(f.source.inspect(sourceUrl), { hostname: host, allowed: true });
+    const opened = await f.source.open(sourceUrl);
+    assert.deepEqual(await collect(opened.stream), Buffer.from([0, 255, 1]));
+    assert.equal(f.count(), 1); assert.equal(f.options().servername, host); assert.equal(f.options().headers.Host, host);
+  }
+  for (const host of ['upload.example.test', 'evil-upload.example.test', 'region-us.upload.example.test.evil.test', 'sub.files.example.test']) {
+    let dnsCalls = 0;
+    const f = fixture({ hosts, resolve: async () => { dnsCalls++; return publicDns(); } }), sourceUrl = `https://${host}/file`;
+    assert.deepEqual(f.source.inspect(sourceUrl), { hostname: host, allowed: false });
+    await assert.rejects(f.source.open(sourceUrl), rejection);
+    assert.equal(dnsCalls, 0); assert.equal(f.count(), 0);
+  }
+});
+
+test('wildcard permission still rejects any private DNS answer and redirects before file exposure', async () => {
+  const hosts = ['*.example.test'];
+  const privateDns = fixture({ hosts, resolve: async () => [{ address: '8.8.8.8', family: 4 }, { address: '127.0.0.1', family: 4 }] });
+  assert.equal(privateDns.source.inspect(url).allowed, true);
+  await assert.rejects(privateDns.source.open(url), rejection); assert.equal(privateDns.count(), 0);
+  const redirect = fixture({ hosts, status: 302, headers: { location: 'https://other.example.test/secret' } });
+  assert.equal(redirect.source.inspect(url).allowed, true);
+  await assert.rejects(redirect.source.open(url), rejection);
+  assert.equal(redirect.count(), 1); assert.equal(redirect.destroyed(), 1);
 });
 
 test('all DNS answers must be public, including mapped and transition IPv6', async () => {

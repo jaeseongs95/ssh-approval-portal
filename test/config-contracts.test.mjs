@@ -10,9 +10,33 @@ import { generateSecrets } from '../scripts/generate-secrets.mjs';
 import { checkHealth } from '../scripts/healthcheck.mjs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { parseUploadHosts, matchesUploadHost, UPLOAD_HOSTS_MAX_BYTES } from '../src/adapters/config/upload-hosts.mjs';
 
 const origin = 'https://admin.example.test';
 const env = { BRIDGE_MCP_TOKEN: 'fixture-mcp', BRIDGE_ADMIN_TOKEN: 'fixture-admin', BRIDGE_ADMIN_ORIGIN: origin };
+
+test('runtime upload settings share exact and wildcard policy vectors with deployment tools', () => {
+  for (const { value, expected, valid } of settingsContract.uploadHostVectors) {
+    if (valid === false) {
+      assert.throws(() => parseUploadHosts(value), undefined, JSON.stringify(value));
+      assert.throws(() => parseSettings({ ...env, BRIDGE_UPLOAD_SOURCE_HOSTS: value }));
+    } else {
+      assert.deepEqual(parseUploadHosts(value), expected);
+      assert.deepEqual(parseSettings({ ...env, BRIDGE_UPLOAD_SOURCE_HOSTS: value }).uploadHosts, expected);
+    }
+  }
+  for (const { pattern, host, allowed } of settingsContract.uploadHostMatchVectors) {
+    assert.equal(matchesUploadHost(host, parseUploadHosts(pattern)), allowed, `${pattern}: ${host}`);
+  }
+  const script = fileURLToPath(new URL('../scripts/validate-upload-hosts.mjs', import.meta.url));
+  for (const [input, expected] of [[' Files.Example.test,*.Example.test ', 'files.example.test,*.example.test'], ['', ''], ['*', null], ['x'.repeat(UPLOAD_HOSTS_MAX_BYTES + 1), null]]) {
+    const result = spawnSync(process.execPath, [script], { input, encoding: 'utf8', timeout: 5000, maxBuffer: UPLOAD_HOSTS_MAX_BYTES + 256 });
+    assert.ifError(result.error);
+    assert.equal(result.status, expected === null ? 1 : 0);
+    assert.equal(result.stdout, expected ?? '');
+    assert.equal(result.stderr, expected === null ? 'Upload source validation failed.\n' : '');
+  }
+});
 
 test('canonical origin and supported port vectors are identical configuration contracts', () => {
   for (const { value, valid } of settingsContract.originVectors) {

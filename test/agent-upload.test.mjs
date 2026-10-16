@@ -5,10 +5,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { request as httpRequest } from 'node:http';
+import { EventEmitter } from 'node:events';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { createApplication } from '../app.mjs';
 import { hash } from '../src/domain/validation.mjs';
+import { createFileSource } from '../src/adapters/sources/file-source.mjs';
 
 const file = { download_url: 'https://files.example.test/source?signature=URL_SECRET_SENTINEL', file_id: 'FILE_REFERENCE_SENTINEL' };
 const bytes = Buffer.from('FILE_BYTES_NEVER_IN_MODEL\0\xff');
@@ -17,14 +19,14 @@ const waitFor = async condition => {
   for (let i = 0; i < 200; i++) { if (condition()) return; await new Promise(resolve => setTimeout(resolve, 5)); }
   assert.fail('Fixture condition timed out');
 };
-async function fixture({ open, allowed = true, enabled = true, auditFail = false } = {}) {
+async function fixture({ open, allowed = true, enabled = true, auditFail = false, uploadSource } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'ssh-agent-file-')), events = [], calls = [];
   let opened = 0;
   const application = await createApplication({ registry: { getProfile: name => ({ host: '127.0.0.1', port: 22, user: 'mcpops', readOnly: name === 'aws-readonly' }), closeAll: async () => {} },
     classify: () => ({ class: 'safe' }), executeCommand: async () => assert.fail('Upload must not execute a command'),
     audit: event => { if (auditFail && event.action === 'submitted') throw Error('audit unavailable'); events.push(event); }, transferRoot: root,
     env: { BRIDGE_MCP_TOKEN: 'test-mcp', BRIDGE_ADMIN_TOKEN: 'test-admin', BRIDGE_ADMIN_ORIGIN: 'https://example.test', BRIDGE_UI_TICKET_KEY: 'b'.repeat(64), BRIDGE_UI_ENABLED: String(enabled), BRIDGE_TRANSFER_MAX_BYTES: '64', BRIDGE_TRANSFER_BUDGET_BYTES: '128' },
-    uiHtml: '<html>test</html>', uploadSource: { inspect: () => ({ hostname: 'files.example.test', allowed }), open: async (url, options) => {
+    uiHtml: '<html>test</html>', uploadSource: uploadSource ?? { inspect: () => ({ hostname: 'files.example.test', allowed }), open: async (url, options) => {
       opened++; return open ? open(url, options) : { stream: Readable.from([bytes]), expectedSize: bytes.length, close() {} };
     } } });
   application.transfers.upload = async operation => {
@@ -85,6 +87,35 @@ test('unconfigured sources report only hostname without fetching or reserving; d
     assert.equal((await fetch(`${f.web}/api/${id}/deny`, { method: 'POST', headers: { Authorization: 'Bearer test-admin', Origin: 'https://example.test' } })).status, 200);
     assert.equal(f.application.queue.get(id).state, 'denied'); assert.equal(f.calls.length, 0);
     await f.application.store.reap(); assert.equal(f.application.store.reserved, 0);
+  } finally { await f.close(); }
+});
+
+test('mixed provider hosts accept regional rotation while rejected boundaries never stage a file', async () => {
+  // Application boundary with the real host/DNS/response policy; DNS and HTTPS are
+  // injected, so this checks approval/staging integration rather than provider TLS.
+  let requests = 0;
+  const uploadSource = createFileSource({ hosts: ['direct.example.test', '*.files.example.test'],
+    resolve: async () => [{ address: '93.184.216.34', family: 4 }],
+    request: (_url, _options, callback) => {
+      requests++;
+      const request = new EventEmitter(); request.destroy = () => {};
+      request.end = () => queueMicrotask(() => callback(Object.assign(Readable.from([bytes]), { statusCode: 200, headers: {}, rawHeaders: [] })));
+      return request;
+    },
+  });
+  const f = await fixture({ uploadSource });
+  try {
+    for (const host of ['files.example.test', 'evil-files.example.test', 'us.files.example.test.evil.test', 'sub.direct.example.test']) {
+      const result = await f.call({ file: { ...file, download_url: `https://${host}/source?signature=URL_SECRET_SENTINEL` } });
+      assert.equal(result.structuredContent.error, 'upload-source-not-configured'); assert.equal(result.structuredContent.sourceHost, host);
+      assert.equal(requests, 0); assert.equal(f.application.store.reserved, 0); assert.equal(f.application.queue.jobs.size, 0); noPayloadLeak(result);
+    }
+    for (const host of ['direct.example.test', 'us.files.example.test', 'eu.files.example.test']) {
+      const result = await f.call({ file: { ...file, download_url: `https://${host}/source?signature=URL_SECRET_SENTINEL` } });
+      assert.equal(result.structuredContent.state, 'pending'); assert.equal(result.structuredContent.operation.sha256, hash(bytes));
+      assert.equal(result.structuredContent.operation.size, bytes.length); assert.equal(f.calls.length, 0); noPayloadLeak(result);
+    }
+    assert.equal(requests, 3); assert.equal(f.application.queue.jobs.size, 3);
   } finally { await f.close(); }
 });
 

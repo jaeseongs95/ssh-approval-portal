@@ -13,13 +13,15 @@ Claude Team·Enterprise의 조직 소유자는 `Organization settings > Capabili
 1. 설치한 후보의 파일 검증을 마친 뒤 Cloudflare Portal의 서버 기능을 동기화하고 ChatGPT 연결의 도구를 새로고침합니다.
 2. ChatGPT에서 파일을 만들거나 첨부하고, “이 파일을 `request-upload`로 `/home/mcpops/reviewed-script.py`에 업로드 승인 요청해 줘”라고 요청합니다. 클라이언트가 파일 참조를 전달해야 하며, 임의 URL이나 쿠키를 직접 입력하지 않습니다.
 3. 초기 허용 목록은 비어 있습니다. 이때 `upload-source-not-configured`와 파일 제공자의 hostname만 반환하며, 파일을 가져오거나 승인 요청을 만들지 않습니다. hostname이 실제 파일 제공자의 주소인지 관리자가 확인합니다. 서명된 전체 URL은 채팅이나 로그에 복사하지 않습니다.
-4. 네이티브 서버 관리자 터미널에서 아래 설정 도구를 실행하고 확인한 **정확한 hostname**만 입력합니다. 여러 주소는 쉼표로 구분합니다. 빈 입력은 이 경로를 비활성화합니다.
+4. 네이티브 서버의 관리자 터미널에서 아래 설정 도구를 실행하고 확인한 **정확한 hostname 또는 앞에 `*.`가 붙은 domain 패턴**을 `BRIDGE_UPLOAD_SOURCE_HOSTS`에 입력합니다. 예를 들어 `files.example.test,*.downloads.example.test`처럼 한 목록에 쉼표로 구분해 함께 입력할 수 있습니다. 이 주소들은 가상 예시입니다. 빈 입력은 이 경로를 비활성화합니다.
 
 ```sh
 sudo bash /var/lib/ssh-mcp/app/approval-bridge/scripts/configure-upload-sources.sh
 ```
 
 도구는 설치 파일과 설정을 확인하고, 유지보수를 예약한 뒤 기존 시크릿·SSH 키·인증 설정을 보존해 허용 목록만 변경합니다. 설정을 백업하며 시작 검사 실패 시 복원을 시도합니다. 대기 요청·실행·전송이 있으면 먼저 끝내거나 거부해야 합니다.
+
+앞에 `*.`가 붙은 패턴은 한 단계 이상의 모든 깊이 하위 도메인에 일치하고 기준 domain 자체는 제외합니다. `*.example.com`은 `a.example.com`과 `a.b.example.com`에 일치하지만 `example.com`이나 `badexample.com`에는 일치하지 않습니다. 점 경계를 기준으로 비교하며, 단독 `*`, 다른 위치의 wildcard, URL·IP 주소·포트는 거부합니다. 관리자가 wildcard를 선택하면 포함되는 모든 하위 호스트를 신뢰 범위로 정하는 것입니다. 그 범위를 확인한 뒤 설정하고, 공유 CDN을 넓게 허용하는 패턴을 자동 권장하거나 미리 등록된 값으로 간주하지 않습니다.
 
 5. 같은 파일을 새 파일 입력으로 다시 전달합니다. 성공 응답의 상태는 `pending`입니다. 카드에서 파일명·크기·SHA-256·목적지·덮어쓰기·sudo 설정을 확인한 뒤 승인합니다. 내려받은 파일과 원본의 해시까지 비교해야 왕복 시험이 완료됩니다.
 
@@ -28,16 +30,16 @@ sudo bash /var/lib/ssh-mcp/app/approval-bridge/scripts/configure-upload-sources.
 ## 한도와 취소
 
 - 파일 하나당 최대 64 MiB, 중계기 총량은 기본 512 MiB입니다. 가져오기 하나가 시작 전에 최대 파일 크기를 예약하고, 완료 후 실측 크기만 유지합니다. 외부 가져오기는 최대 두 개까지 동시에 처리합니다.
-- HTTPS/443, 정확한 서버 허용 hostname, 공개 DNS 주소만 사용합니다. 모든 DNS 응답을 검사하고 검증한 IP에 연결을 고정합니다. redirect와 압축 응답은 거부합니다.
+- HTTPS/443, 설정한 exact 이름 또는 앞에 wildcard가 붙은 패턴과 일치하는 hostname, 공개 DNS 주소만 사용합니다. TLS는 요청한 hostname을 계속 검증합니다. 모든 DNS 응답을 검사하고 검증한 IP에 연결을 고정합니다. redirect와 압축 응답은 거부합니다.
 - 기본 전체 가져오기 제한은 60초, 유휴 제한은 15초입니다. 연결 종료·서비스 종료·오류·한도 초과 시 임시 파일과 예약 용량을 정리합니다. OS가 이미 시작한 DNS 조회 자체는 취소하지 못하지만 늦은 DNS 결과로 연결하지 않습니다.
 - 이 서버는 stateless MCP를 사용하므로 별도 POST로 들어오는 논리적 취소 알림이 실행 중 요청을 찾는다고 보장하지 않습니다. 실제 HTTP 연결 종료, 서비스 종료와 시간 제한은 별도로 적용합니다.
 - 승인 대기는 기존 10분 만료와 메모리 큐를 사용합니다. 재시작한 요청을 자동 복원하거나 다시 실행하지 않습니다.
 
 ## Docker 설정
 
-컨테이너에서도 같은 `BRIDGE_UPLOAD_SOURCE_HOSTS` 설정을 읽으며 기본값은 비어 있습니다. 관리자가 보호된 `/etc/ssh-approval-portal/docker-secrets.env`를 백업하고 정확한 hostname만 설정한 뒤, 기존 유지보수·Compose 업데이트 절차로 컨테이너를 다시 생성합니다. 컨테이너에 Docker socket이나 추가 권한을 주지 않습니다.
+컨테이너에서도 같은 `BRIDGE_UPLOAD_SOURCE_HOSTS` 설정을 읽으며 기본값은 비어 있습니다. 관리자가 보호된 `/etc/ssh-approval-portal/docker-secrets.env`를 백업하고 같은 쉼표 구분 목록에 확인한 정확한 hostname 또는 앞에 wildcard가 붙은 패턴을 설정한 뒤, 기존 유지보수·Compose 업데이트 절차로 컨테이너를 다시 생성합니다. 컨테이너에 Docker socket이나 추가 권한을 주지 않습니다.
 
-예전 이미지로 복원할 때는 새 설정 키를 해석할 수 있는지도 확인해야 합니다. 이 기능이 없는 이전 이미지로 돌아가면 해당 이미지에 맞는 보호된 설정 백업도 함께 복원합니다. 네이티브 전용 설정 스크립트를 실행해 Docker 서비스를 변경하지 않습니다.
+exact 목록만 지원하는 이전 버전으로 복원하기 전에는 wildcard를 확인된 정확한 hostname으로 바꾸거나 해당 버전에 맞는 보호된 설정 백업을 복원합니다. `BRIDGE_UPLOAD_SOURCE_HOSTS` 키를 해석하는 이전 버전도 wildcard 값은 거부할 수 있습니다. 키 자체를 모르는 이미지로 돌아갈 때도 호환되는 보호된 설정 백업을 복원합니다. 네이티브 전용 설정 스크립트를 실행해 Docker 서비스를 변경하지 않습니다.
 
 ## 검증 범위
 
