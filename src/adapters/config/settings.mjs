@@ -43,8 +43,12 @@ export function parseSettings(env) {
   if (!/^[A-Za-z0-9_-]*$/.test(prefix)) throw Error('Invalid UI namespace');
   const maxBytes = Number(value('BRIDGE_TRANSFER_MAX_BYTES')), budget = Number(value('BRIDGE_TRANSFER_BUDGET_BYTES'));
   if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0 || maxBytes > MAX_BYTES || !Number.isSafeInteger(budget) || budget < maxBytes) throw Error('Invalid staging limits');
+  if (!['true', 'false'].includes(value('BRIDGE_JEV_ENABLED'))) throw Error('Invalid Jev switch');
+  const jevMaxCalls = Number(value('BRIDGE_JEV_MAX_CALLS'));
+  if (!/^[1-9][0-9]*$/.test(value('BRIDGE_JEV_MAX_CALLS')) || !Number.isSafeInteger(jevMaxCalls) || jevMaxCalls > 10000) throw Error('Invalid Jev call budget');
   return Object.freeze({ mcpToken, adminToken, adminOrigin,
     targets: parseTargets(value('BRIDGE_TARGETS'), value('BRIDGE_DEFAULT_TARGET')),
+    jevEnabled: value('BRIDGE_JEV_ENABLED') === 'true', jevMaxCalls,
     defaultTarget: value('BRIDGE_DEFAULT_TARGET') || undefined,
     bridgeDisplayName: displayName(value('BRIDGE_DISPLAY_NAME')) || new URL(adminOrigin).host,
     targetDisplayName: displayName(value('BRIDGE_TARGET_DISPLAY_NAME')) || 'SSH', uiEnabled: value('BRIDGE_UI_ENABLED') === 'true', prefix, maxBytes, budget,

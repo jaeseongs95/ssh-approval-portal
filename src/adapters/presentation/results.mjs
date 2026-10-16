@@ -39,6 +39,9 @@ export const outputSchemas = {
   ready: z.object({ ready: z.literal(true), fileName: z.string() }),
   targets: z.object({ targets: z.array(z.object({ id: targetId, displayName: z.string(), enabled: z.boolean(), isDefault: z.boolean() })), defaultTarget: targetId.nullable() }),
   probe: z.object({ probe: z.literal('SSH_UI_PUBLIC_PROBE'), uiEnabled: z.boolean() }),
+  safety: z.object({ id: identifier, subject: z.string().regex(/^[a-f0-9]{64}$/), targetId,
+    targetRevision: z.string().optional(), advisory: z.literal(true), automaticExecutionEnabled: z.literal(false),
+    assessment: z.object({ status: z.enum(['assessed', 'unavailable']) }).passthrough() }),
 };
 
 export function presentOutcome(value) {

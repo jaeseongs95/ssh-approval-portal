@@ -14,7 +14,7 @@ function decodeChunk(data) {
   return bytes;
 }
 
-export function createMcpAdapter({ queue, commands, files, settings, capabilities, uiHtml, bindFileSource, shutdownSignal, targets }) {
+export function createMcpAdapter({ queue, commands, files, settings, capabilities, uiHtml, bindFileSource, shutdownSignal, targets, requestSafety }) {
   const identity = target => targets && !targets.legacy ? { ...targets.select(target).identity, target: targets.select(target).target } : undefined;
   const URI = `ui://ssh-approval/card-${hash(uiHtml)}.html`;
   return function mcpServer(requestSignal) {
@@ -37,6 +37,9 @@ export function createMcpAdapter({ queue, commands, files, settings, capabilitie
     }, { description: 'Run read-only immediately; queue all other commands for approval. If pending, call show-approval with its id to show the owner the approval card.' });
     tool('request-safe-command', { target, command: z.string().min(1).max(2000) }, outputSchemas.job, ({ command, target }) => jobResult(queue.submit(command, true, target)), { description: 'Legacy safe-only owner approval request.' });
     tool('get-request-status', { id }, outputSchemas.status, ({ id }) => statusResult(queue.get(id)), { readOnly: true });
+    tool('assess-request-risk', { id, externalDisclosureApproved: z.literal(true), context: z.string().max(4096).default('') }, outputSchemas.safety,
+      async ({ id, context }) => publicResult(await requestSafety.assess(id, context), outputSchemas.safety),
+      { readOnly: true, openWorld: true, description: 'Observe the risk of a queued command request with Jev. Requires administrator BRIDGE_JEV_ENABLED opt-in and explicit externalDisclosureApproved=true: the exact command, target ID/display name and optional context are disclosed to TypeSafe. Never include secrets in command/context. A bounded cached assessment confers no execution authority; owner approval is still required. No SSH execution or approval occurs.' });
     tool('request-upload', {
       target,
       file: z.object({ download_url: z.string().min(1).max(16384), file_id: z.string().min(1).max(1024), mime_type: z.string().max(255).optional(), file_name: z.string().max(255).optional() }).strict(),

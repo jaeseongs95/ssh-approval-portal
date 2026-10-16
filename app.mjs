@@ -14,6 +14,8 @@ import { createAdminAccess } from './src/adapters/security/admin-access.mjs';
 import { authorizeAdminRequest } from './src/adapters/security/admin-policy.mjs';
 import { Tickets } from './src/adapters/security/tickets.mjs';
 import { createProtocolAdapters } from './src/adapters/http/protocol.mjs';
+import { createJevAssessor } from './src/adapters/safety/jev.mjs';
+import { createRequestSafety } from './src/application/request-safety.mjs';
 
 // Preserve the original injectable createApplication callback at the composition boundary.
 // Concrete runtime executors already return the neutral outcome accepted by use cases.
@@ -25,7 +27,7 @@ const commandExecutor = execute => async (profile, command) => {
 };
 
 /** Assemble concrete ports. Business policy belongs to application/domain modules. */
-export async function createApplication({ registry, classify, executeCommand, audit, transferRoot, env = process.env, uiHtml, accessKeySet, uploadSource }) {
+export async function createApplication({ registry, classify, executeCommand, audit, transferRoot, env = process.env, uiHtml, accessKeySet, uploadSource, riskAssessor }) {
   const settings = parseSettings(env);
   const adminAccess = createAdminAccess(env, accessKeySet);
   const signer = new Tickets(env.BRIDGE_UI_TICKET_KEY);
@@ -58,6 +60,8 @@ export async function createApplication({ registry, classify, executeCommand, au
   });
   const targets = createTargetRouter(runtimes, { defaultTarget: settings.targets === null ? 'default' : settings.defaultTarget, legacy: settings.targets === null, store, audit });
   const { queue, commands, files } = targets;
+  const requestSafety = createRequestSafety({ queue, maxCalls: settings.jevMaxCalls,
+    assessor: settings.jevEnabled ? riskAssessor ?? createJevAssessor({ apiKey: env.JEV_API_KEY }) : undefined });
   let protocols;
   const lifecycle = createLifecycleService({ queue, store, commands, files, closeConnections: async () => { await targets.drain(); await registry.closeAll(); },
     onReap: () => protocols?.reapCapabilities() });
@@ -66,7 +70,7 @@ export async function createApplication({ registry, classify, executeCommand, au
     readFile(new URL('./web/index.html', import.meta.url), 'utf8'),
     readFile(new URL('./web/dist/app.js', import.meta.url), 'utf8'),
   ]);
-  protocols = createProtocolAdapters({ queue, commands, files, store, lifecycle, settings, signer, adminAccess, targets,
+  protocols = createProtocolAdapters({ queue, commands, files, store, lifecycle, settings, signer, adminAccess, targets, requestSafety,
     authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal: shutdown.signal });
   const timer = setInterval(() => lifecycle.reap().catch(() => {}), 30_000); timer.unref();
   return { ...protocols, queue, store, targets, transfers: runtimes[0].transfers, enabled: settings.uiEnabled,
