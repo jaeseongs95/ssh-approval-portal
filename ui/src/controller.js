@@ -21,7 +21,7 @@ export function createCardController({ state, view, host, document, hashFile, en
     if (!state.apply(result)) return;
     stopPolling(); view.error('');
     const context = state.capture();
-    if (state.mode === 'probe') return view.probe(state.probeMarker);
+    if (state.mode === 'probe') return view.probe(state.probeMarker, state.meta);
     if (state.mode === 'transfer') return view.transfer(state.transfer, state.meta, (config, file) => submit(config, file, context));
     view.job(state.job, state.meta, { decide: action => decide(action, context), save: () => save(context) });
     if (['pending', 'running'].includes(state.job.state)) polling = timers.setInterval(() => {

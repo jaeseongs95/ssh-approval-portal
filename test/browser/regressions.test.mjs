@@ -72,3 +72,36 @@ for (const [locale, language] of [['ko-KR', 'ko'], ['fr-FR', 'en']]) test(`UI pr
   await page.locator('#logout').click(); await page.waitForURL('**/cdn-cgi/access/logout');
   assert.equal(await page.textContent('body'), 'Synthetic signed out');
 }, locale));
+
+test('server names distinguish installations, remain text, and accompany pending and completed jobs', async () => browserFixture(async (page, server) => {
+  const malicious = '<img src=x onerror="window.nameInjected=true">';
+  server.state.bridgeDisplayName = malicious; server.state.targetDisplayName = '운영 대상 & SSH';
+  server.state.jobs = [job('named-pending'), job('named-done', 'completed')];
+  await page.goto(server.origin + '/fixture/web'); await page.locator('#jobs .request').waitFor();
+  assert.equal(await page.title(), `${malicious} · 운영 대상 & SSH · SSH approvals`);
+  assert.match(await page.locator('#server-identity').textContent(), /Bridge · <img/);
+  for (const selector of ['#jobs .target', '#history .target']) {
+    const text = await page.locator(selector).textContent();
+    assert.ok(text.includes(malicious)); assert.ok(text.includes('Target server · 운영 대상 & SSH')); assert.ok(text.includes('(fixture)'));
+  }
+  assert.equal(await page.locator('img').count(), 0); assert.equal(await page.evaluate(() => window.nameInjected), undefined);
+  server.state.bridgeDisplayName = '운영 중계기'; await page.reload();
+  assert.equal(await page.title(), '운영 중계기 · 운영 대상 & SSH · SSH approvals');
+}));
+test('card identity follows replacement and completed result without HTML injection or stale names', async () => browserFixture(async (page, server) => {
+  await page.goto(server.origin + '/fixture/card'); await page.waitForFunction(() => window.fixture);
+  const receive = (page, value, meta) => page.evaluate(({value, meta}) => window.fixture.receive({structuredContent:value,_meta:{sshApproval:meta}}), {value,meta});
+  const display = {bridgeDisplayName:'시험 <bridge>',targetDisplayName:'운영 & target'};
+  await receive(page, job('named-card'), display);
+  assert.equal(await page.title(), '시험 <bridge> · 운영 & target · SSH approval and file transfer');
+  assert.ok((await page.locator('#details').textContent()).includes('Bridge · 시험 <bridge>'));
+  // A metadata-only change must invalidate the old render fingerprint.
+  await receive(page, job('named-card'), {...display, bridgeDisplayName:'다른 중계기'});
+  assert.ok((await page.title()).startsWith('다른 중계기'));
+  await receive(page, job('named-card', 'completed'), {...display, targetDisplayName:'<script>window.nameInjected=true</script>'});
+  assert.ok((await page.locator('#details').textContent()).includes('line 0 fixture result'));
+  assert.equal(await page.evaluate(() => window.nameInjected), undefined);
+  await page.evaluate(() => window.fixture.transfer('/tmp/replacement'));
+  assert.equal(await page.locator('.server-identity').count(), 0);
+  assert.equal(await page.title(), 'SSH approval and file transfer');
+}));

@@ -159,3 +159,18 @@ test('healthcheck uses configured port and requires healthy JSON without disclos
   await assert.rejects(checkHealth({ env: { BRIDGE_MCP_PORT: '65536' }, fetchImpl }));
   assert.equal(parseSecretText('SSH_MCP_FIXTURE2_KEY=\"private-value\"\n').SSH_MCP_FIXTURE2_KEY, 'private-value');
 });
+
+test('display names are optional public labels, bounded and free of control/formatting characters', () => {
+  const env = { BRIDGE_MCP_TOKEN: 'mcp', BRIDGE_ADMIN_TOKEN: 'admin', BRIDGE_ADMIN_ORIGIN: 'https://test-admin.example' };
+  const legacy = parseSettings(env);
+  assert.equal(legacy.bridgeDisplayName, 'test-admin.example'); assert.equal(legacy.targetDisplayName, 'SSH');
+  const configured = parseSettings({ ...env, BRIDGE_DISPLAY_NAME: '  시험 중계기  ', BRIDGE_TARGET_DISPLAY_NAME: '<ARM & production>' });
+  assert.equal(configured.bridgeDisplayName, '시험 중계기'); assert.equal(configured.targetDisplayName, '<ARM & production>');
+  assert.equal(parseSettings({ ...env, BRIDGE_DISPLAY_NAME: 'A'.repeat(80) }).bridgeDisplayName.length, 80);
+  for (const key of ['BRIDGE_DISPLAY_NAME', 'BRIDGE_TARGET_DISPLAY_NAME']) {
+    for (const value of ['A'.repeat(81), 'spoof\nname', 'spoof\u202ename', 'name\u0000', 'name\u2028break', 123]) {
+      assert.throws(() => parseSettings({ ...env, [key]: value }), /Display names/);
+    }
+    assert.ok(settingsContract.allowedKeys.includes(key));
+  }
+});

@@ -7,6 +7,8 @@ import { presentJob } from '../presentation/results.mjs';
 
 const json = (res, status, value) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }); res.end(JSON.stringify(value)); };
 
+const escapeHtml = value => value.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
+
 export function createProtocolAdapters({ queue, commands, files, store, lifecycle, settings, signer, adminAccess, authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal }) {
   const capabilities = createCapabilities({ queue, store, signer, settings });
   const mcpServer = createMcpAdapter({ queue, commands, files, settings, capabilities, uiHtml, bindFileSource, shutdownSignal });
@@ -50,7 +52,8 @@ export function createProtocolAdapters({ queue, commands, files, store, lifecycl
       }
       if (req.method === 'GET' && ['/', '/app.js'].includes(url.pathname)) {
         res.writeHead(200, { 'Content-Type': url.pathname === '/' ? 'text/html; charset=utf-8' : 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'", 'Referrer-Policy': 'no-referrer' });
-        return res.end(url.pathname === '/' ? webHtml.replace('data-auth-mode="token"', `data-auth-mode="${adminAccess.mode}"`) : webJs);
+        return res.end(url.pathname === '/' ? webHtml.replace('data-auth-mode="token"', () => `data-auth-mode="${adminAccess.mode}" data-bridge-display-name="${escapeHtml(settings.bridgeDisplayName)}" data-target-display-name="${escapeHtml(settings.targetDisplayName)}"`)
+          .replace('<title>SSH 승인 · Approval Portal</title>', () => `<title>${escapeHtml(settings.bridgeDisplayName)} · ${escapeHtml(settings.targetDisplayName)} · SSH Approval Portal</title>`) : webJs);
       }
       if (req.method === 'GET' && url.pathname === '/api/pending') return json(res, 200, queue.list().map(presentJob));
       if (req.method === 'GET' && url.pathname === '/api/requests') return json(res, 200, queue.listAll().map(presentJob));

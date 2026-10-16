@@ -28,6 +28,11 @@ export function validatedPort(value) {
   return Number(value);
 }
 
+function displayName(value) {
+  if (typeof value !== 'string' || value.length > 80 || /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(value)) throw Error('Display names must be at most 80 characters without control or formatting characters');
+  return value.trim();
+}
+
 export function parseSettings(env) {
   const value = key => env[key] ?? settingsContract.defaults[key];
   const mcpToken = env.BRIDGE_MCP_TOKEN, adminToken = env.BRIDGE_ADMIN_TOKEN;
@@ -37,7 +42,9 @@ export function parseSettings(env) {
   if (!/^[A-Za-z0-9_-]*$/.test(prefix)) throw Error('Invalid UI namespace');
   const maxBytes = Number(value('BRIDGE_TRANSFER_MAX_BYTES')), budget = Number(value('BRIDGE_TRANSFER_BUDGET_BYTES'));
   if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0 || maxBytes > MAX_BYTES || !Number.isSafeInteger(budget) || budget < maxBytes) throw Error('Invalid staging limits');
-  return Object.freeze({ mcpToken, adminToken, adminOrigin, uiEnabled: value('BRIDGE_UI_ENABLED') === 'true', prefix, maxBytes, budget,
+  return Object.freeze({ mcpToken, adminToken, adminOrigin,
+    bridgeDisplayName: displayName(value('BRIDGE_DISPLAY_NAME')) || new URL(adminOrigin).host,
+    targetDisplayName: displayName(value('BRIDGE_TARGET_DISPLAY_NAME')) || 'SSH', uiEnabled: value('BRIDGE_UI_ENABLED') === 'true', prefix, maxBytes, budget,
     uploadHosts: Object.freeze(parseUploadHosts(value('BRIDGE_UPLOAD_SOURCE_HOSTS'))),
     mcpPort: validatedPort(value('BRIDGE_MCP_PORT')), adminPort: validatedPort(value('BRIDGE_ADMIN_PORT')),
     readProfile: 'aws-readonly', writeProfile: 'aws-local' });

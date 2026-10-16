@@ -21,7 +21,8 @@
 <body data-auth-mode="token">
   <main class="shell">
     <header class="topbar"><div class="brand"><span class="mark" aria-hidden="true">›_</span>SSH Approval Portal</div><div class="account"><div id="connection" class="connection"><span class="dot" aria-hidden="true"></span><span id="connection-text" data-en="Not connected">연결 전</span></div><button id="logout" class="secondary" hidden data-en="Sign out">로그아웃</button></div></header>
-    <div class="intro"><p class="eyebrow" data-en="SERVER OPERATIONS">서버 작업 승인</p><h1 data-en="SSH approvals and execution">SSH 승인·실행</h1><p class="subtitle" data-en="Review commands and file transfers. Each approved request runs once.">명령과 파일 전송 내용을 확인하세요. 승인한 요청은 한 번만 실행됩니다.</p></div>
+    <div class="intro">
+    <p id="server-identity" class="target" aria-label="서버 식별"></p><p class="eyebrow" data-en="SERVER OPERATIONS">서버 작업 승인</p><h1 data-en="SSH approvals and execution">SSH 승인·실행</h1><p class="subtitle" data-en="Review commands and file transfers. Each approved request runs once.">명령과 파일 전송 내용을 확인하세요. 승인한 요청은 한 번만 실행됩니다.</p></div>
     <div class="auth"><div><label id="auth-label" class="auth-label" for="token" data-en="Administrator connection">관리자 연결</label><p id="auth-note" class="auth-note" data-en="Enter your administrator token to view requests.">관리자 토큰으로 요청 목록을 조회합니다.</p></div><div class="auth-controls"><input id="token" type="password" placeholder="관리자 토큰" aria-label="관리자 토큰" autocomplete="off" spellcheck="false"><button id="load" class="primary" data-en="Refresh requests">요청 조회</button><a id="sign-in" href="/" hidden data-en="Sign in again">다시 로그인</a></div></div>
     <p id="error" class="error" role="alert" hidden></p>
     <div class="grid">

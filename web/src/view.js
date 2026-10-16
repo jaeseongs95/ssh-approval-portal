@@ -1,6 +1,9 @@
 export function createWebView({ document, i18n }) {
   const { t, korean, locale, states, kinds } = i18n;
   const el = id => document.getElementById(id);
+  const bridgeName = document.body.dataset.bridgeDisplayName || document.location?.host || 'SSH Approval Portal';
+  const targetName = document.body.dataset.targetDisplayName || 'SSH';
+  const identity = `${t('중계기')} · ${bridgeName} / ${t('대상 서버')} · ${targetName}`;
   const records = new Map();
   let handlers;
   function text(parent, tag, value, className = '') {
@@ -29,7 +32,7 @@ export function createWebView({ document, i18n }) {
     } else {
       const head = text(box, 'div', '', 'request-top'); text(head, 'span', kinds[job.kind] ?? job.kind, 'kind'); text(head, 'span', t('승인 대기'), 'badge pending');
     }
-    text(body, 'p', job.target, 'target'); text(body, 'pre', command, 'command');
+    text(body, 'p', `${identity} (${job.target})`, 'target'); text(body, 'pre', command, 'command');
     const meta = text(body, 'div', '', 'meta'); text(meta, 'span', `${t('요청')} ${job.id}`, 'request-id');
     const time = waiting ? job.expiresAt : job.finishedAt ?? job.createdAt;
     text(meta, 'span', `${t(waiting ? '만료' : job.finishedAt ? '처리 완료' : '요청')} ${new Date(time).toLocaleString(locale)}`);
@@ -79,7 +82,9 @@ export function createWebView({ document, i18n }) {
   function initialize(actions) {
     handlers = actions;
     document.documentElement.lang = korean ? 'ko' : 'en';
-    document.title = korean ? 'SSH 승인 · Approval Portal' : 'SSH approvals · Approval Portal';
+    document.title = `${bridgeName} · ${targetName} · ${korean ? 'SSH 승인' : 'SSH approvals'}`;
+    const serverIdentity = el('server-identity');
+    if (serverIdentity) { serverIdentity.textContent = identity; serverIdentity.ariaLabel = t('서버 식별'); }
     if (!korean) for (const node of document.querySelectorAll('[data-en]')) node.textContent = node.dataset.en;
     el('token').placeholder = el('token').ariaLabel = t('관리자 토큰');
     el('load').onclick = actions.load; el('logout').onclick = actions.logout;

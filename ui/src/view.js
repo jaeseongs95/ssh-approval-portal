@@ -15,8 +15,14 @@ export function createCardView({ document, i18n }) {
     if (state) el('status').dataset.state = state; else delete el('status').dataset.state;
     el('status').textContent = message;
   }
+  function identity(meta) {
+    const names = [meta.bridgeDisplayName, meta.targetDisplayName].filter(Boolean);
+    document.title = [...names, korean ? 'SSH 승인 및 파일 전송' : 'SSH approval and file transfer'].join(' · ');
+    if (meta.bridgeDisplayName) text(el('details'), 'p', `${t('중계기')} · ${meta.bridgeDisplayName}`, 'server-identity');
+    if (meta.targetDisplayName) text(el('details'), 'p', `${t('대상 서버')} · ${meta.targetDisplayName}`, 'server-identity');
+  }
   function job(job, meta, actions) {
-    clear(); status(states[job.state] ?? job.state, job.state);
+    clear(); identity(meta); status(states[job.state] ?? job.state, job.state);
     const infoBox = text(el('details'), 'div', '', 'request-meta');
     text(infoBox, 'p', `${t('대상 서버')} · ${job.target}`);
     const info = text(infoBox, 'details', ''); text(info, 'summary', t('요청 정보'));
@@ -48,7 +54,7 @@ export function createCardView({ document, i18n }) {
     if (job.kind === 'download' && job.state === 'completed') button(t('파일 저장'), actions.save, !meta.uiEnabled || !meta.viewTicket);
   }
   function transfer(seed, meta, submit) {
-    clear(); status(t(seed.direction === 'upload' ? '파일 업로드 준비' : '파일 다운로드 준비'));
+    clear(); identity(meta); status(t(seed.direction === 'upload' ? '파일 업로드 준비' : '파일 다운로드 준비'));
     const label = text(el('details'), 'label', t('서버의 절대 파일 경로'));
     const path = document.createElement('input'); path.type = 'text'; path.value = seed.remotePath; label.append(path);
     const elevated = document.createElement('input'); elevated.type = 'checkbox'; elevated.checked = seed.elevate;
@@ -81,7 +87,7 @@ export function createCardView({ document, i18n }) {
     t, initialize, job, transfer, theme, clear,
     error: message => { el('error').textContent = message; },
     setBusy: busy => { for (const { node, disabled } of buttons) node.disabled = busy || disabled; },
-    probe: marker => { clear(); status(t('표시 시험 — 명령은 실행되지 않습니다')); text(el('details'), 'pre', marker ?? t('UI 전용 메타데이터를 받지 못했습니다')); },
+    probe: (marker, meta = {}) => { clear(); identity(meta); status(t('표시 시험 — 명령은 실행되지 않습니다')); text(el('details'), 'pre', marker ?? t('UI 전용 메타데이터를 받지 못했습니다')); },
     missing: () => { status(t('요청을 찾을 수 없습니다. 재시작으로 유실됐을 수 있습니다.')); buttons = []; el('controls').replaceChildren(); },
     progress: percent => { el('status').textContent = `${t('중계기 전송')} ${percent}%`; },
   };

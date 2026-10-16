@@ -5,7 +5,7 @@ import { CHUNK_BYTES } from '../../contracts/ports.mjs';
 export function createCapabilities({ queue, store, signer, settings, now = () => Date.now() }) {
   const used = new Map();
   const view = job => {
-    const meta = { uiEnabled: settings.uiEnabled, namespace: settings.prefix, maxBytes: settings.maxBytes, chunkBytes: CHUNK_BYTES, webUrl: settings.adminOrigin };
+    const meta = { bridgeDisplayName: settings.bridgeDisplayName, targetDisplayName: settings.targetDisplayName, uiEnabled: settings.uiEnabled, namespace: settings.prefix, maxBytes: settings.maxBytes, chunkBytes: CHUNK_BYTES, webUrl: settings.adminOrigin };
     if (settings.uiEnabled) {
       meta.viewTicket = signer.issue('view', queue.subject(job.id), now() + 600_000);
       if (job.state === 'pending') meta.approvalTicket = signer.issue('decision', queue.subject(job.id), job.expiresAt);

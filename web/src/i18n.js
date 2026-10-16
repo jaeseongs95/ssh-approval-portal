@@ -2,6 +2,7 @@ export function createWebI18n(language = 'en') {
 const korean = language.toLowerCase().startsWith('ko');
 const locale = korean ? 'ko-KR' : 'en-US';
 const en = {
+  '중계기': 'Bridge', '대상 서버': 'Target server', '서버 식별': 'Server identity',
   '승인 대기': 'Awaiting approval', '실행 중': 'Running', '완료': 'Completed', '실패': 'Failed', '거부': 'Denied', '만료': 'Expired',
   '명령 실행': 'Command', '파일 업로드': 'File upload', '파일 다운로드': 'File download', '요청 실패': 'Request failed',
   '요청': 'Request', '처리 완료': 'Finished', '승인·실행': 'Approve and run', '실행 결과': 'Execution result', '파일 저장': 'Save file',
