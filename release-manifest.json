@@ -380,13 +380,13 @@
     },
     {
       "path": "test/browser/fixture-server.mjs",
-      "size": 3439,
-      "sha256": "5175dd6fe55a1ca6aff6e6fa156e9d618b3e64d5e0a02bb7d56d2d0affab7f18"
+      "size": 4086,
+      "sha256": "fe8a7d52f92e88c2887f0a4a148eb97d5b01e8409c1aff6754e09239826dacb2"
     },
     {
       "path": "test/browser/regressions.test.mjs",
-      "size": 11734,
-      "sha256": "9eb2db4152de71ad86b193f7c6949b5bc4225bb9d09690cb206b5660bbf5965b"
+      "size": 13724,
+      "sha256": "02d8586f2f8d134f17ed484ceec97a29ae7f72233791f2b4f522aecd7f6ba134"
     },
     {
       "path": "test/command-lifecycle.test.mjs",
@@ -650,8 +650,8 @@
     },
     {
       "path": "web/dist/app.js",
-      "size": 12818,
-      "sha256": "d381202ad98f8618c11389c812fb3c10e51eb2e07083fa05c7adaaf86e01d491"
+      "size": 13084,
+      "sha256": "2477a4de763d079d25ba173a26e85b448972394753ef640cba0a702bf947de8e"
     },
     {
       "path": "web/index.html",
@@ -660,8 +660,8 @@
     },
     {
       "path": "web/src/controller.js",
-      "size": 2394,
-      "sha256": "990a9de4ad4d7a7cbb3f4c3ad39ca73c4a8926108b6654167c6e061efe63053f"
+      "size": 2777,
+      "sha256": "70ac4205567e43360c19ce1729c1122f9a133e9efbf151c35461b4e44f938c4b"
     },
     {
       "path": "web/src/http.js",
@@ -680,8 +680,8 @@
     },
     {
       "path": "web/src/view.js",
-      "size": 9055,
-      "sha256": "0225a96948cce51957010c176e63e2eda562f7841369d87c740c1e0e5d57720b"
+      "size": 9210,
+      "sha256": "871e19b69efa23ab4963fd6cfd673a82998e7f59be53065e392ff6cf45871cfd"
     }
   ]
 }

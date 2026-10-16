@@ -5,10 +5,19 @@ import { fileURLToPath } from 'node:url';
 
 const escape = value => value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 export async function fixtureServer(root) {
-  const state = { jobs: [], requests: [], reads: 0, bridgeDisplayName: '시험 <bridge>', targetDisplayName: '운영 & target', multiTarget: false, beforeRequests: null };
+  const state = { jobs: [], requests: [], reads: 0, bridgeDisplayName: '시험 <bridge>', targetDisplayName: '운영 & target', multiTarget: false, beforeRequests: null, beforeDownload: null, downloadError: false };
   const server = createServer(async (request, response) => {
     try {
       const url = new URL(request.url, 'http://fixture.invalid');
+      const download = /^\/api\/([^/]+)\/download$/.exec(url.pathname);
+      if (download && request.method === 'POST') {
+        await state.beforeDownload?.(download[1]);
+        response.setHeader('Content-Type', 'application/json');
+        if (state.downloadError) { response.writeHead(409); response.end(JSON.stringify({error:'synthetic previous target error'})); }
+        else response.end(JSON.stringify({downloadUrl:'/fixture/download/'+download[1]}));
+        return;
+      }
+      if (url.pathname.startsWith('/fixture/download/')) { response.end('Synthetic download delivered'); return; }
       if (url.pathname === '/api/targets') {
         response.setHeader('Content-Type', 'application/json');response.end(JSON.stringify({ targets: ['alpha','beta'].map(id=>({id,displayName:id+' 이름',enabled:true,isDefault:id==='alpha'})),defaultTarget:'alpha' }));return;
       }

@@ -134,3 +134,26 @@ test('card target replacement clears selected file and blocks late upload work f
   assert.equal(await page.locator('#details select').inputValue(),'beta');
   assert.equal(await page.evaluate(()=>window.fixture.calls.find(x=>x.name==='ui-upload-begin').args.transfer.target),'alpha');
 }));
+
+for (const mode of ['beta-success','beta-error','aba-success','aba-error','unchanged']) test(`web download response belongs to its captured selection generation (${mode})`, async () => browserFixture(async (page, server) => {
+  server.state.multiTarget = true;server.state.downloadError=mode.endsWith('error');
+  server.state.jobs=['alpha','beta'].map(id=>({...job(id+'-file','completed'),kind:'download',operation:{remotePath:'/tmp/same.bin',elevate:false},targetId:id,targetDisplayName:id+' 이름',targetRevision:id+'-v1',hostKey:'SHA256:'+id}));
+  await page.goto(server.origin+'/fixture/web');await page.locator('#target-filter').waitFor({state:'visible'});
+  await page.selectOption('#target-filter','alpha');await page.waitForFunction(()=>document.querySelector('#history details')?.dataset.requestId==='alpha-file'&&document.querySelector('#history-count').textContent==='1');
+  await page.locator('#history details').evaluate(node=>node.open=true);
+  let entered, release;const started=new Promise(resolve=>entered=resolve),held=new Promise(resolve=>release=resolve);
+  server.state.beforeDownload=async()=>{entered();await held;};
+  const reply=page.waitForResponse(response=>response.url().endsWith('/api/alpha-file/download'));
+  await page.locator('#history button').click();await started;
+  if(mode!=='unchanged') {
+    await page.selectOption('#target-filter','beta');
+    if(mode.startsWith('aba'))await page.selectOption('#target-filter','alpha');
+  }
+  release();await(await reply).finished();
+  if(mode==='unchanged') {await page.waitForURL('**/fixture/download/alpha-file');assert.equal(await page.textContent('body'),'Synthetic download delivered');}
+  else {
+    await page.waitForLoadState('networkidle');
+    assert.ok(page.url().endsWith('/fixture/web'),'An old selection download must not navigate the replacement view');
+    assert.equal(await page.locator('#error').textContent(),'','An old selection error must not be shown in the replacement view');
+  }
+}));

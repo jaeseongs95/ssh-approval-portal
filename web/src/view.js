@@ -5,6 +5,7 @@ export function createWebView({ document, i18n }) {
   const targetName = document.body.dataset.targetDisplayName || 'SSH';
   const identity = `${t('중계기')} · ${bridgeName} / ${t('대상 서버')} · ${targetName}`;
   const multiTarget = document.body.dataset.multiTarget === 'true';
+  let selectionRevision = 0;
   const records = new Map();
   let handlers;
   function text(parent, tag, value, className = '') {
@@ -102,6 +103,7 @@ export function createWebView({ document, i18n }) {
   return {
     initialize, render, multiTarget,
     target: () => el('target-filter')?.value || undefined,
+    selectionRevision: () => selectionRevision,
     targets(data, changed) {
       const select = el('target-filter'); select.replaceChildren();
       const all = text(select, 'option', t('전체 대상')); all.value = '';
@@ -113,7 +115,7 @@ export function createWebView({ document, i18n }) {
         document.title = `${bridgeName} · ${name} · ${korean ? 'SSH 승인' : 'SSH approvals'}`;
         el('server-identity').textContent = `${t('중계기')} · ${bridgeName} / ${t('대상 서버')} · ${name}`;
       };
-      identify(); select.onchange = () => { render([]); identify(); changed(); };
+      identify(); select.onchange = () => { selectionRevision++; render([]); identify(); el('error').textContent = ''; el('error').hidden = true; changed(); };
     },
     token: () => el('token').value,
     unauthorized: () => { el('sign-in').hidden = false; },

@@ -1,4 +1,6 @@
 export function createWebController({ state, view, api, document, location, timers = globalThis }) {
+  const capture = () => ({ target: view.target?.(), revision: view.selectionRevision?.() });
+  const current = context => context.target === view.target?.() && context.revision === view.selectionRevision?.();
   function stopPolling() { timers.clearInterval(state.polling); state.polling = null; }
   async function load(force = false) {
     if (state.signedOut) return;
@@ -7,7 +9,7 @@ export function createWebController({ state, view, api, document, location, time
       if (force === true) return load(true);
       return;
     }
-    let settled;
+    let settled, context = capture();
     state.loading = new Promise(resolve => { settled = resolve; }); view.loading(true);
     try {
       if (view.multiTarget && !state.targetsLoaded) {
@@ -15,29 +17,31 @@ export function createWebController({ state, view, api, document, location, time
         if (state.signedOut) return;
         view.targets(targets, () => load(true)); state.targetsLoaded = true;
       }
-      const target = view.target?.();
+      context = capture(); const target = context.target;
       const jobs = await api('/api/requests' + (target ? `?target=${encodeURIComponent(target)}` : ''));
-      if (state.signedOut || target !== view.target?.()) return;
+      if (state.signedOut || !current(context)) return;
       view.render(jobs, state.deciding); view.connected(); view.error('');
       if (!state.polling) state.polling = timers.setInterval(() => { if (!document.hidden) load(); }, 10000);
     } catch (error) {
-      if (!state.signedOut) { view.error(error.message); view.disconnected(); }
+      if (!state.signedOut && current(context)) { view.error(error.message); view.disconnected(); }
       stopPolling();
     } finally { state.loading = null; view.loading(state.signedOut); settled(); }
   }
   async function decide(id, action) {
     if (state.signedOut || state.deciding) return;
+    const context = capture();
     state.deciding = true; view.deciding(true); view.error('');
     try { await api(`/api/${id}/${action}`, 'POST'); if (!state.signedOut) await load(true); }
-    catch (error) { if (!state.signedOut) view.error(error.message); }
+    catch (error) { if (!state.signedOut && current(context)) view.error(error.message); }
     finally { state.deciding = false; if (!state.signedOut) view.deciding(false); }
   }
   async function download(id) {
     if (state.signedOut) return;
+    const context = capture();
     try {
       const result = await api(`/api/${id}/download`, 'POST');
-      if (!state.signedOut) location.assign(result.downloadUrl);
-    } catch (error) { if (!state.signedOut) view.error(error.message); }
+      if (!state.signedOut && current(context)) location.assign(result.downloadUrl);
+    } catch (error) { if (!state.signedOut && current(context)) view.error(error.message); }
   }
   function logout() {
     state.signedOut = true; stopPolling(); view.signedOut();
