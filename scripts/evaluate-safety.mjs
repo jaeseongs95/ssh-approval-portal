@@ -36,16 +36,18 @@ export async function runSafetyEvaluation({ mode = 'replay', apiKey, fetchImpl }
       };
     } };
   }
-  const report = await evaluateSafety({ cases: corpus.cases, assessor, source: mode === 'live' ? 'live' : 'simulated' });
+  // Injected transports include local contract servers, never real-model evidence.
+  const transport = mode === 'replay' ? 'replay' : fetchImpl === undefined ? 'typesafe-https' : 'injected';
+  const report = await evaluateSafety({ cases: corpus.cases, assessor, source: transport === 'typesafe-https' ? 'live' : 'simulated' });
   return { ...report, runId: randomUUID(), startedAt, finishedAt: new Date().toISOString(),
     datasetVersion: corpus.version, datasetDigest: sha256(corpusBytes),
     protocolDigest: sha256(JSON.stringify({ protocol: SAFETY_PROTOCOL, question: SAFETY_QUESTION })),
-    sourceFiles, replayDigest: replayBytes ? sha256(replayBytes) : null,
+    sourceFiles, transport, replayDigest: replayBytes ? sha256(replayBytes) : null,
     requestedModel: SAFETY_PROTOCOL.model, actualCostUsd: null,
     usageComplete: report.unavailable === 0,
     qualification: 'development-smoke-only',
     limitations: ['No production-risk qualification or approved automation threshold.', 'Timeout/error can still incur provider charges.',
-      ...(mode === 'replay' ? ['Simulated outputs: no model accuracy measured; usage values are synthetic.'] : [])] };
+      ...(transport !== 'typesafe-https' ? ['Simulated outputs: no model accuracy measured; usage values are synthetic.'] : [])] };
 }
 
 export async function main(argv = process.argv.slice(2)) {

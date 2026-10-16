@@ -47,6 +47,18 @@ node scripts/evaluate-safety.mjs --mode live --out safety-live-001.json
 
 실행 결과에는 run ID·시작/종료 시각·corpus 원본 digest·질문/정책 digest·실행 소스 파일 digest·요청 모델·사례별 판정·오판·혼동 행렬·후보 오탐·관측 토큰을 남깁니다. 정답과 설명은 모델 입력에서 제외합니다. 실측은 `source: live`, `modelQualityStatus: UNVALIDATED`로 기록합니다.
 
+## 계약에 맞춘 임시 HTTP 서버 시험
+
+```sh
+node --test test/safety-http.test.mjs
+```
+
+시험이 `127.0.0.1`의 임의 포트에 서버를 만들고 종료 시 정리합니다. 실제 Jev 키는 읽지 않고 합성 토큰만 사용합니다. 제품 어댑터의 목적지는 그대로 고정하며, 테스트에 주입한 연결 함수만 로컬 서버로 연결합니다. CLI에 임의 endpoint 설정은 추가하지 않습니다.
+
+임시 서버는 제품 encoder/validator를 import하지 않고 POST·Bearer·model·state·Choice 질문/답변 키를 별도로 검사합니다. 실제 Node HTTP/fetch로 20개 합성 사례, 분할 응답, 잘못된 모델·답변, 401/429/500/529, redirect 거절, 응답 크기 초과, 헤더/본문 지연과 취소 뒤 복구를 확인합니다. AGS의 스킬 추천 라벨은 SSH 위험 질문 계약에서 거절합니다.
+
+`runSafetyEvaluation()`에 `fetchImpl`을 주입하면 `transport: injected`, `source: simulated`, `modelQualityStatus: NOT_MEASURED`로 기록합니다. 실제 HTTP 왕복을 했더라도 모델 실측으로 표시하지 않습니다. 기본 연결을 사용한 명시적 live 실행만 `transport: typesafe-https`가 됩니다. 이 테스트는 TypeSafe의 외부 TLS·모델 품질·과금을 검증하지 않습니다.
+
 ## 5단계 진입 조건
 
 현재 corpus는 개발용 합성 smoke 사례이며 독립적인 품질 평가셋이 아닙니다. 실제 Jev 평가와 정답의 독립 검토가 끝나지 않았습니다. 후보 임계값 `P(low_risk) >= 0.999`, `confidence >= 0.99`는 집계 동작을 확인하기 위한 미검증 값입니다. 신뢰도는 안전성 보증이나 승인 확률이 아닙니다.

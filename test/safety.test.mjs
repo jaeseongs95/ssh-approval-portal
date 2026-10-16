@@ -148,7 +148,7 @@ test('EVAL-03 simulated report preserves deliberate wrong/failed cases and hand-
   assert.match(report.datasetDigest,/^sha256:[a-f0-9]{64}$/);assert.equal(Object.keys(report.sourceFiles).length,4);
 });
 
-test('EVAL-04 live harness uses adapter on every case and records mismatches, never oracle answers in requests', async () => {
+test('EVAL-04 injected transport uses adapter on every case but never claims a real-model evaluation', async () => {
   let calls=0;
   const report=await runSafetyEvaluation({mode:'live',apiKey:'fixture',fetchImpl:async(_url,options)=>{
     calls++;const payload=JSON.parse(options.body);
@@ -156,7 +156,7 @@ test('EVAL-04 live harness uses adapter on every case and records mismatches, ne
     assert.doesNotMatch(options.body,/rationale|"expected"|"id":"S/);return response(wire());
   }});
   assert.equal(calls,20); assert.equal(report.correct,6);assert.equal(report.incorrect,14);assert.equal(report.falseCandidates,14);
-  assert.equal(report.source,'live');assert.equal(report.modelQualityStatus,'UNVALIDATED');assert.equal(report.stage5Ready,false);
+  assert.equal(report.source,'simulated');assert.equal(report.modelQualityStatus,'NOT_MEASURED');assert.equal(report.transport,'injected');assert.equal(report.stage5Ready,false);
 });
 
 test('EVAL-05 CLI refuses overwrite and missing key without leaking secrets or making paid calls', async () => {
