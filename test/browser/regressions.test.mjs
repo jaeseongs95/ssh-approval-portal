@@ -105,3 +105,32 @@ test('card identity follows replacement and completed result without HTML inject
   assert.equal(await page.locator('.server-identity').count(), 0);
   assert.equal(await page.title(), 'SSH approval and file transfer');
 }));
+
+test('multi-target web filter retires a delayed old response and updates visible identity', async () => browserFixture(async (page, server) => {
+  server.state.multiTarget = true;
+  server.state.jobs = ['alpha','beta'].map(id=>({...job(id+'-request'),targetId:id,targetDisplayName:id+' 이름',targetRevision:id+'-v1',hostKey:'SHA256:'+id}));
+  await page.goto(server.origin+'/fixture/web'); await page.locator('#target-filter').waitFor({state:'visible'});
+  assert.equal(await page.locator('#jobs .request').count(),2);
+  let entered, release; const held=new Promise(resolve=>release=resolve), started=new Promise(resolve=>entered=resolve);
+  server.state.beforeRequests=async target=>{if(target==='alpha'){entered();await held;}};
+  await page.selectOption('#target-filter','alpha');await started;
+  await page.selectOption('#target-filter','beta');
+  assert.ok((await page.title()).includes('beta 이름 [beta]')); assert.equal(await page.locator('#jobs .request').count(),0);
+  release();await page.waitForFunction(()=>document.querySelector('#jobs .request')?.dataset.requestId==='beta-request');
+  assert.equal(await page.locator('#jobs .request').count(),1);assert.ok((await page.locator('#jobs').textContent()).includes('beta 이름 [beta]'));
+}));
+test('card target replacement clears selected file and blocks late upload work for the former target', async () => browserFixture(async (page, server) => {
+  await page.goto(server.origin+'/fixture/card');await page.waitForFunction(()=>window.fixture);
+  await page.evaluate(()=>window.fixture.transfer('/tmp/same','alpha'));
+  await page.locator('input[type=file]').setInputFiles({name:'synthetic.bin',mimeType:'application/octet-stream',buffer:Buffer.from([1,2,3,4])});
+  await page.evaluate(()=>window.fixture.hold('ui-upload-chunk'));await page.locator('#controls button').click();
+  await page.waitForFunction(()=>window.fixture.calls.some(x=>x.name==='ui-upload-chunk'));
+  await page.selectOption('#details select','beta');
+  await page.waitForFunction(()=>document.title.includes('beta 이름'));
+  assert.equal(await page.locator('input[type=file]').evaluate(node=>node.files.length),0);
+  await page.evaluate(()=>window.fixture.release('ui-upload-chunk'));
+  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+  assert.equal(await page.evaluate(()=>window.fixture.calls.filter(x=>x.name==='ui-upload-finish').length),0);
+  assert.equal(await page.locator('#details select').inputValue(),'beta');
+  assert.equal(await page.evaluate(()=>window.fixture.calls.find(x=>x.name==='ui-upload-begin').args.transfer.target),'alpha');
+}));

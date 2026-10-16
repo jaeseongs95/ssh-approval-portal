@@ -9,9 +9,9 @@ const json = (res, status, value) => { res.writeHead(status, { 'Content-Type': '
 
 const escapeHtml = value => value.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
 
-export function createProtocolAdapters({ queue, commands, files, store, lifecycle, settings, signer, adminAccess, authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal }) {
-  const capabilities = createCapabilities({ queue, store, signer, settings });
-  const mcpServer = createMcpAdapter({ queue, commands, files, settings, capabilities, uiHtml, bindFileSource, shutdownSignal });
+export function createProtocolAdapters({ queue, commands, files, store, lifecycle, settings, signer, adminAccess, authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal, targets }) {
+  const capabilities = createCapabilities({ queue, store, signer, settings, targets });
+  const mcpServer = createMcpAdapter({ queue, commands, files, settings, capabilities, uiHtml, bindFileSource, shutdownSignal, targets });
   const mcpHttp = createServer(async (req, res) => {
     let server, disconnect, aborted, closed;
     try {
@@ -37,6 +37,11 @@ export function createProtocolAdapters({ queue, commands, files, store, lifecycl
       const authorization = await authorizeAdminRequest(req, { adminAccess, adminToken: settings.adminToken, adminOrigin: settings.adminOrigin });
       if (!authorization.allowed) return json(res, authorization.status ?? 403, { error: authorization.status === 401 ? 'Unauthorized' : authorization.status === 409 ? 'Request refused, expired, busy or unavailable' : 'Forbidden' });
       const url = new URL(req.url, settings.adminOrigin);
+      const filter = url.searchParams.getAll('target');
+      if (filter.length && (!['/api/requests', '/api/pending'].includes(url.pathname) || filter.length !== 1 || !targets)) throw Error('Conflicting target selector');
+      if (filter.length) targets.select(filter[0]);
+      const visible = jobs => filter.length ? jobs.filter(job => (job.targetId ?? 'default') === filter[0]) : jobs;
+      if (req.method === 'GET' && url.pathname === '/api/targets') return json(res, 200, targets?.list() ?? { targets: [{ id: 'default', displayName: settings.targetDisplayName ?? 'SSH', enabled: true, isDefault: true }], defaultTarget: 'default' });
       if (req.method === 'GET' && url.pathname === '/api/session') return json(res, 200, { mode: adminAccess.mode });
       const match = /^\/downloads\/([a-f0-9]{48})\/([a-f0-9]{32})$/.exec(url.pathname);
       if (match && ['GET', 'HEAD'].includes(req.method)) {
@@ -52,11 +57,11 @@ export function createProtocolAdapters({ queue, commands, files, store, lifecycl
       }
       if (req.method === 'GET' && ['/', '/app.js'].includes(url.pathname)) {
         res.writeHead(200, { 'Content-Type': url.pathname === '/' ? 'text/html; charset=utf-8' : 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'", 'Referrer-Policy': 'no-referrer' });
-        return res.end(url.pathname === '/' ? webHtml.replace('data-auth-mode="token"', () => `data-auth-mode="${adminAccess.mode}" data-bridge-display-name="${escapeHtml(settings.bridgeDisplayName)}" data-target-display-name="${escapeHtml(settings.targetDisplayName)}"`)
+        return res.end(url.pathname === '/' ? webHtml.replace('data-auth-mode="token"', () => `data-auth-mode="${adminAccess.mode}" data-multi-target="${settings.targets ? 'true' : 'false'}" data-bridge-display-name="${escapeHtml(settings.bridgeDisplayName)}" data-target-display-name="${escapeHtml(settings.targetDisplayName)}"`)
           .replace('<title>SSH 승인 · Approval Portal</title>', () => `<title>${escapeHtml(settings.bridgeDisplayName)} · ${escapeHtml(settings.targetDisplayName)} · SSH Approval Portal</title>`) : webJs);
       }
-      if (req.method === 'GET' && url.pathname === '/api/pending') return json(res, 200, queue.list().map(presentJob));
-      if (req.method === 'GET' && url.pathname === '/api/requests') return json(res, 200, queue.listAll().map(presentJob));
+      if (req.method === 'GET' && url.pathname === '/api/pending') return json(res, 200, visible(queue.list()).map(presentJob));
+      if (req.method === 'GET' && url.pathname === '/api/requests') return json(res, 200, visible(queue.listAll()).map(presentJob));
       const single = /^\/api\/([a-f0-9]{48})$/.exec(url.pathname);
       if (req.method === 'GET' && single) { const job = queue.get(single[1]); return json(res, 200, job ? presentJob(job) : { error: 'Unknown request' }); }
       if (url.pathname === '/api/maintenance/reserve') { lifecycle.reserve(); return json(res, 200, { reserved: true }); }

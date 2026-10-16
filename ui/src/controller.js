@@ -22,14 +22,14 @@ export function createCardController({ state, view, host, document, hashFile, en
     stopPolling(); view.error('');
     const context = state.capture();
     if (state.mode === 'probe') return view.probe(state.probeMarker, state.meta);
-    if (state.mode === 'transfer') return view.transfer(state.transfer, state.meta, (config, file) => submit(config, file, context));
+    if (state.mode === 'transfer') return view.transfer(state.transfer, state.meta, (config, file) => submit(config, file, context), target => selectTarget(target, context));
     view.job(state.job, state.meta, { decide: action => decide(action, context), save: () => save(context) });
     if (['pending', 'running'].includes(state.job.state)) polling = timers.setInterval(() => {
       if (!document.hidden) refresh().catch(() => {
         if (state.current(context)) view.error(t('연결이 끊겼습니다. 명령은 재실행하지 않습니다.'));
       });
     }, 2000);
-    else host.updateModelContext({ structuredContent: { requestId: state.job.id, kind: state.job.kind, state: state.job.state, result: state.job.result } }).catch(() => {});
+    else host.updateModelContext({ structuredContent: { requestId: state.job.id, ...(state.job.targetId ? { targetId: state.job.targetId, targetRevision: state.job.targetRevision } : {}), kind: state.job.kind, state: state.job.state, result: state.job.result } }).catch(() => {});
   }
   async function refresh() {
     if (state.disposed || state.mode !== 'job') return;
@@ -39,6 +39,15 @@ export function createCardController({ state, view, host, document, hashFile, en
       if (result.structuredContent?.error) { stopPolling(); view.missing(); return; }
       receive(result);
     } catch (error) { if (error !== stale && state.current(context)) throw error; }
+  }
+  async function selectTarget(target, context) {
+    if (!state.current(context)) return;
+    const config = { ...context.transfer, target };
+    // Retire the old view before I/O, so its selected File and pending work lose ownership.
+    state.revision++; state.busy = false; const selection = state.capture();
+    stopPolling(); view.clear(); view.error('');
+    try { receive(await call(selection, 'show-file-transfer', config)); }
+    catch (error) { if (state.current(selection) && error !== stale) view.error(t('대상 선택에 실패했습니다. 다시 열어 주세요.')); }
   }
   function decide(action, context) {
     return act(async context => {
@@ -75,7 +84,7 @@ export function createCardController({ state, view, host, document, hashFile, en
     return act(async context => {
       if (!context.meta.uiEnabled || !context.transfer) return;
       if (config.direction === 'download') {
-        const request = await call(context, 'request-download', { remotePath: config.remotePath, elevate: config.elevate });
+        const request = await call(context, 'request-download', { remotePath: config.remotePath, elevate: config.elevate, ...(config.target === undefined ? {} : { target: config.target }) });
         receive(await call(context, 'show-approval', { id: request.structuredContent.id })); return;
       }
       if (!file || file.size > context.meta.maxBytes) throw Error(t('파일을 선택하고 크기 한도를 확인하세요.'));
@@ -97,5 +106,5 @@ export function createCardController({ state, view, host, document, hashFile, en
     if (state.current(context) && context.meta.webUrl) await host.openLink({ url: context.meta.webUrl });
   }
   function dispose() { stopPolling(); state.dispose(); view.clear(); }
-  return { receive, refresh, decide, save, submit, openWeb, dispose };
+  return { receive, refresh, decide, save, submit, selectTarget, openWeb, dispose };
 }

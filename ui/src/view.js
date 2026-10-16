@@ -27,6 +27,11 @@ export function createCardView({ document, i18n }) {
     text(infoBox, 'p', `${t('대상 서버')} · ${job.target}`);
     const info = text(infoBox, 'details', ''); text(info, 'summary', t('요청 정보'));
     text(info, 'p', `${t('요청')} ${job.id}`, 'request-id');
+    if (job.targetId) {
+      text(info, 'p', `${t('대상 ID')} · ${job.targetId}`);
+      text(info, 'p', `${t('설정 revision')} · ${job.targetRevision}`);
+      text(info, 'p', `${t('호스트 키')} · ${job.hostKey}`);
+    }
     text(info, 'p', `${t('승인 만료')} ${new Date(job.expiresAt).toLocaleString(locale)}`);
     text(el('details'), 'p', t(job.kind === 'command' ? '실행할 명령' : '파일 전송 내용'), 'section-label');
     if (job.kind === 'command') text(el('details'), 'pre', job.command);
@@ -53,8 +58,14 @@ export function createCardView({ document, i18n }) {
     if (job.state === 'pending') for (const action of ['approve', 'deny']) button(t(action === 'approve' ? '승인·실행' : '거부'), () => actions.decide(action), !meta.uiEnabled || !meta.approvalTicket);
     if (job.kind === 'download' && job.state === 'completed') button(t('파일 저장'), actions.save, !meta.uiEnabled || !meta.viewTicket);
   }
-  function transfer(seed, meta, submit) {
+  function transfer(seed, meta, submit, selectTarget) {
     clear(); identity(meta); status(t(seed.direction === 'upload' ? '파일 업로드 준비' : '파일 다운로드 준비'));
+    if (seed.target && meta.targets) {
+      const label = text(el('details'), 'label', t('대상 서버'));
+      const select = document.createElement('select'); select.ariaLabel = t('대상 서버');
+      for (const target of meta.targets) { const option = text(select, 'option', `${target.displayName} (${target.id})`); option.value = target.id; option.disabled = !target.enabled; }
+      select.value = seed.target; select.onchange = () => selectTarget(select.value); label.append(select);
+    }
     const label = text(el('details'), 'label', t('서버의 절대 파일 경로'));
     const path = document.createElement('input'); path.type = 'text'; path.value = seed.remotePath; label.append(path);
     const elevated = document.createElement('input'); elevated.type = 'checkbox'; elevated.checked = seed.elevate;
@@ -68,7 +79,7 @@ export function createCardView({ document, i18n }) {
     }
     // The visible input owns its file; a replacement view never inherits it.
     button(t(seed.direction === 'upload' ? '파일 전송 후 승인 요청' : '다운로드 요청'), () => submit({
-      direction: seed.direction, remotePath: path.value, elevate: elevated.checked, overwrite: overwrite?.checked ?? false,
+      ...(seed.target === undefined ? {} : { target: seed.target }), direction: seed.direction, remotePath: path.value, elevate: elevated.checked, overwrite: overwrite?.checked ?? false,
     }, fileInput?.files?.[0] ?? null), !meta.uiEnabled);
     if (!meta.uiEnabled) text(el('details'), 'p', t('UI 동작은 클라이언트 검증 후 활성화됩니다.'));
   }

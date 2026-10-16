@@ -1,7 +1,7 @@
 import { remotePath } from '../domain/validation.mjs';
 
 /** File use cases know metadata and ports; bytes never become host protocol objects. */
-export function createFileService({ store, queue, transfers, maxConcurrent = 2, now = () => Date.now() }) {
+export function createFileService({ store, queue, transfers, maxConcurrent = 2, now = () => Date.now(), claimImport = () => () => {} }) {
   const shutdown = new AbortController(), imports = new Set();
   const guard = () => { if (shutdown.signal.aborted || queue.maintenance) throw Error('Maintenance or file service closed'); };
   const submitUpload = artifact => queue.submitOperation({ kind: 'upload', artifactId: artifact.id, remotePath: artifact.remotePath,
@@ -12,6 +12,7 @@ export function createFileService({ store, queue, transfers, maxConcurrent = 2, 
       if (imports.size >= maxConcurrent) throw Error('File imports busy');
       const policy = source.inspect();
       if (!policy.allowed) return { type: 'source-unavailable', sourceHost: policy.sourceHost };
+      const release = claimImport();
       const combined = AbortSignal.any([shutdown.signal, signal].filter(Boolean));
       const work = (async () => {
         let artifact, submitted = false;
@@ -23,7 +24,7 @@ export function createFileService({ store, queue, transfers, maxConcurrent = 2, 
         } finally { if (artifact && !submitted) await store.remove(artifact.id); }
       })();
       imports.add(work);
-      try { return await work; } finally { imports.delete(work); }
+      try { return await work; } finally { imports.delete(work); release(); }
     },
     requestDownload({ remotePath: path, elevate = false }) {
       remotePath(path); guard();

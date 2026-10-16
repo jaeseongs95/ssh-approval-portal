@@ -5,6 +5,7 @@ import { hash, remotePath } from '../../domain/validation.mjs';
 import { CHUNK_BYTES } from '../../contracts/ports.mjs';
 import { outputSchemas, publicResult, jobResult, statusResult, immediateResult, sourceUnavailable, refused } from '../presentation/results.mjs';
 
+const target = z.string().regex(/^[a-z][a-z0-9_-]{0,31}$/).optional();
 const id = z.string().regex(/^[a-f0-9]{48}$/), ticket = z.string().min(1).max(8192);
 function decodeChunk(data) {
   if (typeof data !== 'string' || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(data)) throw Error('Invalid chunk');
@@ -13,7 +14,8 @@ function decodeChunk(data) {
   return bytes;
 }
 
-export function createMcpAdapter({ queue, commands, files, settings, capabilities, uiHtml, bindFileSource, shutdownSignal }) {
+export function createMcpAdapter({ queue, commands, files, settings, capabilities, uiHtml, bindFileSource, shutdownSignal, targets }) {
+  const identity = target => targets && !targets.legacy ? { ...targets.select(target).identity, target: targets.select(target).target } : undefined;
   const URI = `ui://ssh-approval/card-${hash(uiHtml)}.html`;
   return function mcpServer(requestSignal) {
     const server = new McpServer({ name: 'SSH Approval Portal', version: '1.0.0' });
@@ -25,20 +27,22 @@ export function createMcpAdapter({ queue, commands, files, settings, capabilitie
       try { return await handler(args, { ...extra, signal: AbortSignal.any([shutdownSignal, requestSignal, extra?.signal].filter(Boolean)) }); }
       catch { return refused(); }
     });
-    tool('read-command', { command: z.string().min(1).max(2000) }, outputSchemas.immediate, async ({ command }) => immediateResult(await commands.read(command)), { readOnly: true, description: 'Execute proven read-only commands immediately.' });
-    tool('run-command', { command: z.string().min(1).max(2000) }, outputSchemas.run, async ({ command }) => {
-      const result = await commands.run(command);
-      if (result.type === 'immediate') return immediateResult(result.outcome);
+    tool('list-targets', {}, outputSchemas.targets, () => publicResult(targets?.list() ?? { targets: [{ id: 'default', displayName: settings.targetDisplayName ?? 'SSH', enabled: true, isDefault: true }], defaultTarget: 'default' }, outputSchemas.targets), { readOnly: true, description: 'List administrator-registered SSH target IDs and display names. Unknown or disabled targets are refused; an omitted target uses only the configured fixed default.' });
+    tool('read-command', { target, command: z.string().min(1).max(2000) }, outputSchemas.immediate, async ({ command, target }) => immediateResult(await commands.read(command, target), identity(target)), { readOnly: true, description: 'Execute proven read-only commands immediately.' });
+    tool('run-command', { target, command: z.string().min(1).max(2000) }, outputSchemas.run, async ({ command, target }) => {
+      const result = await commands.run(command, target);
+      if (result.type === 'immediate') return immediateResult(result.outcome, identity(target));
       if (result.type !== 'job') throw Error('Invalid command result');
       return jobResult(result.job);
     }, { description: 'Run read-only immediately; queue all other commands for approval. If pending, call show-approval with its id to show the owner the approval card.' });
-    tool('request-safe-command', { command: z.string().min(1).max(2000) }, outputSchemas.job, ({ command }) => jobResult(queue.submit(command, true)), { description: 'Legacy safe-only owner approval request.' });
+    tool('request-safe-command', { target, command: z.string().min(1).max(2000) }, outputSchemas.job, ({ command, target }) => jobResult(queue.submit(command, true, target)), { description: 'Legacy safe-only owner approval request.' });
     tool('get-request-status', { id }, outputSchemas.status, ({ id }) => statusResult(queue.get(id)), { readOnly: true });
     tool('request-upload', {
+      target,
       file: z.object({ download_url: z.string().min(1).max(16384), file_id: z.string().min(1).max(1024), mime_type: z.string().max(255).optional(), file_name: z.string().max(255).optional() }).strict(),
       remotePath: z.string().max(4096), overwrite: z.boolean().default(false), elevate: z.boolean().default(false),
-    }, outputSchemas.upload, async ({ file, remotePath: path, overwrite, elevate }, { signal }) => {
-      const result = await files.requestUpload({ source: bindFileSource(file.download_url), fileName: file.file_name ?? posix.basename(path), remotePath: path, overwrite, elevate }, { signal });
+    }, outputSchemas.upload, async ({ target, file, remotePath: path, overwrite, elevate }, { signal }) => {
+      const result = await files.requestUpload({ target, source: bindFileSource(file.download_url), fileName: file.file_name ?? posix.basename(path), remotePath: path, overwrite, elevate }, { signal });
       if (result.type === 'source-unavailable') return sourceUnavailable(result.sourceHost);
       if (result.type !== 'job') throw Error('Invalid upload result');
       return { ...jobResult(result.job), _meta: { sshApproval: capabilities.view(result.job) } };
@@ -49,17 +53,19 @@ export function createMcpAdapter({ queue, commands, files, settings, capabilitie
       const job = queue.get(id); if (!job) throw Error('Unknown request');
       return { ...jobResult(job), _meta: { sshApproval: capabilities.view(job) } };
     }, { ui: true, readOnly: true });
-    tool('show-file-transfer', { direction: z.enum(['upload', 'download']), remotePath: z.string().max(4096), elevate: z.boolean().default(false), overwrite: z.boolean().default(false) }, outputSchemas.transfer, args => {
+    tool('show-file-transfer', { target, direction: z.enum(['upload', 'download']), remotePath: z.string().max(4096), elevate: z.boolean().default(false), overwrite: z.boolean().default(false) }, outputSchemas.transfer, args => {
       remotePath(args.remotePath);
-      return { ...publicResult({ transfer: args, uiEnabled: settings.uiEnabled, maxBytes: settings.maxBytes }, outputSchemas.transfer), _meta: { sshApproval: { bridgeDisplayName: settings.bridgeDisplayName, targetDisplayName: settings.targetDisplayName, uiEnabled: settings.uiEnabled, namespace: settings.prefix, maxBytes: settings.maxBytes, chunkBytes: CHUNK_BYTES, webUrl: settings.adminOrigin, ...(settings.uiEnabled ? { bootstrapTicket: capabilities.bootstrap(args) } : {}) } } };
+      args = targets?.canonicalTransfer(args) ?? args;
+      const selected = targets?.select(args.target);
+      return { ...publicResult({ transfer: args, uiEnabled: settings.uiEnabled, maxBytes: settings.maxBytes }, outputSchemas.transfer), _meta: { sshApproval: { bridgeDisplayName: settings.bridgeDisplayName, targetDisplayName: selected?.displayName ?? settings.targetDisplayName, ...(selected ? { targetId: selected.id, targetRevision: selected.revision, targets: targets.list().targets } : {}), uiEnabled: settings.uiEnabled, namespace: settings.prefix, maxBytes: settings.maxBytes, chunkBytes: CHUNK_BYTES, webUrl: settings.adminOrigin, ...(settings.uiEnabled ? { bootstrapTicket: capabilities.bootstrap(args) } : {}) } } };
     }, { ui: true, readOnly: true });
-    tool('request-download', { remotePath: z.string().max(4096), elevate: z.boolean().default(false) }, outputSchemas.job, args => jobResult(files.requestDownload(args)), { description: 'Read a regular remote file, or queue a sudo download. Call show-approval for the returned id to display status and save button.' });
+    tool('request-download', { target, remotePath: z.string().max(4096), elevate: z.boolean().default(false) }, outputSchemas.job, args => jobResult(files.requestDownload(args)), { description: 'Read a regular remote file, or queue a sudo download. Call show-approval for the returned id to display status and save button.' });
     tool('ui-decide-request', { id, action: z.enum(['approve', 'deny']), ticket }, outputSchemas.job, ({ id, action, ticket }) => {
       capabilities.guard(); capabilities.verifyJob(id, ticket, 'decision');
       const job = action === 'approve' ? queue.start(id) : queue.deny(id);
       return { ...jobResult(job), _meta: { sshApproval: capabilities.view(job) } };
     }, { appOnly: true });
-    tool('ui-upload-begin', { transfer: z.object({ direction: z.literal('upload'), remotePath: z.string().max(4096), elevate: z.boolean(), overwrite: z.boolean() }), ticket, fileName: z.string().max(255), size: z.number().int().nonnegative(), sha256: z.string().regex(/^[a-f0-9]{64}$/) }, outputSchemas.begin, async ({ transfer, ticket, ...meta }) => {
+    tool('ui-upload-begin', { transfer: z.object({ target, direction: z.literal('upload'), remotePath: z.string().max(4096), elevate: z.boolean(), overwrite: z.boolean() }), ticket, fileName: z.string().max(255), size: z.number().int().nonnegative(), sha256: z.string().regex(/^[a-f0-9]{64}$/) }, outputSchemas.begin, async ({ transfer, ticket, ...meta }) => {
       capabilities.guard(); capabilities.verifyBootstrap(transfer, ticket);
       const item = await files.beginUpload({ ...transfer, ...meta });
       return { ...publicResult({ transferId: item.id, received: 0 }, outputSchemas.begin), _meta: { sshApproval: { uploadTicket: capabilities.upload(item) } } };

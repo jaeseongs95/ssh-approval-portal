@@ -5,13 +5,18 @@ import { fileURLToPath } from 'node:url';
 
 const escape = value => value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
 export async function fixtureServer(root) {
-  const state = { jobs: [], requests: [], reads: 0, bridgeDisplayName: '시험 <bridge>', targetDisplayName: '운영 & target' };
+  const state = { jobs: [], requests: [], reads: 0, bridgeDisplayName: '시험 <bridge>', targetDisplayName: '운영 & target', multiTarget: false, beforeRequests: null };
   const server = createServer(async (request, response) => {
     try {
       const url = new URL(request.url, 'http://fixture.invalid');
+      if (url.pathname === '/api/targets') {
+        response.setHeader('Content-Type', 'application/json');response.end(JSON.stringify({ targets: ['alpha','beta'].map(id=>({id,displayName:id+' 이름',enabled:true,isDefault:id==='alpha'})),defaultTarget:'alpha' }));return;
+      }
       if (url.pathname === '/api/requests') {
         state.reads++; state.requests.push({ method: request.method, authorization: request.headers.authorization ?? null });
-        response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify(state.jobs)); return;
+        const target = url.searchParams.get('target'), jobs = target ? state.jobs.filter(job=>job.targetId===target) : state.jobs;
+        await state.beforeRequests?.(target);
+        response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify(jobs)); return;
       }
       if (url.pathname === '/cdn-cgi/access/logout') { response.end('Synthetic signed out'); return; }
       let text, type = 'text/javascript';
@@ -22,7 +27,7 @@ export async function fixtureServer(root) {
         text = await readFile(resolve(root, 'ui/card.js'), 'utf8');
         if (url.pathname.endsWith('legacy-card.js')) text = text.replace("import { App } from '@modelcontextprotocol/ext-apps';", 'const App = window.FixtureApp;');
       } else if (url.pathname === '/' || url.pathname === '/fixture/web') {
-        text = (await readFile(resolve(root, 'web/index.html'), 'utf8')).replace('data-auth-mode="token"', () => `data-auth-mode="access" data-bridge-display-name="${escape(state.bridgeDisplayName)}" data-target-display-name="${escape(state.targetDisplayName)}"`).replace('<script src="/app.js" defer></script>', '<script type="module" src="/web/app.js"></script>'); type = 'text/html';
+        text = (await readFile(resolve(root, 'web/index.html'), 'utf8')).replace('data-auth-mode="token"', () => `data-auth-mode="access" data-multi-target="${state.multiTarget}" data-bridge-display-name="${escape(state.bridgeDisplayName)}" data-target-display-name="${escape(state.targetDisplayName)}"`).replace('<script src="/app.js" defer></script>', '<script type="module" src="/web/app.js"></script>'); type = 'text/html';
       } else {
         const path = resolve(root, '.' + url.pathname);
         if (!path.startsWith(resolve(root) + sep) || !/^\/(?:ui|web)\/(?:src\/[^/]+\.js|app\.js)$/.test(url.pathname)) { response.writeHead(404); response.end(); return; }

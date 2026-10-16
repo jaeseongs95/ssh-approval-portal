@@ -19,7 +19,7 @@ export function writeAll(fd, bytes, writer) {
 export function createAudit({ path, redact, now = () => new Date() }) {
   return event => {
     const operation = event.operation;
-    const record = { at: now().toISOString(), action: event.action, id: event.id, kind: event.kind ?? operation?.kind, profile: event.profile, target: event.target, commandClass: event.commandClass };
+    const record = { at: now().toISOString(), action: event.action, id: event.id, kind: event.kind ?? operation?.kind, profile: event.profile, target: event.target, targetId: event.targetId, targetRevision: event.targetRevision, commandClass: event.commandClass };
     const command = event.command ?? operation?.command;
     if (command) { record.commandHash = hash(command); record.command = redact(command, { entropyScan: true }); }
     if (operation && operation.kind !== 'command') Object.assign(record, { remotePath: operation.remotePath, sha256: operation.sha256, size: operation.size, overwrite: operation.overwrite, elevate: operation.elevate });

@@ -4,6 +4,7 @@ const job = { id: 'old-A', kind: 'command', state: 'completed', command: 'fixtur
 async function call(name, args, namespace) {
   calls.push({ name, args, namespace });
   if (name === held) await new Promise(resolve => waiting.set(name, resolve));
+  if (name === 'show-file-transfer' && args.target) return { structuredContent: { transfer: args, uiEnabled: true, maxBytes:67108864 }, _meta: { sshApproval: { uiEnabled:true, namespace:'fixture_', maxBytes:67108864, chunkBytes:2, bootstrapTicket:'synthetic-bootstrap', targetId:args.target, targetRevision:args.target+'-v1', targetDisplayName:args.target+' 이름', targets:['alpha','beta'].map(id=>({id,displayName:id+' 이름',enabled:true})) } } };
   if (name === 'show-file-transfer') return { _meta: { sshApproval: { bootstrapTicket: 'synthetic-bootstrap' } } };
   if (name === 'ui-upload-begin') return { structuredContent: { transferId: 'synthetic-upload' }, _meta: { sshApproval: { uploadTicket: 'synthetic-ticket' } } };
   if (name === 'ui-upload-finish') return { structuredContent: job, _meta: { sshApproval: {} } };
@@ -36,6 +37,6 @@ if (source.startsWith('import { App }')) {
   view.initialize(controller.openWeb); receive = controller.receive;
 }
 window.fixture = { calls, hold: name => { held = name; }, release: name => { held = ''; waiting.get(name)?.(); }, receive,
-  transfer: path => receive({ structuredContent: { transfer: { direction: 'upload', remotePath: path, elevate: false, overwrite: false } },
-    _meta: { sshApproval: { uiEnabled: true, namespace: 'fixture_', maxBytes: 67108864, chunkBytes: 2, bootstrapTicket: 'synthetic-bootstrap' } } }),
+  transfer: (path, target) => receive({ structuredContent: { transfer: { ...(target ? {target} : {}), direction: 'upload', remotePath: path, elevate: false, overwrite: false } },
+    _meta: { sshApproval: { ...(target ? {targetId:target,targetRevision:target+'-v1',targetDisplayName:target+' 이름',targets:['alpha','beta'].map(id=>({id,displayName:id+' 이름',enabled:true}))} : {}), uiEnabled: true, namespace: 'fixture_', maxBytes: 67108864, chunkBytes: 2, bootstrapTicket: 'synthetic-bootstrap' } } }),
 };

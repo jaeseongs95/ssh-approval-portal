@@ -13,6 +13,7 @@ const validateUpload = meta => {
   remotePath(meta.remotePath);
   if (typeof meta.fileName !== 'string' || !meta.fileName || meta.fileName.length > 255 || /[\x00-\x1f\x7f/\\]/.test(meta.fileName)) throw Error('Invalid filename');
 };
+const ownership = meta => meta.targetId === undefined ? {} : { targetId: meta.targetId, targetRevision: meta.targetRevision };
 const snapshot = item => {
   const { path, last, ...metadata } = item;
   return Object.freeze(metadata);
@@ -62,12 +63,12 @@ export class Artifacts {
   get(id) { return snapshot(this.#get(id)); }
   subject(id) {
     const x = this.#get(id);
-    return hash(JSON.stringify({ id, size: x.size, sha256: x.sha256, remotePath: x.remotePath, overwrite: x.overwrite, elevate: x.elevate }));
+    return hash(JSON.stringify({ ...ownership(x), id, size: x.size, sha256: x.sha256, remotePath: x.remotePath, overwrite: x.overwrite, elevate: x.elevate }));
   }
   async begin(meta) {
     validateUpload(meta);
     if (!validHash(meta.sha256)) throw Error('Invalid file hash');
-    const item = this.#allocate({ fileName: meta.fileName, remotePath: meta.remotePath, size: meta.size, sha256: meta.sha256, overwrite: meta.overwrite === true, elevate: meta.elevate === true });
+    const item = this.#allocate({ ...ownership(meta), fileName: meta.fileName, remotePath: meta.remotePath, size: meta.size, sha256: meta.sha256, overwrite: meta.overwrite === true, elevate: meta.elevate === true });
     try { const fd = await open(item.path, 'wx', 0o600); await fd.close(); } catch (err) { await this.remove(item.id); throw err; }
     return snapshot(item);
   }
@@ -101,7 +102,7 @@ export class Artifacts {
   }
   async importFile(meta, openSource, { signal } = {}) {
     validateUpload(meta); signal?.throwIfAborted();
-    const item = this.#allocate({ fileName: meta.fileName, remotePath: meta.remotePath, size: this.maxBytes,
+    const item = this.#allocate({ ...ownership(meta), fileName: meta.fileName, remotePath: meta.remotePath, size: this.maxBytes,
       overwrite: meta.overwrite === true, elevate: meta.elevate === true });
     item.busy = true;
     let fd, source;
@@ -132,7 +133,7 @@ export class Artifacts {
   #resize(item, size) { this.#reserved -= item.size - size; item.size = size; }
   reserveDownload(meta) {
     validateUpload(meta);
-    return snapshot(this.#allocate({ fileName: meta.fileName, remotePath: meta.remotePath, elevate: meta.elevate === true, size: this.maxBytes }, true));
+    return snapshot(this.#allocate({ ...ownership(meta), fileName: meta.fileName, remotePath: meta.remotePath, elevate: meta.elevate === true, size: this.maxBytes }, true));
   }
   async receiveDownload(id, metadata, writeTo) {
     const x = this.#get(id);

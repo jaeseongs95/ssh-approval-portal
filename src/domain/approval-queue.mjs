@@ -11,9 +11,10 @@ export class ApprovalQueue {
    * @param {{classify:(command:string)=>{class:string}, executeOperation:(operation:Object,id:string)=>Promise<OperationOutcome>, profile:string, target:string, audit?:(event:Object)=>void, now?:()=>number, idFactory?:()=>string, onTerminal?:(job:Object)=>void, externalBusy?:()=>boolean}} ports
    * audit is synchronous and may throw: a failed admission record never authorizes execution.
    */
-  constructor({ classify, executeOperation, profile, target, audit = () => {}, now = () => Date.now(), idFactory = () => randomBytes(24).toString('hex'), onTerminal = () => {}, externalBusy = () => false }) {
+  constructor({ classify, executeOperation, profile, target, audit = () => {}, now = () => Date.now(), idFactory = () => randomBytes(24).toString('hex'), onTerminal = () => {}, externalBusy = () => false, identity, claimExecution = () => () => {} }) {
     if (typeof profile !== 'string' || !profile) throw Error('Approval profile is required');
     Object.assign(this, { classify, executeOperation, profile, target, audit, now, idFactory, onTerminal, externalBusy });
+    this.identity = identity && Object.freeze({ ...identity }); this.claimExecution = claimExecution;
     this.jobs = new Map(); this.active = null; this.maintenance = false;
   }
   submit(command, safeOnly = false) {
@@ -27,7 +28,7 @@ export class ApprovalQueue {
     // Operations contain flat primitives; retain no caller-owned mutable object.
     const op = Object.freeze({ ...operation });
     const job = { id: this.idFactory(), operation: op, profile: this.profile, commandClass,
-      target: this.target, state: 'pending', createdAt: this.now(), expiresAt: this.now() + EXPIRES_MS };
+      ...this.identity, target: this.target, state: 'pending', createdAt: this.now(), expiresAt: this.now() + EXPIRES_MS };
     this.audit({ action: 'submitted', ...this.public(job) });
     this.jobs.set(job.id, job);
     return this.public(job);
@@ -35,12 +36,12 @@ export class ApprovalQueue {
   public(job) {
     if (!job) return null;
     return { id: job.id, kind: job.operation.kind, operation: { ...job.operation }, command: job.operation.command,
-      profile: job.profile, commandClass: job.commandClass, target: job.target, state: job.state,
+      ...this.identity, profile: job.profile, commandClass: job.commandClass, target: job.target, state: job.state,
       createdAt: job.createdAt, expiresAt: job.expiresAt, finishedAt: job.finishedAt, result: job.result, auditError: job.auditError };
   }
   subject(id) {
     const job = this.jobs.get(id); if (!job) throw Error('Unknown request');
-    return hash(JSON.stringify({ id, operation: job.operation, profile: job.profile, target: job.target, expiresAt: job.expiresAt }));
+    return hash(JSON.stringify({ ...this.identity, id, operation: job.operation, profile: job.profile, target: job.target, expiresAt: job.expiresAt }));
   }
   get(id) {
     const job = this.jobs.get(id);
@@ -78,7 +79,8 @@ export class ApprovalQueue {
     if (automatic && (job.operation.kind !== 'download' || job.operation.elevate)) throw Error('Approval required');
     if (this.busy()) throw Error('A request is already executing');
     if (job.operation.kind === 'command') validateCommand(job.operation.command, this.classify);
-    this.audit({ action: automatic ? 'read-started' : 'approved', ...this.public(job) });
+    const release = this.claimExecution();
+    try { this.audit({ action: automatic ? 'read-started' : 'approved', ...this.public(job) }); } catch (error) { release(); throw error; }
     job.state = 'running'; this.active = job;
     // The claim and audit complete synchronously before any external side effect.
     job.completion = Promise.resolve().then(async () => {
@@ -91,7 +93,7 @@ export class ApprovalQueue {
       } finally {
         job.finishedAt = this.now();
         try { this.audit({ action: job.state, id }); } catch { job.auditError = 'Final audit write failed; operation must not be retried automatically'; }
-        this.active = null; this.onTerminal(job);
+        this.active = null; try { this.onTerminal(job); } finally { release(); }
       }
       return this.public(job);
     });

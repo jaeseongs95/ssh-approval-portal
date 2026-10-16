@@ -9,7 +9,7 @@ export function createCardState() {
       if (!mode) return false;
       const sameJob = mode === 'job' && this.mode === 'job' && this.job.id === value.id;
       const meta = { ...(sameJob ? this.meta : {}), ...result._meta?.sshApproval };
-      const fingerprint = JSON.stringify([value, meta.bridgeDisplayName, meta.targetDisplayName, meta.uiEnabled, !!meta.approvalTicket, !!meta.viewTicket]);
+      const fingerprint = JSON.stringify([value, meta.bridgeDisplayName, meta.targetDisplayName, meta.targetId, meta.targetRevision, meta.uiEnabled, !!meta.approvalTicket, !!meta.viewTicket]);
       this.meta = meta;
       if (sameJob && this.fingerprint === fingerprint) return false;
       this.revision++; this.mode = mode; this.job = mode === 'job' ? value : null;

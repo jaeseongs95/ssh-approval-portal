@@ -3,6 +3,7 @@ import { MAX_BYTES } from '../../contracts/ports.mjs';
 import { equalSecret } from '../security/tickets.mjs';
 import { domainToASCII, domainToUnicode } from 'node:url';
 import { parseUploadHosts } from './upload-hosts.mjs';
+import { parseTargets } from './targets.mjs';
 
 export { settingsContract };
 
@@ -43,6 +44,8 @@ export function parseSettings(env) {
   const maxBytes = Number(value('BRIDGE_TRANSFER_MAX_BYTES')), budget = Number(value('BRIDGE_TRANSFER_BUDGET_BYTES'));
   if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0 || maxBytes > MAX_BYTES || !Number.isSafeInteger(budget) || budget < maxBytes) throw Error('Invalid staging limits');
   return Object.freeze({ mcpToken, adminToken, adminOrigin,
+    targets: parseTargets(value('BRIDGE_TARGETS'), value('BRIDGE_DEFAULT_TARGET')),
+    defaultTarget: value('BRIDGE_DEFAULT_TARGET') || undefined,
     bridgeDisplayName: displayName(value('BRIDGE_DISPLAY_NAME')) || new URL(adminOrigin).host,
     targetDisplayName: displayName(value('BRIDGE_TARGET_DISPLAY_NAME')) || 'SSH', uiEnabled: value('BRIDGE_UI_ENABLED') === 'true', prefix, maxBytes, budget,
     uploadHosts: Object.freeze(parseUploadHosts(value('BRIDGE_UPLOAD_SOURCE_HOSTS'))),

@@ -19,8 +19,9 @@ const jobSchema = z.object(jobFields).passthrough();
 const immediateSchema = z.object({ kind: z.literal('command'), state: z.enum(['completed', 'failed']) }).passthrough();
 const unknownSchema = z.object({ error: z.literal('Unknown request; server may have restarted') });
 const sourceUnavailableSchema = z.object({ error: z.literal('upload-source-not-configured'), sourceHost: z.string(), message: z.string() });
+const targetId = z.string().regex(/^[a-z][a-z0-9_-]{0,31}$/);
 const transferSchema = z.object({
-  transfer: z.object({ direction: z.enum(['upload', 'download']), remotePath: z.string(), elevate: z.boolean(), overwrite: z.boolean() }),
+  transfer: z.object({ target: targetId.optional(), direction: z.enum(['upload', 'download']), remotePath: z.string(), elevate: z.boolean(), overwrite: z.boolean() }),
   uiEnabled: z.boolean(), maxBytes: z.number().int().positive(),
 });
 
@@ -36,6 +37,7 @@ export const outputSchemas = {
   begin: z.object({ transferId: identifier, received: z.literal(0) }),
   chunk: z.object({ sequence: z.number().int().nonnegative(), received: z.number().int().nonnegative() }),
   ready: z.object({ ready: z.literal(true), fileName: z.string() }),
+  targets: z.object({ targets: z.array(z.object({ id: targetId, displayName: z.string(), enabled: z.boolean(), isDefault: z.boolean() })), defaultTarget: targetId.nullable() }),
   probe: z.object({ probe: z.literal('SSH_UI_PUBLIC_PROBE'), uiEnabled: z.boolean() }),
 };
 
@@ -46,6 +48,7 @@ export function presentOutcome(value) {
 
 export function presentJob(job) {
   const value = { id: job.id, kind: job.kind, operation: { ...job.operation }, command: job.command,
+    ...(job.targetId === undefined ? {} : { targetId: job.targetId, targetRevision: job.targetRevision, targetDisplayName: job.targetDisplayName, hostKey: job.hostKey }),
     profile: job.profile, commandClass: job.commandClass, target: job.target, state: job.state,
     createdAt: job.createdAt, expiresAt: job.expiresAt, finishedAt: job.finishedAt,
     result: job.result === undefined ? undefined : presentOutcome(job.result), auditError: job.auditError };
@@ -60,8 +63,8 @@ export function publicResult(value, schema) {
 
 export const jobResult = job => publicResult(presentJob(job), jobSchema);
 export const statusResult = job => job ? jobResult(job) : publicResult({ error: 'Unknown request; server may have restarted' }, unknownSchema);
-export function immediateResult(value) {
-  return { ...presentOutcome(value), structuredContent: { state: value.failed ? 'failed' : 'completed', kind: 'command' } };
+export function immediateResult(value, identity) {
+  return { ...presentOutcome(value), structuredContent: { state: value.failed ? 'failed' : 'completed', kind: 'command', ...identity } };
 }
 export const sourceUnavailable = sourceHost => ({ ...publicResult({ error: 'upload-source-not-configured', sourceHost,
   message: 'File was not fetched or queued. An administrator must configure a verified exact hostname or *.domain pattern for this provider; the card file picker remains available.' }, sourceUnavailableSchema), isError: true });

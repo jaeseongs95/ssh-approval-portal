@@ -10,8 +10,14 @@ export function createWebController({ state, view, api, document, location, time
     let settled;
     state.loading = new Promise(resolve => { settled = resolve; }); view.loading(true);
     try {
-      const jobs = await api('/api/requests');
-      if (state.signedOut) return;
+      if (view.multiTarget && !state.targetsLoaded) {
+        const targets = await api('/api/targets');
+        if (state.signedOut) return;
+        view.targets(targets, () => load(true)); state.targetsLoaded = true;
+      }
+      const target = view.target?.();
+      const jobs = await api('/api/requests' + (target ? `?target=${encodeURIComponent(target)}` : ''));
+      if (state.signedOut || target !== view.target?.()) return;
       view.render(jobs, state.deciding); view.connected(); view.error('');
       if (!state.polling) state.polling = timers.setInterval(() => { if (!document.hidden) load(); }, 10000);
     } catch (error) {

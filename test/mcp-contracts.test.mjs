@@ -42,7 +42,7 @@ test('MCP contract families preserve tool names, JSON text, private capabilities
   const f = await fixture();
   try {
     const { tools } = await f.client.listTools();
-    assert.deepEqual(tools.map(tool => tool.name), ['read-command', 'run-command', 'request-safe-command', 'get-request-status', 'request-upload', 'show-ui-probe', 'show-approval', 'show-file-transfer', 'request-download', 'ui-decide-request', 'ui-upload-begin', 'ui-upload-chunk', 'ui-upload-finish', 'ui-download-link']);
+    assert.deepEqual(tools.map(tool => tool.name), ['list-targets', 'read-command', 'run-command', 'request-safe-command', 'get-request-status', 'request-upload', 'show-ui-probe', 'show-approval', 'show-file-transfer', 'request-download', 'ui-decide-request', 'ui-upload-begin', 'ui-upload-chunk', 'ui-upload-finish', 'ui-download-link']);
     for (const tool of tools) assert.equal(tool.outputSchema.type, 'object', tool.name);
     const upload = tools.find(tool => tool.name === 'request-upload');
     assert.deepEqual(upload._meta['openai/fileParams'], ['file']); assert.match(upload.description, /only that host contract/);

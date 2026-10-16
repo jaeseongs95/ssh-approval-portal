@@ -61,6 +61,7 @@ Version 0.3 updates and rollbacks reserve maintenance through the administrator 
 
 - MCP defaults to localhost port 39124 at `/mcp`; the web administrator interface defaults to localhost port 39125. Set `BRIDGE_MCP_PORT` and `BRIDGE_ADMIN_PORT` in the protected configuration to ports from 1–65535. Maintenance and startup checks use those same values.
 - Connect HTTPS domains through Cloudflare Tunnel or an equivalent service. Bind `BRIDGE_MCP_TOKEN` to the Cloudflare Portal upstream Bearer credential and keep an owner-only access policy. Do not bind the administrator token to the upstream.
+- 여러 SSH 대상 등록·고정 기본 대상·승인 결속과 전역 한도는 [다중 대상 설정](docs/multi-targets.ko.md)을 참고하세요.
 - `BRIDGE_DISPLAY_NAME`과 `BRIDGE_TARGET_DISPLAY_NAME`은 관리자 탭·화면과 승인·결과 카드에 표시할 중계기 및 SSH 대상 이름입니다. 생략하면 공개 관리자 호스트명과 `SSH`를 사용합니다. 앞뒤 공백을 제거하며, 최대 80 UTF-16 코드 단위이고 제어·서식 문자는 허용하지 않습니다. 인증 전에도 표시될 수 있으므로 비밀·계정·키 경로를 넣지 마세요. 이름은 실행 대상이나 승인 권한을 바꾸지 않습니다.
 - `BRIDGE_ADMIN_ORIGIN` must exactly match the canonical HTTPS administrator origin, with a lowercase hostname and no path, trailing slash, query, fragment, or user information. To use another SSH server, configure both read and write profiles for the same server and account, verify and pin its public host key, and prepare the file helper and private remote staging directory on that target.
 - Keep the server ID `ssh-approval-bridge` in the Portal's ordinary tool mode. If tool aliases change, check `BRIDGE_UI_TOOL_PREFIX` and the UI tool mapping. Refresh the tools in ChatGPT and connect Claude to the same owner-only Portal URL.

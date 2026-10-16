@@ -3,6 +3,9 @@ import { ApprovalQueue } from './src/domain/approval-queue.mjs';
 import { createCommandService } from './src/application/commands.mjs';
 import { createFileService } from './src/application/files.mjs';
 import { createLifecycleService } from './src/application/lifecycle.mjs';
+import { resolveTargets } from './src/adapters/config/targets.mjs';
+import { scopedArtifacts } from './src/adapters/storage/scoped-artifacts.mjs';
+import { createClaims, createTargetRouter } from './src/application/target-router.mjs';
 import { Artifacts } from './src/adapters/storage/artifacts.mjs';
 import { createFileSource } from './src/adapters/sources/file-source.mjs';
 import { createTransferExecutor } from './src/adapters/ssh/transfers.mjs';
@@ -26,9 +29,7 @@ export async function createApplication({ registry, classify, executeCommand, au
   const settings = parseSettings(env);
   const adminAccess = createAdminAccess(env, accessKeySet);
   const signer = new Tickets(env.BRIDGE_UI_TICKET_KEY);
-  const reader = registry.getProfile(settings.readProfile), writer = registry.getProfile(settings.writeProfile);
-  if (!reader.readOnly || writer.readOnly || ['host', 'port', 'user'].some(key => reader[key] !== writer[key])) throw Error('Expected matching writable and read-only SSH targets');
-  const target = `${writer.user}@${writer.host}:${writer.port}`;
+  const definitions = resolveTargets(settings, registry);
   const store = new Artifacts(transferRoot, { maxBytes: settings.maxBytes, budget: settings.budget });
   await store.init();
   const source = uploadSource ?? createFileSource({ hosts: settings.uploadHosts, maxBytes: settings.maxBytes });
@@ -36,28 +37,39 @@ export async function createApplication({ registry, classify, executeCommand, au
     inspect() { const policy = source.inspect(url); return { allowed: policy.allowed, sourceHost: policy.sourceHost ?? policy.hostname }; },
     open: options => source.open(url, options),
   };
-  const transfers = createTransferExecutor(registry, store, { readProfile: settings.readProfile, writeProfile: settings.writeProfile });
-  const execute = commandExecutor(executeCommand);
-  let commands, files, protocols;
-  const queue = new ApprovalQueue({ classify, target, profile: settings.writeProfile, audit,
-    externalBusy: () => commands?.busy() ?? false,
-    executeOperation: operation => operation.kind === 'command' ? execute(settings.writeProfile, operation.command)
-      : operation.kind === 'upload' ? transfers.upload(operation) : transfers.download(operation),
-    onTerminal: job => files?.onTerminal(job),
+  const execute = commandExecutor(executeCommand), claimExecution = createClaims(2), claimImport = createClaims(2);
+  const runtimes = definitions.map(definition => {
+    const { target, readProfile, writeProfile, identity } = definition;
+    const targetStore = identity ? scopedArtifacts(store, identity) : store;
+    const checkedRegistry = { getOrCreate(profile) { definition.verify(); return registry.getOrCreate(profile); } };
+    const transfers = createTransferExecutor(checkedRegistry, targetStore, { readProfile, writeProfile });
+    const checkedExecute = (profile, command) => { definition.verify(); return execute(profile, command); };
+    const targetAudit = event => audit({ ...event, ...identity });
+    let commands, files;
+    const queue = new ApprovalQueue({ classify, target, profile: writeProfile, audit: targetAudit, identity, claimExecution,
+      externalBusy: () => (commands?.busy() ?? false) || claimExecution.busy(),
+      executeOperation: operation => operation.kind === 'command' ? checkedExecute(writeProfile, operation.command)
+        : operation.kind === 'upload' ? transfers.upload(operation) : transfers.download(operation),
+      onTerminal: job => files?.onTerminal(job),
+    });
+    commands = createCommandService({ queue, classify, executeCommand: checkedExecute, audit: targetAudit, target, readProfile, claimExecution });
+    files = createFileService({ store: targetStore, queue, transfers, claimImport });
+    return { ...definition, queue, commands, files, transfers, store: targetStore };
   });
-  commands = createCommandService({ queue, classify, executeCommand: execute, audit, target, readProfile: settings.readProfile });
-  files = createFileService({ store, queue, transfers });
-  const lifecycle = createLifecycleService({ queue, store, commands, files, closeConnections: () => registry.closeAll(),
+  const targets = createTargetRouter(runtimes, { defaultTarget: settings.targets === null ? 'default' : settings.defaultTarget, legacy: settings.targets === null, store, audit });
+  const { queue, commands, files } = targets;
+  let protocols;
+  const lifecycle = createLifecycleService({ queue, store, commands, files, closeConnections: async () => { await targets.drain(); await registry.closeAll(); },
     onReap: () => protocols?.reapCapabilities() });
   const shutdown = new AbortController();
   const [webHtml, webJs] = await Promise.all([
     readFile(new URL('./web/index.html', import.meta.url), 'utf8'),
     readFile(new URL('./web/dist/app.js', import.meta.url), 'utf8'),
   ]);
-  protocols = createProtocolAdapters({ queue, commands, files, store, lifecycle, settings, signer, adminAccess,
+  protocols = createProtocolAdapters({ queue, commands, files, store, lifecycle, settings, signer, adminAccess, targets,
     authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal: shutdown.signal });
   const timer = setInterval(() => lifecycle.reap().catch(() => {}), 30_000); timer.unref();
-  return { ...protocols, queue, store, transfers, enabled: settings.uiEnabled,
+  return { ...protocols, queue, store, targets, transfers: runtimes[0].transfers, enabled: settings.uiEnabled,
     close() {
       clearInterval(timer); shutdown.abort();
       return lifecycle.close(() => Promise.all([protocols.mcpHttp, protocols.adminHttp].map(server => new Promise(resolve => server.close(resolve)))));
