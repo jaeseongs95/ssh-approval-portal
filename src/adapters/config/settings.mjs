@@ -4,6 +4,8 @@ import { equalSecret } from '../security/tickets.mjs';
 import { domainToASCII, domainToUnicode } from 'node:url';
 import { parseUploadHosts } from './upload-hosts.mjs';
 import { parseTargets } from './targets.mjs';
+import path from 'node:path';
+import { parseSecretReference } from '../../application/secret-service.mjs';
 
 export { settingsContract };
 
@@ -46,9 +48,14 @@ export function parseSettings(env) {
   if (!['true', 'false'].includes(value('BRIDGE_JEV_ENABLED'))) throw Error('Invalid Jev switch');
   const jevMaxCalls = Number(value('BRIDGE_JEV_MAX_CALLS'));
   if (!/^[1-9][0-9]*$/.test(value('BRIDGE_JEV_MAX_CALLS')) || !Number.isSafeInteger(jevMaxCalls) || jevMaxCalls > 10000) throw Error('Invalid Jev call budget');
+  const secretStoreDir = value('BRIDGE_SECRET_STORE_DIR'), jevKeyRef = value('BRIDGE_JEV_KEY_REF');
+  if (typeof secretStoreDir !== 'string' || (secretStoreDir && (!path.isAbsolute(secretStoreDir) || path.resolve(secretStoreDir) !== secretStoreDir))) throw Error('Configure a canonical secret store directory');
+  if (typeof jevKeyRef !== 'string') throw Error('Configure a secret reference');
+  if (jevKeyRef) parseSecretReference(jevKeyRef);
   return Object.freeze({ mcpToken, adminToken, adminOrigin,
     targets: parseTargets(value('BRIDGE_TARGETS'), value('BRIDGE_DEFAULT_TARGET')),
     jevEnabled: value('BRIDGE_JEV_ENABLED') === 'true', jevMaxCalls,
+    secretStoreDir, jevKeyRef,
     defaultTarget: value('BRIDGE_DEFAULT_TARGET') || undefined,
     bridgeDisplayName: displayName(value('BRIDGE_DISPLAY_NAME')) || new URL(adminOrigin).host,
     targetDisplayName: displayName(value('BRIDGE_TARGET_DISPLAY_NAME')) || 'SSH', uiEnabled: value('BRIDGE_UI_ENABLED') === 'true', prefix, maxBytes, budget,

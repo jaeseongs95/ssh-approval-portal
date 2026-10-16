@@ -46,6 +46,14 @@ class PackageContract(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding='utf-8')
 
+    def test_secret_store_records_are_rejected_without_exposing_the_value(self):
+        marker = 'synthetic-package-secret-must-not-ship'
+        self.write('src/private-store/key.json', json.dumps({'kind': 'secret-record', 'schema': 1, 'value': marker}))
+        with self.assertRaisesRegex(ValueError, 'Secret store record') as caught:
+            packager.package(self.root)
+        self.assertNotIn(marker, str(caught.exception))
+        self.assertFalse((self.root / 'release-manifest.json').exists())
+
     def run_node(self, script, *arguments):
         node = shutil.which('node')
         self.assertIsNotNone(node, 'Package import contract requires the configured Node runtime')

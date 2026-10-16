@@ -16,6 +16,8 @@ import { Tickets } from './src/adapters/security/tickets.mjs';
 import { createProtocolAdapters } from './src/adapters/http/protocol.mjs';
 import { createJevAssessor } from './src/adapters/safety/jev.mjs';
 import { createRequestSafety } from './src/application/request-safety.mjs';
+import { createSecretService } from './src/application/secret-service.mjs';
+import { createLocalSecretStore } from './src/adapters/secrets/local-file.mjs';
 
 // Preserve the original injectable createApplication callback at the composition boundary.
 // Concrete runtime executors already return the neutral outcome accepted by use cases.
@@ -27,7 +29,7 @@ const commandExecutor = execute => async (profile, command) => {
 };
 
 /** Assemble concrete ports. Business policy belongs to application/domain modules. */
-export async function createApplication({ registry, classify, executeCommand, audit, transferRoot, env = process.env, uiHtml, accessKeySet, uploadSource, riskAssessor }) {
+export async function createApplication({ registry, classify, executeCommand, audit, transferRoot, env = process.env, uiHtml, accessKeySet, uploadSource, riskAssessor, secretResolver }) {
   const settings = parseSettings(env);
   const adminAccess = createAdminAccess(env, accessKeySet);
   const signer = new Tickets(env.BRIDGE_UI_TICKET_KEY);
@@ -60,8 +62,18 @@ export async function createApplication({ registry, classify, executeCommand, au
   });
   const targets = createTargetRouter(runtimes, { defaultTarget: settings.targets === null ? 'default' : settings.defaultTarget, legacy: settings.targets === null, store, audit });
   const { queue, commands, files } = targets;
+  let risk = riskAssessor;
+  if (settings.jevEnabled && !risk) {
+    let apiKey = env.JEV_API_KEY;
+    if (!apiKey && settings.jevKeyRef) {
+      const resolver = secretResolver ?? createSecretService(settings.secretStoreDir
+        ? { 'local-file': createLocalSecretStore(settings.secretStoreDir) } : {});
+      try { apiKey = await resolver.resolve(settings.jevKeyRef); } catch { /* Unavailable credentials grant no execution authority. */ }
+    }
+    risk = createJevAssessor({ apiKey });
+  }
   const requestSafety = createRequestSafety({ queue, maxCalls: settings.jevMaxCalls,
-    assessor: settings.jevEnabled ? riskAssessor ?? createJevAssessor({ apiKey: env.JEV_API_KEY }) : undefined });
+    assessor: settings.jevEnabled ? risk : undefined });
   let protocols;
   const lifecycle = createLifecycleService({ queue, store, commands, files, closeConnections: async () => { await targets.drain(); await registry.closeAll(); },
     onReap: () => protocols?.reapCapabilities() });

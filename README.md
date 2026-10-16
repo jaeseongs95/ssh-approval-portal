@@ -6,6 +6,8 @@ An MCP server for reviewing and approving SSH commands and file transfers. It pr
 
 The development [Jev observation/evaluation tool](docs/jev-observation.ko.md) compares risk classifications on synthetic commands. It is separate from the service approval policy; automatic execution remains disabled.
 
+[Secret management (Korean)](docs/secret-management.ko.md) separates secret references from provider adapters. Its first backend is a private POSIX local store managed through a hidden-input operator CLI. Jev resolves a reference at startup; actual values stay out of chat, MCP results, and packages.
+
 The current version is **1.1.0**. Responsibilities are separated into domain, application, and adapter layers while preserving approval rules. Existing client tests, agent-upload observations, and local validation of the restructuring are recorded separately.
 
 | Area | Verified scope and remaining limits |

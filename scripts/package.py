@@ -58,6 +58,13 @@ def package(root, output=None, *, release=False):
         data = path.read_bytes()
         if re.search(rb'^-----BEGIN (?:OPENSSH|RSA|EC|ENCRYPTED) PRIVATE KEY-----', data, re.MULTILINE):
             raise ValueError('Private key in package')
+        if path.suffix == '.json':
+            try:
+                record = json.loads(data)
+            except (ValueError, UnicodeDecodeError):
+                record = None
+            if isinstance(record, dict) and record.get('kind') == 'secret-record':
+                raise ValueError('Secret store record in package')
         entries.append({'path': path.relative_to(root).as_posix(), 'size': len(data),
                         'sha256': hashlib.sha256(data).hexdigest()})
     manifest = {'version': version, 'status': 'release' if release else 'candidate-pending-live-host-verification',
