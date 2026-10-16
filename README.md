@@ -4,6 +4,8 @@
 
 An MCP server for reviewing and approving SSH commands and file transfers. It provides MCP Apps cards for ChatGPT and Claude alongside a web administrator interface. One bridge supports up to 32 registered SSH targets. The unified administrator screen shows requests across targets and lets the owner filter and act on each request. See [target configuration](docs/multi-targets.ko.md).
 
+The development [Jev observation/evaluation tool](docs/jev-observation.ko.md) compares risk classifications on synthetic commands. It is separate from the service approval policy; automatic execution remains disabled.
+
 The current version is **1.1.0**. Responsibilities are separated into domain, application, and adapter layers while preserving approval rules. Existing client tests, agent-upload observations, and local validation of the restructuring are recorded separately.
 
 | Area | Verified scope and remaining limits |

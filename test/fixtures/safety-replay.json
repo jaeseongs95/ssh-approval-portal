@@ -1,0 +1,6 @@
+{
+  "version": "simulated-adapter-exercise-v1",
+  "source": "simulated",
+  "description": "Deliberately imperfect test responses, not Jev outputs or evidence of model accuracy.",
+  "predictions": ["low_risk","low_risk","uncertain","low_risk","low_risk","low_risk","high_risk","high_risk","high_risk","high_risk","high_risk","high_risk","high_risk","high_risk","low_risk",null,"uncertain","uncertain","uncertain","low_risk"]
+}

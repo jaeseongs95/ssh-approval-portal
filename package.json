@@ -11,6 +11,7 @@
     "start": "node bridge.mjs",
     "test": "node --test test/*.test.mjs",
     "test:browser": "node --test test/browser/*.test.mjs",
+    "evaluate:safety": "node scripts/evaluate-safety.mjs",
     "build:ui": "npm --prefix ui ci && npm --prefix ui run build",
     "package": "python3 scripts/package.py",
     "verify": "node scripts/verify.mjs"
