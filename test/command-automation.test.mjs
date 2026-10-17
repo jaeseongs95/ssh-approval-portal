@@ -38,7 +38,7 @@ async function fixture(t, options = {}) {
     const result = await api('/api/command-policy', { ...proposal, reviewToken: review.body.reviewToken, acknowledged: true });
     assert.equal(result.status, 200); return result.body;
   };
-  const run = async (command, key, context) => {
+  const run = async (command, key, context = 'Synthetic test instance; fixture effects only; no external resources; restore the fixture after checking') => {
     const result = await app.targets.commands.run(command, undefined, key, context);
     await app.targets.drain();
     return app.queue.get(result.job.id);
@@ -78,7 +78,7 @@ test('model OR path executes sudo and unmatched commands only with explicit prov
   assert.doesNotMatch(JSON.stringify(f.inputs), /threshold|fixture-owner/);
   const details = JSON.parse(f.inputs[0].context);
   assert.equal(details.serverFacts.sshTarget, 'fixture@127.0.0.1:22');
-  assert.equal(details.callerSituation, null);
+  assert.match(details.callerSituation, /Synthetic test instance/);
 });
 
 test('safety probability0.9 is inclusive and confidence is diagnostic rather than a second gate', async t => {
@@ -159,7 +159,7 @@ test('policy revision change during evaluation discards the old automatic decisi
   let complete;
   const f = await fixture(t, { riskEvaluators: { jev: { model: 'jev-1.14.0', assess: () => new Promise(resolve => { complete = resolve; }) } } });
   await f.policy({ commands: [], modelExecution: true, thresholds: { jev: threshold('jev-1.14.0') } });
-  const { job } = await f.app.targets.commands.run('sudo id');
+  const { job } = await f.app.targets.commands.run('sudo id', undefined, undefined, 'Synthetic identity inspection; no mutation');
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(f.app.queue.get(job.id).state, 'evaluating');
   assert.throws(() => f.app.queue.start(job.id), /not pending/);
@@ -255,8 +255,8 @@ test('concurrent duplicate key observes the same evaluating job and does not eva
   const f = await fixture(t, { riskEvaluators: { jev: { model: 'jev-1.14.0', assess: () => { calls++; return new Promise(resolve => { complete = resolve; }); } } } });
   await f.policy({ commands: [] });
   const key = 'fixture-same-key-0001';
-  const first = await f.app.targets.commands.run('sudo id', undefined, key);
-  const second = await f.app.targets.commands.run('sudo id', undefined, key);
+  const first = await f.app.targets.commands.run('sudo id', undefined, key, 'Synthetic identity inspection; no mutation');
+  const second = await f.app.targets.commands.run('sudo id', undefined, key, 'Synthetic identity inspection; no mutation');
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(first.job.id, second.job.id); assert.equal(calls, 1);
   complete(low); await f.app.targets.drain(); assert.equal(f.executions.length, 0);
@@ -336,4 +336,43 @@ test('reviewed model selection drives actual evaluator transport while preservin
     const job = await f.run('sudo id'); assert.equal(job.state, 'completed'); assert.equal(job.decision.assessment.model, model);
   }
   assert.deepEqual(seen, ['jev-1.13.0', 'jev-1.14.0']);
+});
+
+test('missing or whitespace-only task context withholds the model call and execution; explicit command-name authority is unchanged', async t => {
+  const f = await fixture(t); await f.policy({ commands: ['ls'], modelExecution: true, thresholds: { jev: threshold('jev-1.14.0') } });
+  for (const context of ['', '   ']) {
+    const job = await f.run('sudo id', undefined, context);
+    assert.equal(job.state, 'pending'); assert.equal(job.decision.reasonCode, 'context_required');
+    assert.equal(job.decision.evaluation.modelCalled, false); assert.equal(job.decision.assessment, undefined);
+  }
+  assert.equal(f.inputs.length, 0); assert.equal(f.executions.length, 0);
+  assert.equal((await f.run('ls /tmp', undefined, '')).state, 'completed');
+  assert.equal(f.inputs.length, 0);
+});
+
+test('the legacy command-only MCP path delivers exact task context through automation into the Jev HTTP body', async t => {
+  const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+  const { StreamableHTTPClientTransport } = await import('@modelcontextprotocol/sdk/client/streamableHttp.js');
+  const { AUTOMATION_QUESTION } = await import('../src/domain/command-policy.mjs');
+  let payload, calls = 0;
+  const assessor = createJevAssessor({ apiKey: 'synthetic-only-key', question: AUTOMATION_QUESTION, questionVersion: 'ssh-command-risk-v4', inputKind: 'execution', fetchImpl: async (_url, options) => {
+    calls++; payload = JSON.parse(options.body);
+    return new Response(JSON.stringify({ model: 'jev-1.14.0', answers: { risk: { type: 'choice', choice: 'uncertain', confidence: 1, probabilities: { low_risk: 0, high_risk: 0, uncertain: 1 } } }, usage: { input_tokens: 10, output_tokens: 4 } }), { headers: { 'content-type': 'application/json' } });
+  } });
+  const f = await fixture(t, { riskEvaluators: { jev: assessor } });
+  await f.policy({ commands: [], modelExecution: true, thresholds: { jev: threshold('jev-1.14.0') } });
+  await new Promise(resolve => f.app.mcpHttp.listen(0, '127.0.0.1', resolve));
+  const client = new Client({ name: 'command-only-host-fixture', version: '1' });
+  const command = 'sudo id', context = 'Test only; inspect effective identity to verify the SSH account; no writes or restart; no recovery required';
+  try {
+    await client.connect(new StreamableHTTPClientTransport(new URL('http://127.0.0.1:' + f.app.mcpHttp.address().port + '/mcp'), { requestInit: { headers: { Authorization: 'Bearer fixture-mcp' } } }));
+    const response = await client.callTool({ name: 'run-command', arguments: { command: 'ssh-request-v1:' + JSON.stringify({ command, context }) } });
+    assert.equal(response.isError, undefined); await f.app.targets.drain();
+    const job = f.app.queue.get(response.structuredContent.id);
+    assert.equal(job.operation.command, command); assert.equal(job.operation.context, context);
+    assert.equal(payload.state.command, command); assert.equal(JSON.parse(payload.state.context).callerSituation, context);
+    assert.equal(payload.state.userApproval.explicit, false); assert.deepEqual(payload.state.preapprovedCommands, []);
+    assert.equal(job.decision.evaluation.callerContextProvided, true); assert.equal(job.decision.threshold.minLowRisk, 0.9);
+    assert.equal(job.state, 'pending'); assert.equal(calls, 1); assert.equal(f.executions.length, 0);
+  } finally { await client.close(); }
 });

@@ -144,3 +144,26 @@ test('MCP preserves detailed optional context and rejects oversized descriptions
     assert.equal(seen.length, 1);
   } finally { await f.close(); }
 });
+
+test('command-only hosts decode a strict context envelope before dispatch; invalid or conflicting fields never dispatch', async () => {
+  const seen = [], f = await fixture();
+  f.commands.run = async (...args) => { seen.push(args); return { type: 'job', job: f.pending }; };
+  const input = { command: 'sudo id', context: 'Test instance; check identity only; no mutation; no rollback needed', requestKey: 'synthetic-context-request-1' };
+  const envelope = value => 'ssh-request-v1:' + JSON.stringify(value);
+  try {
+    assert.equal((await f.call('run-command', { command: envelope(input) })).isError, undefined);
+    assert.deepEqual(seen, [[input.command, undefined, input.requestKey, input.context]]);
+    for (const args of [
+      { command: envelope(input), context: 'conflicting context' },
+      { command: envelope(input), requestKey: 'conflicting-request-key' },
+      { command: envelope({ ...input, target: 'other-server' }) },
+      { command: envelope({ ...input, userApproval: true }) },
+      { command: envelope({ ...input, context: '   ' }) },
+      { command: envelope({ ...input, context: 'api_key=synthetic-value' }) },
+      { command: envelope({ ...input, requestKey: 12 }) },
+      { command: envelope({ ...input, command: envelope(input) }) },
+      { command: 'ssh-request-v1:invalid' },
+    ]) assert.equal((await f.call('run-command', args)).isError, true);
+    assert.equal(seen.length, 1);
+  } finally { await f.close(); }
+});

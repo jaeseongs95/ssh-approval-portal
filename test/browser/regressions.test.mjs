@@ -44,7 +44,7 @@ test('card and web show classification and actual review condition before diagno
   assert.equal(await page.locator('.assessment-scores dd').nth(1).isVisible(), false);
   await page.getByText('AI 평가 상세', { exact: true }).click();
   await page.getByText('60.0%', { exact: true }).waitFor();
-  await page.getByText(/구체적인 위험 사유가 제공되지/).waitFor();
+  await page.getByText(/구체적인 위험 근거는 제공하지/).waitFor();
   assert.doesNotMatch(await page.locator('.assessment-details').textContent(), /confidence|command-explanation/);
   server.state.jobs = [value]; await page.goto(server.origin + '/fixture/web');
   await page.getByText('위험도가 높다는 평가로 사용자 확인이 필요합니다.', { exact: true }).waitFor();
@@ -231,3 +231,27 @@ test('unified console counts all targets, separates running work, sorts across q
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Console fits a narrow browser without horizontal overflow');
   await page.locator('#logout').click();await page.waitForURL('**/cdn-cgi/access/logout');
 }));
+
+test('approved history keeps historical scores and threshold while explaining the completed owner action in past tense', async () => browserFixture(async (page, server) => {
+  const context = '테스트 서버 조회. 변경·재시작 없음. <script>window.contextInjected=true</script>';
+  const value = { id: 'approved-context-fixture', kind: 'command', state: 'completed', approvalMode: 'owner', command: 'sudo id', operation: { kind: 'command', command: 'sudo id', context }, target: 'fixture', expiresAt: 2000000000000,
+    decision: { decision: 'review', reasonCode: 'model_review', reviewReason: 'uncertain', decisionRuleVersion: 'command-explanation-v1', provider: 'jev', evaluation: { callerContextProvided: true },
+      assessment: { model: 'jev-1.14.0', label: 'uncertain', confidence: 0.505, probabilities: { low_risk: 0.01, high_risk: 0.32, uncertain: 0.67 } }, threshold: { minLowRisk: 0.51 } } };
+  server.state.jobs = [value];
+  await page.goto(server.origin + '/fixture/web');
+  await page.locator('#history > details').evaluate(node => node.open = true);
+  await page.getByText('사용자가 승인한 요청입니다', { exact: true }).waitFor();
+  await page.getByText('당시 자동승인을 보류했고, 사용자가 직접 승인해 진행한 요청입니다.', { exact: true }).waitFor();
+  await page.getByText('AI 평가 상세', { exact: true }).click();
+  await page.getByText('당시 보류 사유: AI가 위험도를 판단하지 못했습니다.', { exact: true }).waitFor();
+  assert.doesNotMatch(await page.locator('#history').textContent(), /사용자 확인이 필요합니다/);
+  assert.match(await page.locator('.assessment-details').textContent(), /51.0% 이상/);
+  assert.deepEqual(await page.locator('.assessment-scores dd').allTextContents(), ['1.0%', '32.0%', '67.0%']);
+  assert.ok((await page.locator('.assessment-details').textContent()).includes(context));
+  assert.equal(await page.evaluate(() => window.contextInjected), undefined);
+  await page.goto(server.origin + '/fixture/card'); await page.waitForFunction(() => window.fixture);
+  await page.evaluate(value => window.fixture.receive({ structuredContent: value, _meta: { sshApproval: {} } }), value);
+  await page.getByText('당시 자동승인을 보류했고, 사용자가 직접 승인해 진행한 요청입니다.', { exact: true }).waitFor();
+  await page.getByText('AI 평가 상세', { exact: true }).click();
+  await page.getByText('당시 보류 사유: AI가 위험도를 판단하지 못했습니다.', { exact: true }).waitFor();
+}, 'ko-KR'));

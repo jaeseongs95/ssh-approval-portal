@@ -17,6 +17,7 @@ export function createCommandAutomation({ queue, state, definition, classify, ev
   };
   async function assess(command, rule, context, policyRevision) {
     if (!rule?.externalDisclosure) return { reasonCode: 'disclosure_not_enabled' };
+    if (!context.trim()) return { reasonCode: 'context_required', evaluation: { purpose: 'execution', callerContextProvided: false, modelCalled: false } };
     if (inspectCommand(command, classify).sensitive) return { reasonCode: 'sensitive_input' };
     const input = { command, target: definition.id, environment: definition.displayName,
       context: assessmentContext(context, { targetId: definition.id, targetDisplayName: definition.displayName,
