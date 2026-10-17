@@ -34,9 +34,8 @@ export function createFileService({ store, queue, transfers, maxConcurrent = 2, 
     },
     requestDownload({ remotePath: path, elevate = false }) {
       remotePath(path); guard();
-      if (!elevate && queue.busy()) throw Error('Execution busy');
       const job = queue.submitOperation({ kind: 'download', remotePath: path, elevate }, elevate ? 'privileged' : 'read-only');
-      if (!elevate) queue.start(job.id, true);
+      try { queue.startDownload(job.id); } catch { /* Missing authority or a busy slot retains the owner request; never auto-retry. */ }
       return queue.get(job.id);
     },
     async beginUpload(meta) { guard(); return store.begin(meta); },

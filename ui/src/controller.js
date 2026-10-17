@@ -88,18 +88,24 @@ export function createCardController({ state, view, host, document, hashFile, en
       const link = await call(context, 'ui-download-link', { id, ticket: context.meta.viewTicket });
       const data = link._meta?.sshApproval;
       if (!data?.downloadUrl) throw Error(t('파일 저장 링크를 받지 못했습니다.'));
+      const openBrowser = async data => {
+        const reply = await host.openLink({ url: data.downloadUrl }); check(context);
+        if (reply?.isError) throw Error(t('웹 승인 화면에서 파일을 저장하세요.'));
+        view.downloadStatus?.(t('브라우저에서 로그인 후 파일을 저장하세요. 저장된 파일은 기기에서 확인해 주세요.'));
+      };
+      // Access authentication belongs to the user's browser; a host-side fetch has no login session.
+      if (context.meta.downloadRequiresLogin) { await openBrowser(data); return; }
       try {
         check(context);
         const reply = await host.downloadFile({ contents: [{ type: 'resource_link', uri: data.downloadUrl, name: data.fileName, mimeType: 'application/octet-stream' }] });
         check(context);
-        if (reply.isError) throw Error(t('저장 취소 또는 미지원'));
+        if (reply?.isError) throw Error(t('저장 취소 또는 미지원'));
+        view.downloadStatus?.(t('파일 저장 요청을 보냈습니다. 저장된 파일은 기기에서 확인해 주세요.'));
       } catch (error) {
         check(context);
         // A failed host save may already have consumed its single-use URL.
         const renewed = await call(context, 'ui-download-link', { id, ticket: context.meta.viewTicket });
-        const reply = await host.openLink({ url: renewed._meta.sshApproval.downloadUrl });
-        check(context);
-        if (reply.isError) throw Error(t('웹 승인 화면에서 파일을 저장하세요.'));
+        await openBrowser(renewed._meta.sshApproval);
       }
     }, context);
   }

@@ -117,13 +117,14 @@ test('import concurrency reserves before opening, and maintenance winning submis
   } finally { gate.resolve(); await f.close(); }
 });
 
-test('ordinary download starts once immediately while sudo download waits for owner approval', async () => {
+test('ordinary and sudo downloads wait for owner without a reviewed policy', async () => {
   const f = await fixture();
   try {
     const ordinary = f.files.requestDownload({ remotePath: '/tmp/file', elevate: false });
-    assert.equal(ordinary.state, 'running');
-    assert.throws(() => f.files.requestDownload({ remotePath: '/tmp/other', elevate: false }), /busy/);
-    assert.equal((await f.queue.wait(ordinary.id)).state, 'completed'); assert.equal(f.effects.length, 1);
+    assert.equal(ordinary.state, 'pending'); assert.equal(f.effects.length, 0);
+    assert.throws(() => f.queue.start(ordinary.id, true), /authority/);
+    assert.equal((await f.queue.approve(ordinary.id)).state, 'completed'); assert.equal(f.effects.length, 1);
+    await assert.rejects(f.queue.approve(ordinary.id));
     const elevated = f.files.requestDownload({ remotePath: '/root/file', elevate: true });
     assert.equal(elevated.state, 'pending'); assert.equal(elevated.commandClass, 'privileged'); assert.equal(f.effects.length, 1);
     await f.queue.approve(elevated.id); assert.equal(f.effects.length, 2);

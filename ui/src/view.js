@@ -66,7 +66,11 @@ export function createCardView({ document, i18n }) {
     if (job.result?.isError && job.kind !== 'command') text(el('details'), 'pre', job.result.content?.map(x => x.text ?? '').join('\n') ?? t('파일 전송에 실패했습니다.'));
     if (job.auditError) text(el('details'), 'p', job.auditError);
     if (job.state === 'pending') for (const action of ['approve', 'deny']) button(t(action === 'approve' ? '승인·실행' : '거부'), () => actions.decide(action), !meta.uiEnabled || !meta.approvalTicket);
-    if (job.kind === 'download' && job.state === 'completed') button(t('파일 저장'), actions.save, !meta.uiEnabled || !meta.viewTicket);
+    if (job.kind === 'download' && job.state === 'completed') {
+      status(korean ? '서버 파일 준비 완료' : 'Server file ready', job.state);
+      text(el('details'), 'p', korean ? '서버에서 파일을 준비했습니다. 아직 PC 저장이나 에이전트 수신이 완료된 것은 아닙니다. 파일 저장을 누르세요. 카드 저장을 지원하지 않으면 웹 승인 화면에서 저장할 수 있습니다.' : 'The server file is ready. This does not confirm a device save or agent receipt. Save it here, or use the administrator page if this host cannot save files.');
+      button(meta.downloadRequiresLogin ? (korean ? '브라우저에서 파일 저장' : 'Save in browser') : t('파일 저장'), actions.save, !meta.uiEnabled || !meta.viewTicket);
+    }
   }
   function transfer(seed, meta, submit, selectTarget) {
     clear(); identity(meta); status(t(seed.direction === 'upload' ? '파일 업로드 준비' : '파일 다운로드 준비'));
@@ -106,6 +110,7 @@ export function createCardView({ document, i18n }) {
   }
   return {
     t, initialize, job, transfer, theme, clear,
+    downloadStatus: message => status(message, 'completed'),
     output(value, page, next) {
       const area = el('command-output'); if (!area) return; area.replaceChildren();
       text(area, 'p', `${page.offsetBytes}–${page.nextOffset} / ${page.totalBytes} bytes`);

@@ -93,7 +93,7 @@ export function createCommandAutomation({ queue, state, definition, classify, ev
         else result = await assess(command, rule, context, policy.revision);
         // No await between freshness check, decision record and execution claim.
         definition.verify();
-        if (state.policy().revision !== policy.revision) result = { reasonCode: 'policy_changed' };
+        if (state.policy().revision !== policy.revision) result = { ...result, reasonCode: 'policy_changed' };
         const current = queue.get(job.id);
         if (current.state !== 'evaluating') return;
         const automatic = ['command_set', 'model_passed'].includes(result.reasonCode);
@@ -102,10 +102,10 @@ export function createCommandAutomation({ queue, state, definition, classify, ev
         if (automatic) queue.startCommand(job.id);
       })().catch(() => {
         if (queue.get(job.id)?.state === 'evaluating') {
-          try { decision(job, { policyRevision: policy.revision, decision: 'review', reasonCode: 'evaluation_failed' }); queue.finishEvaluation(job.id); }
+          try { decision(job, { ...queue.get(job.id)?.decision, policyRevision: policy.revision, decision: 'review', reasonCode: 'evaluation_failed' }); queue.finishEvaluation(job.id); }
           catch { queue.abortEvaluation(job.id); }
         } else if (queue.get(job.id)?.state === 'pending') {
-          try { decision(job, { policyRevision: policy.revision, decision: 'review', reasonCode: 'execution_busy' }); } catch { queue.abortEvaluation(job.id); }
+          try { decision(job, { ...queue.get(job.id)?.decision, policyRevision: policy.revision, decision: 'review', reasonCode: 'execution_busy' }); } catch { queue.abortEvaluation(job.id); }
         }
       }).finally(() => tasks.delete(job.id));
       tasks.set(job.id, task);

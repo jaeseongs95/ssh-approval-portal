@@ -2,11 +2,11 @@ import { randomBytes } from 'node:crypto';
 import { hash } from '../../domain/validation.mjs';
 import { CHUNK_BYTES } from '../../contracts/ports.mjs';
 
-export function createCapabilities({ queue, store, signer, settings, targets, now = () => Date.now() }) {
+export function createCapabilities({ queue, store, signer, settings, targets, adminAuthMode = 'token', now = () => Date.now() }) {
   const used = new Map(), epoch = randomBytes(24).toString('hex');
   const bound = (subject, target) => targets ? hash(JSON.stringify({ epoch, subject, identity: targets.select(target).identity })) : subject;
   const view = job => {
-    const meta = { bridgeDisplayName: settings.bridgeDisplayName, targetDisplayName: job.targetDisplayName ?? settings.targetDisplayName, ...(job.targetId ? { targetId: job.targetId, targetRevision: job.targetRevision } : {}), uiEnabled: settings.uiEnabled, namespace: settings.prefix, maxBytes: settings.maxBytes, chunkBytes: CHUNK_BYTES, webUrl: settings.adminOrigin };
+    const meta = { bridgeDisplayName: settings.bridgeDisplayName, targetDisplayName: job.targetDisplayName ?? settings.targetDisplayName, ...(job.targetId ? { targetId: job.targetId, targetRevision: job.targetRevision } : {}), uiEnabled: settings.uiEnabled, namespace: settings.prefix, maxBytes: settings.maxBytes, chunkBytes: CHUNK_BYTES, webUrl: settings.adminOrigin, downloadRequiresLogin: adminAuthMode === 'access' };
     if (settings.uiEnabled) {
       meta.viewTicket = signer.issue('view', queue.subject(job.id), now() + 600_000);
       if (job.state === 'pending') meta.approvalTicket = signer.issue('decision', queue.subject(job.id), job.expiresAt);

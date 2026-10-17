@@ -4,6 +4,7 @@ const locale = korean ? 'ko-KR' : 'en-US';
 const en = {
   '위험 평가 중': 'Assessing risk', '실행 결과 불명': 'Execution outcome unknown',
   '등록됨': 'Registered', '사용 중지': 'Disabled',
+  '보관 중': 'Retained', '평가 중': 'Assessing', '결과 불명': 'Outcome unknown',
   '실행 중인 요청이 없습니다': 'No running requests',
   '승인 후 실행 중인 명령과 파일 전송이 표시됩니다.': 'Approved commands and file transfers in progress appear here.',
   '대상 ID': 'Target ID', '설정 revision': 'Configuration revision', '호스트 키': 'Host key', '전체 대상': 'All targets',

@@ -34,11 +34,11 @@ test('file operation and ticket scope are immutable; expiry, denial and audit fa
   assert.throws(() => q.start(expired.id)); assert.throws(() => signer.verify(cap, 'decision', q.subject(job.id)));
   assert.equal(executions, 0);
 });
-test('automatic execution is restricted to ordinary downloads; raw error text never reaches results', async () => {
+test('a boolean cannot grant automatic file authority; raw error text never reaches owner-approved results', async () => {
   const q = new ApprovalQueue({ classify, profile: 'aws-local', target: 'host', executeOperation: async () => { throw Error('secret-file-bytes'); } });
   assert.throws(() => q.start(q.submit('sudo id').id, true));
   assert.throws(() => q.start(q.submitOperation({ kind: 'download', elevate: true }).id, true));
-  const job = q.submitOperation({ kind: 'download', elevate: false }); q.start(job.id, true);
+  const job = q.submitOperation({ kind: 'download', elevate: false }); assert.throws(()=>q.start(job.id,true));assert.throws(()=>q.startDownload(job.id));q.start(job.id);
   const result = await q.wait(job.id); assert.equal(result.state, 'failed'); assert.ok(!JSON.stringify(result).includes('secret-file-bytes'));
 });
 test('audit partial writes complete; zero-write fails', () => {
@@ -50,7 +50,7 @@ test('late completed downloads remain addressable for a full hour after completi
   let now = 0, complete;
   const q = new ApprovalQueue({ classify, profile: 'aws-local', target: 'host', now: () => now, executeOperation: () => new Promise(resolve => { complete = resolve; }) });
   const job = q.submitOperation({ kind: 'download', elevate: false });
-  now = job.expiresAt - 1; q.start(job.id, true); await Promise.resolve();
+  now = job.expiresAt - 1; q.start(job.id); await Promise.resolve();
   now = job.expiresAt + 300000; complete({ failed: false, texts: [], data: { artifactId: 'synthetic' } }); await q.wait(job.id);
   now = job.expiresAt + 3600001; q.reap(); assert.equal(q.get(job.id).state, 'completed');
   now = job.expiresAt + 300000 + 3600001; q.reap(); assert.equal(q.get(job.id), null);

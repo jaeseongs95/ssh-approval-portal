@@ -5,6 +5,7 @@ import { callerContext } from './execution-context.mjs';
 
 const COMMAND_AUTHORITY = Symbol('server-command-policy');
 const UPLOAD_AUTHORITY = Symbol('server-upload-policy');
+const DOWNLOAD_AUTHORITY = Symbol('server-download-policy');
 
 /** @typedef {import('../contracts/ports.mjs').OperationOutcome} OperationOutcome */
 /** @typedef {import('../contracts/ports.mjs').Job} Job */
@@ -102,21 +103,25 @@ export class ApprovalQueue {
     if (operation?.kind !== 'upload' || operation.elevate !== false || operation.overwrite !== false) throw Error('Owner upload approval required');
     return this.start(id, false, UPLOAD_AUTHORITY);
   }
+  startDownload(id) {
+    if (this.jobs.get(id)?.operation.kind !== 'download') throw Error('Download policy authority required');
+    return this.start(id, false, DOWNLOAD_AUTHORITY);
+  }
   start(id, automatic = false, authority) {
     if (this.maintenance) throw Error('Maintenance in progress');
     const job = this.jobs.get(id);
     if (!job || this.get(id).state !== 'pending') throw Error('Request is not pending');
-    if (automatic && (job.operation.kind !== 'download' || job.operation.elevate)) throw Error('Approval required');
+    if (automatic) throw Error('Server policy authority required');
     if (this.busy()) throw Error('A request is already executing');
     if (job.operation.kind === 'command') validateCommand(job.operation.command, this.classify);
     if (job.operation.kind === 'command') this.beforeCommandStart?.(this.public(job));
-    if (authority === UPLOAD_AUTHORITY) {
-      const decision = this.beforeUploadStart?.(this.public(job));
-      if (!decision || decision.decision !== 'execute') throw Error('Upload policy authority required');
+    if (authority === UPLOAD_AUTHORITY || authority === DOWNLOAD_AUTHORITY) {
+      const decision = (authority === UPLOAD_AUTHORITY ? this.beforeUploadStart : this.beforeDownloadStart)?.(this.public(job));
+      if (!decision || decision.decision !== 'execute') throw Error('File policy authority required');
       this.setDecision(id, decision);
     }
     const release = this.claimExecution();
-    const policyAuthority = authority === COMMAND_AUTHORITY || authority === UPLOAD_AUTHORITY;
+    const policyAuthority = authority === COMMAND_AUTHORITY || authority === UPLOAD_AUTHORITY || authority === DOWNLOAD_AUTHORITY;
     const approvalMode = policyAuthority || automatic ? 'automatic' : 'owner';
     try {
       this.audit({ action: policyAuthority ? 'policy-execution-started' : automatic ? 'read-started' : 'approved', ...this.public(job), approvalMode });

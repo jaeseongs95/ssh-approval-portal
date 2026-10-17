@@ -37,7 +37,7 @@ test('one download URL is claimed before verification await; simultaneous replay
       writable.end(data); await finished(writable);
     });
     app.transfers.download = async () => ({ failed: false, texts: [], data: { artifactId: artifact.id, fileName: artifact.fileName } });
-    const job = app.queue.submitOperation({ kind: 'download', remotePath: '/tmp/race.bin', elevate: false }); app.queue.start(job.id, true); await app.queue.wait(job.id);
+    const job = app.queue.submitOperation({ kind: 'download', remotePath: '/tmp/race.bin', elevate: false }); app.queue.start(job.id); await app.queue.wait(job.id);
     const base = `http://127.0.0.1:${app.adminHttp.address().port}`;
     const reply = await fetch(`${base}/api/${job.id}/download`, { method: 'POST', headers: { Authorization: 'Bearer fixture-admin', Origin: 'https://example.test' } });
     const url = new URL((await reply.json()).downloadUrl); const local = base + url.pathname + url.search;

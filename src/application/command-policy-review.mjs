@@ -38,7 +38,8 @@ export function createCommandPolicyReview({ state, validateTargets, evaluator, a
             try {
               const input = { command: 'Review proposed command-name registration', target: rule.targetId,
                 environment: 'SSH command policy', context: assessmentContext('The user is reviewing proposed command names before registration. Names are not yet approved; arguments will have no name-policy restrictions. No command is executed by this review.'
-                  + (rule.automaticUploads === true ? ' The proposal also enables user-authorized automatic uploads of new files using the SSH account permissions, without overwrite or sudo. Upload paths, contents and consequences are not known at policy registration; consider later execution, sensitive paths and storage exhaustion.' : ''),
+                  + (rule.automaticUploads === true ? ' The proposal also enables user-authorized automatic uploads of new files using the SSH account permissions, without overwrite or sudo. Upload paths, contents and consequences are not known at policy registration; consider later execution, sensitive paths and storage exhaustion.' : '')
+                  + (rule.automaticDownloads === true ? ' The proposal enables automatic downloads of regular files readable by the SSH account. Contents may contain credentials or private data; Jev does not inspect files. Elevated downloads additionally require automaticSudo and may read root-owned secrets.' : ''),
                   { targetId: rule.targetId, targetRevision: rule.targetRevision, profile: rule.profile,
                     policyRevision: expectedRevision, externalDisclosure: rule.externalDisclosure,
                     modelExecution: rule.modelExecution, fallback: rule.fallback }, 'Give risk feedback for the exact proposed policy before the user can acknowledge and register it'), proposedCommands: [...rule.commands] };
@@ -50,9 +51,10 @@ export function createCommandPolicyReview({ state, validateTargets, evaluator, a
             evaluation = { purpose: 'registration', assessedAt: startedAt, latencyMs: Math.max(0, now() - startedAt) };
           } else if (rule.externalDisclosure) reason = selected ? 'budget_exhausted' : 'not_configured';
           feedback.push({ targetId: rule.targetId, commands: [...rule.commands], commandRisks, assessment: assessment ?? null, reason, ...(evaluation ? { evaluation } : {}),
-            level: powerful.length || rule.automaticUploads === true || rule.automaticSudo === true ? 'high_risk' : assessment?.label ?? 'uncertain',
+            level: powerful.length || rule.automaticUploads === true || rule.automaticDownloads === true || rule.automaticSudo === true ? 'high_risk' : assessment?.label ?? 'uncertain',
             warning: (rule.automaticSudo === true ? 'sudo 자동승인을 켜면 다른 사용자 권한으로 실행할 수 있습니다. 내부 명령까지 모두 사전승인이면 Jev 없이 실행하며, 미등록 명령이 있으면 전체 명령줄을 Jev로 평가합니다. 끄면 sudo 요청은 개별 사용자 승인이 필요합니다. ' : '')
               + (rule.automaticUploads === true ? '파일 자동업로드를 켜면 SSH 계정이 쓸 수 있는 경로에 새 파일을 개별 승인 없이 저장합니다. 파일 내용은 Jev가 검사하지 않습니다. 실행 파일·설정·인증 파일 생성과 저장 공간 사용에 영향을 줄 수 있습니다. 덮어쓰기·sudo 업로드는 계속 개별 승인이 필요합니다. ' : '')
+              + (rule.automaticDownloads === true ? '파일 자동다운로드를 켜면 SSH 계정이 읽을 수 있는 일반 파일을 개별 승인 없이 준비합니다. 개인정보·설정·인증 파일도 포함될 수 있으며 파일 내용은 Jev가 검사하지 않습니다. sudo 다운로드는 sudo 자동승인까지 함께 켠 경우에만 자동으로 준비합니다. 준비 완료는 PC 저장이나 에이전트 수신 완료를 뜻하지 않습니다. ' : '')
               + (powerful.length ? `${powerful.join(', ')}에는 상태 변경·권한 상승·임의 실행 또는 외부 전송 기능이 있습니다. ` : '')
               + (rule.commands.includes('sudo') ? 'sudo는 단독으로 위험하다고 판정하지 않으며, 실제 인자를 포함한 동작을 실행 전에 판단합니다. ' : '')
               + '명령줄의 모든 명령 이름이 사전승인 목록에 있으면 인자 위험도나 Jev 평가 없이 실행합니다. 명령 이름 승인에는 인자별 제한이 없습니다. 삭제·권한 상승·코드 실행·정보 유출 가능성을 확인하세요. 점수는 실제 안전 확률을 보증하지 않습니다.' });

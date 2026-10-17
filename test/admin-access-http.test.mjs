@@ -34,7 +34,7 @@ test('Access web requires signed owner, cookie POST origin and separate maintena
     const artifact=await app.store.begin({fileName,remotePath:'/tmp/fixture.bin',size:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')});
     await app.store.append(artifact.id,0,bytes);await app.store.finish(artifact.id);
     app.transfers.download=async()=>({failed:false,texts:[],data:{artifactId:artifact.id,fileName}});
-    const fileJob=app.queue.submitOperation({kind:'download',remotePath:'/tmp/fixture.bin',elevate:false});app.queue.start(fileJob.id,true);await app.queue.wait(fileJob.id);
+    const fileJob=app.queue.submitOperation({kind:'download',remotePath:'/tmp/fixture.bin',elevate:false});app.queue.start(fileJob.id);await app.queue.wait(fileJob.id);
     const linkReply=await fetch(url+`/api/${fileJob.id}/download`,{method:'POST',headers:owner});assert.equal(linkReply.status,200);
     const link=new URL((await linkReply.json()).downloadUrl),local=url+link.pathname+link.search;
     assert.equal((await fetch(local)).status,401,'file capability alone does not replace owner login in Access mode');

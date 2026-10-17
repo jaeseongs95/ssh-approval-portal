@@ -10,10 +10,11 @@ async function call(name, args, namespace) {
   if (name === 'ui-upload-begin') return { structuredContent: { transferId: 'synthetic-upload' }, _meta: { sshApproval: { uploadTicket: 'synthetic-ticket' } } };
   if (name === 'ui-upload-finish') return { structuredContent: job, _meta: { sshApproval: {} } };
   if (name === 'show-approval') return { _meta: { sshApproval: { viewTicket: 'synthetic-view' } } };
+  if (name === 'ui-download-link') return { _meta: { sshApproval: { downloadUrl:'https://fixture.test/file?ticket=synthetic-download-ticket',fileName:'fixture.txt' } } };
   if (name === 'ui-read-command-output') return { structuredContent: { outputId: args.outputId, offsetBytes: args.offsetBytes, nextOffset: args.offsetBytes + 20, totalBytes: 20, eof: true }, _meta: { sshOutput: { text: 'EXPLICIT_OUTPUT_SENTINEL' } } };
   return {};
 }
-const host = { call, downloadFile: async () => ({}), openLink: async () => ({}), updateModelContext: async value => { contexts.push(value); return {}; } };
+const host = { call, downloadFile: async () => ({}), openLink: async args => {calls.push({name:'host-open-link',args});return {};}, updateModelContext: async value => { contexts.push(value); return {}; } };
 const source = await (await fetch('/fixture/card-source')).text();
 let receive;
 if (source.startsWith('import { App }')) {

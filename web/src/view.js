@@ -11,6 +11,8 @@ export function createWebView({ document, i18n }) {
   const serverRecords = new Map();
   let targetList = [], changeTarget;
   let handlers;
+  let historyOffset=0, historyAnchor, latestJobs=[], latestDeciding=false, pager;
+  const historyPageSize=20;
   function text(parent, tag, value, className = '') {
     const node = document.createElement(tag); node.textContent = value; node.className = className; parent.append(node); return node;
   }
@@ -77,6 +79,7 @@ export function createWebView({ document, i18n }) {
     }
     if (job.auditError) text(body, 'p', job.auditError, 'error');
     if (job.state === 'completed' && job.kind === 'download') {
+      text(body, 'p', korean ? '서버 파일 준비 완료 · PC 저장이나 에이전트 수신은 아직 확인되지 않았습니다. 아래 파일 저장 버튼을 사용하세요.' : 'Server file ready. Device save or agent receipt is not confirmed. Use Save file below.', 'auth-note');
       const button = text(actions, 'button', t('파일 저장'), 'secondary'); button.onclick = () => handlers.download(job.id);
     }
     if (!actions.childElementCount) actions.remove();
@@ -97,7 +100,7 @@ export function createWebView({ document, i18n }) {
     if (!root) return;
     const counts = id => {
       const scoped = id === undefined ? jobs : jobs.filter(job => (job.targetId ?? 'default') === id);
-      return ['pending', 'running', 'failed'].map(state => scoped.filter(job => job.state === state).length);
+      return [scoped.length, ...['pending', 'evaluating', 'running', 'completed', 'failed', 'denied', 'expired', 'unknown'].map(state => scoped.filter(job => job.state === state).length)];
     };
     const selected = el('target-filter')?.value || '';
     const entries = [{ id: '', displayName: t('전체 대상'), enabled: true }, ...targetList];
@@ -109,7 +112,8 @@ export function createWebView({ document, i18n }) {
         node.setAttribute('aria-pressed', String(target.id === selected));
         text(node, 'strong', target.displayName);
         if (target.id) text(node, 'span', `${target.id} · ${t(target.enabled ? '등록됨' : '사용 중지')}`, 'server-id');
-        text(node, 'span', `${t('승인 대기')} ${values[0]} · ${t('실행 중')} ${values[1]} · ${t('실패')} ${values[2]}`, 'server-counts');
+        const labels=['보관 중', '승인 대기', '평가 중', '실행 중', '완료', '실패', '거부', '만료', '결과 불명'];
+        text(node, 'span', labels.map((label,index)=>`${t(label)} ${values[index]}`).join(' · '), 'server-counts');
         node.onclick = () => { if (changeTarget && target.id !== (el('target-filter')?.value || '')) { el('target-filter').value = target.id; changeTarget(); } };
         if (!changeTarget) node.disabled = true;
         record = { node, fingerprint }; serverRecords.set(target.id, record);
@@ -119,13 +123,20 @@ export function createWebView({ document, i18n }) {
     reconcile(root, nodes); el('overview-section').hidden = false;
   }
   function render(jobs, deciding = false) {
+    latestJobs=jobs; latestDeciding=deciding;
     overview(jobs);
     const selected = el('target-filter')?.value;
     const visible = selected ? jobs.filter(job => (job.targetId ?? 'default') === selected) : jobs;
+    const ordered=[...visible].sort((a,b)=>(b.createdAt??0)-(a.createdAt??0)||a.id.localeCompare(b.id));
+    const historyJobs=ordered.filter(job=>!['pending','running','evaluating'].includes(job.state));
+    if(historyAnchor){const anchor=historyJobs.findIndex(job=>job.id===historyAnchor);if(anchor>=0)historyOffset=anchor;else historyAnchor=undefined;}
+    historyOffset=Math.min(historyOffset,Math.max(0,historyJobs.length-1));
+    const historySlice=historyJobs.slice(historyOffset,historyOffset+historyPageSize),pageIds=new Set(historySlice.map(job=>job.id));
     const live = new Set(visible.map(job => job.id)), pending = [], running = [], history = [];
     for (const [id, record] of records) if (!live.has(id)) { record.node.remove(); records.delete(id); }
     // Aggregate queues arrive grouped by target, so insertion order is not chronology.
-    for (const job of [...visible].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0) || a.id.localeCompare(b.id))) {
+    for (const job of ordered) {
+      if(!['pending','running','evaluating'].includes(job.state)&&!pageIds.has(job.id))continue;
       let record = records.get(job.id);
       if (record?.fingerprint !== JSON.stringify(job)) {
         const previous = record; record = createRecord(job, deciding, previous);
@@ -137,8 +148,21 @@ export function createWebView({ document, i18n }) {
     reconcile(el('jobs'), pending.length ? pending : [placeholders.pending]);
     reconcile(el('history'), history.length ? history : [placeholders.history]);
     if (el('running')) reconcile(el('running'), running.length ? running : [placeholders.running]);
-    el('pending-count').textContent = pending.length; el('history-count').textContent = history.length;
+    el('pending-count').textContent = pending.length; el('history-count').textContent = historyJobs.length;
     if (el('running-count')) el('running-count').textContent = running.length;
+    const navigation=el('history-pagination');
+    if(navigation){
+      if(!pager){
+        const previous=text(navigation,'button',korean?'이전':'Previous','secondary'),label=text(navigation,'span',''),next=text(navigation,'button',korean?'다음':'Next','secondary');
+        label.setAttribute('aria-live','polite');
+        const move=delta=>{historyOffset=Math.max(0,historyOffset+delta);historyAnchor=historyJobsAtOffset();render(latestJobs,latestDeciding);};
+        const historyJobsAtOffset=()=>{const target=el('target-filter')?.value;return [...latestJobs].filter(job=>(!target||(job.targetId??'default')===target)&&!['pending','running','evaluating'].includes(job.state)).sort((a,b)=>(b.createdAt??0)-(a.createdAt??0)||a.id.localeCompare(b.id))[historyOffset]?.id;};
+        previous.onclick=()=>move(-historyPageSize);next.onclick=()=>move(historyPageSize);pager={previous,label,next};
+      }
+      navigation.hidden=historyJobs.length<=historyPageSize;
+      pager.label.textContent=`${historyOffset+1}–${Math.min(historyOffset+historyPageSize,historyJobs.length)} / ${historyJobs.length}`;
+      pager.previous.disabled=deciding||historyOffset===0;pager.next.disabled=deciding||historyOffset+historyPageSize>=historyJobs.length;
+    }
   }
   function initialize(actions) {
     handlers = actions;

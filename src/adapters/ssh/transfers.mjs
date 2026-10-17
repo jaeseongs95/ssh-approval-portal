@@ -40,7 +40,7 @@ export class Transfers {
       session = await this.transport.connect(op.elevate ? this.writeProfile : this.readProfile);
       const metadata = await this.call(session, 'snapshot', staged);
       const ready = await this.store.receiveDownload(item.id, metadata, destination => session.download(`${this.remoteStage}/${item.id}.part`, destination, { maxBytes: this.store.maxBytes }));
-      return { failed: false, texts: ['Download ready; use the file card to save it.'], data: { artifactId: ready.id, fileName: ready.fileName, size: ready.size, sha256: ready.sha256 } };
+      return { failed: false, texts: ['Server file ready. It has not been saved to your device or delivered to the agent. Use the file card or the administrator page to save it.'], data: { artifactId: ready.id, fileName: ready.fileName, size: ready.size, sha256: ready.sha256 } };
     } catch (err) { await this.store.remove(item.id); throw err; }
     finally { if (session) await this.call(session, 'cleanup', { ...staged, elevate: false }).catch(() => {}); }
   }

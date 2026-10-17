@@ -15,6 +15,8 @@ const en = {
   'sudo 사용': 'Use sudo', '예': 'Yes', '아니요': 'No', '덮어쓰기': 'Overwrite', '실행 결과': 'Execution result', '파일 전송에 실패했습니다.': 'File transfer failed.',
   '승인·실행': 'Approve and run', '거부': 'Deny', '파일 저장': 'Save file', '파일 저장 링크를 받지 못했습니다.': 'No file download link was received.',
   '저장 취소 또는 미지원': 'Save cancelled or unsupported', '웹 승인 화면에서 파일을 저장하세요.': 'Save the file from the web approval page.',
+  '브라우저에서 로그인 후 파일을 저장하세요. 저장된 파일은 기기에서 확인해 주세요.': 'Sign in and save the file in your browser. Check the saved file on your device.',
+  '파일 저장 요청을 보냈습니다. 저장된 파일은 기기에서 확인해 주세요.': 'The save request was sent. Check the saved file on your device.',
   '연결이 끊겼습니다. 명령은 재실행하지 않습니다.': 'Connection lost. The command will not be executed again.',
   '파일 업로드 준비': 'Ready to upload', '파일 다운로드 준비': 'Ready to download', '서버의 절대 파일 경로': 'Absolute remote file path',
   ' sudo로 전송': ' Transfer using sudo', ' 기존 파일 덮어쓰기': ' Overwrite existing file', '최대': 'Maximum', '서버 반영은 승인 후 진행합니다.': 'The remote file changes only after approval.',

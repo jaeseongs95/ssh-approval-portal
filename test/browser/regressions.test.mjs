@@ -212,7 +212,8 @@ test('unified console counts all targets, separates running work, sorts across q
   assert.equal(await page.locator('#running-count').textContent(),'1');
   assert.equal(await page.locator('#history-count').textContent(),'2');
   assert.deepEqual(await page.locator('#jobs .request').evaluateAll(nodes=>nodes.map(n=>n.dataset.requestId)),['alpha-upload','beta-new','alpha-old']);
-  assert.ok((await page.locator('#server-overview button').first().textContent()).includes('Awaiting approval 3 · Running 1 · Failed 1'));
+  const counts=await page.locator('#server-overview button').first().textContent();
+  for(const expected of ['Retained 6','Awaiting approval 3','Assessing 0','Running 1','Completed 1','Failed 1'])assert.ok(counts.includes(expected));
   assert.ok((await page.locator('#history summary').allTextContents()).every(text=>/same name \[(alpha|beta)\]/.test(text)));
   const beta=page.locator('#server-overview button[data-target-id=beta]');
   await beta.click();await page.waitForFunction(()=>document.querySelector('#pending-count').textContent==='1');
@@ -255,3 +256,28 @@ test('approved history keeps historical scores and threshold while explaining th
   await page.getByText('AI 평가 상세', { exact: true }).click();
   await page.getByText('당시 보류 사유: AI가 위험도를 판단하지 못했습니다.', { exact: true }).waitFor();
 }, 'ko-KR'));
+
+test('long history uses a full-width page of 20 and preserves expanded records across pages and polling',async()=>browserFixture(async(page,server)=>{
+  server.state.multiTarget=true;
+  server.state.jobs=Array.from({length:45},(_,i)=>({...job('history-'+i,'completed'),createdAt:100-i,targetId:i%2?'alpha':'beta'}));
+  server.state.jobs.push({...job('evaluating-now','evaluating'),createdAt:200},{...job('running-now','running'),createdAt:201});
+  await page.goto(server.origin+'/fixture/web');await page.locator('#history details').first().waitFor();
+  assert.equal(await page.locator('#history details').count(),20);assert.equal(await page.locator('#history-count').textContent(),'45');
+  const counts=await page.locator('#server-overview button').first().textContent();assert.match(counts,/Retained 47/);assert.match(counts,/Assessing 1/);assert.match(counts,/Running 1/);
+  const first=page.locator('#history details').first();await first.locator('summary').click();await first.evaluate(n=>window.savedHistory=n);
+  await page.locator('#history-pagination').getByRole('button',{name:'Next',exact:true}).click();assert.equal(await page.locator('#history details').first().getAttribute('data-request-id'),'history-20');
+  await page.locator('#history-pagination').getByRole('button',{name:'Previous',exact:true}).click();assert.equal(await first.evaluate(n=>n===window.savedHistory&&n.open),true);
+  await page.locator('#load').click();assert.equal(await first.evaluate(n=>n===window.savedHistory&&n.open),true);
+  assert.ok(await page.locator('#history').evaluate(n=>n.getBoundingClientRect().width>document.querySelector('.grid').getBoundingClientRect().width*.95));
+  if(process.env.FOLLOWUP_SCREENSHOTS)await page.screenshot({path:process.env.FOLLOWUP_SCREENSHOTS+'/history-desktop.png',fullPage:true});
+  await page.setViewportSize({width:390,height:844});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+}));
+
+test('prepared download card distinguishes server readiness from local receipt and opens authenticated browser save',async()=>browserFixture(async(page,server)=>{
+  await page.goto(server.origin+'/fixture/card');await page.waitForFunction(()=>window.fixture);
+  await page.evaluate(()=>window.fixture.receive({structuredContent:{id:'download-ready',kind:'download',state:'completed',target:'fixture',expiresAt:2e12,operation:{remotePath:'/tmp/fixture.txt',elevate:false},result:{structuredContent:{fileName:'fixture.txt',size:0}}},_meta:{sshApproval:{uiEnabled:true,viewTicket:'synthetic-view',namespace:'fixture_',downloadRequiresLogin:true}}}));
+  assert.equal(await page.locator('#status').textContent(),'서버 파일 준비 완료');await page.getByText(/아직 PC 저장이나 에이전트 수신/).waitFor();
+  await page.getByRole('button',{name:'브라우저에서 파일 저장',exact:true}).click();await page.getByText(/브라우저에서 로그인 후/).waitFor();
+  assert.equal(await page.evaluate(()=>fixture.calls.filter(c=>c.name==='host-open-link').length),1);
+  assert.equal(await page.evaluate(()=>JSON.stringify(fixture.contexts).includes('synthetic-download-ticket')),false);
+},'ko-KR'));

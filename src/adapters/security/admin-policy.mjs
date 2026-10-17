@@ -8,7 +8,7 @@ export async function authorizeAdminRequest(req, { adminAccess, adminToken, admi
   const routeKind = ['/api/maintenance/reserve', '/api/maintenance/release'].includes(pathname) ? 'maintenance'
     : method === 'GET' && pathname === '/api/session' ? 'session'
     : ['GET', 'HEAD'].includes(method) && /^\/downloads\/[a-f0-9]{48}\/[a-f0-9]{32}$/.test(pathname) ? 'download'
-    : method === 'GET' && ['/', '/app.js'].includes(pathname) ? 'static' : 'api';
+    : method === 'GET' && ['/', '/settings', '/app.js'].includes(pathname) ? 'static' : 'api';
   const deny = status => ({ allowed: false, status, routeKind });
   if (routeKind === 'maintenance') {
     if (!authenticated(req, adminToken)) return deny(401);
@@ -16,7 +16,7 @@ export async function authorizeAdminRequest(req, { adminAccess, adminToken, admi
     if (!await adminAccess.authenticated(req)) return deny(401);
   } else if (routeKind === 'api' && !authenticated(req, adminToken)) return deny(401);
   if (['api', 'maintenance'].includes(routeKind) &&
-      !(method === 'GET' && (['/api/pending', '/api/requests', '/api/targets', '/api/command-policy'].includes(pathname) || /^\/api\/[a-f0-9]{48}$/.test(pathname) || /^\/api\/outputs\/[a-f0-9]{48}$/.test(pathname))) &&
+      !(method === 'GET' && (['/api/pending', '/api/requests', '/api/targets', '/api/command-policy', '/api/automation-metrics'].includes(pathname) || /^\/api\/[a-f0-9]{48}$/.test(pathname) || /^\/api\/outputs\/[a-f0-9]{48}$/.test(pathname))) &&
       (method !== 'POST' || req.headers.origin !== adminOrigin)) return deny(403);
   return { allowed: true, routeKind };
 }

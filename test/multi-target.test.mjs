@@ -82,7 +82,7 @@ test('global execution slots, per-target serialization, audit failures, configur
  const gate=deferred();const f=await fixture({execute:async()=>{await gate.promise;return {failed:false,texts:['done']};}});try {
   const a=f.app.targets.commands.read('id','alpha'),b=f.app.targets.commands.read('id','beta');await until(()=>f.calls.length===2);
   await assert.rejects(f.app.targets.commands.read('id','alpha'));await assert.rejects(f.app.targets.commands.read('id','gamma'));assert.equal(f.calls.length,2);
-  assert.throws(()=>f.app.targets.files.requestDownload({target:'gamma',remotePath:'/tmp/read.bin',elevate:false}));assert.equal(f.app.queue.jobs.size,0,'A full global slot cannot leave a hidden pending automatic download');
+  const download=f.app.targets.files.requestDownload({target:'gamma',remotePath:'/tmp/read.bin',elevate:false});assert.equal(download.state,'pending');assert.ok(f.app.queue.list().some(j=>j.id===download.id),'A deferred download is visible for owner review');assert.throws(()=>f.app.queue.start(download.id));f.app.queue.deny(download.id);
   const job=f.app.queue.submit('sudo id',false,'gamma');assert.throws(()=>f.app.queue.start(job.id));assert.equal(f.app.queue.get(job.id).state,'pending');f.app.queue.deny(job.id);
   assert.equal((await f.http('/api/maintenance/reserve','POST')).status,409);
   const closing=f.app.close();await settle();assert.equal(f.closed,false);assert.equal(f.app.queue.maintenance,true);
@@ -116,9 +116,9 @@ test('changed/restarted target contexts reject old bootstrap and download capabi
   const make=async target=>{const runtime=f.app.targets.select(target),reserved=runtime.store.reserveDownload({fileName:'same.bin',remotePath:'/tmp/same.bin',elevate:false});return runtime.store.receiveDownload(reserved.id,{size:bytes.length,sha256},async out=>{out.end(bytes);await finished(out);});};
   const a=await make('alpha'),b=await make('beta');
   const runtime=f.app.targets.select('alpha');runtime.transfers.download=async()=>({failed:false,texts:['ready'],data:{artifactId:b.id,fileName:b.fileName}});
-  const bad=f.app.targets.files.requestDownload({target:'alpha',remotePath:'/tmp/same.bin',elevate:false});await f.app.queue.wait(bad.id);assert.equal((await f.http(`/api/${bad.id}/download`,'POST')).status,409);
+  const bad=f.app.targets.files.requestDownload({target:'alpha',remotePath:'/tmp/same.bin',elevate:false});await f.app.queue.approve(bad.id);assert.equal((await f.http(`/api/${bad.id}/download`,'POST')).status,409);
   runtime.transfers.download=async()=>({failed:false,texts:['ready'],data:{artifactId:a.id,fileName:a.fileName}});
-  const good=f.app.targets.files.requestDownload({target:'alpha',remotePath:'/tmp/same.bin',elevate:false});await f.app.queue.wait(good.id);
+  const good=f.app.targets.files.requestDownload({target:'alpha',remotePath:'/tmp/same.bin',elevate:false});await f.app.queue.approve(good.id);
   const result=await(await f.http(`/api/${good.id}/download`,'POST')).json(),url=new URL(result.downloadUrl),local=f.web+url.pathname+url.search;
   assert.equal((await fetch(local.replace(a.id,b.id))).status,409);assert.equal((await fetch(local,{method:'HEAD'})).status,200);
   assert.deepEqual(Buffer.from(await(await fetch(local)).arrayBuffer()),bytes);assert.equal((await fetch(local)).status,409);

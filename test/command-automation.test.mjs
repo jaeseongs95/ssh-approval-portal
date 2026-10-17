@@ -159,8 +159,11 @@ test('policy revision change during evaluation discards the old automatic decisi
   assert.equal(f.app.queue.get(job.id).state, 'evaluating');
   assert.throws(() => f.app.queue.start(job.id), /not pending/);
   assert.throws(() => f.app.queue.reserveMaintenance());
-  await f.policy({ commands: [] }); complete(low); await f.app.targets.drain();
+  await f.policy({ commands: [] }); complete({ ...low, inputTokens: 17, outputTokens: 3 }); await f.app.targets.drain();
   assert.equal(f.app.queue.get(job.id).decision.reasonCode, 'policy_changed'); assert.equal(f.executions.length, 0);
+  assert.equal(f.app.queue.get(job.id).decision.assessment.inputTokens, 17);
+  assert.equal(f.app.queue.get(job.id).decision.assessment.outputTokens, 3);
+  assert.equal(f.app.queue.get(job.id).decision.decision, 'review');
 });
 
 test('request keys survive restart, reject changed arguments, and never replay completed execution', async t => {
@@ -257,6 +260,17 @@ test('execution admission audit failure cannot dispatch a preapproved command', 
   await f.policy({}); const job = await f.run('sudo id');
   assert.equal(job.state, 'pending'); assert.equal(job.decision.reasonCode, 'execution_busy'); assert.equal(f.executions.length, 0);
   assert.equal(job.approvalMode, undefined);
+});
+
+test('an evaluated command retains observed usage when execution admission fails', async t => {
+  const f = await fixture(t, { riskEvaluators: { jev: { model: 'jev-1.14.0', assess: async () => ({ ...low, inputTokens: 17, outputTokens: 3 }) } },
+    audit: event => { if (event.action === 'policy-execution-started') throw Error('synthetic audit unavailable'); } });
+  await f.policy({ commands: [], modelExecution: true, thresholds: { jev: threshold('jev-1.14.0') } });
+  const job = await f.run('sudo id');
+  assert.equal(job.state, 'pending'); assert.equal(job.decision.reasonCode, 'execution_busy');
+  assert.equal(job.decision.decision, 'review'); assert.equal(job.approvalMode, undefined);
+  assert.equal(job.decision.assessment.inputTokens, 17); assert.equal(job.decision.assessment.outputTokens, 3);
+  assert.equal(f.executions.length, 0);
 });
 
 test('unknown elevated programs and interpreter carriers route to independent evaluation', async t => {

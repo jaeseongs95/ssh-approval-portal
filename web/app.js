@@ -4,6 +4,8 @@ import { createWebView } from './src/view.js';
 import { createWebApi } from './src/http.js';
 import { createWebController } from './src/controller.js';
 import { createCommandPolicyEditor } from './src/command-policy.js';
+import { createAdminPages } from './src/pages.js';
+import { createAutomationMetricsPanel } from './src/metrics.js';
 
 const i18n = createWebI18n(navigator.language ?? 'en');
 const state = createWebState(document.body?.dataset.authMode === 'access');
@@ -12,4 +14,7 @@ const api = createWebApi({ fetch: globalThis.fetch.bind(globalThis), accessMode:
   isSignedOut: () => state.signedOut, unauthorized: view.unauthorized, t: i18n.t });
 const controller = createWebController({ state, view, api, document, location });
 controller.start();
-createCommandPolicyEditor({ document, api, error: view.error });
+const pages = createAdminPages({ document, location, history });
+createCommandPolicyEditor({ document, api, onNavigate: pages.settings });
+createAutomationMetricsPanel({ document, api });
+pages.sync();

@@ -26,6 +26,7 @@ import { createCommandPolicyReview } from './src/application/command-policy-revi
 import { CommandOutputs } from './src/adapters/storage/command-output.mjs';
 import { hash } from './src/domain/validation.mjs';
 import { createModelCatalog } from './src/application/model-catalog.mjs';
+import { createAutomationMetrics } from './src/application/automation-metrics.mjs';
 
 // Preserve the original injectable createApplication callback at the composition boundary.
 // Concrete runtime executors already return the neutral outcome accepted by use cases.
@@ -95,6 +96,12 @@ export async function createApplication({ registry, classify, executeCommand, au
       if (rule?.automaticUploads !== true) throw Error('Automatic uploads not enabled by the user');
       return { decision: 'execute', reasonCode: 'upload_policy', policyRevision: policy.revision, targetRevision: definition.revision };
     };
+    queue.beforeDownloadStart = job => {
+      definition.verify();
+      const policy = commandState?.policy(), rule = policy?.targets.find(rule => rule.targetId === definition.id && rule.targetRevision === definition.revision && rule.profile === writeProfile);
+      if (rule?.automaticDownloads !== true || (job.operation.elevate && rule.automaticSudo !== true)) throw Error('Automatic download not enabled by the user');
+      return { decision: 'execute', reasonCode: 'download_policy', policyRevision: policy.revision, targetRevision: definition.revision };
+    };
     commands = createCommandService({ queue, classify, executeCommand: checkedExecute, audit: targetAudit, target, readProfile, claimExecution, automation });
     files = createFileService({ store: targetStore, queue, transfers, claimImport });
     return { ...definition, queue, commands, files, transfers, store: targetStore };
@@ -147,7 +154,7 @@ export async function createApplication({ registry, classify, executeCommand, au
     readFile(new URL('./web/dist/app.js', import.meta.url), 'utf8'),
   ]);
   protocols = createProtocolAdapters({ queue, commands, files, store, lifecycle, settings, signer, adminAccess, targets, requestSafety,
-    authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal: shutdown.signal, commandPolicy, commandOutputs });
+    authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal: shutdown.signal, commandPolicy, commandOutputs, automationMetrics: createAutomationMetrics({state:commandState}) });
   const timer = setInterval(() => { lifecycle.reap().catch(() => {}); try { outputs.reap(); } catch { /* Failed deletions stay charged. */ } }, 30_000); timer.unref();
   let closing;
   return { ...protocols, queue, store, targets, transfers: runtimes[0].transfers, enabled: settings.uiEnabled,

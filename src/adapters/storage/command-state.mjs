@@ -33,6 +33,15 @@ export function createCommandState(root) {
     },
     find(key) { const row = db.prepare('SELECT digest,body FROM requests WHERE request_key=?').get(key); return row && { digest: row.digest, job: JSON.parse(row.body) }; },
     list() { return db.prepare('SELECT body FROM requests').all().map(row => JSON.parse(row.body)); },
+    metricsRows(from,to) {
+      // The journal is capped at 10,000 entries. Project metadata in SQLite, without loading command/context bodies.
+      return db.prepare(`SELECT json_extract(body,'$.targetId') AS targetId,json_extract(body,'$.approvalMode') AS approvalMode,
+        json_extract(body,'$.decision.reasonCode') AS reasonCode,json_extract(body,'$.decision.provider') AS provider,
+        json_extract(body,'$.decision.assessment.status') = 'assessed' AS assessed,
+        json_extract(body,'$.decision.assessment.inputTokens') AS inputTokens,json_extract(body,'$.decision.assessment.outputTokens') AS outputTokens,
+        json_extract(body,'$.decision.evaluation.latencyMs') AS latencyMs,json_extract(body,'$.decision.attempts') AS attempts
+        FROM requests WHERE json_extract(body,'$.createdAt')>=? AND json_extract(body,'$.createdAt')<=?`).all(from,to);
+    },
     insert(job, key, digest) {
       // ponytail: bounded journal; explicit archival can replace this refusal when needed.
       if (db.prepare('SELECT count(*) AS n FROM requests').get().n >= 10000) throw Error('Command journal full');

@@ -66,7 +66,10 @@ export function createMcpAdapter({ queue, commands, files, settings, capabilitie
       const selected = targets?.select(args.target);
       return { ...publicResult({ transfer: args, uiEnabled: settings.uiEnabled, maxBytes: settings.maxBytes }, outputSchemas.transfer), _meta: { sshApproval: { bridgeDisplayName: settings.bridgeDisplayName, targetDisplayName: selected?.displayName ?? settings.targetDisplayName, ...(selected ? { targetId: selected.id, targetRevision: selected.revision, targets: targets.list().targets } : {}), uiEnabled: settings.uiEnabled, namespace: settings.prefix, maxBytes: settings.maxBytes, chunkBytes: CHUNK_BYTES, webUrl: settings.adminOrigin, ...(settings.uiEnabled ? { bootstrapTicket: capabilities.bootstrap(args) } : {}) } } };
     }, { ui: true, readOnly: true });
-    tool('request-download', { target, remotePath: z.string().max(4096), elevate: z.boolean().default(false) }, outputSchemas.job, args => jobResult(files.requestDownload(args)), { description: 'Read a regular remote file, or queue a sudo download. Call show-approval for the returned id to display status and save button.' });
+    tool('request-download', { target, remotePath: z.string().max(4096), elevate: z.boolean().default(false) }, outputSchemas.job, args => {
+      const job = files.requestDownload(args);
+      return { ...jobResult(job), _meta: { sshApproval: capabilities.view(job) } };
+    }, { ui: true, description: 'Prepare a regular remote file and display its approval/save card. Automatic download requires the owner-reviewed target automaticDownloads option; elevated downloads also require automaticSudo. Otherwise request owner approval. Completed means the server file is ready, not that the user or agent received it. Use the card to save the file; if the host cannot display cards or save files, open the administrator page and use its save button. Do not rerun a command to recover file contents, and never expose download tickets to model context.' });
     tool('ui-decide-request', { id, action: z.enum(['approve', 'deny']), ticket }, outputSchemas.job, ({ id, action, ticket }) => {
       capabilities.guard(); capabilities.verifyJob(id, ticket, 'decision');
       const job = action === 'approve' ? queue.start(id) : queue.deny(id);

@@ -5,7 +5,7 @@ const CURRENT = 'ssh-command-risk-v4', BASIS = 'safety-probability-v1';
 const legacy = threshold => threshold && (threshold.questionVersion !== CURRENT || threshold.basis !== BASIS);
 
 /** Preserve the owner policy; only explicitly edited settings become a proposal. */
-export function createCommandPolicyEditor({ document, api }) {
+export function createCommandPolicyEditor({ document, api, onNavigate = () => {} }) {
   if (document.body.dataset.commandAutomation !== 'true') return;
   const el = (tag, text, className) => {
     const node = document.createElement(tag);
@@ -22,7 +22,7 @@ export function createCommandPolicyEditor({ document, api }) {
   const failure = el('p', '', 'error'); failure.setAttribute('role', 'alert'); failure.hidden = true; root.append(failure);
   const form = el('form'); form.className = 'policy-form';
   const important = el('section', '', 'request policy-editor important-settings'); important.id = 'important-settings';
-  important.append(el('h2', '중요 자동승인 설정'), el('p', '파일 업로드와 sudo 허용 여부를 서버별로 설정합니다. 변경 후 위험도 확인·OK·저장을 거쳐야 적용됩니다.', 'policy-help'));
+  important.append(el('h2', '중요 자동승인 설정'), el('p', '파일 업로드·다운로드와 sudo 허용 여부를 서버별로 설정합니다. 변경 후 위험도 확인·OK·저장을 거쳐야 적용됩니다.', 'policy-help'));
   const importantFields = el('fieldset', '', 'policy-fields'); importantFields.disabled = true; important.append(importantFields);
   const importantStatus = el('p', '서버 설정을 불러오면 현재 허용 상태를 표시합니다.', 'policy-message'); importantStatus.setAttribute('role','status'); important.append(importantStatus);
   const quickLoad = el('button', '현재 설정 불러오기', 'secondary'); quickLoad.type = 'button'; important.append(quickLoad);
@@ -56,6 +56,7 @@ export function createCommandPolicyEditor({ document, api }) {
   const count = el('p', '', 'policy-help'); one.append(count);
   one.append(el('p', '명령줄의 명령이 모두 사전승인 목록에 있으면 인자 위험도·Jev 평가 없이 실행합니다. 하나라도 미등록이면 전체 명령줄을 Jev로 평가합니다.', 'policy-help'));
   const uploads = check(importantFields, '파일 자동업로드 허용', '폴더 제한 없이 SSH 계정이 쓸 수 있는 경로에 새 파일을 개별 승인 없이 저장합니다. 설정·인증·자동 실행 파일 생성에도 영향을 줍니다. 덮어쓰기·sudo 전송은 계속 승인받으며 파일 내용은 Jev가 검사하지 않습니다.');
+  const downloads = check(importantFields, '파일 자동다운로드 허용', 'SSH 계정이 읽을 수 있는 일반 파일을 개별 승인 없이 준비합니다. 개인정보·인증 파일도 포함될 수 있으며 파일 내용은 Jev가 검사하지 않습니다. sudo 다운로드는 sudo 자동승인도 함께 켜야 합니다. 파일 저장은 별도로 진행합니다.');
 
   const sudo = check(importantFields, 'sudo 자동승인 허용', '기본값은 꺼짐입니다. 켜면 sudo 안에서 실행하는 명령까지 사전승인 목록과 비교합니다. 하나라도 미등록이면 전체 명령줄을 Jev로 평가하며, 끄면 sudo는 매번 개별 승인을 받습니다.');
 
@@ -125,8 +126,8 @@ export function createCommandPolicyEditor({ document, api }) {
   }
   function update() {
     if (snapshot) {
-      const dirty = uploads.checked !== (original?.automaticUploads === true) || sudo.checked !== (original?.automaticSudo === true);
-      importantStatus.textContent = nameOf(target.value) + ' · 저장된 설정: 파일 업로드 ' + (original?.automaticUploads === true ? '허용' : '개별 승인') + ' · sudo ' + (original?.automaticSudo === true ? '허용' : '개별 승인') + (dirty ? ' · 변경 사항은 아직 저장되지 않았습니다.' : '');
+      const dirty = uploads.checked !== (original?.automaticUploads === true) || downloads.checked !== (original?.automaticDownloads === true) || sudo.checked !== (original?.automaticSudo === true);
+      importantStatus.textContent = nameOf(target.value) + ' · 저장된 설정: 파일 업로드 ' + (original?.automaticUploads === true ? '허용' : '개별 승인') + ' · 다운로드 ' + (original?.automaticDownloads === true ? '허용' : '개별 승인') + ' · sudo ' + (original?.automaticSudo === true ? '허용' : '개별 승인') + (dirty ? ' · 변경 사항은 아직 저장되지 않았습니다.' : '');
     }
     count.textContent = commands.value.split(/\r?\n/).filter(line => line.trim()).length + '개 입력 · 최대 128개';
     const selected = commands.value.split(/\r?\n/).map(line => line.trim());
@@ -153,6 +154,7 @@ export function createCommandPolicyEditor({ document, api }) {
     for (const line of lines) summary.append(el('p', line));
     summary.append(el('p', 'sudo 자동승인 ' + (sudo.checked ? '허용 · 내부 명령까지 등록 검사 · 권한 상승 포함' : '허용 안 함 · sudo마다 개별 승인')));
     summary.append(el('p', '파일 자동업로드 ' + (uploads.checked ? '허용 · 폴더 제한 없이 SSH 계정이 쓸 수 있는 경로에 새 파일 저장 · 설정/인증/자동 실행 파일도 포함 · Jev 내용 검사 없음 · 덮어쓰기/sudo 제외' : '허용 안 함 · 전송마다 승인')));
+    summary.append(el('p', '파일 자동다운로드 ' + (downloads.checked ? '허용 · 읽을 수 있는 일반 파일 준비 · 개인정보/인증 파일 포함 가능 · Jev 내용 검사 없음 · sudo는 별도 허용 필요' : '허용 안 함 · 전송마다 승인')));
   }
   function show() {
     original = snapshot.targets.find(rule => rule.targetId === target.value);
@@ -160,7 +162,7 @@ export function createCommandPolicyEditor({ document, api }) {
     commands.value = (original ? original.commands : Object.keys(RECOMMENDED)).join('\n'); denied.value = (original?.deniedCommands ?? []).join('\n');
     search.value = ''; renderSearch();
     disclosure.checked = original?.externalDisclosure ?? false; execution.checked = original?.modelExecution ?? false; fallback.value = original?.fallback ?? '';
-    uploads.checked = original?.automaticUploads === true; sudo.checked = original?.automaticSudo === true;
+    uploads.checked = original?.automaticUploads === true; downloads.checked = original?.automaticDownloads === true; sudo.checked = original?.automaticSudo === true;
     for (const [provider, inputs] of Object.entries(scores)) {
       const catalog = snapshot.evaluators?.[provider], saved = original?.thresholds[provider]?.model;
       const available = catalog?.models ?? (provider === 'jev' ? ['jev-1.14.0', 'jev-1.13.0'] : []);
@@ -186,7 +188,7 @@ export function createCommandPolicyEditor({ document, api }) {
     } catch (failure) { message.textContent = importantStatus.textContent = '설정을 불러오지 못했습니다. 로그인 상태를 확인한 뒤 다시 불러오세요.'; error('로그인 상태를 확인한 뒤 다시 불러오세요. ' + failure.message); }
     finally { loading = false; fields.disabled = importantFields.disabled = !snapshot; reload.disabled = quickLoad.disabled = false; reviewButton.disabled = false; }
   }
-  root.ontoggle = () => { if (root.open && !snapshot && !loading) load(); }; reload.onclick = quickLoad.onclick = load;
+  root.ontoggle = () => { if (root.open && !snapshot && !loading && (document.body.dataset.authMode === 'access' || document.querySelector('#token')?.value)) load(); }; reload.onclick = quickLoad.onclick = load;
   document.querySelector('#load')?.addEventListener('click', () => { if (!snapshot) load(); });
   if (document.body.dataset.authMode === 'access') queueMicrotask(load);
   target.onchange = () => { error(''); show(); };
@@ -194,7 +196,7 @@ export function createCommandPolicyEditor({ document, api }) {
     if (event.target === acknowledged || event.target === target || event.target === search || searchResults.contains(event.target)) return;
     for (const [provider, inputs] of Object.entries(scores)) if ([inputs.model, inputs.score].includes(event.target)) changed.add(provider);
     loadHint.hidden = false; error(''); clearFieldErrors(); invalidate();
-    if ([uploads, sudo].includes(event.target)) root.open = true;
+    if ([uploads, downloads, sudo].includes(event.target)) { onNavigate(); root.open = true; }
     update();
   };
   function renderSearch() {
@@ -229,6 +231,7 @@ export function createCommandPolicyEditor({ document, api }) {
     const rule = original ? structuredClone(original) : { targetId: binding.targetId, targetRevision: binding.targetRevision, profile: binding.profile, commands: [], deniedCommands: [], externalDisclosure: false, modelExecution: false, fallback: null, thresholds: {} };
     Object.assign(rule, { commands: names(commands, '자동승인 명령'), deniedCommands: names(denied, '금지 명령'), externalDisclosure: disclosure.checked, modelExecution: execution.checked, fallback: fallback.value || null });
     if (uploads.checked || Object.hasOwn(rule, 'automaticUploads')) rule.automaticUploads = uploads.checked;
+    if (downloads.checked || Object.hasOwn(rule, 'automaticDownloads')) rule.automaticDownloads = downloads.checked;
     if (sudo.checked || Object.hasOwn(rule, 'automaticSudo')) rule.automaticSudo = sudo.checked;
     for (const [provider, inputs] of Object.entries(scores)) {
       if (!changed.has(provider) && !(provider === 'jev' && !rule.thresholds.jev && execution.checked)) continue;

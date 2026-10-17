@@ -49,8 +49,8 @@ async function fixture(run, { multi = false, assess = async () => low, width = 3
     });
     const page = await context.newPage(); page.setDefaultTimeout(10000);
     const open = async () => {
-      await page.goto(origin); await page.locator('#token').fill('fixture-owner');
-      await page.getByText('자동승인 설정', { exact: true }).click();
+      await page.goto(origin+'/settings'); await page.locator('#token').fill('fixture-owner');
+      await page.getByRole('button',{name:'현재 설정 불러오기',exact:true}).click();
       await names(page).waitFor({ state: 'visible' });
     };
     const checked = async () => { await review(page).click(); await ok(page).waitFor({ state: 'visible' }); await page.waitForFunction(() => !document.querySelector('.policy-section:last-child input[type=checkbox]').disabled, null, { timeout: 10000 }); };
@@ -103,6 +103,7 @@ for (const width of [375, 390]) test('simple registration preserves explicit con
   assert.equal(f.calls.length, 0);
   const { job } = await f.app.targets.commands.run('ls && pwd'); await f.app.targets.drain();
   assert.equal(f.app.queue.get(job.id).state, 'completed'); assert.equal(f.app.queue.get(job.id).approvalMode, 'automatic');
+  await page.getByRole('link',{name:'승인',exact:true}).click();
   await page.locator('#load').click(); await page.locator('[data-request-id="' + job.id + '"] summary').getByText('자동승인', { exact: true }).waitFor();
 }, { width }));
 
@@ -235,6 +236,28 @@ test('saved empty and custom command policies are not replaced by defaults',asyn
   await page.getByLabel('설정할 서버',{exact:true}).selectOption('alpha');assert.equal(await names(page).inputValue(),'');
   assert.equal(f.posts.length,0);
 },{multi:true}));
+
+test('download opt-in is visible, exact-review-bound and isolated per target',async()=>fixture(async f=>{
+  await f.open();const download=f.page.getByRole('checkbox',{name:/^파일 자동다운로드 허용/});
+  assert.equal(await download.isChecked(),false);await download.check();assert.equal(await save(f.page).isDisabled(),true);
+  await f.checked();await f.page.getByText(/파일 자동다운로드를 켜면/).waitFor();await f.commit();
+  let policy=await f.api('/api/command-policy');assert.equal(policy.targets[0].automaticDownloads,true);assert.equal(policy.targets[0].automaticSudo,undefined);
+  await f.page.getByLabel('설정할 서버',{exact:true}).selectOption('beta');assert.equal(await download.isChecked(),false);
+  await f.page.getByLabel('설정할 서버',{exact:true}).selectOption('alpha');assert.equal(await download.isChecked(),true);
+  await download.uncheck();await f.checked();await f.commit();policy=await f.api('/api/command-policy');assert.equal(policy.targets[0].automaticDownloads,false);
+},{multi:true}));
+
+test('settings is a separate URL, navigation preserves unsaved input without storing credentials and metrics load on demand',async()=>fixture(async f=>{
+  const {page}=f;await f.open();assert.ok(page.url().endsWith('/settings'));await names(page).fill('ls');
+  await page.getByRole('link',{name:'승인',exact:true}).click();assert.ok(page.url().endsWith('/'));assert.equal(await page.locator('#command-policy').isVisible(),false);
+  assert.equal(await page.getByRole('checkbox',{name:/^파일 자동다운로드 허용/}).isVisible(),true);
+  await page.getByRole('link',{name:'설정',exact:true}).click();assert.equal(await names(page).inputValue(),'ls');assert.equal(await page.locator('#token').inputValue(),'fixture-owner');
+  assert.deepEqual(await page.evaluate(()=>({local:Object.keys(localStorage),session:Object.keys(sessionStorage)})),{local:[],session:[]});
+  await page.locator('#automation-metrics>summary').click();await page.locator('.metric-card').first().waitFor();assert.equal(await page.locator('.metric-card').count(),5);
+  assert.match(await page.locator('#automation-metrics').textContent(),/청구금액은 수집하지/);assert.equal(f.calls.length,0);
+  if(process.env.FOLLOWUP_SCREENSHOTS)await page.screenshot({path:process.env.FOLLOWUP_SCREENSHOTS+'/settings-mobile.png',fullPage:true});
+  await page.goBack();assert.ok(page.url().endsWith('/'));assert.equal(await page.locator('#command-policy').isVisible(),false);
+}));
 
 test('upload opt-in is explicit, review-bound, preserved per target and reversible', async () => fixture(async f => {
   const { page } = f; await f.open();
