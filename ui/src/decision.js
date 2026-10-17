@@ -1,4 +1,5 @@
 const reasons = {
+  sudo_not_enabled: ['sudo 자동승인이 꺼져 있어 개별 사용자 승인이 필요합니다.', 'Automatic sudo is disabled; individual owner approval is required.'],
   context_required: ['작업 설명이 없어 AI 평가를 요청하지 않았습니다. 작업 목적·대상·예상 영향·복구 방법을 확인해 주세요.', 'No AI call was made because task context is missing. Check the purpose, target, expected impact and recovery plan.'],
   command_set: ['사전 승인 명령셋에 일치', 'Matched the preapproved command set'],
   upload_policy: ['사용자가 허용한 파일 자동업로드', 'File upload allowed by owner policy'],

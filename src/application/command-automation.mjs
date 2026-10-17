@@ -1,3 +1,4 @@
+import { commandLineNames } from '../domain/command-line.mjs';
 import { inspectCommand, commandDigest, validatedRisk, deniedCommand, explicitUserApproval, AUTOMATION_QUESTION_VERSION, AUTOMATION_QUESTION, SAFETY_PROBABILITY_BASIS } from '../domain/command-policy.mjs';
 import { assessmentContext, callerContext } from '../domain/execution-context.mjs';
 
@@ -24,7 +25,8 @@ export function createCommandAutomation({ queue, state, definition, classify, ev
         targetRevision: definition.revision, profile: definition.writeProfile, sshTarget: definition.target,
         commandClass: classify(command).class, policyRevision, externalDisclosure: rule.externalDisclosure,
         modelExecution: rule.modelExecution, fallback: rule.fallback }),
-      preapprovedCommands: [...rule.commands], userApproval: explicitUserApproval(command, rule.commands) };
+      preapprovedCommands: [...rule.commands.filter(name => name !== 'sudo'), ...(rule.automaticSudo === true ? ['sudo'] : [])],
+      userApproval: explicitUserApproval(command, [...rule.commands.filter(name => name !== 'sudo'), ...(rule.automaticSudo === true ? ['sudo'] : [])]) };
     const attempts = [];
     for (const provider of ['jev', ...(rule.fallback ? [rule.fallback] : [])]) {
       const configured = evaluators[provider];
@@ -79,14 +81,15 @@ export function createCommandAutomation({ queue, state, definition, classify, ev
       const persist = value => state.save(value);
       queue.track(job.id, persist);
       const task = (async () => {
-        const scan = inspectCommand(command, classify);
+        const line = commandLineNames(command);
         const base = { policyRevision: policy.revision, targetRevision: definition.revision };
         let result;
         if (deniedCommand(command, rule)) {
           decision(job, { ...base, decision: 'deny', reasonCode: 'policy_denied' }); queue.finishEvaluation(job.id, 'denied');
           return;
         }
-        if (rule?.commands.includes(scan.executable) && !scan.risky) result = { reasonCode: 'command_set' };
+        if (line.usesSudo && rule?.automaticSudo !== true) result = { reasonCode: 'sudo_not_enabled' };
+        else if (line.complete && rule && line.names.every(name => name === 'sudo' ? rule.automaticSudo === true : rule.commands.includes(name))) result = { reasonCode: 'command_set', commandNames: line.names };
         else result = await assess(command, rule, context, policy.revision);
         // No await between freshness check, decision record and execution claim.
         definition.verify();

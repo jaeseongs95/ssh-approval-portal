@@ -1,3 +1,4 @@
+import risks from '../domain/command-risks.json' with { type: 'json' };
 import { hash } from '../domain/validation.mjs';
 import { validateCommandPolicy, validatedRisk, COMMAND_SET_QUESTION_VERSION } from '../domain/command-policy.mjs';
 import { assessmentContext } from '../domain/execution-context.mjs';
@@ -26,7 +27,8 @@ export function createCommandPolicyReview({ state, validateTargets, evaluator, a
           if (JSON.stringify(current.targets.find(item => item.targetId === rule.targetId)) === JSON.stringify(rule)) continue;
           checked(policy, expectedRevision);
           let assessment, evaluation, reason = 'external_disclosure_not_enabled';
-          const powerful = rule.commands.filter(name => /^(su|sh|bash|zsh|python[0-9.]*|node|perl|ruby|rm|rmdir|mv|cp|dd|mkfs(?:\..*)?|chmod|chown|mount|umount|systemctl|reboot|shutdown|kill|pkill|iptables|ufw|curl|wget|scp|sftp|rsync|ssh|nc|find|xargs|env)$/.test(name));
+          const commandRisks = rule.commands.filter(name => name !== 'sudo').map(name => ({ name, ...(risks.commands[name] ?? risks.defaultRisk) }));
+          const powerful = commandRisks.filter(item => item.riskLevel === 'high').map(item => item.name);
           const selected = evaluator?.forModel ? evaluator.forModel(rule.thresholds.jev?.model) : evaluator;
           if (rule.externalDisclosure && selected && budget.used < maxCalls) {
             budget.used++;
@@ -47,12 +49,13 @@ export function createCommandPolicyReview({ state, validateTargets, evaluator, a
             reason = assessment ? 'assessed' : 'evaluation_unavailable';
             evaluation = { purpose: 'registration', assessedAt: startedAt, latencyMs: Math.max(0, now() - startedAt) };
           } else if (rule.externalDisclosure) reason = selected ? 'budget_exhausted' : 'not_configured';
-          feedback.push({ targetId: rule.targetId, commands: [...rule.commands], assessment: assessment ?? null, reason, ...(evaluation ? { evaluation } : {}),
-            level: powerful.length || rule.automaticUploads === true ? 'high_risk' : assessment?.label ?? 'uncertain',
-            warning: (rule.automaticUploads === true ? '파일 자동업로드를 켜면 SSH 계정이 쓸 수 있는 경로에 새 파일을 개별 승인 없이 저장합니다. 파일 내용은 Jev가 검사하지 않습니다. 실행 파일·설정·인증 파일 생성과 저장 공간 사용에 영향을 줄 수 있습니다. 덮어쓰기·sudo 업로드는 계속 개별 승인이 필요합니다. ' : '')
+          feedback.push({ targetId: rule.targetId, commands: [...rule.commands], commandRisks, assessment: assessment ?? null, reason, ...(evaluation ? { evaluation } : {}),
+            level: powerful.length || rule.automaticUploads === true || rule.automaticSudo === true ? 'high_risk' : assessment?.label ?? 'uncertain',
+            warning: (rule.automaticSudo === true ? 'sudo 자동승인을 켜면 다른 사용자 권한으로 실행할 수 있습니다. 내부 명령까지 모두 사전승인이면 Jev 없이 실행하며, 미등록 명령이 있으면 전체 명령줄을 Jev로 평가합니다. 끄면 sudo 요청은 개별 사용자 승인이 필요합니다. ' : '')
+              + (rule.automaticUploads === true ? '파일 자동업로드를 켜면 SSH 계정이 쓸 수 있는 경로에 새 파일을 개별 승인 없이 저장합니다. 파일 내용은 Jev가 검사하지 않습니다. 실행 파일·설정·인증 파일 생성과 저장 공간 사용에 영향을 줄 수 있습니다. 덮어쓰기·sudo 업로드는 계속 개별 승인이 필요합니다. ' : '')
               + (powerful.length ? `${powerful.join(', ')}에는 상태 변경·권한 상승·임의 실행 또는 외부 전송 기능이 있습니다. ` : '')
               + (rule.commands.includes('sudo') ? 'sudo는 단독으로 위험하다고 판정하지 않으며, 실제 인자를 포함한 동작을 실행 전에 판단합니다. ' : '')
-              + '명령 이름 승인에는 인자별 제한이 없습니다. 삭제·권한 상승·코드 실행·정보 유출 가능성을 확인하세요. 점수는 실제 안전 확률을 보증하지 않습니다.' });
+              + '명령줄의 모든 명령 이름이 사전승인 목록에 있으면 인자 위험도나 Jev 평가 없이 실행합니다. 명령 이름 승인에는 인자별 제한이 없습니다. 삭제·권한 상승·코드 실행·정보 유출 가능성을 확인하세요. 점수는 실제 안전 확률을 보증하지 않습니다.' });
         }
         checked(policy, expectedRevision);
         const token = nonce(), id = nonce(), expiresAt = now() + 300000;

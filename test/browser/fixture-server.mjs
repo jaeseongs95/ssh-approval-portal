@@ -47,6 +47,8 @@ export async function fixtureServer(root) {
       else if (url.pathname === '/fixture/card-source' || url.pathname === '/fixture/legacy-card.js') {
         text = await readFile(resolve(root, 'ui/card.js'), 'utf8');
         if (url.pathname.endsWith('legacy-card.js')) text = text.replace("import { App } from '@modelcontextprotocol/ext-apps';", 'const App = window.FixtureApp;');
+      } else if (url.pathname === '/src/domain/command-risks.json') {
+        text = await readFile(resolve(root, 'src/domain/command-risks.json'), 'utf8'); type = 'application/json';
       } else if (url.pathname === '/' || url.pathname === '/fixture/web') {
         text = (await readFile(resolve(root, 'web/index.html'), 'utf8')).replace('data-auth-mode="token"', () => `data-auth-mode="access" data-multi-target="${state.multiTarget}" data-bridge-display-name="${escape(state.bridgeDisplayName)}" data-target-display-name="${escape(state.targetDisplayName)}"`).replace('<script src="/app.js" defer></script>', '<script type="module" src="/web/app.js"></script>'); type = 'text/html';
       } else {

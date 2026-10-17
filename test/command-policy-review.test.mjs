@@ -92,3 +92,12 @@ test('failed assessment still requires an explicit informed OK; failed audit can
   const checked = await broken.review.review(policy, 0);
   assert.throws(() => broken.review.set(policy, 0, checked.reviewToken, true), /audit failed/); assert.equal(broken.state.policy().revision, 0);
 });
+
+test('sudo opt-in is high-risk feedback, separately acknowledged and exact-review-bound',async()=>{
+  const f=fixture({evaluator:undefined}),policy={targets:[{...rule(),commands:['ls'],automaticSudo:true}]};
+  const result=await f.review.review(policy,0);assert.equal(result.feedback[0].level,'high_risk');assert.match(result.feedback[0].warning,/sudo 자동승인/);
+  assert.throws(()=>f.review.set(policy,0,result.reviewToken,false));
+  assert.throws(()=>f.review.set({targets:[{...policy.targets[0],automaticSudo:false}]},0,result.reviewToken,true));
+  const saved=f.review.set(policy,0,result.reviewToken,true);assert.equal(saved.targets[0].automaticSudo,true);
+  assert.equal(result.feedback[0].commandRisks[0].name,'ls');assert.equal(result.feedback[0].commandRisks[0].riskLevel,'low');
+});

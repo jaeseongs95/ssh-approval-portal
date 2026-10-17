@@ -32,7 +32,7 @@ async function fixture(t, options = {}) {
   const policy = async changes => {
     const { body: current } = await api('/api/command-policy'), binding = current.bindings[0];
     const rule = { targetId: binding.targetId, targetRevision: binding.targetRevision, profile: binding.profile,
-      commands: ['ls', 'sudo', 'rm'], deniedCommands: [], externalDisclosure: true, modelExecution: false, fallback: null, thresholds: {}, ...changes };
+      commands: ['ls', 'rm', 'id'], deniedCommands: [], automaticSudo: true, externalDisclosure: true, modelExecution: false, fallback: null, thresholds: {}, ...changes };
     const proposal = { expectedRevision: current.revision, policy: { targets: [rule] } };
     const review = await api('/api/command-policy/review', proposal); assert.equal(review.status, 200);
     const result = await api('/api/command-policy', { ...proposal, reviewToken: review.body.reviewToken, acknowledged: true });
@@ -48,23 +48,18 @@ async function fixture(t, options = {}) {
     async restart() { await app.close(); app = await make(); await new Promise(resolve => app.adminHttp.listen(0, '127.0.0.1', resolve)); url = `http://127.0.0.1:${app.adminHttp.address().port}`; } };
 }
 
-test('command set ignores arguments; risky arguments and nested execution do not inherit that authority', async t => {
-  const f = await fixture(t); await f.policy({});
-  for (const command of ['ls /tmp', 'ls -la /var', 'sudo id']) {
-    const job = await f.run(command); assert.equal(job.state, 'completed'); assert.equal(job.decision.reasonCode, 'command_set'); assert.equal(job.approvalMode, 'automatic');
+test('every registered command bypasses argument-risk evaluation; all segments and nested names must match', async t => {
+  const f = await fixture(t); await f.policy({commands:['ls','rm','id']});
+  for (const command of ['ls /tmp', 'rm -rf /tmp/fixture', 'sudo -n rm -rf /tmp/fixture', 'ls && id', 'ls $(id)', 'ls; rm /tmp/fixture']) {
+    const job = await f.run(command, undefined, ''); assert.equal(job.state,'completed',command);assert.equal(job.decision.reasonCode,'command_set');assert.equal(job.approvalMode,'automatic');
   }
-  assert.equal(f.inputs.length, 0);
-  for (const command of ['ls $(touch /tmp/x)', 'rm -rf /tmp/x', 'sudo rm -rf /tmp/x']) {
-    const job = await f.run(command); assert.equal(job.state, 'pending'); assert.equal(job.decision.reasonCode, 'observation_only'); assert.equal(job.approvalMode, undefined);
+  assert.equal(f.inputs.length,0);assert.equal(f.executions.length,6);
+  await f.policy({commands:['ls']});
+  for (const command of ['ls && rm /tmp/fixture','ls | grep x','ls $(id)','ls '+String.fromCharCode(96)+'id'+String.fromCharCode(96)]) {
+    const job = await f.run(command);assert.equal(job.state,'pending',command);assert.equal(job.decision.reasonCode,'observation_only');
+    assert.equal(f.inputs.at(-1).command,command);assert.equal(f.inputs.at(-1).userApproval.explicit,false);
   }
-  assert.equal(f.executions.length, 3); assert.equal(f.inputs.length, 3);
-  for (const input of f.inputs) {
-    assert.deepEqual(input.preapprovedCommands, ['ls', 'sudo', 'rm']);
-    assert.equal(input.userApproval.explicit, true);
-    assert.equal(input.userApproval.statement, '이 명령은 사용자가 명시적으로 승인했습니다.');
-    assert.equal(input.userApproval.scope, 'command-name');
-  }
-  assert.equal(inspectCommand('sudo id', classifyCommand).risky, false);
+  assert.equal(f.inputs.length,4);assert.equal(f.executions.length,6);
 });
 
 test('model OR path executes sudo and unmatched commands only with explicit provider-specific safety probability policy', async t => {
@@ -74,7 +69,7 @@ test('model OR path executes sudo and unmatched commands only with explicit prov
   assert.equal(job.approvalMode, 'automatic');
   assert.equal(f.executions[0].command, 'sudo systemctl restart synthetic.service');
   assert.deepEqual(Object.keys(f.inputs[0]).sort(), ['command', 'context', 'environment', 'preapprovedCommands', 'target', 'userApproval']);
-  assert.deepEqual(f.inputs[0].preapprovedCommands, []); assert.equal(f.inputs[0].userApproval.explicit, false);
+  assert.deepEqual(f.inputs[0].preapprovedCommands, ['sudo']); assert.equal(f.inputs[0].userApproval.explicit, false);
   assert.doesNotMatch(JSON.stringify(f.inputs), /threshold|fixture-owner/);
   const details = JSON.parse(f.inputs[0].context);
   assert.equal(details.serverFacts.sshTarget, 'fixture@127.0.0.1:22');
@@ -207,15 +202,10 @@ test('a stored v2 threshold is loadable but cannot approve execution under the c
   await f.restart(); assert.equal((await f.run('sudo id')).state, 'pending');
 });
 
-test('explicit user approval is communicated but cannot replace risk assessment of dangerous arguments', async t => {
-  const inputs = [];
-  const f = await fixture(t, { riskEvaluators: { jev: { model: 'jev-1.14.0', async assess(input) {
-    inputs.push(input); return { ...low, label: 'high_risk', probabilities: { low_risk: 0, high_risk: 1, uncertain: 0 } };
-  } } } });
-  await f.policy({ commands: ['rm'], modelExecution: true, thresholds: { jev: threshold('jev-1.14.0') } });
-  const job = await f.run('rm -rf /');
-  assert.equal(inputs[0].userApproval.explicit, true); assert.equal(inputs[0].userApproval.commandName, 'rm');
-  assert.equal(job.state, 'pending'); assert.equal(f.executions.length, 0);
+test('partial name approval never tells Jev the whole mixed line was explicitly approved', async t => {
+  const f=await fixture(t,{riskEvaluators:{jev:{model:'jev-1.14.0',assess:async()=>({...low,label:'high_risk',probabilities:{low_risk:0,high_risk:1,uncertain:0}})}}});
+  await f.policy({commands:['ls'],modelExecution:true,thresholds:{jev:threshold('jev-1.14.0')}});
+  const job=await f.run('ls && rm -rf /tmp/fixture');assert.equal(job.state,'pending');assert.equal(job.decision.assessment.label,'high_risk');assert.equal(f.executions.length,0);
 });
 
 test('AIK adapter never dispatches before authority and keeps host authorization out of MCP', async () => {
@@ -270,7 +260,7 @@ test('execution admission audit failure cannot dispatch a preapproved command', 
 });
 
 test('unknown elevated programs and interpreter carriers route to independent evaluation', async t => {
-  const f = await fixture(t); await f.policy({});
+  const f = await fixture(t); await f.policy({commands:['ls']});
   for (const command of ['sudo custom-program', 'sudo python3 -c "print(1)"', 'ls; id', 'ls `id`']) {
     assert.equal((await f.run(command)).state, 'pending');
   }
@@ -371,8 +361,35 @@ test('the legacy command-only MCP path delivers exact task context through autom
     const job = f.app.queue.get(response.structuredContent.id);
     assert.equal(job.operation.command, command); assert.equal(job.operation.context, context);
     assert.equal(payload.state.command, command); assert.equal(JSON.parse(payload.state.context).callerSituation, context);
-    assert.equal(payload.state.userApproval.explicit, false); assert.deepEqual(payload.state.preapprovedCommands, []);
+    assert.equal(payload.state.userApproval.explicit, false); assert.deepEqual(payload.state.preapprovedCommands, ['sudo']);
     assert.equal(job.decision.evaluation.callerContextProvided, true); assert.equal(job.decision.threshold.minLowRisk, 0.9);
     assert.equal(job.state, 'pending'); assert.equal(calls, 1); assert.equal(f.executions.length, 0);
   } finally { await client.close(); }
+});
+
+test('sudo defaults to individual owner approval even if its name was saved; opt-in is separate and revocable',async t=>{
+  const f=await fixture(t);
+  for(const automaticSudo of [undefined,false]){
+    await f.policy({commands:['sudo','id'],automaticSudo,modelExecution:true,thresholds:{jev:threshold('jev-1.14.0')}});
+    const job=await f.run('sudo -n id');assert.equal(job.state,'pending');assert.equal(job.decision.reasonCode,'sudo_not_enabled');
+  }
+  assert.equal(f.inputs.length,0);assert.equal(f.executions.length,0);
+  await f.policy({commands:['id'],automaticSudo:true});assert.equal((await f.run('sudo -n id')).state,'completed');assert.equal(f.inputs.length,0);
+  await f.policy({commands:[],automaticSudo:true,modelExecution:true,thresholds:{jev:threshold('jev-1.14.0')}});
+  assert.equal((await f.run('sudo -n id')).state,'completed');assert.equal(f.inputs.length,1);
+  await f.policy({commands:['id'],automaticSudo:false});assert.equal((await f.run('sudo -n id')).decision.reasonCode,'sudo_not_enabled');assert.equal(f.executions.length,2);
+});
+
+// Quoting cannot hide a denied name from the new bypass grammar.
+test('denied names remain prior to full-line bypass after shell quote removal', async t => {
+ const f=await fixture(t);await f.policy({commands:['ls','rm'],deniedCommands:['rm']});
+ for(const line of ["r'm' /tmp/fixture","ls && r'm' /tmp/fixture"]){const job=await f.run(line);assert.equal(job.state,'denied');}
+ assert.equal(f.executions.length,0);assert.equal(f.inputs.length,0);
+});
+
+test('combined shell flags cannot hide unregistered or disabled sudo names',async t=>{
+ const f=await fixture(t);await f.policy({commands:['bash','ls'],automaticSudo:false});
+ assert.equal((await f.run('bash -lc "sudo id"')).decision.reasonCode,'sudo_not_enabled');
+ const mixed=await f.run('bash -lc "ls && id"');assert.equal(mixed.state,'pending');assert.equal(f.inputs.at(-1).command,'bash -lc "ls && id"');
+ assert.equal(f.executions.length,0);
 });

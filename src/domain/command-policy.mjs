@@ -1,3 +1,4 @@
+import { commandLineNames } from './command-line.mjs';
 import { hash } from './validation.mjs';
 import { sensitiveText } from './execution-context.mjs';
 
@@ -21,7 +22,7 @@ export function approvedCommandNames(commands) {
 }
 export function explicitUserApproval(command, commands) {
   approvedCommandNames(commands);
-  const commandName = executableName(command), explicit = commandName !== null && commands.includes(commandName);
+  const commandName = executableName(command), line = commandLineNames(command), explicit = line.complete && line.names.every(name => commands.includes(name));
   return { explicit, statement: explicit ? '이 명령은 사용자가 명시적으로 승인했습니다.' : '이 명령은 사전 승인 명령셋과 일치하지 않습니다.', scope: 'command-name', commandName };
 }
 export const COMMAND_SET_QUESTION_VERSION = 'ssh-command-set-risk-v1';
@@ -36,12 +37,13 @@ export function validateCommandPolicy(value) {
   if (!keys(value, ['targets']) || !Array.isArray(value.targets) || value.targets.length > 32) throw Error('Invalid command policy');
   const seen = new Set();
   for (const rule of value.targets) {
-    if (!keys(rule, ['targetId', 'targetRevision', 'profile', 'commands', 'deniedCommands', 'externalDisclosure', 'modelExecution', 'automaticUploads', 'fallback', 'thresholds'])
+    if (!keys(rule, ['targetId', 'targetRevision', 'profile', 'commands', 'deniedCommands', 'externalDisclosure', 'modelExecution', 'automaticUploads', 'automaticSudo', 'fallback', 'thresholds'])
       || !/^[a-z][a-z0-9_-]{0,31}$/.test(rule.targetId) || seen.has(rule.targetId)
       || !/^[a-f0-9]{64}$/.test(rule.targetRevision) || !name(rule.profile)
       || !['commands', 'deniedCommands'].every(key => Array.isArray(rule[key]) && rule[key].length <= 128 && rule[key].every(name) && new Set(rule[key]).size === rule[key].length)
       || typeof rule.externalDisclosure !== 'boolean' || typeof rule.modelExecution !== 'boolean'
       || (rule.automaticUploads !== undefined && typeof rule.automaticUploads !== 'boolean')
+      || (rule.automaticSudo !== undefined && typeof rule.automaticSudo !== 'boolean')
       || ![null, 'luna', 'sonnet'].includes(rule.fallback) || !keys(rule.thresholds, ['jev', 'luna', 'sonnet'])) throw Error('Invalid command policy');
     seen.add(rule.targetId);
     for (const threshold of Object.values(rule.thresholds)) {
@@ -82,4 +84,4 @@ export function validatedRisk(value, model) {
     ...Object.fromEntries(['inputTokens', 'outputTokens'].filter(key => Number.isSafeInteger(value[key]) && value[key] >= 0).map(key => [key, value[key]])) };
 }
 export const commandDigest = (command, targetRevision, profile, context = '') => hash(JSON.stringify({ command, targetRevision, profile, ...(context ? { context } : {}) }));
-export const deniedCommand = (command, rule) => Boolean(rule?.deniedCommands.some(name => command.split(/[^A-Za-z0-9_.+-]+/).includes(name)));
+export const deniedCommand = (command, rule) => Boolean(rule?.deniedCommands.some(name => commandLineNames(command).names.includes(name) || command.split(/[^A-Za-z0-9_.+-]+/).includes(name)));

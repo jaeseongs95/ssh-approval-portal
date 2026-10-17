@@ -101,7 +101,7 @@ for (const width of [375, 390]) test('simple registration preserves explicit con
   assert.deepEqual(stored.targets[0].commands, ['ls', 'sudo', 'pwd']);
   assert.equal(stored.targets[0].externalDisclosure, false); assert.equal(stored.targets[0].modelExecution, false); assert.deepEqual(stored.targets[0].thresholds, {});
   assert.equal(f.calls.length, 0);
-  const { job } = await f.app.targets.commands.run('sudo id'); await f.app.targets.drain();
+  const { job } = await f.app.targets.commands.run('ls && pwd'); await f.app.targets.drain();
   assert.equal(f.app.queue.get(job.id).state, 'completed'); assert.equal(f.app.queue.get(job.id).approvalMode, 'automatic');
   await page.locator('#load').click(); await page.locator('[data-request-id="' + job.id + '"] summary').getByText('자동승인', { exact: true }).waitFor();
 }, { width }));
@@ -270,3 +270,25 @@ test('model selection is above consent, invalidates review, and threshold errors
   assert.equal(await fallbackOption.evaluate(node=>node.disabled),true,JSON.stringify(await fallbackOption.evaluate(node=>({html:node.outerHTML,parent:node.parentElement.outerHTML}))));
   await screenshot(page,'model-and-inline-validation');
 }));
+
+test('important upload and sudo controls stay between overview and collapsed policy; changes require exact feedback and OK',async()=>fixture(async f=>{
+  const {page}=f;await page.goto(f.origin);await page.locator('#token').fill('fixture-owner');
+  await page.getByRole('button',{name:'현재 설정 불러오기',exact:true}).click();
+  const sudo=page.getByRole('checkbox',{name:/^sudo 자동승인 허용/}),upload=page.getByRole('checkbox',{name:/^파일 자동업로드 허용/});
+  await page.waitForFunction(()=>!document.querySelector('#important-settings fieldset').disabled);
+  assert.equal(await sudo.isVisible(),true);assert.equal(await upload.isVisible(),true);
+  assert.equal(await page.locator('#command-policy').evaluate(n=>n.open),false);
+  assert.equal(await sudo.isChecked(),false);assert.equal(await upload.isChecked(),false);
+  assert.equal(await page.locator('#important-settings').evaluate(n=>Boolean(document.querySelector('#overview-section').compareDocumentPosition(n)&Node.DOCUMENT_POSITION_FOLLOWING)&&Boolean(n.compareDocumentPosition(document.querySelector('#command-policy'))&Node.DOCUMENT_POSITION_FOLLOWING)),true);
+  await sudo.check();assert.equal(await page.locator('#command-policy').evaluate(n=>n.open),true);
+  assert.match(await page.locator('#important-settings [role=status]').textContent(),/아직 저장되지/);
+  assert.equal(f.posts.filter(p=>p.path==='/api/command-policy').length,0);assert.equal(await save(page).isDisabled(),true);
+  await f.checked();await page.getByText(/sudo 자동승인을 켜면/).waitFor();await f.commit();
+  let policy=(await f.api('/api/command-policy'));assert.equal(policy.targets[0].automaticSudo,true);
+  await page.getByLabel('설정할 서버',{exact:true}).selectOption('beta');assert.equal(await sudo.isChecked(),false);
+  await page.getByLabel('설정할 서버',{exact:true}).selectOption('alpha');assert.equal(await sudo.isChecked(),true);
+  await sudo.uncheck();await f.checked();await f.commit();assert.equal((await f.api('/api/command-policy')).targets[0].automaticSudo,false);
+  await page.locator('#command-policy').evaluate(n=>n.open=false);await page.setViewportSize({width:390,height:844});
+  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  if(process.env.POLICY_UX_SCREENSHOTS)await page.screenshot({path:process.env.POLICY_UX_SCREENSHOTS+'/important-settings.png',fullPage:true});
+},{multi:true}));

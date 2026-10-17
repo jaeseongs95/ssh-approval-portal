@@ -1,0 +1,618 @@
+{
+  "schemaVersion": "1.0.0",
+  "purpose": "등록 전 명령 이름의 기능·위험 안내. 실제 사고 확률이나 실행 허가를 뜻하지 않습니다.",
+  "authorityEffect": "none",
+  "argumentScope": "인자별 실제 위험을 점수화하지 않습니다. 사전승인 실행 여부는 명령줄 전체의 등록 여부와 별도 sudo 설정으로 결정합니다.",
+  "excludedCommands": [
+    "sudo"
+  ],
+  "defaultRisk": {
+    "riskLevel": "unknown",
+    "capabilities": [],
+    "reason": "알려진 기능 정의가 없습니다. 등록 전에 직접 확인해야 합니다."
+  },
+  "defaultCommands": [
+    "pwd",
+    "ls",
+    "stat",
+    "df",
+    "du",
+    "uname",
+    "uptime",
+    "whoami",
+    "id",
+    "hostname"
+  ],
+  "commands": {
+    "pwd": {
+      "description": "현재 위치",
+      "category": "조회",
+      "riskLevel": "low",
+      "capabilities": [
+        "inspection"
+      ],
+      "reason": "주로 상태나 메타데이터를 조회합니다. 대상 정보의 민감도와 사용 자원은 별도 확인이 필요합니다."
+    },
+    "ls": {
+      "description": "파일 목록",
+      "category": "조회",
+      "riskLevel": "low",
+      "capabilities": [
+        "inspection"
+      ],
+      "reason": "주로 상태나 메타데이터를 조회합니다. 대상 정보의 민감도와 사용 자원은 별도 확인이 필요합니다."
+    },
+    "stat": {
+      "description": "파일 정보",
+      "category": "조회",
+      "riskLevel": "low",
+      "capabilities": [
+        "inspection"
+      ],
+      "reason": "주로 상태나 메타데이터를 조회합니다. 대상 정보의 민감도와 사용 자원은 별도 확인이 필요합니다."
+    },
+    "df": {
+      "description": "디스크 여유 공간",
+      "category": "조회",
+      "riskLevel": "low",
+      "capabilities": [
+        "inspection"
+      ],
+      "reason": "주로 상태나 메타데이터를 조회합니다. 대상 정보의 민감도와 사용 자원은 별도 확인이 필요합니다."
+    },
+    "du": {
+      "description": "폴더 용량",
+      "category": "조회",
+      "riskLevel": "low",
+      "capabilities": [
+        "inspection"
+      ],
+      "reason": "주로 상태나 메타데이터를 조회합니다. 대상 정보의 민감도와 사용 자원은 별도 확인이 필요합니다."
+    },
+    "uname": {
+      "description": "시스템 정보",
+      "category": "조회",
+      "riskLevel": "low",
+      "capabilities": [
+        "inspection"
+      ],
+      "reason": "주로 상태나 메타데이터를 조회합니다. 대상 정보의 민감도와 사용 자원은 별도 확인이 필요합니다."
+    },
+    "uptime": {
+      "description": "가동 시간",
+      "category": "조회",
+      "riskLevel": "low",
+      "capabilities": [
+        "inspection"
+      ],
+      "reason": "주로 상태나 메타데이터를 조회합니다. 대상 정보의 민감도와 사용 자원은 별도 확인이 필요합니다."
+    },
+    "whoami": {
+      "description": "현재 사용자",
+      "category": "조회",
+      "riskLevel": "low",
+      "capabilities": [
+        "inspection"
+      ],
+      "reason": "주로 상태나 메타데이터를 조회합니다. 대상 정보의 민감도와 사용 자원은 별도 확인이 필요합니다."
+    },
+    "id": {
+      "description": "사용자 권한 정보",
+      "category": "조회",
+      "riskLevel": "low",
+      "capabilities": [
+        "inspection"
+      ],
+      "reason": "주로 상태나 메타데이터를 조회합니다. 대상 정보의 민감도와 사용 자원은 별도 확인이 필요합니다."
+    },
+    "ps": {
+      "description": "실행 중인 프로세스 목록",
+      "category": "조회",
+      "riskLevel": "low",
+      "capabilities": [
+        "inspection"
+      ],
+      "reason": "주로 상태나 메타데이터를 조회합니다. 대상 정보의 민감도와 사용 자원은 별도 확인이 필요합니다."
+    },
+    "free": {
+      "description": "메모리 사용량 보기",
+      "category": "조회",
+      "riskLevel": "low",
+      "capabilities": [
+        "inspection"
+      ],
+      "reason": "주로 상태나 메타데이터를 조회합니다. 대상 정보의 민감도와 사용 자원은 별도 확인이 필요합니다."
+    },
+    "wc": {
+      "description": "줄·단어·글자 수 세기",
+      "category": "조회",
+      "riskLevel": "low",
+      "capabilities": [
+        "inspection"
+      ],
+      "reason": "주로 상태나 메타데이터를 조회합니다. 대상 정보의 민감도와 사용 자원은 별도 확인이 필요합니다."
+    },
+    "cat": {
+      "description": "파일 내용 보기",
+      "category": "조회",
+      "riskLevel": "moderate",
+      "capabilities": [
+        "read_data"
+      ],
+      "reason": "파일·로그·연결 정보에 민감한 내용이 포함되거나 많은 자원을 사용할 수 있습니다."
+    },
+    "head": {
+      "description": "파일 앞부분 보기",
+      "category": "조회",
+      "riskLevel": "moderate",
+      "capabilities": [
+        "read_data"
+      ],
+      "reason": "파일·로그·연결 정보에 민감한 내용이 포함되거나 많은 자원을 사용할 수 있습니다."
+    },
+    "tail": {
+      "description": "파일 뒷부분과 로그 보기",
+      "category": "조회",
+      "riskLevel": "moderate",
+      "capabilities": [
+        "read_data"
+      ],
+      "reason": "파일·로그·연결 정보에 민감한 내용이 포함되거나 많은 자원을 사용할 수 있습니다."
+    },
+    "grep": {
+      "description": "파일 내용에서 글자나 문장 검색",
+      "category": "조회",
+      "riskLevel": "moderate",
+      "capabilities": [
+        "read_data"
+      ],
+      "reason": "파일·로그·연결 정보에 민감한 내용이 포함되거나 많은 자원을 사용할 수 있습니다."
+    },
+    "ss": {
+      "description": "네트워크 연결과 포트 보기",
+      "category": "조회",
+      "riskLevel": "moderate",
+      "capabilities": [
+        "read_data"
+      ],
+      "reason": "파일·로그·연결 정보에 민감한 내용이 포함되거나 많은 자원을 사용할 수 있습니다."
+    },
+    "ping": {
+      "description": "네트워크 연결 확인",
+      "category": "네트워크",
+      "riskLevel": "moderate",
+      "capabilities": [
+        "read_data"
+      ],
+      "reason": "파일·로그·연결 정보에 민감한 내용이 포함되거나 많은 자원을 사용할 수 있습니다."
+    },
+    "printf": {
+      "description": "지정한 텍스트 출력",
+      "category": "출력",
+      "riskLevel": "moderate",
+      "capabilities": [
+        "read_data"
+      ],
+      "reason": "파일·로그·연결 정보에 민감한 내용이 포함되거나 많은 자원을 사용할 수 있습니다."
+    },
+    "echo": {
+      "description": "텍스트 출력",
+      "category": "출력",
+      "riskLevel": "moderate",
+      "capabilities": [
+        "read_data"
+      ],
+      "reason": "파일·로그·연결 정보에 민감한 내용이 포함되거나 많은 자원을 사용할 수 있습니다."
+    },
+    "true": {
+      "description": "성공 상태 반환",
+      "category": "상태",
+      "riskLevel": "moderate",
+      "capabilities": [
+        "read_data"
+      ],
+      "reason": "파일·로그·연결 정보에 민감한 내용이 포함되거나 많은 자원을 사용할 수 있습니다."
+    },
+    "false": {
+      "description": "실패 상태 반환",
+      "category": "상태",
+      "riskLevel": "moderate",
+      "capabilities": [
+        "read_data"
+      ],
+      "reason": "파일·로그·연결 정보에 민감한 내용이 포함되거나 많은 자원을 사용할 수 있습니다."
+    },
+    "find": {
+      "description": "파일·폴더 찾기",
+      "category": "조회·변경",
+      "riskLevel": "high",
+      "capabilities": [
+        "change_state"
+      ],
+      "reason": "인자에 따라 파일·권한·서비스·네트워크 설정을 바꾸거나 데이터를 외부로 전송할 수 있습니다."
+    },
+    "sort": {
+      "description": "텍스트 줄 정렬",
+      "category": "조회·변경",
+      "riskLevel": "high",
+      "capabilities": [
+        "change_state"
+      ],
+      "reason": "인자에 따라 파일·권한·서비스·네트워크 설정을 바꾸거나 데이터를 외부로 전송할 수 있습니다."
+    },
+    "uniq": {
+      "description": "연속으로 중복된 줄 정리",
+      "category": "조회·변경",
+      "riskLevel": "high",
+      "capabilities": [
+        "change_state"
+      ],
+      "reason": "인자에 따라 파일·권한·서비스·네트워크 설정을 바꾸거나 데이터를 외부로 전송할 수 있습니다."
+    },
+    "top": {
+      "description": "프로세스와 CPU 사용량 보기",
+      "category": "조회·변경",
+      "riskLevel": "high",
+      "capabilities": [
+        "change_state"
+      ],
+      "reason": "인자에 따라 파일·권한·서비스·네트워크 설정을 바꾸거나 데이터를 외부로 전송할 수 있습니다."
+    },
+    "date": {
+      "description": "날짜와 시간 확인·설정",
+      "category": "조회·변경",
+      "riskLevel": "high",
+      "capabilities": [
+        "change_state"
+      ],
+      "reason": "인자에 따라 파일·권한·서비스·네트워크 설정을 바꾸거나 데이터를 외부로 전송할 수 있습니다."
+    },
+    "hostname": {
+      "description": "서버 이름 확인·설정",
+      "category": "조회·변경",
+      "riskLevel": "high",
+      "capabilities": [
+        "change_state"
+      ],
+      "reason": "인자에 따라 파일·권한·서비스·네트워크 설정을 바꾸거나 데이터를 외부로 전송할 수 있습니다."
+    },
+    "ip": {
+      "description": "네트워크 주소 확인·설정",
+      "category": "조회·변경",
+      "riskLevel": "high",
+      "capabilities": [
+        "change_state"
+      ],
+      "reason": "인자에 따라 파일·권한·서비스·네트워크 설정을 바꾸거나 데이터를 외부로 전송할 수 있습니다."
+    },
+    "curl": {
+      "description": "URL로 네트워크 요청 보내기",
+      "category": "네트워크·변경",
+      "riskLevel": "high",
+      "capabilities": [
+        "change_state"
+      ],
+      "reason": "인자에 따라 파일·권한·서비스·네트워크 설정을 바꾸거나 데이터를 외부로 전송할 수 있습니다."
+    },
+    "wget": {
+      "description": "URL에서 파일 받기",
+      "category": "네트워크·변경",
+      "riskLevel": "high",
+      "capabilities": [
+        "change_state"
+      ],
+      "reason": "인자에 따라 파일·권한·서비스·네트워크 설정을 바꾸거나 데이터를 외부로 전송할 수 있습니다."
+    },
+    "journalctl": {
+      "description": "시스템 서비스 로그 확인·관리",
+      "category": "조회·변경",
+      "riskLevel": "high",
+      "capabilities": [
+        "change_state"
+      ],
+      "reason": "인자에 따라 파일·권한·서비스·네트워크 설정을 바꾸거나 데이터를 외부로 전송할 수 있습니다."
+    },
+    "systemctl": {
+      "description": "서비스 상태 확인·시작·중지",
+      "category": "조회·변경",
+      "riskLevel": "high",
+      "capabilities": [
+        "change_state"
+      ],
+      "reason": "인자에 따라 파일·권한·서비스·네트워크 설정을 바꾸거나 데이터를 외부로 전송할 수 있습니다."
+    },
+    "cp": {
+      "description": "파일 복사",
+      "category": "변경",
+      "riskLevel": "high",
+      "capabilities": [
+        "change_state"
+      ],
+      "reason": "인자에 따라 파일·권한·서비스·네트워크 설정을 바꾸거나 데이터를 외부로 전송할 수 있습니다."
+    },
+    "mv": {
+      "description": "파일 이동·이름 변경",
+      "category": "변경",
+      "riskLevel": "high",
+      "capabilities": [
+        "change_state"
+      ],
+      "reason": "인자에 따라 파일·권한·서비스·네트워크 설정을 바꾸거나 데이터를 외부로 전송할 수 있습니다."
+    },
+    "mkdir": {
+      "description": "폴더 만들기",
+      "category": "변경",
+      "riskLevel": "high",
+      "capabilities": [
+        "change_state"
+      ],
+      "reason": "인자에 따라 파일·권한·서비스·네트워크 설정을 바꾸거나 데이터를 외부로 전송할 수 있습니다."
+    },
+    "touch": {
+      "description": "파일 만들기·수정 시각 변경",
+      "category": "변경",
+      "riskLevel": "high",
+      "capabilities": [
+        "change_state"
+      ],
+      "reason": "인자에 따라 파일·권한·서비스·네트워크 설정을 바꾸거나 데이터를 외부로 전송할 수 있습니다."
+    },
+    "rm": {
+      "description": "파일·폴더 삭제",
+      "category": "삭제",
+      "riskLevel": "high",
+      "capabilities": [
+        "change_state"
+      ],
+      "reason": "인자에 따라 파일·권한·서비스·네트워크 설정을 바꾸거나 데이터를 외부로 전송할 수 있습니다."
+    },
+    "rmdir": {
+      "description": "빈 폴더 삭제",
+      "category": "삭제",
+      "riskLevel": "high",
+      "capabilities": [
+        "change_state"
+      ],
+      "reason": "인자에 따라 파일·권한·서비스·네트워크 설정을 바꾸거나 데이터를 외부로 전송할 수 있습니다."
+    },
+    "chmod": {
+      "description": "파일 접근 권한 변경",
+      "category": "권한 변경",
+      "riskLevel": "high",
+      "capabilities": [
+        "change_state"
+      ],
+      "reason": "인자에 따라 파일·권한·서비스·네트워크 설정을 바꾸거나 데이터를 외부로 전송할 수 있습니다."
+    },
+    "chown": {
+      "description": "파일 소유자 변경",
+      "category": "권한 변경",
+      "riskLevel": "high",
+      "capabilities": [
+        "change_state"
+      ],
+      "reason": "인자에 따라 파일·권한·서비스·네트워크 설정을 바꾸거나 데이터를 외부로 전송할 수 있습니다."
+    },
+    "tar": {
+      "description": "파일 묶기·풀기",
+      "category": "조회·변경",
+      "riskLevel": "high",
+      "capabilities": [
+        "change_state"
+      ],
+      "reason": "인자에 따라 파일·권한·서비스·네트워크 설정을 바꾸거나 데이터를 외부로 전송할 수 있습니다."
+    },
+    "kill": {
+      "description": "프로세스에 신호 보내기·종료",
+      "category": "변경",
+      "riskLevel": "high",
+      "capabilities": [
+        "change_state"
+      ],
+      "reason": "인자에 따라 파일·권한·서비스·네트워크 설정을 바꾸거나 데이터를 외부로 전송할 수 있습니다."
+    },
+    "pkill": {
+      "description": "이름으로 프로세스 종료",
+      "category": "변경",
+      "riskLevel": "high",
+      "capabilities": [
+        "change_state"
+      ],
+      "reason": "인자에 따라 파일·권한·서비스·네트워크 설정을 바꾸거나 데이터를 외부로 전송할 수 있습니다."
+    },
+    "dd": {
+      "description": "블록 단위 복사·덮어쓰기",
+      "category": "삭제·변경",
+      "riskLevel": "high",
+      "capabilities": [
+        "change_state"
+      ],
+      "reason": "인자에 따라 파일·권한·서비스·네트워크 설정을 바꾸거나 데이터를 외부로 전송할 수 있습니다."
+    },
+    "reboot": {
+      "description": "서버 재시작",
+      "category": "서비스 중단",
+      "riskLevel": "high",
+      "capabilities": [
+        "change_state"
+      ],
+      "reason": "인자에 따라 파일·권한·서비스·네트워크 설정을 바꾸거나 데이터를 외부로 전송할 수 있습니다."
+    },
+    "shutdown": {
+      "description": "서버 종료",
+      "category": "서비스 중단",
+      "riskLevel": "high",
+      "capabilities": [
+        "change_state"
+      ],
+      "reason": "인자에 따라 파일·권한·서비스·네트워크 설정을 바꾸거나 데이터를 외부로 전송할 수 있습니다."
+    },
+    "ssh": {
+      "description": "원격 서버에서 명령 실행",
+      "category": "원격 실행",
+      "riskLevel": "high",
+      "capabilities": [
+        "change_state"
+      ],
+      "reason": "인자에 따라 파일·권한·서비스·네트워크 설정을 바꾸거나 데이터를 외부로 전송할 수 있습니다."
+    },
+    "scp": {
+      "description": "서버 사이 파일 복사",
+      "category": "파일 전송",
+      "riskLevel": "high",
+      "capabilities": [
+        "change_state"
+      ],
+      "reason": "인자에 따라 파일·권한·서비스·네트워크 설정을 바꾸거나 데이터를 외부로 전송할 수 있습니다."
+    },
+    "rsync": {
+      "description": "파일 동기화",
+      "category": "파일 전송·삭제",
+      "riskLevel": "high",
+      "capabilities": [
+        "change_state"
+      ],
+      "reason": "인자에 따라 파일·권한·서비스·네트워크 설정을 바꾸거나 데이터를 외부로 전송할 수 있습니다."
+    },
+    "sh": {
+      "description": "코드 또는 다른 명령 실행",
+      "category": "코드 실행",
+      "riskLevel": "high",
+      "capabilities": [
+        "execute_code",
+        "delegate_commands"
+      ],
+      "reason": "입력·스크립트·환경에 따라 다른 명령이나 임의 코드를 실행할 수 있습니다."
+    },
+    "bash": {
+      "description": "코드 또는 다른 명령 실행",
+      "category": "코드 실행",
+      "riskLevel": "high",
+      "capabilities": [
+        "execute_code",
+        "delegate_commands"
+      ],
+      "reason": "입력·스크립트·환경에 따라 다른 명령이나 임의 코드를 실행할 수 있습니다."
+    },
+    "dash": {
+      "description": "코드 또는 다른 명령 실행",
+      "category": "코드 실행",
+      "riskLevel": "high",
+      "capabilities": [
+        "execute_code",
+        "delegate_commands"
+      ],
+      "reason": "입력·스크립트·환경에 따라 다른 명령이나 임의 코드를 실행할 수 있습니다."
+    },
+    "zsh": {
+      "description": "코드 또는 다른 명령 실행",
+      "category": "코드 실행",
+      "riskLevel": "high",
+      "capabilities": [
+        "execute_code",
+        "delegate_commands"
+      ],
+      "reason": "입력·스크립트·환경에 따라 다른 명령이나 임의 코드를 실행할 수 있습니다."
+    },
+    "node": {
+      "description": "코드 또는 다른 명령 실행",
+      "category": "코드 실행",
+      "riskLevel": "high",
+      "capabilities": [
+        "execute_code",
+        "delegate_commands"
+      ],
+      "reason": "입력·스크립트·환경에 따라 다른 명령이나 임의 코드를 실행할 수 있습니다."
+    },
+    "python": {
+      "description": "코드 또는 다른 명령 실행",
+      "category": "코드 실행",
+      "riskLevel": "high",
+      "capabilities": [
+        "execute_code",
+        "delegate_commands"
+      ],
+      "reason": "입력·스크립트·환경에 따라 다른 명령이나 임의 코드를 실행할 수 있습니다."
+    },
+    "python3": {
+      "description": "코드 또는 다른 명령 실행",
+      "category": "코드 실행",
+      "riskLevel": "high",
+      "capabilities": [
+        "execute_code",
+        "delegate_commands"
+      ],
+      "reason": "입력·스크립트·환경에 따라 다른 명령이나 임의 코드를 실행할 수 있습니다."
+    },
+    "perl": {
+      "description": "코드 또는 다른 명령 실행",
+      "category": "코드 실행",
+      "riskLevel": "high",
+      "capabilities": [
+        "execute_code",
+        "delegate_commands"
+      ],
+      "reason": "입력·스크립트·환경에 따라 다른 명령이나 임의 코드를 실행할 수 있습니다."
+    },
+    "ruby": {
+      "description": "코드 또는 다른 명령 실행",
+      "category": "코드 실행",
+      "riskLevel": "high",
+      "capabilities": [
+        "execute_code",
+        "delegate_commands"
+      ],
+      "reason": "입력·스크립트·환경에 따라 다른 명령이나 임의 코드를 실행할 수 있습니다."
+    },
+    "awk": {
+      "description": "코드 또는 다른 명령 실행",
+      "category": "코드 실행",
+      "riskLevel": "high",
+      "capabilities": [
+        "execute_code",
+        "delegate_commands"
+      ],
+      "reason": "입력·스크립트·환경에 따라 다른 명령이나 임의 코드를 실행할 수 있습니다."
+    },
+    "xargs": {
+      "description": "코드 또는 다른 명령 실행",
+      "category": "코드 실행",
+      "riskLevel": "high",
+      "capabilities": [
+        "execute_code",
+        "delegate_commands"
+      ],
+      "reason": "입력·스크립트·환경에 따라 다른 명령이나 임의 코드를 실행할 수 있습니다."
+    },
+    "env": {
+      "description": "코드 또는 다른 명령 실행",
+      "category": "코드 실행",
+      "riskLevel": "high",
+      "capabilities": [
+        "execute_code",
+        "delegate_commands"
+      ],
+      "reason": "입력·스크립트·환경에 따라 다른 명령이나 임의 코드를 실행할 수 있습니다."
+    },
+    "exec": {
+      "description": "코드 또는 다른 명령 실행",
+      "category": "코드 실행",
+      "riskLevel": "high",
+      "capabilities": [
+        "execute_code",
+        "delegate_commands"
+      ],
+      "reason": "입력·스크립트·환경에 따라 다른 명령이나 임의 코드를 실행할 수 있습니다."
+    },
+    "eval": {
+      "description": "코드 또는 다른 명령 실행",
+      "category": "코드 실행",
+      "riskLevel": "high",
+      "capabilities": [
+        "execute_code",
+        "delegate_commands"
+      ],
+      "reason": "입력·스크립트·환경에 따라 다른 명령이나 임의 코드를 실행할 수 있습니다."
+    }
+  }
+}
