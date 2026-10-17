@@ -26,7 +26,8 @@ export function createCommandAutomation({ queue, state, definition, classify, ev
       preapprovedCommands: [...rule.commands], userApproval: explicitUserApproval(command, rule.commands) };
     const attempts = [];
     for (const provider of ['jev', ...(rule.fallback ? [rule.fallback] : [])]) {
-      const evaluator = evaluators[provider];
+      const configured = evaluators[provider];
+      const evaluator = provider === 'jev' && configured?.forModel ? configured.forModel(rule.thresholds.jev?.model) : configured;
       if (!evaluator || evaluator.questionVersion !== AUTOMATION_QUESTION_VERSION) { attempts.push({ provider, status: 'unavailable', reason: 'not_configured' }); continue; }
       if (budget.used >= maxCalls) return { reasonCode: 'budget_exhausted', attempts };
       budget.used++;

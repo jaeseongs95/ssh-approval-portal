@@ -36,19 +36,20 @@ test('approval card labels actual automatic approval and removes it for owner ap
 
 test('card and web show classification and actual review condition before diagnostic numbers', async () => browserFixture(async (page, server) => {
   const decision = { decision: 'review', reasonCode: 'model_review', reviewReason: 'high_risk', decisionRuleVersion: 'command-explanation-v1', provider: 'jev',
-    assessment: { model: 'jev-1.13.0', label: 'high_risk', confidence: 0.4, probabilities: { low_risk: 0, high_risk: 0.6, uncertain: 0.4 } }, threshold: { minLowRisk: 0.9 } };
+    assessment: { model: 'jev-1.14.0', label: 'high_risk', confidence: 0.4, probabilities: { low_risk: 0, high_risk: 0.6, uncertain: 0.4 } }, threshold: { minLowRisk: 0.9 } };
   const value = { id: 'review-fixture', kind: 'command', state: 'pending', command: 'sudo fixture', target: 'fixture', expiresAt: 2000000000000, decision };
   await page.goto(server.origin + '/fixture/card'); await page.waitForFunction(() => window.fixture);
   await page.evaluate(value => window.fixture.receive({ structuredContent: value, _meta: { sshApproval: { uiEnabled: true } } }), value);
   await page.getByText('위험도가 높다는 평가로 사용자 확인이 필요합니다.', { exact: true }).waitFor();
-  assert.equal(await page.getByText('높은 위험: 60.0%', { exact: true }).isVisible(), false);
+  assert.equal(await page.locator('.assessment-scores dd').nth(1).isVisible(), false);
   await page.getByText('AI 평가 상세', { exact: true }).click();
-  await page.getByText('높은 위험: 60.0%', { exact: true }).waitFor();
-  await page.getByText(/구체적인 위험 사유가 제공되지/).waitFor(); await page.getByText(/정답률이 아닙니다/).waitFor();
+  await page.getByText('60.0%', { exact: true }).waitFor();
+  await page.getByText(/구체적인 위험 사유가 제공되지/).waitFor();
+  assert.doesNotMatch(await page.locator('.assessment-details').textContent(), /confidence|command-explanation/);
   server.state.jobs = [value]; await page.goto(server.origin + '/fixture/web');
   await page.getByText('위험도가 높다는 평가로 사용자 확인이 필요합니다.', { exact: true }).waitFor();
-  assert.equal(await page.getByText('낮은 위험: 0.0%', { exact: true }).isVisible(), false);
-  await page.getByText('AI 평가 상세', { exact: true }).click(); await page.getByText('판단 불가: 40.0%', { exact: true }).waitFor();
+  assert.equal(await page.locator('.assessment-scores dd').first().isVisible(), false);
+  await page.getByText('AI 평가 상세', { exact: true }).click(); await page.getByText('40.0%', { exact: true }).waitFor();
   server.state.jobs = [{ ...value, decision: { decision: 'review', reasonCode: 'model_review', assessment: decision.assessment, provider: 'jev' } }];
   await page.reload(); await page.getByText('평가 결과에 따른 사용자 확인 필요 · AI 분류: 높은 위험', { exact: true }).waitFor();
   assert.equal(await page.getByText(/못 미쳐/).count(), 0, 'old records cannot claim an unrecorded gate failure');
@@ -59,6 +60,10 @@ test('card and web show classification and actual review condition before diagno
     await page.evaluate(value => window.fixture.receive({ structuredContent: value, _meta: { sshApproval: { uiEnabled: true } } }), next);
     await page.getByText(message, { exact: true }).waitFor();
   }
+  const completed = { ...value, state: 'completed', approvalMode: 'owner' };
+  await page.evaluate(value => window.fixture.receive({ structuredContent: value, _meta: { sshApproval: {} } }), completed);
+  await page.getByText('사용자가 승인한 요청입니다', { exact: true }).waitFor();
+  await page.getByText(/사용자 승인 전 AI 검토/).waitFor();
 }, 'ko-KR'));
 test('UI-S-01 selected file cannot cross a card replacement', async () => browserFixture(async (page, server) => {
   await card(page, server); await page.evaluate(() => window.fixture.transfer('/tmp/B'));

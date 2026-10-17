@@ -4,7 +4,7 @@ import { createCommandPolicyReview } from '../src/application/command-policy-rev
 
 const rule = () => ({ targetId: 'default', targetRevision: 'a'.repeat(64), profile: 'aws-local', commands: ['sudo', 'rm'],
   deniedCommands: [], externalDisclosure: true, modelExecution: false, fallback: null, thresholds: {} });
-const low = { status: 'assessed', model: 'jev-1.13.0', label: 'low_risk', confidence: 1, probabilities: { low_risk: 1, high_risk: 0, uncertain: 0 } };
+const low = { status: 'assessed', model: 'jev-1.14.0', label: 'low_risk', confidence: 1, probabilities: { low_risk: 1, high_risk: 0, uncertain: 0 } };
 function fixture(options = {}) {
   let current = { revision: 0, targets: [] }, time = 0, serial = 0;
   const calls = [], events = [], budget = { used: 0 };

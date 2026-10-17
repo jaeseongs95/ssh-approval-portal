@@ -35,18 +35,23 @@ export function decisionText(decision, korean) {
 }
 
 /** Explain recorded facts, never an invented model rationale. Shared card/web view. */
-export function renderDecision(document, parent, decision, korean) {
+export function renderDecision(document, parent, decision, korean, job = {}) {
   const add = (parent, tag, value) => { const node = document.createElement(tag); node.textContent = value; parent.append(node); return node; };
-  add(parent, 'p', decisionText(decision, korean));
+  const box = add(parent, 'div', ''); box.className = 'assessment-summary';
+  if (job.approvalMode === 'owner') add(box, 'strong', korean ? '사용자가 승인한 요청입니다' : 'Approved by the owner');
+  else add(box, 'strong', korean ? (decision.decision === 'execute' ? '자동승인' : decision.decision === 'deny' ? '정책에서 차단' : '자동승인 보류') : (decision.decision === 'execute' ? 'Automatically approved' : 'Automatic approval withheld'));
+  if (job.approvalMode === 'owner') add(box, 'small', korean ? '아래는 사용자 승인 전 AI 검토 결과입니다.' : 'The assessment below was recorded before owner approval.');
+  add(box, 'p', decisionText(decision, korean));
   const assessment = decision.assessment;
   if (!assessment) return;
   const details = add(parent, 'details', ''); details.className = 'assessment-details';
   add(details, 'summary', korean ? 'AI 평가 상세' : 'AI assessment details');
-  add(details, 'p', korean ? '분류 점수는 실제 사고 확률이 아닙니다. 이 응답에는 구체적인 위험 사유가 제공되지 않았습니다.' : 'Classification scores are not incident probabilities. This response provides no specific risk rationale.');
-  for (const [key, label] of Object.entries(labels)) if (Number.isFinite(assessment.probabilities?.[key])) add(details, 'p', `${label[korean ? 0 : 1]}: ${(assessment.probabilities[key] * 100).toFixed(1)}%`);
-  add(details, 'p', `${decision.provider ?? 'AI'} · ${assessment.model ?? ''}`);
-  if (decision.threshold) add(details, 'p', (korean ? '저장된 자동승인 기준: ' : 'Stored execution threshold: ') + (decision.threshold.minLowRisk * 100).toFixed(1) + '%');
-  if (Number.isFinite(assessment.confidence)) add(details, 'p', `confidence: ${assessment.confidence} · ` + (korean ? (decision.provider === 'jev' ? '분류 점수 분포에서 계산한 참고값이며 정답률이 아닙니다. 별도 실행 조건으로 사용하지 않습니다.' : '참고값이며 별도 실행 조건으로 사용하지 않습니다.') : 'Diagnostic value, not a separate execution condition.'));
-  if (decision.evaluation) add(details, 'p', (korean ? '평가 입력에 저장된 작업 설명: ' : 'Stored caller context: ') + (decision.evaluation.callerContextProvided ? (korean ? '있음' : 'provided') : (korean ? '없음' : 'absent')));
-  if (decision.decisionRuleVersion) add(details, 'p', decision.decisionRuleVersion);
+  const body = add(details, 'div', ''); body.className = 'assessment-body';
+  add(body, 'p', korean ? '세 점수는 AI가 어느 분류에 무게를 뒀는지 보여줍니다. 실제 사고 확률이 아닙니다.' : 'These scores show the model’s classification weights, not incident probabilities.');
+  const scores = add(body, 'dl', ''); scores.className = 'assessment-scores';
+  for (const [key, label] of Object.entries(labels)) if (Number.isFinite(assessment.probabilities?.[key])) { add(scores, 'dt', label[korean ? 0 : 1]); add(scores, 'dd', `${(assessment.probabilities[key] * 100).toFixed(1)}%`); }
+  if (decision.threshold && Number.isFinite(decision.threshold.minLowRisk)) add(body, 'p', (korean ? '자동승인에 필요한 낮은 위험 점수: ' : 'Required low-risk score: ') + (decision.threshold.minLowRisk * 100).toFixed(1) + '%');
+  add(body, 'p', korean ? '구체적인 위험 사유가 제공되지 않은 응답입니다. 명령과 영향을 직접 확인해 주세요.' : 'No specific risk rationale was provided. Review the command and its impact.');
+  if (decision.evaluation && !decision.evaluation.callerContextProvided) add(body, 'p', korean ? '이 평가에는 요청자의 작업 설명이 포함되지 않았습니다.' : 'This assessment did not include caller-provided task context.');
+  add(body, 'small', (korean ? '평가 모델: ' : 'Assessment model: ') + (assessment.model ?? decision.provider ?? 'AI'));
 }

@@ -3,7 +3,7 @@ import { createServer } from 'node:http';
 // Independent TypeSafe wire fixture. Never imports production encoders/validators.
 const exact = (value, keys) => value !== null && typeof value === 'object' && !Array.isArray(value)
   && Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
-export const fixtureChoice = () => ({ model: 'jev-1.13.0', answers: { risk: {
+export const fixtureChoice = () => ({ model: 'jev-1.14.0', answers: { risk: {
   type: 'choice', choice: 'low_risk', confidence: 1, probabilities: { low_risk: 1, high_risk: 0, uncertain: 0 },
 } }, usage: { input_tokens: 20, output_tokens: 4 } });
 
@@ -30,7 +30,7 @@ export async function createJevFixture(replies = []) {
       let body;
       try { body = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks))); }
       catch { return refuse(400); }
-      if (!exact(body, ['model', 'state', 'questions']) || body.model !== 'jev-1.13.0'
+      if (!exact(body, ['model', 'state', 'questions']) || body.model !== 'jev-1.14.0'
         || !exact(body.state, ['command', 'target', 'environment', 'context'])
         || !Object.values(body.state).every(value => typeof value === 'string' && value.trim() && value.length <= 4096)
         || !exact(body.questions, ['risk']) || !exact(body.questions.risk, ['type', 'instructions', 'criteria'])

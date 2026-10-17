@@ -52,7 +52,7 @@ export function createCardView({ document, i18n }) {
       }
     }
     if (job.kind === 'command' && job.operation?.context) { const context = text(el('details'), 'details', ''); text(context, 'summary', korean ? '요청자가 제공한 작업 설명' : 'Caller-provided context'); text(context, 'p', job.operation.context); }
-    if (job.decision) renderDecision(document, el('details'), job.decision, korean);
+    if (job.decision) renderDecision(document, el('details'), job.decision, korean, job);
     const output = job.result?.structuredContent?.output;
     if (output && job.kind === 'command') {
       text(el('details'), 'p', korean ? `저장된 실행 결과 · ${output.bytes ?? 0}바이트 · ${output.state}` : `Stored result · ${output.bytes ?? 0} bytes · ${output.state}`);

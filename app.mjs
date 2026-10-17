@@ -25,6 +25,7 @@ import { AUTOMATION_QUESTION, AUTOMATION_QUESTION_VERSION, COMMAND_SET_QUESTION 
 import { createCommandPolicyReview } from './src/application/command-policy-review.mjs';
 import { CommandOutputs } from './src/adapters/storage/command-output.mjs';
 import { hash } from './src/domain/validation.mjs';
+import { createModelCatalog } from './src/application/model-catalog.mjs';
 
 // Preserve the original injectable createApplication callback at the composition boundary.
 // Concrete runtime executors already return the neutral outcome accepted by use cases.
@@ -59,7 +60,8 @@ export async function createApplication({ registry, classify, executeCommand, au
   commandState = settings.commandAutomation ? createCommandState(transferRoot) : undefined;
   const evaluators = { ...riskEvaluators };
   const automationBudget = { used: 0 };
-  if (settings.jevEnabled && !evaluators.jev) evaluators.jev = { model: 'jev-1.13.0', questionVersion: AUTOMATION_QUESTION_VERSION, ...createJevAssessor({ apiKey, question: AUTOMATION_QUESTION, inputKind: 'execution' }) };
+  if (settings.jevEnabled && !evaluators.jev) evaluators.jev = createJevAssessor({ apiKey, question: AUTOMATION_QUESTION, questionVersion: AUTOMATION_QUESTION_VERSION, inputKind: 'execution' });
+  const modelCatalog = createModelCatalog({ jev: policyRiskAssessor ?? (settings.jevEnabled ? createJevAssessor({ apiKey }) : undefined), providers: evaluators, configured: Boolean(policyRiskAssessor || (settings.jevEnabled && apiKey)) });
   const source = uploadSource ?? createFileSource({ hosts: settings.uploadHosts, maxBytes: settings.maxBytes });
   const bindFileSource = url => source.bind ? source.bind(url) : {
     inspect() { const policy = source.inspect(url); return { allowed: policy.allowed, sourceHost: policy.sourceHost ?? policy.hostname }; },
@@ -130,7 +132,7 @@ export async function createApplication({ registry, classify, executeCommand, au
     },
   });
   const commandPolicy = commandState && {
-    get: () => ({ ...commandState.policy(), bindings: runtimes.map(runtime => ({ targetId: runtime.id, targetRevision: runtime.revision, profile: runtime.writeProfile, displayName: runtime.displayName })) }),
+    get: async () => ({ ...commandState.policy(), evaluators: await modelCatalog.get(), bindings: runtimes.map(runtime => ({ targetId: runtime.id, targetRevision: runtime.revision, profile: runtime.writeProfile, displayName: runtime.displayName })) }),
     review: policyReview.review,
     set: policyReview.set,
   };
@@ -138,7 +140,7 @@ export async function createApplication({ registry, classify, executeCommand, au
     assessor: settings.jevEnabled ? risk : undefined });
   let protocols;
   const lifecycle = createLifecycleService({ queue, store, commands, files, closeConnections: async () => { await targets.drain(); await registry.closeAll(); },
-    onReap: () => protocols?.reapCapabilities() });
+    onReap: () => { protocols?.reapCapabilities(); void modelCatalog.refreshDue(); } });
   const shutdown = new AbortController();
   const [webHtml, webJs] = await Promise.all([
     readFile(new URL('./web/index.html', import.meta.url), 'utf8'),

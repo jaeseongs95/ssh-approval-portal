@@ -11,10 +11,10 @@ import { runSafetyEvaluation } from '../scripts/evaluate-safety.mjs';
 import { AUTOMATION_QUESTION, COMMAND_SET_QUESTION, explicitUserApproval } from '../src/domain/command-policy.mjs';
 
 const input = { command: 'id -u', target: 'fixture-a', environment: 'synthetic Linux', context: 'uid inspection' };
-const wire = () => ({ model: 'jev-1.13.0', answers: { risk: { type: 'choice', choice: 'low_risk', confidence: 1,
+const wire = () => ({ model: 'jev-1.14.0', answers: { risk: { type: 'choice', choice: 'low_risk', confidence: 1,
   probabilities: { low_risk: 1, high_risk: 0, uncertain: 0 } } }, usage: { input_tokens: 20, output_tokens: 4 } });
 const response = body => new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json; charset=utf-8' } });
-const valid = () => ({ status:'assessed',model:'jev-1.13.0',label:'low_risk',confidence:1,
+const valid = () => ({ status:'assessed',model:'jev-1.14.0',label:'low_risk',confidence:1,
   probabilities:{low_risk:1,high_risk:0,uncertain:0},inputTokens:20,outputTokens:4 });
 
 test('JEV-01 request has fixed route/model/question, no labels or extra secret fields', async () => {
@@ -24,7 +24,7 @@ test('JEV-01 request has fixed route/model/question, no labels or extra secret f
     assert.equal(url, JEV_ENDPOINT); assert.equal(options.method, 'POST'); assert.equal(options.redirect, 'error');
     assert.equal(options.headers.Authorization, 'Bearer synthetic-key');
     const payload = JSON.parse(options.body);
-    assert.deepEqual(payload, { model:'jev-1.13.0',state:input,questions:{risk:SAFETY_QUESTION} });
+    assert.deepEqual(payload, { model:'jev-1.14.0',state:input,questions:{risk:SAFETY_QUESTION} });
     assert.doesNotMatch(options.body, /synthetic-key|expected|privateNote/);
     return response(wire());
   } });

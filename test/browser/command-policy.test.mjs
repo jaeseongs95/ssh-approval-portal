@@ -8,7 +8,7 @@ import { classifyCommand } from 'ssh-mcp/build/policy/classifier.js';
 import { createApplication } from '../../app.mjs';
 
 const recommended = ['pwd', 'ls', 'stat', 'df', 'du', 'uname', 'uptime', 'whoami', 'id', 'hostname'];
-const low = { status: 'assessed', model: 'jev-1.13.0', label: 'low_risk', confidence: 0.7, probabilities: { low_risk: 0.95, high_risk: 0.02, uncertain: 0.03 } };
+const low = { status: 'assessed', model: 'jev-1.14.0', label: 'low_risk', confidence: 0.7, probabilities: { low_risk: 0.95, high_risk: 0.02, uncertain: 0.03 } };
 const targets = ['alpha', 'beta'].map(id => ({ id, displayName: id === 'alpha' ? '테스트 서버' : '운영 서버', readProfile: id + '-read', writeProfile: id + '-write', credentialRevision: 'v1' }));
 const names = page => page.getByLabel('자동승인할 명령', { exact: true });
 const ok = page => page.getByRole('checkbox', { name: /^위험도와 변경 내용을 확인했고/, includeHidden: true });
@@ -72,7 +72,9 @@ for (const width of [375, 390]) test('simple registration preserves explicit con
   const { page } = f; await f.open();
   assert.equal(await page.getByRole('checkbox', { name: /^Jev에 정보 전송/ }).isChecked(), false);
   assert.equal(await page.getByRole('checkbox', { name: /^Jev 판단으로도/ }).isChecked(), false);
-  assert.equal(await page.getByLabel('jev 모델 ID', { exact: true }).isVisible(), false);
+  assert.equal(await page.getByLabel('Jev 모델', { exact: true }).isVisible(), true);
+  assert.equal(await page.getByLabel('Jev 모델', { exact: true }).evaluate(node => node.tagName), 'SELECT');
+  assert.equal(await page.getByLabel('Jev 모델', { exact: true }).inputValue(), 'jev-1.14.0');
   assert.equal(await page.getByLabel(/기준 근거 참조/).count(), 0);
   assert.deepEqual((await names(page).inputValue()).split('\n'), recommended);
   assert.equal(await page.getByRole('button', { name: '조회 명령 10개 추가' }).count(), 0);
@@ -126,7 +128,7 @@ test('Jev 90 percent needs no manual reference and persists exactly the reviewed
 
 test('legacy, 80 percent, fallback, denied rules and other targets survive command-only editing; migration is explicit', async () => fixture(async f => {
   const initial = await f.api('/api/command-policy');
-  const thresholds = { jev: { model: 'jev-1.13.0', questionVersion: 'ssh-command-risk-v2', minLowRisk: 0.8, minConfidence: 0.7, validationRef: 'synthetic:original-legacy' },
+  const thresholds = { jev: { model: 'jev-1.14.0', questionVersion: 'ssh-command-risk-v2', minLowRisk: 0.8, minConfidence: 0.7, validationRef: 'synthetic:original-legacy' },
     luna: { model: 'custom-luna', questionVersion: 'ssh-command-risk-v4', basis: 'safety-probability-v1', minLowRisk: 0.96, validationRef: 'synthetic:luna' },
     sonnet: { model: 'custom-sonnet', questionVersion: 'ssh-command-risk-v4', basis: 'safety-probability-v1', minLowRisk: 0.91, validationRef: 'synthetic:sonnet' } };
   const policy = { targets: initial.bindings.map(binding => ({ targetId: binding.targetId, targetRevision: binding.targetRevision, profile: binding.profile,
@@ -252,3 +254,19 @@ test('upload opt-in is explicit, review-bound, preserved per target and reversib
   assert.equal((await f.api('/api/command-policy')).targets[0].automaticUploads, false);
   assert.equal(f.calls.length, 0);
 }, { multi: true }));
+
+test('model selection is above consent, invalidates review, and threshold errors stay beside their input', async () => fixture(async f => {
+  const {page}=f;await f.open();const model=page.getByLabel('Jev 모델',{exact:true}),score=page.getByLabel('Jev 자동승인 기준 (%)',{exact:true});
+  assert.equal(await model.evaluate(node=>node.tagName),'SELECT');
+  assert.ok(await model.evaluate(node=>Boolean(node.compareDocumentPosition(document.querySelector('.policy-section:nth-child(2) input[type=checkbox]')) & Node.DOCUMENT_POSITION_FOLLOWING)));
+  await page.getByRole('checkbox',{name:/^Jev에 정보 전송/}).check();await page.getByRole('checkbox',{name:/^Jev 판단으로도/}).check();
+  await score.fill('50');await review(page).click();
+  const note=page.locator('#'+await score.getAttribute('aria-errormessage'));await note.waitFor();
+  assert.match(await note.textContent(),/50%보다 크고/);assert.equal(await score.getAttribute('aria-invalid'),'true');
+  assert.equal(await score.evaluate(node=>document.activeElement===node),true);assert.equal(await page.locator('#command-policy>p.error').isVisible(),false);
+  await score.fill('90');await f.checked();await ok(page).check();await model.selectOption('jev-1.13.0');
+  assert.equal(await save(page).isDisabled(),true);assert.equal(await ok(page).isChecked(),false);
+  const fallbackOption=page.getByLabel('Jev 평가 불가 시 대체 평가자',{exact:true}).locator('option[value=luna]');
+  assert.equal(await fallbackOption.evaluate(node=>node.disabled),true,JSON.stringify(await fallbackOption.evaluate(node=>({html:node.outerHTML,parent:node.parentElement.outerHTML}))));
+  await screenshot(page,'model-and-inline-validation');
+}));

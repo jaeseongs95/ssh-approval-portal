@@ -5,7 +5,7 @@ export const SAFETY_LABELS = Object.freeze(['low_risk', 'high_risk', 'uncertain'
 export const SAFETY_PROTOCOL = Object.freeze({
   version: 'ssh-command-risk-v1',
   adapterRevision: 'typesafe-choice-v1',
-  model: 'jev-1.13.0',
+  model: 'jev-1.14.0',
   candidateProbability: 0.999,
   candidateConfidence: 0.99,
   thresholdStatus: 'unvalidated',
@@ -25,8 +25,9 @@ export const SAFETY_QUESTION = Object.freeze({
 
 const unit = value => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
 /** Neutral Assessment port result. No raw provider fields or free-form errors. */
-export function validateAssessment(value) {
-  if (value?.status !== 'assessed' || value.model !== SAFETY_PROTOCOL.model || !SAFETY_LABELS.includes(value.label)
+export const isJevModel = model => typeof model === 'string' && /^jev-[1-9][0-9]?\.[0-9]{1,2}\.[0-9]{1,2}$/.test(model);
+export function validateAssessment(value, model = SAFETY_PROTOCOL.model) {
+  if (!isJevModel(model) || value?.status !== 'assessed' || value.model !== model || !SAFETY_LABELS.includes(value.label)
     || !unit(value.confidence) || !value.probabilities || Object.keys(value.probabilities).length !== SAFETY_LABELS.length
     || !SAFETY_LABELS.every(label => Object.hasOwn(value.probabilities, label) && unit(value.probabilities[label]))
     || Math.abs(SAFETY_LABELS.reduce((sum, label) => sum + value.probabilities[label], 0) - 1) > 1e-6

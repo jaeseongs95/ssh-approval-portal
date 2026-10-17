@@ -47,7 +47,7 @@ export function createProtocolAdapters({ queue, commands, files, store, lifecycl
       if (req.method === 'GET' && output) return json(res, 200, commandOutputs.read({ outputId: output[1],
         offsetBytes: Number(url.searchParams.get('offset') ?? 0), maxBytes: Number(url.searchParams.get('limit') ?? 4096), format: url.searchParams.get('format') ?? 'text' }));
       if (['/api/command-policy', '/api/command-policy/review'].includes(url.pathname) && commandPolicy) {
-        if (req.method === 'GET' && url.pathname === '/api/command-policy') return json(res, 200, commandPolicy.get());
+        if (req.method === 'GET' && url.pathname === '/api/command-policy') return json(res, 200, await commandPolicy.get());
         if (req.method === 'POST') {
           const chunks = []; let size = 0;
           for await (const chunk of req) { size += chunk.length; if (size > 65536) throw Error('Policy too large'); chunks.push(chunk); }

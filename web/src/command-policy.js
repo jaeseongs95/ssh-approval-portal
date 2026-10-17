@@ -36,12 +36,14 @@ export function createCommandPolicyEditor({ document, api }) {
     const node = el('section', '', 'policy-section'); node.append(el('h3', number + '. ' + title)); fields.append(node); return node;
   };
   let fieldId = 0;
+  const fieldErrors = new Map();
   const field = (parent, label, tag = 'input', type = 'text', hint = '') => {
     const box = el('label', '', 'policy-field'), input = el(tag);
     const caption = el('span', label); caption.id = 'policy-label-' + ++fieldId;
     input.setAttribute('aria-labelledby', caption.id); box.append(caption); if (tag === 'input') input.type = type;
     box.append(input); parent.append(box);
     if (hint) { const help = el('p', hint, 'policy-help'); help.id = 'policy-help-' + fieldId; input.setAttribute('aria-describedby', help.id); parent.append(help); }
+    const error = el('p', '', 'policy-field-error'); error.id = 'policy-error-' + fieldId; error.hidden = true; error.setAttribute('role', 'alert'); parent.append(error); fieldErrors.set(input, error);
     return input;
   };
   const check = (parent, title, explanation) => {
@@ -60,12 +62,14 @@ export function createCommandPolicyEditor({ document, api }) {
   const uploads = check(one, '파일 자동업로드 허용', '폴더 제한 없이 SSH 계정이 쓸 수 있는 경로에 새 파일을 개별 승인 없이 저장합니다. 설정·인증·자동 실행 파일 생성에도 영향을 줍니다. 덮어쓰기·sudo 전송은 계속 승인받으며 파일 내용은 Jev가 검사하지 않습니다.');
 
   const two = section(2, 'Jev 도움받기');
+  const jevModel = field(two, 'Jev 모델', 'select', '', '선택한 모델로 실제 평가합니다. 바꾼 뒤 위험도 확인과 저장이 필요합니다.');
+  const modelNote = el('p', '', 'policy-help'); two.append(modelNote);
   const disclosure = check(two, 'Jev에 정보 전송 허용', '명령·작업 상황·서버 정보를 TypeSafe의 Jev로 보냅니다. 저장 전 위험도 확인부터 전송됩니다.');
   const disclosureDetails = el('details', '', 'policy-details'); disclosureDetails.append(el('summary', '전송 정보 자세히 보기'), el('p', '등록 전에는 후보 명령셋·대상·프로필 정보를 보냅니다. 실행 판단에는 전체 명령, 작업 상황, 대상·프로필·접속대상, 명령셋과 사용자 명시적 승인 여부를 보냅니다.', 'policy-help')); two.append(disclosureDetails);
   const execution = check(two, 'Jev 판단으로도 자동승인', '목록 밖의 명령도 점수 기준을 넘으면 실행합니다. 끄면 등록한 조회 명령의 자동승인만 유지됩니다.');
   const transmissionNote = el('p', '', 'policy-warning'); two.append(transmissionNote);
   const scoreBox = el('div'); two.append(scoreBox);
-  const probability = field(scoreBox, 'Jev 자동승인 기준 (%)', 'input', 'number', '모델이 제시한 안전 확률의 기준입니다. 실제 안전을 보증하지 않습니다.');
+  const probability = field(scoreBox, 'Jev 자동승인 기준 (%)', 'input', 'number', '예: 90을 입력하면 90%입니다. 모델의 낮은 위험 점수 기준이며 실제 안전을 보증하지 않습니다.');
   probability.min = '50'; probability.max = '100'; probability.step = 'any';
   const legacyBox = el('div', '', 'policy-warning'); scoreBox.append(legacyBox);
 
@@ -78,7 +82,7 @@ export function createCommandPolicyEditor({ document, api }) {
   const scores = {};
   for (const provider of ['jev', 'luna', 'sonnet']) {
     const box = el('div', '', 'policy-provider'); advanced.append(box);
-    const model = field(box, provider + ' 모델 ID');
+    const model = provider === 'jev' ? jevModel : field(box, (provider === 'luna' ? 'Luna' : 'Sonnet') + ' 모델', 'select');
     const score = provider === 'jev' ? probability : field(box, provider + ' 자동승인 기준 (%)', 'input', 'number');
     score.min = '50'; score.max = '100'; score.step = 'any';
     const old = provider === 'jev' ? legacyBox : el('div', '', 'policy-warning'); if (provider !== 'jev') box.append(old);
@@ -101,6 +105,12 @@ export function createCommandPolicyEditor({ document, api }) {
   const changed = new Set(), converted = new Set();
   const nameOf = id => snapshot?.bindings.find(binding => binding.targetId === id)?.displayName ?? id;
   const error = text => { failure.textContent = text; failure.hidden = !text; };
+  const clearFieldErrors = () => { for (const [input, note] of fieldErrors) { note.hidden = true; note.textContent = ''; input.removeAttribute('aria-invalid'); input.removeAttribute('aria-errormessage'); } };
+  const invalid = (input, message) => {
+    const note = fieldErrors.get(input); note.textContent = message; note.hidden = false;
+    input.setAttribute('aria-invalid', 'true'); input.setAttribute('aria-errormessage', note.id); input.focus();
+    const failure = Error(message); failure.field = true; throw failure;
+  };
   const invalidate = (text = '내용이 바뀌었습니다. 위험도를 다시 확인해 주세요.') => {
     generation++; clearTimeout(expiry); reviewed = undefined; acknowledged.checked = false; acknowledged.disabled = true; save.disabled = true; confirmation.hidden = true; feedback.replaceChildren(); next.textContent = text;
   };
@@ -108,11 +118,11 @@ export function createCommandPolicyEditor({ document, api }) {
     const result = [];
     for (const [index, line] of input.value.split(/\r?\n/).entries()) {
       const name = line.trim(); if (!name) continue;
-      if (!/^[A-Za-z0-9_][A-Za-z0-9_.+-]{0,79}$/.test(name)) throw Error(label + ' ' + (index + 1) + '번째 줄: 명령 이름만 입력하세요. 예: ls -l 대신 ls');
-      if (result.includes(name)) throw Error(label + ' ' + (index + 1) + '번째 줄: ' + name + '이 중복됐습니다. 한 번만 남겨주세요.');
+      if (!/^[A-Za-z0-9_][A-Za-z0-9_.+-]{0,79}$/.test(name)) invalid(input, label + ' ' + (index + 1) + '번째 줄: 명령 이름만 입력하세요. 예: ls -l 대신 ls');
+      if (result.includes(name)) invalid(input, label + ' ' + (index + 1) + '번째 줄: ' + name + '이 중복됐습니다. 한 번만 남겨주세요.');
       result.push(name);
     }
-    if (result.length > 128) throw Error(label + '은 최대 128개까지 등록할 수 있습니다.');
+    if (result.length > 128) invalid(input, label + '은 최대 128개까지 등록할 수 있습니다.');
     return result;
   }
   function update() {
@@ -135,7 +145,7 @@ export function createCommandPolicyEditor({ document, api }) {
       '정보 전송 ' + (disclosure.checked ? '허용 (위험도 확인부터 전송)' : '허용 안 함') + ' · Jev 기준 자동 실행 ' + (execution.checked ? '사용 (명령셋 밖도 포함)' : '사용 안 함')];
     const threshold = original?.thresholds.jev;
     if (threshold || execution.checked || changed.has('jev')) lines.push('Jev 기준 ' + probability.value + '% · ' + (legacy(threshold) && !converted.has('jev') ? '이전 방식 보존' : '안전 확률 방식 · 사용자 선택 기준'));
-    if (changed.has('jev') && scores.jev.model.value !== (original?.thresholds.jev?.model ?? 'jev-1.13.0')) lines.push('Jev 모델 변경: ' + scores.jev.model.value);
+    if (changed.has('jev') && scores.jev.model.value !== (original?.thresholds.jev?.model ?? 'jev-1.14.0')) lines.push('Jev 모델 변경: ' + scores.jev.model.value);
     if (converted.size) lines.push('점수 방식 전환: ' + [...converted].join(', ') + ' · 기존 confidence 조건 제거');
     if (fallback.value) lines.push('대체 평가자 ' + fallback.value + ' · 연결 상태 미확인');
     for (const line of lines) summary.append(el('p', line));
@@ -143,15 +153,23 @@ export function createCommandPolicyEditor({ document, api }) {
   }
   function show() {
     original = snapshot.targets.find(rule => rule.targetId === target.value);
-    changed.clear(); converted.clear(); loadHint.hidden = true; invalidate('설정을 확인하고 위험도 확인을 눌러주세요.');
+    changed.clear(); converted.clear(); clearFieldErrors(); loadHint.hidden = true; invalidate('설정을 확인하고 위험도 확인을 눌러주세요.');
     commands.value = (original ? original.commands : Object.keys(RECOMMENDED)).join('\n'); denied.value = (original?.deniedCommands ?? []).join('\n');
     search.value = ''; renderSearch();
     disclosure.checked = original?.externalDisclosure ?? false; execution.checked = original?.modelExecution ?? false; fallback.value = original?.fallback ?? '';
     uploads.checked = original?.automaticUploads === true;
     for (const [provider, inputs] of Object.entries(scores)) {
-      inputs.model.value = original?.thresholds[provider]?.model ?? (provider === 'jev' ? 'jev-1.13.0' : '');
+      const catalog = snapshot.evaluators?.[provider], saved = original?.thresholds[provider]?.model;
+      const available = catalog?.models ?? (provider === 'jev' ? ['jev-1.14.0', 'jev-1.13.0'] : []);
+      const chosen = saved ?? catalog?.defaultModel ?? available[0] ?? '';
+      inputs.model.replaceChildren();
+      for (const value of [...new Set([...available, ...(chosen ? [chosen] : [])])]) { const option = el('option', value + (!available.includes(value) ? ' · 저장된 선택' : '')); option.value = value; inputs.model.append(option); }
+      if (!inputs.model.options.length) { const option = el('option', '연결된 모델 없음'); option.value = ''; inputs.model.append(option); }
+      inputs.model.value = chosen;
       inputs.score.value = String((original?.thresholds[provider]?.minLowRisk ?? 0.9) * 100);
     }
+    for (const option of fallback.options) if (option.value) option.disabled = !snapshot.evaluators?.[option.value]?.configured && option.value !== original?.fallback;
+    modelNote.textContent = '모델 목록은 24시간마다 갱신합니다. 저장된 모델은 자동으로 바뀌지 않습니다.' + (snapshot.evaluators?.status === 'unavailable' ? ' 현재 목록 갱신에 실패해 이전 목록을 표시합니다.' : '') + ' 대체 평가는 서버에 연결된 모델만 선택할 수 있습니다.';
     message.textContent = original ? nameOf(target.value) + ' · ' + original.commands.length + '개 명령이 저장돼 있습니다.' : nameOf(target.value) + ' · 기본 조회 명령을 초안에 채웠습니다. 위험도 확인 후 저장하세요.';
     update();
   }
@@ -170,7 +188,7 @@ export function createCommandPolicyEditor({ document, api }) {
   form.oninput = event => {
     if (event.target === acknowledged || event.target === target || event.target === search || searchResults.contains(event.target)) return;
     for (const [provider, inputs] of Object.entries(scores)) if ([inputs.model, inputs.score].includes(event.target)) changed.add(provider);
-    loadHint.hidden = false; error(''); invalidate(); update();
+    loadHint.hidden = false; error(''); clearFieldErrors(); invalidate(); update();
   };
   function renderSearch() {
     const query = search.value.trim().toLowerCase(); searchResults.replaceChildren(); searchResults.hidden = !query;
@@ -208,8 +226,8 @@ export function createCommandPolicyEditor({ document, api }) {
       if (!changed.has(provider) && !(provider === 'jev' && !rule.thresholds.jev && execution.checked)) continue;
       if (legacy(rule.thresholds[provider]) && !converted.has(provider)) throw Error('이전 점수 방식은 명시적으로 전환해야 변경할 수 있습니다.');
       const score = Number(inputs.score.value) / 100;
-      if (!inputs.score.value || !Number.isFinite(score) || score <= 0.5 || score > 1) throw Error(provider + ' 기준은 50% 초과, 100% 이하로 입력해 주세요.');
-      if (!/^[A-Za-z0-9_.:-]{1,100}$/.test(inputs.model.value)) throw Error(provider + ' 모델 ID를 고급 설정에서 확인해 주세요.');
+      if (!inputs.score.value || !Number.isFinite(score) || score <= 0.5 || score > 1) invalid(inputs.score, '50%보다 크고 100% 이하인 값을 입력해 주세요. 예: 90');
+      if (!/^[A-Za-z0-9_.:-]{1,100}$/.test(inputs.model.value)) invalid(inputs.model, '연결된 모델을 선택해 주세요.');
       rule.thresholds[provider] = { model: inputs.model.value, questionVersion: CURRENT, basis: BASIS, minLowRisk: score, validationRef: 'user-choice:' + Date.now() + ':' + globalThis.crypto.randomUUID() };
     }
     const policy = structuredClone({ targets: snapshot.targets });
@@ -219,8 +237,8 @@ export function createCommandPolicyEditor({ document, api }) {
   }
   reviewButton.onclick = async () => {
     if (!snapshot || busy || loading) return;
-    invalidate(); error(''); let candidate;
-    try { candidate = proposal(); } catch (failure) { error(failure.message); return; }
+    invalidate(); error(''); clearFieldErrors(); let candidate;
+    try { candidate = proposal(); } catch (failure) { if (!failure.field) error(failure.message); return; }
     const revision = generation; busy = true; reviewButton.disabled = true; reload.disabled = true; next.textContent = '위험도를 확인하는 중입니다…';
     try {
       const result = await api('/api/command-policy/review', 'POST', candidate);
@@ -236,7 +254,7 @@ export function createCommandPolicyEditor({ document, api }) {
         card.append(el('p', '서버의 등록 규칙과 사용 가능한 Jev 평가를 반영한 안내입니다. 파일 자동업로드나 영향이 큰 명령은 서버 규칙에서 높은 위험으로 안내합니다.'));
         if (item.assessment) {
           card.append(el('p', 'Jev 분류: ' + labels[item.assessment.label] + ' · 구체적인 위험 사유는 제공되지 않았습니다.'));
-          const details = el('details'); details.append(el('summary', '평가 상세'), el('p', '낮은 위험 점수 ' + (item.assessment.probabilities.low_risk * 100).toFixed(1) + '% · 실제 안전을 보증하지 않습니다.'), el('p', 'confidence ' + item.assessment.confidence + ' · 분류 점수 분포에서 계산한 참고값이며 정답률이나 별도 실행 기준이 아닙니다.')); card.append(details);
+          const details = el('details'); details.append(el('summary', '평가 상세'), el('p', '낮은 위험 점수 ' + (item.assessment.probabilities.low_risk * 100).toFixed(1) + '% · 실제 안전을 보증하지 않습니다.')); card.append(details);
         } else card.append(el('p', '평가가 없다는 것이 안전하다는 뜻은 아닙니다. 아래 경고를 읽어주세요.'));
         card.append(el('p', item.warning)); feedback.append(card);
       }
@@ -252,7 +270,7 @@ export function createCommandPolicyEditor({ document, api }) {
     const checked = reviewed; busy = true; fields.disabled = true; reload.disabled = true; save.disabled = true; error('');
     try {
       const result = await api('/api/command-policy', 'POST', { ...checked.candidate, reviewToken: checked.reviewToken, acknowledged: true });
-      snapshot = { ...result, bindings: snapshot.bindings }; const server = nameOf(target.value); show();
+      snapshot = { ...result, bindings: snapshot.bindings, evaluators: snapshot.evaluators }; const server = nameOf(target.value); show();
       message.textContent = server + '에 명령 ' + (original?.commands.length ?? 0) + '개를 저장했습니다.'; next.textContent = '저장 완료. 이후 요청부터 이 설정을 적용합니다.';
     } catch (failure) { invalidate('저장 결과를 확인하지 못했습니다. 입력은 유지됩니다. 서버 설정을 다시 불러와 결과를 확인해 주세요.'); error('저장을 확인하지 못했습니다. ' + failure.message); }
     finally { busy = false; fields.disabled = false; reload.disabled = false; update(); }

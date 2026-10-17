@@ -4,7 +4,7 @@ import { ApprovalQueue } from '../src/domain/approval-queue.mjs';
 import { createRequestSafety } from '../src/application/request-safety.mjs';
 import { parseSettings } from '../src/adapters/config/settings.mjs';
 
-const result = { status: 'assessed', model: 'jev-1.13.0', label: 'low_risk', confidence: 1,
+const result = { status: 'assessed', model: 'jev-1.14.0', label: 'low_risk', confidence: 1,
   probabilities: { low_risk: 1, high_risk: 0, uncertain: 0 }, inputTokens: 7, outputTokens: 1 };
 const queue = () => new ApprovalQueue({ classify: () => ({ class: 'privileged' }), profile: 'fixture-write',
   target: 'secret-user@private-host:22', identity: { targetId: 'test', targetRevision: 'rev-1', targetDisplayName: '시험' },

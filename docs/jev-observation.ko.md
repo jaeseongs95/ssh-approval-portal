@@ -16,7 +16,7 @@
 
 `src/domain/safety.mjs`는 공급자 중립 입력과 결과를 정의합니다. 입력은 `command`, `target`, `environment`, `context` 네 필드입니다. 결과는 `low_risk / high_risk / uncertain`, 확률 분포, 신뢰도, 관측 모델, 토큰 사용량입니다. 낮은 위험도는 실행 허가를 뜻하지 않습니다. 알려지지 않은 동작·민감도는 `uncertain`으로 분류합니다.
 
-TypeSafe 어댑터는 [공식 Choice 계약](https://docs.typesafe.ai/primitives/choice)과 [HTTP API](https://docs.typesafe.ai/api)를 사용합니다. 모델은 이동 별칭 대신 `jev-1.13.0`, 질문은 `ssh-command-risk-v1`, 어댑터는 `typesafe-choice-v1`로 고정합니다. [모델 문서](https://docs.typesafe.ai/models)의 다른 판본으로 바꾸면 별도 평가가 필요합니다.
+TypeSafe 어댑터는 [공식 Choice 계약](https://docs.typesafe.ai/primitives/choice)과 [HTTP API](https://docs.typesafe.ai/api)를 사용합니다. 기본 관측 모델은 이동 별칭 대신 `jev-1.14.0`, 질문은 `ssh-command-risk-v1`, 어댑터는 `typesafe-choice-v1`로 고정합니다. 명령 자동화에서는 사용자가 위험도 확인 후 저장한 판본으로 실제 호출하며, 응답 판본도 정확히 일치해야 합니다. 모델 판본 변경만으로 판정 성능이 검증됐다고 간주하지 않습니다.
 
 - 목적지는 `https://api.typesafe.ai/v1/systemone`으로 고정합니다. 리다이렉트·자동 재시도·대체 모델 호출은 없습니다.
 - 요청 본문 최대 24 KiB, 각 입력 필드 최대 4,096자, 응답 최대 64 KiB입니다. 헤더와 본문 수신을 합쳐 기본 10초 제한을 적용합니다.

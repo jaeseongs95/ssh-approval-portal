@@ -6,7 +6,7 @@ import { runSafetyEvaluation } from '../scripts/evaluate-safety.mjs';
 
 const input = { command: 'id -u', target: 'fixture-a', environment: 'synthetic Linux', context: 'bounded uid inspection' };
 // Fixed independent fixture request; no production encoder or question object imported.
-const request = () => ({ model: 'jev-1.13.0', state: { ...input }, questions: { risk: { type: 'choice',
+const request = () => ({ model: 'jev-1.14.0', state: { ...input }, questions: { risk: { type: 'choice',
   instructions: 'Classify this synthetic command risk.', criteria: { low_risk: 'Bounded public read', high_risk: 'Mutation or secret exposure', uncertain: 'Unknown effects' },
 } } });
 const headers = { authorization: 'Bearer fixture-only-token', 'content-type': 'application/json' };
@@ -54,7 +54,7 @@ test('WIRE-02 actual evaluation/adapter/HTTP path preserves 20 cases, usage and 
 });
 
 test('WIRE-03 fragmented real HTTP response decodes correctly; unknown keys/models/types refuse then recover', async () => {
-  const badModel = fixtureChoice(); badModel.model = 'jev-1.14.0';
+  const badModel = fixtureChoice(); badModel.model = 'jev-1.13.0';
   const extra = fixtureChoice(); extra.answers.extra = extra.answers.risk;
   const wrongType = fixtureChoice(); wrongType.answers.risk = { type: 'noul', noul: 1 };
   const good = JSON.stringify(fixtureChoice());
