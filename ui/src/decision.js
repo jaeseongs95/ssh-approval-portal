@@ -3,6 +3,7 @@ const reasons = {
   context_required: ['작업 설명이 없어 AI 평가를 요청하지 않았습니다. 작업 목적·대상·예상 영향·복구 방법을 확인해 주세요.', 'No AI call was made because task context is missing. Check the purpose, target, expected impact and recovery plan.'],
   command_set: ['사전 승인 명령셋에 일치', 'Matched the preapproved command set'],
   upload_policy: ['사용자가 허용한 파일 자동업로드', 'File upload allowed by owner policy'],
+  download_policy: ['사용자가 허용한 파일 자동다운로드', 'File download allowed by owner policy'],
   model_passed: ['위험 평가 기준 통과', 'Risk assessment passed'],
   model_review: ['평가 결과에 따른 사용자 확인 필요', 'Assessment requires owner review'],
   observation_only: ['관측 단계 — 사용자 승인 필요', 'Observation mode — owner approval required'],
@@ -41,30 +42,49 @@ export function decisionText(decision, korean) {
     const label = labels[decision.assessment?.label]?.[korean ? 0 : 1];
     return reviewReasons[decision.reviewReason][korean ? 0 : 1] + (label && !['high_risk', 'uncertain'].includes(decision.reviewReason) ? (korean ? ' · AI 분류: ' : ' · AI classification: ') + label : '');
   }
-  const reason = reasons[decision.reasonCode]?.[korean ? 0 : 1] ?? (korean ? '사용자 확인 필요' : 'Owner review required');
+  const reason = reasons[decision.reasonCode]?.[korean ? 0 : 1] ?? (korean ? '사유 설명 미지원' : 'Reason description unavailable');
   const label = labels[decision.assessment?.label]?.[korean ? 0 : 1];
   return `${reason}${label ? (korean ? ' · AI 분류: ' : ' · AI classification: ') + label : ''}`;
+}
+
+/** Admission records an approval route only after a request enters execution. */
+export function recordedApprovalMode(job) {
+  return ['running', 'completed', 'failed', 'unknown'].includes(job.state) && ['owner', 'automatic'].includes(job.approvalMode) ? job.approvalMode : undefined;
 }
 
 /** Explain recorded facts, never an invented model rationale. Shared card/web view. */
 export function renderDecision(document, parent, decision, korean, job = {}) {
   const add = (parent, tag, value) => { const node = document.createElement(tag); node.textContent = value; parent.append(node); return node; };
   const box = add(parent, 'div', ''); box.className = 'assessment-summary';
-  if (job.approvalMode === 'owner') add(box, 'strong', korean ? '사용자가 승인한 요청입니다' : 'Approved by the owner');
-  else add(box, 'strong', korean ? (decision.decision === 'execute' ? '자동승인' : decision.decision === 'deny' ? '정책에서 차단' : '자동승인 보류') : (decision.decision === 'execute' ? 'Automatically approved' : 'Automatic approval withheld'));
-  if (job.approvalMode === 'owner') add(box, 'small', korean ? '아래는 사용자 승인 전 AI 검토 결과입니다.' : 'The assessment below was recorded before owner approval.');
-  if (job.approvalMode === 'owner' && decision.decision === 'review') {
-    add(box, 'p', korean ? '당시 자동승인을 보류했고, 사용자가 직접 승인해 진행한 요청입니다.' : 'Automatic approval was withheld at the time; the owner subsequently approved this request.');
-  } else add(box, 'p', decisionText(decision, korean));
+  const approval = recordedApprovalMode(job);
+  const historical = ['running', 'completed', 'failed', 'unknown'].includes(job.state);
   const assessment = decision.assessment;
+  const titles = {
+    pending: ['승인 대기', 'Awaiting approval'], evaluating: ['승인 조건 확인 중', 'Checking approval conditions'],
+    denied: ['거절됨', 'Denied'], expired: ['승인 기한 만료', 'Approval expired'],
+  };
+  const title = approval === 'owner' ? ['사용자가 승인한 요청입니다', 'Approved by the owner']
+    : approval === 'automatic' ? ['자동승인', 'Automatically approved']
+    : historical ? ['승인 방식 미확인', 'Approval route not recorded']
+    : titles[job.state] ?? ['정책 판단 기록', 'Recorded policy decision'];
+  add(box, 'strong', title[korean ? 0 : 1]);
+  if (approval === 'owner' && assessment) add(box, 'small', korean ? '아래는 사용자 승인 전 AI 검토 결과입니다.' : 'The assessment below was recorded before owner approval.');
+  if (historical && decision.decision === 'review') {
+    add(box, 'p', approval === 'owner'
+      ? (korean ? '당시 자동승인을 보류했고, 사용자가 직접 승인해 진행한 요청입니다.' : 'Automatic approval was withheld at the time; the owner subsequently approved this request.')
+      : (korean ? '당시 정책은 사용자 검토로 분류했습니다. 현재 처리 상태와 승인 방식은 별도 기록입니다.' : 'The policy required review at the time. Current processing state and approval route are separate records.'));
+  } else if (job.state === 'pending' && decision.decision === 'execute') {
+    add(box, 'p', korean ? '자동승인 조건 일치 기록이 있으나 실행 시작은 확인되지 않았습니다.' : 'The policy matched automatic approval conditions, but execution has not started.');
+  } else if (historical) {
+    add(box, 'p', (korean ? '당시 정책 판단: ' : 'Policy decision at the time: ') + decisionText(decision, korean));
+  } else add(box, 'p', decisionText(decision, korean));
   if (!assessment) return;
-  const historical = job.approvalMode === 'owner';
   const details = add(parent, 'details', ''); details.className = 'assessment-details';
   add(details, 'summary', korean ? 'AI 평가 상세' : 'AI assessment details');
   const body = add(details, 'div', ''); body.className = 'assessment-body';
-  if (historical) add(body, 'p', historical
-    ? (korean ? '당시 보류 사유: ' : 'Reason withheld at the time: ') + (recordedReasons[decision.reviewReason]?.[korean ? 0 : 1] ?? (korean ? '당시 자동승인 조건을 충족하지 못했습니다.' : 'The automatic approval conditions were not met at the time.'))
-    : decisionText(decision, korean));
+  if (historical) add(body, 'p', decision.decision === 'review'
+    ? (korean ? '당시 보류 사유: ' : 'Reason withheld at the time: ') + (recordedReasons[decision.reviewReason]?.[korean ? 0 : 1] ?? (korean ? '당시 정책은 사용자 검토로 분류했습니다.' : 'The policy required review at the time.'))
+    : (korean ? '당시 정책 판단: ' : 'Policy decision at the time: ') + decisionText(decision, korean));
   add(body, 'p', korean ? '세 점수는 AI가 어느 분류에 무게를 뒀는지 보여줍니다. 실제 사고 확률이 아닙니다.' : 'These scores show the model’s classification weights, not incident probabilities.');
   const scores = add(body, 'dl', ''); scores.className = 'assessment-scores';
   for (const [key, label] of Object.entries(labels)) if (Number.isFinite(assessment.probabilities?.[key])) { add(scores, 'dt', label[korean ? 0 : 1]); add(scores, 'dd', `${(assessment.probabilities[key] * 100).toFixed(1)}%`); }

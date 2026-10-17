@@ -281,3 +281,45 @@ test('prepared download card distinguishes server readiness from local receipt a
   assert.equal(await page.evaluate(()=>fixture.calls.filter(c=>c.name==='host-open-link').length),1);
   assert.equal(await page.evaluate(()=>JSON.stringify(fixture.contexts).includes('synthetic-download-ticket')),false);
 },'ko-KR'));
+
+for (const [locale, korean] of [['ko-KR', true], ['en-US', false]]) test(`recorded approval display separates admission, policy and AI history (${locale})`, async () => browserFixture(async (page, server) => {
+  const automatic = korean ? '자동승인' : 'Automatically approved';
+  const owner = korean ? '사용자가 승인한 요청입니다' : 'Approved by the owner';
+  const missing = korean ? '승인 방식 미확인' : 'Approval route not recorded';
+  const waiting = korean ? '승인 대기' : 'Awaiting approval';
+  const aiNote = korean ? '사용자 승인 전 AI 검토' : 'recorded before owner approval';
+  const cases = [
+    { id: 'download-automatic', state: 'completed', approvalMode: 'automatic', reasonCode: 'download_policy', title: automatic, noReview: true },
+    { id: 'upload-admission-not-started', kind: 'upload', state: 'pending', reasonCode: 'upload_policy', title: waiting, noReview: true },
+    { id: 'download-admission-not-started', state: 'pending', reasonCode: 'download_policy', title: waiting, noReview: true },
+    { id: 'legacy-route-missing', state: 'completed', reasonCode: 'future_reason', title: missing, noReview: true },
+    { id: 'owner-file-no-ai', state: 'completed', approvalMode: 'owner', reasonCode: 'download_policy', title: owner, noReview: true },
+    { id: 'future-reason', state: 'running', approvalMode: 'automatic', reasonCode: 'future_reason', title: automatic, noReview: true },
+    { id: 'interrupted', state: 'unknown', approvalMode: 'automatic', reasonCode: 'download_policy', title: automatic, noReview: true },
+    { id: 'inconsistent-pending-mode', state: 'pending', approvalMode: 'automatic', reasonCode: 'download_policy', title: waiting, noReview: true },
+    { id: 'expired-owner-mode', state: 'expired', approvalMode: 'owner', reasonCode: 'download_policy', title: korean ? '승인 기한 만료' : 'Approval expired', noReview: true },
+    { id: 'completed-audit-error', state: 'completed', approvalMode: 'automatic', reasonCode: 'download_policy', title: automatic, auditError: 'synthetic audit record error', noReview: true },
+    { id: 'owner-review-is-history', kind: 'command', state: 'completed', approvalMode: 'owner', reasonCode: 'model_review', decision: 'review', title: owner, assessment: { model: 'fixture-model', label: 'uncertain', probabilities: { low_risk: 0.01, high_risk: 0.32, uncertain: 0.67 } } },
+  ];
+  for (const item of cases) {
+    const { title, noReview, ...fields } = item;
+    const value = { kind: 'download', target: 'fixture', command: 'fixture command', expiresAt: 2000000000000, createdAt: 1900000000000,
+      operation: { remotePath: '/tmp/fixture.bin', elevate: false }, ...fields,
+      decision: { decision: item.decision ?? 'execute', reasonCode: item.reasonCode, ...(item.assessment ? { assessment: item.assessment } : {}) } };
+    for (const surface of ['card', 'web']) {
+      if (surface === 'card') {
+        await page.goto(server.origin + '/fixture/card'); await page.waitForFunction(() => window.fixture);
+        await page.evaluate(value => window.fixture.receive({ structuredContent: value, _meta: { sshApproval: { uiEnabled: true } } }), value);
+      } else { server.state.jobs = [value]; await page.goto(server.origin + '/fixture/web'); }
+      const summary = page.locator('.assessment-summary');
+      assert.equal(await summary.locator('strong').textContent(), title, item.id + '/' + surface);
+      const text = await summary.textContent();
+      if (noReview) assert.doesNotMatch(text, /사용자 확인 필요|사용자 승인이 필요|Owner review required|owner approval is required/i, item.id + '/' + surface);
+      if (!item.assessment) assert.ok(!text.includes(aiNote), 'no invented AI assessment: ' + item.id + '/' + surface);
+      else assert.ok(text.includes(aiNote), 'recorded assessment remains historical');
+      assert.equal(await page.locator('.automatic-approval').count(), item.title === automatic ? 1 : 0, 'actual approval badge: ' + item.id + '/' + surface);
+      if (item.reasonCode === 'download_policy' && item.state === 'completed') assert.match(text, korean ? /파일 자동다운로드/ : /File download allowed/);
+      if (item.auditError) assert.ok((await page.locator('body').textContent()).includes(item.auditError), 'audit failure must not replace completion');
+    }
+  }
+}, locale));
