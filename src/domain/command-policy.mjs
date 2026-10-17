@@ -36,11 +36,12 @@ export function validateCommandPolicy(value) {
   if (!keys(value, ['targets']) || !Array.isArray(value.targets) || value.targets.length > 32) throw Error('Invalid command policy');
   const seen = new Set();
   for (const rule of value.targets) {
-    if (!keys(rule, ['targetId', 'targetRevision', 'profile', 'commands', 'deniedCommands', 'externalDisclosure', 'modelExecution', 'fallback', 'thresholds'])
+    if (!keys(rule, ['targetId', 'targetRevision', 'profile', 'commands', 'deniedCommands', 'externalDisclosure', 'modelExecution', 'automaticUploads', 'fallback', 'thresholds'])
       || !/^[a-z][a-z0-9_-]{0,31}$/.test(rule.targetId) || seen.has(rule.targetId)
       || !/^[a-f0-9]{64}$/.test(rule.targetRevision) || !name(rule.profile)
       || !['commands', 'deniedCommands'].every(key => Array.isArray(rule[key]) && rule[key].length <= 128 && rule[key].every(name) && new Set(rule[key]).size === rule[key].length)
       || typeof rule.externalDisclosure !== 'boolean' || typeof rule.modelExecution !== 'boolean'
+      || (rule.automaticUploads !== undefined && typeof rule.automaticUploads !== 'boolean')
       || ![null, 'luna', 'sonnet'].includes(rule.fallback) || !keys(rule.thresholds, ['jev', 'luna', 'sonnet'])) throw Error('Invalid command policy');
     seen.add(rule.targetId);
     for (const threshold of Object.values(rule.thresholds)) {
@@ -77,7 +78,8 @@ export function validatedRisk(value, model) {
     || Math.abs(labels.reduce((sum, key) => sum + value.probabilities[key], 0) - 1) > 1e-6
     || labels.some(key => value.probabilities[key] > value.probabilities[value.label])) return null;
   return { status: 'assessed', model, label: value.label, confidence: value.confidence,
-    probabilities: Object.fromEntries(labels.map(key => [key, value.probabilities[key]])) };
+    probabilities: Object.fromEntries(labels.map(key => [key, value.probabilities[key]])),
+    ...Object.fromEntries(['inputTokens', 'outputTokens'].filter(key => Number.isSafeInteger(value[key]) && value[key] >= 0).map(key => [key, value[key]])) };
 }
 export const commandDigest = (command, targetRevision, profile, context = '') => hash(JSON.stringify({ command, targetRevision, profile, ...(context ? { context } : {}) }));
 export const deniedCommand = (command, rule) => Boolean(rule?.deniedCommands.some(name => command.split(/[^A-Za-z0-9_.+-]+/).includes(name)));

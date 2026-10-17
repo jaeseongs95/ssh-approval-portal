@@ -31,6 +31,7 @@ export function createCommandAutomation({ queue, state, definition, classify, ev
       if (budget.used >= maxCalls) return { reasonCode: 'budget_exhausted', attempts };
       budget.used++;
       let raw, timer;
+      const startedAt = now();
       const controller = new AbortController();
       try { raw = await Promise.race([Promise.resolve().then(() => evaluator.assess(structuredClone(input), { signal: controller.signal, question: AUTOMATION_QUESTION, questionVersion: AUTOMATION_QUESTION_VERSION })),
         new Promise(resolve => { timer = setTimeout(() => { controller.abort(); resolve(null); }, 10000); })]); }
@@ -42,7 +43,16 @@ export function createCommandAutomation({ queue, state, definition, classify, ev
       const passed = Boolean(rule.modelExecution && threshold && threshold.model === evaluator.model
         && threshold.questionVersion === AUTOMATION_QUESTION_VERSION && threshold.basis === SAFETY_PROBABILITY_BASIS
         && assessment.label === 'low_risk' && assessment.probabilities.low_risk >= threshold.minLowRisk);
+      // Explanation only: record the first failed condition of the existing AND gate.
+      const reviewReason = !rule.modelExecution ? 'execution_disabled' : !threshold ? 'threshold_missing'
+        : threshold.model !== evaluator.model ? 'model_mismatch'
+        : threshold.questionVersion !== AUTOMATION_QUESTION_VERSION ? 'question_mismatch'
+        : threshold.basis !== SAFETY_PROBABILITY_BASIS ? 'basis_mismatch'
+        : assessment.label !== 'low_risk' ? assessment.label
+        : assessment.probabilities.low_risk < threshold.minLowRisk ? 'below_threshold' : undefined;
       return { reasonCode: passed ? 'model_passed' : !rule.modelExecution || !threshold ? 'observation_only' : 'model_review',
+        ...(reviewReason ? { reviewReason } : {}), decisionRuleVersion: 'command-explanation-v1',
+        evaluation: { purpose: 'execution', assessedAt: startedAt, latencyMs: Math.max(0, now() - startedAt), callerContextProvided: Boolean(context) },
         provider, assessment, attempts, questionVersion: AUTOMATION_QUESTION_VERSION,
         ...(threshold ? { threshold: structuredClone(threshold) } : {}) };
     }

@@ -27,7 +27,10 @@ test('request assessment freezes server identity and shares an in-flight result 
   assert.equal(details.serverFacts.profile, 'fixture-write');
   complete({ ...result, injectedSecret: 'must-not-escape' });
   const [a, b] = await Promise.all([first, second]);
-  assert.deepEqual(a, b); assert.notEqual(a, b);
+  assert.deepEqual(a.assessment, b.assessment); assert.notEqual(a, b);
+  assert.equal(a.provenance.cached, false); assert.equal(b.provenance.cached, true);
+  assert.equal(b.provenance.additionalContextApplied, false);
+  assert.equal(b.provenance.inputStatus, 'input_changed_not_reassessed');
   assert.equal(a.subject, q.subject(job.id));
   assert.equal(a.targetId, 'test'); assert.equal(a.targetRevision, 'rev-1');
   assert.equal(a.automaticExecutionEnabled, false);
@@ -40,7 +43,8 @@ test('provider failure is sanitized, cached and never retried', async () => {
   const q = queue(), job = q.submit('sudo id'); let count = 0;
   const service = createRequestSafety({ queue: q, assessor: { assess() { count++; throw Error('secret provider diagnostic'); } } });
   const a = await service.assess(job.id), b = await service.assess(job.id);
-  assert.equal(a.assessment.reason, 'request_failed'); assert.deepEqual(a, b); assert.equal(count, 1);
+  assert.equal(a.assessment.reason, 'request_failed'); assert.deepEqual(a.assessment, b.assessment); assert.equal(count, 1);
+  assert.equal(b.provenance.cached, true); assert.equal(b.provenance.inputStatus, 'same_input');
   assert.ok(!JSON.stringify(a).includes('secret provider'));
   assert.equal(q.get(job.id).state, 'pending');
 });
@@ -69,4 +73,17 @@ test('Jev opt-in and bounded call limit are strict configuration values', () => 
   assert.equal(parseSettings({ ...env, BRIDGE_JEV_ENABLED: 'true', BRIDGE_JEV_MAX_CALLS: '3' }).jevEnabled, true);
   for (const value of ['TRUE', '1', 'yes']) assert.throws(() => parseSettings({ ...env, BRIDGE_JEV_ENABLED: value }));
   for (const value of ['0', '1.5', '1e2', '10001', '']) assert.throws(() => parseSettings({ ...env, BRIDGE_JEV_MAX_CALLS: value }));
+});
+
+test('completed requests expose historical provenance and retain the first input without a paid retry', async () => {
+  const q = queue(), job = q.submit('sudo id', false, 'stored explanation'); let calls = 0, clock = 100;
+  const service = createRequestSafety({ queue: q, now: () => clock, assessor: { assess: async () => { calls++; return result; } } });
+  const first = await service.assess(job.id, 'first facts');
+  assert.equal(first.provenance.assessedAt, 100); assert.equal(first.provenance.requestState, 'pending');
+  assert.equal(first.provenance.storedContextProvided, true);
+  q.deny(job.id); clock = 900;
+  const history = await service.assess(job.id, 'new facts');
+  assert.equal(history.provenance.assessedAt, 100); assert.equal(history.provenance.requestState, 'pending');
+  assert.equal(history.provenance.historical, true); assert.equal(history.provenance.additionalContextApplied, false);
+  assert.equal(calls, 1); assert.deepEqual(history.assessment, first.assessment);
 });

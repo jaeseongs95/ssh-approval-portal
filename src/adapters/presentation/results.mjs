@@ -45,7 +45,10 @@ export const outputSchemas = {
   probe: z.object({ probe: z.literal('SSH_UI_PUBLIC_PROBE'), uiEnabled: z.boolean() }),
   safety: z.object({ id: identifier, subject: z.string().regex(/^[a-f0-9]{64}$/), targetId,
     targetRevision: z.string().optional(), advisory: z.literal(true), automaticExecutionEnabled: z.literal(false),
-    assessment: z.object({ status: z.enum(['assessed', 'unavailable']) }).passthrough() }),
+    assessment: z.object({ status: z.enum(['assessed', 'unavailable']) }).passthrough(),
+    provenance: z.object({ purpose: z.literal('observation'), cached: z.boolean(), assessedAt: z.number(), latencyMs: z.number(),
+      requestState: z.string(), inputRevision: z.literal(1), storedContextProvided: z.boolean(), additionalContextApplied: z.boolean(),
+      inputStatus: z.enum(['first_assessment', 'same_input', 'input_changed_not_reassessed']), historical: z.boolean() }).optional() }),
 };
 
 export function presentOutcome(value) {

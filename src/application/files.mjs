@@ -4,8 +4,14 @@ import { remotePath } from '../domain/validation.mjs';
 export function createFileService({ store, queue, transfers, maxConcurrent = 2, now = () => Date.now(), claimImport = () => () => {} }) {
   const shutdown = new AbortController(), imports = new Set();
   const guard = () => { if (shutdown.signal.aborted || queue.maintenance) throw Error('Maintenance or file service closed'); };
-  const submitUpload = artifact => queue.submitOperation({ kind: 'upload', artifactId: artifact.id, remotePath: artifact.remotePath,
-    fileName: artifact.fileName, size: artifact.size, sha256: artifact.sha256, overwrite: artifact.overwrite, elevate: artifact.elevate }, artifact.elevate ? 'privileged' : 'safe');
+  const submitUpload = artifact => {
+    const job = queue.submitOperation({ kind: 'upload', artifactId: artifact.id, remotePath: artifact.remotePath,
+      fileName: artifact.fileName, size: artifact.size, sha256: artifact.sha256, overwrite: artifact.overwrite, elevate: artifact.elevate }, artifact.elevate ? 'privileged' : 'safe');
+    if (!artifact.elevate && !artifact.overwrite) {
+      try { queue.startUpload(job.id); } catch { /* No current policy authority or execution slot: retain the owner request. */ }
+    }
+    return queue.get(job.id);
+  };
   return {
     async requestUpload({ source, fileName, remotePath: path, overwrite = false, elevate = false }, { signal } = {}) {
       remotePath(path); guard(); signal?.throwIfAborted();

@@ -57,6 +57,7 @@ export function createCommandPolicyEditor({ document, api }) {
   const commands = field(one, '자동승인할 명령', 'textarea', '', '이름만 한 줄에 하나. 예: ls (-l 같은 옵션은 빼주세요.)'); commands.rows = 5; commands.spellcheck = false;
   const count = el('p', '', 'policy-help'); one.append(count);
   one.append(el('p', '등록된 조회 명령은 추가 승인 없이 실행됩니다. 위험 징후가 있으면 Jev나 사용자에게 확인합니다.', 'policy-help'));
+  const uploads = check(one, '파일 자동업로드 허용', '폴더 제한 없이 SSH 계정이 쓸 수 있는 경로에 새 파일을 개별 승인 없이 저장합니다. 설정·인증·자동 실행 파일 생성에도 영향을 줍니다. 덮어쓰기·sudo 전송은 계속 승인받으며 파일 내용은 Jev가 검사하지 않습니다.');
 
   const two = section(2, 'Jev 도움받기');
   const disclosure = check(two, 'Jev에 정보 전송 허용', '명령·작업 상황·서버 정보를 TypeSafe의 Jev로 보냅니다. 저장 전 위험도 확인부터 전송됩니다.');
@@ -138,6 +139,7 @@ export function createCommandPolicyEditor({ document, api }) {
     if (converted.size) lines.push('점수 방식 전환: ' + [...converted].join(', ') + ' · 기존 confidence 조건 제거');
     if (fallback.value) lines.push('대체 평가자 ' + fallback.value + ' · 연결 상태 미확인');
     for (const line of lines) summary.append(el('p', line));
+    summary.append(el('p', '파일 자동업로드 ' + (uploads.checked ? '허용 · 폴더 제한 없이 SSH 계정이 쓸 수 있는 경로에 새 파일 저장 · 설정/인증/자동 실행 파일도 포함 · Jev 내용 검사 없음 · 덮어쓰기/sudo 제외' : '허용 안 함 · 전송마다 승인')));
   }
   function show() {
     original = snapshot.targets.find(rule => rule.targetId === target.value);
@@ -145,6 +147,7 @@ export function createCommandPolicyEditor({ document, api }) {
     commands.value = (original ? original.commands : Object.keys(RECOMMENDED)).join('\n'); denied.value = (original?.deniedCommands ?? []).join('\n');
     search.value = ''; renderSearch();
     disclosure.checked = original?.externalDisclosure ?? false; execution.checked = original?.modelExecution ?? false; fallback.value = original?.fallback ?? '';
+    uploads.checked = original?.automaticUploads === true;
     for (const [provider, inputs] of Object.entries(scores)) {
       inputs.model.value = original?.thresholds[provider]?.model ?? (provider === 'jev' ? 'jev-1.13.0' : '');
       inputs.score.value = String((original?.thresholds[provider]?.minLowRisk ?? 0.9) * 100);
@@ -200,6 +203,7 @@ export function createCommandPolicyEditor({ document, api }) {
     if (!binding || original && (original.targetRevision !== binding.targetRevision || original.profile !== binding.profile)) throw Error('서버 연결 정보가 기존 정책과 다릅니다. 자동으로 연결을 바꾸지 않습니다. 관리자에게 확인해 주세요.');
     const rule = original ? structuredClone(original) : { targetId: binding.targetId, targetRevision: binding.targetRevision, profile: binding.profile, commands: [], deniedCommands: [], externalDisclosure: false, modelExecution: false, fallback: null, thresholds: {} };
     Object.assign(rule, { commands: names(commands, '자동승인 명령'), deniedCommands: names(denied, '금지 명령'), externalDisclosure: disclosure.checked, modelExecution: execution.checked, fallback: fallback.value || null });
+    if (uploads.checked || Object.hasOwn(rule, 'automaticUploads')) rule.automaticUploads = uploads.checked;
     for (const [provider, inputs] of Object.entries(scores)) {
       if (!changed.has(provider) && !(provider === 'jev' && !rule.thresholds.jev && execution.checked)) continue;
       if (legacy(rule.thresholds[provider]) && !converted.has(provider)) throw Error('이전 점수 방식은 명시적으로 전환해야 변경할 수 있습니다.');
@@ -227,11 +231,12 @@ export function createCommandPolicyEditor({ document, api }) {
       if (!result.feedback.length) feedback.append(el('p', '저장된 설정과 같습니다. 새 평가 결과는 없습니다.'));
       const labels = { low_risk: '낮음', high_risk: '높음', uncertain: '판단 불충분' };
       for (const item of result.feedback) {
-        const card = el('div', '', 'policy-risk'); card.dataset.level = item.assessment ? item.level : 'uncertain';
-        card.append(el('strong', nameOf(item.targetId) + ' · ' + (item.assessment ? '위험도 ' + labels[item.level] : item.level === 'high_risk' ? '위험도 높음 · Jev 평가 미제공' : 'Jev 평가 미제공 · 판단 불충분')), el('p', item.commands.join(', ') || '등록할 명령 없음'));
+        const card = el('div', '', 'policy-risk'); card.dataset.level = item.level;
+        card.append(el('strong', nameOf(item.targetId) + ' · 종합 위험도 ' + labels[item.level]), el('p', item.commands.join(', ') || '등록할 명령 없음'));
+        card.append(el('p', '서버의 등록 규칙과 사용 가능한 Jev 평가를 반영한 안내입니다. 파일 자동업로드나 영향이 큰 명령은 서버 규칙에서 높은 위험으로 안내합니다.'));
         if (item.assessment) {
-          card.append(el('p', 'Jev 안전 확률 ' + (item.assessment.probabilities.low_risk * 100).toFixed(1) + '% · 실제 안전을 보증하지 않습니다.'));
-          const details = el('details'); details.append(el('summary', '평가 상세'), el('p', 'Jev 판정 ' + labels[item.assessment.label] + ' · 참고 confidence ' + item.assessment.confidence + ' (실행 기준 아님)')); card.append(details);
+          card.append(el('p', 'Jev 분류: ' + labels[item.assessment.label] + ' · 구체적인 위험 사유는 제공되지 않았습니다.'));
+          const details = el('details'); details.append(el('summary', '평가 상세'), el('p', '낮은 위험 점수 ' + (item.assessment.probabilities.low_risk * 100).toFixed(1) + '% · 실제 안전을 보증하지 않습니다.'), el('p', 'confidence ' + item.assessment.confidence + ' · 분류 점수 분포에서 계산한 참고값이며 정답률이나 별도 실행 기준이 아닙니다.')); card.append(details);
         } else card.append(el('p', '평가가 없다는 것이 안전하다는 뜻은 아닙니다. 아래 경고를 읽어주세요.'));
         card.append(el('p', item.warning)); feedback.append(card);
       }

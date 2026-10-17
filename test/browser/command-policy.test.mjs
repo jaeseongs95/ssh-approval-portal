@@ -111,7 +111,8 @@ test('Jev 90 percent needs no manual reference and persists exactly the reviewed
   assert.equal(await page.getByLabel('Jev 자동승인 기준 (%)', { exact: true }).inputValue(), '90');
   await screenshot(page, 'mobile-390-settings');
   await f.checked(); assert.equal(f.calls.length, 1);
-  await page.getByText('Jev 안전 확률 95.0% · 실제 안전을 보증하지 않습니다.', { exact: true }).waitFor();
+  await page.getByText('Jev 분류: 낮음 · 구체적인 위험 사유는 제공되지 않았습니다.', { exact: true }).waitFor();
+  assert.equal(await page.getByText(/낮은 위험 점수 95.0%/).isVisible(), false);
   const proposed = f.posts.find(x => x.path.endsWith('/review')).body;
   assert.equal(proposed.policy.targets[0].thresholds.jev.minLowRisk, 0.9);
   assert.match(proposed.policy.targets[0].thresholds.jev.validationRef, /^user-choice:/);
@@ -186,7 +187,7 @@ test('expired feedback clears OK without losing input, and an unobserved save pr
 
 test('local high-risk warning remains prominent even when Jev reports low risk', async () => fixture(async f => {
   const { page } = f; await f.open(); await names(page).fill('rm'); await page.getByRole('checkbox', { name: /^Jev에 정보 전송/ }).check();
-  await f.checked(); await page.getByText(/위험도 높음/).waitFor();
+  await f.checked(); await page.getByText(/종합 위험도 높음/).waitFor();
   assert.equal(await page.locator('.policy-risk').getAttribute('data-level'), 'high_risk');
   assert.equal(await save(page).isDisabled(), true); assert.equal((await f.api('/api/command-policy')).targets.length, 0);
 }));
@@ -232,3 +233,22 @@ test('saved empty and custom command policies are not replaced by defaults',asyn
   await page.getByLabel('설정할 서버',{exact:true}).selectOption('alpha');assert.equal(await names(page).inputValue(),'');
   assert.equal(f.posts.length,0);
 },{multi:true}));
+
+test('upload opt-in is explicit, review-bound, preserved per target and reversible', async () => fixture(async f => {
+  const { page } = f; await f.open();
+  const upload = page.getByRole('checkbox', { name: /^파일 자동업로드 허용/ });
+  assert.equal(await upload.isChecked(), false);
+  assert.ok((await upload.locator('..').textContent()).includes('폴더 제한 없이 SSH 계정이 쓸 수 있는 경로'));
+  await f.checked(); await ok(page).check(); await upload.check();
+  assert.equal(await save(page).isDisabled(), true); assert.equal(await ok(page).isChecked(), false);
+  assert.ok((await page.locator('.policy-change-summary').textContent()).includes('설정/인증/자동 실행 파일도 포함'));
+  await f.checked(); await page.getByText(/종합 위험도 높음/).waitFor(); await f.commit();
+  const stored = await f.api('/api/command-policy'); assert.equal(stored.targets[0].automaticUploads, true);
+  await page.getByLabel('설정할 서버', { exact: true }).selectOption('beta'); assert.equal(await upload.isChecked(), false);
+  await names(page).fill('ls'); await f.checked(); await f.commit();
+  const other = (await f.api('/api/command-policy')).targets; assert.equal(other[0].automaticUploads, true); assert.equal(Object.hasOwn(other[1], 'automaticUploads'), false);
+  await page.getByLabel('설정할 서버', { exact: true }).selectOption('alpha'); assert.equal(await upload.isChecked(), true);
+  await upload.uncheck(); await f.checked(); await f.commit();
+  assert.equal((await f.api('/api/command-policy')).targets[0].automaticUploads, false);
+  assert.equal(f.calls.length, 0);
+}, { multi: true }));

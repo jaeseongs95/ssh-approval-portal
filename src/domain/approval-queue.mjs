@@ -4,6 +4,7 @@ import { hash, validateCommand } from './validation.mjs';
 import { callerContext } from './execution-context.mjs';
 
 const COMMAND_AUTHORITY = Symbol('server-command-policy');
+const UPLOAD_AUTHORITY = Symbol('server-upload-policy');
 
 /** @typedef {import('../contracts/ports.mjs').OperationOutcome} OperationOutcome */
 /** @typedef {import('../contracts/ports.mjs').Job} Job */
@@ -96,6 +97,11 @@ export class ApprovalQueue {
     if (job?.operation.kind !== 'command' || job.decision?.decision !== 'execute') throw Error('Command policy authority required');
     return this.start(id, false, COMMAND_AUTHORITY);
   }
+  startUpload(id) {
+    const operation = this.jobs.get(id)?.operation;
+    if (operation?.kind !== 'upload' || operation.elevate !== false || operation.overwrite !== false) throw Error('Owner upload approval required');
+    return this.start(id, false, UPLOAD_AUTHORITY);
+  }
   start(id, automatic = false, authority) {
     if (this.maintenance) throw Error('Maintenance in progress');
     const job = this.jobs.get(id);
@@ -104,10 +110,16 @@ export class ApprovalQueue {
     if (this.busy()) throw Error('A request is already executing');
     if (job.operation.kind === 'command') validateCommand(job.operation.command, this.classify);
     if (job.operation.kind === 'command') this.beforeCommandStart?.(this.public(job));
+    if (authority === UPLOAD_AUTHORITY) {
+      const decision = this.beforeUploadStart?.(this.public(job));
+      if (!decision || decision.decision !== 'execute') throw Error('Upload policy authority required');
+      this.setDecision(id, decision);
+    }
     const release = this.claimExecution();
-    const approvalMode = authority === COMMAND_AUTHORITY || automatic ? 'automatic' : 'owner';
+    const policyAuthority = authority === COMMAND_AUTHORITY || authority === UPLOAD_AUTHORITY;
+    const approvalMode = policyAuthority || automatic ? 'automatic' : 'owner';
     try {
-      this.audit({ action: authority === COMMAND_AUTHORITY ? 'policy-execution-started' : automatic ? 'read-started' : 'approved', ...this.public(job), approvalMode });
+      this.audit({ action: policyAuthority ? 'policy-execution-started' : automatic ? 'read-started' : 'approved', ...this.public(job), approvalMode });
       job.approvalMode = approvalMode; job.state = 'running'; job.persist?.(this.public(job));
     } catch (error) { delete job.approvalMode; if (job.state === 'running') { job.state = 'unknown'; job.finishedAt = this.now(); } release(); throw error; }
     this.active = job;

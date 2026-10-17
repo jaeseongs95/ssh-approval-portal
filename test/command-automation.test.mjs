@@ -107,6 +107,29 @@ test('legacy combined-confidence policy stays readable but never silently gains 
   assert.equal((await f.run('sudo id')).state, 'completed');
 });
 
+test('explanations identify the first failed gate and preserve usage without changing authority', async t => {
+  let answer = { ...low, inputTokens: 17, outputTokens: 3 };
+  const f = await fixture(t, { riskEvaluators: { jev: { model: 'jev-1.13.0', assess: async () => answer } } });
+  const cases = [
+    [{}, answer, 'execution_disabled'],
+    [{ modelExecution: true }, answer, 'threshold_missing'],
+    [{ modelExecution: true, thresholds: { jev: threshold('other-model') } }, answer, 'model_mismatch'],
+    [{ modelExecution: true, thresholds: { jev: { model: 'jev-1.13.0', questionVersion: 'ssh-command-risk-v3', minLowRisk: 0.9, minConfidence: 0.9, validationRef: 'synthetic:legacy' } } }, answer, 'question_mismatch'],
+    [{ modelExecution: true, thresholds: { jev: threshold('jev-1.13.0') } }, { ...answer, label: 'high_risk', probabilities: { low_risk: 0, high_risk: 0.6, uncertain: 0.4 }, confidence: 0.4 }, 'high_risk'],
+    [{ modelExecution: true, thresholds: { jev: threshold('jev-1.13.0') } }, { ...answer, label: 'uncertain', probabilities: { low_risk: 0, high_risk: 0.4, uncertain: 0.6 } }, 'uncertain'],
+    [{ modelExecution: true, thresholds: { jev: threshold('jev-1.13.0') } }, { ...answer, probabilities: { low_risk: 0.8, high_risk: 0.1, uncertain: 0.1 } }, 'below_threshold'],
+  ];
+  for (const [changes, value, reason] of cases) {
+    answer = value; await f.policy({ commands: [], ...changes });
+    const job = await f.run('sudo id', undefined, 'Synthetic purpose and known impact');
+    assert.equal(job.state, 'pending'); assert.equal(job.decision.reviewReason, reason);
+    assert.equal(job.decision.decisionRuleVersion, 'command-explanation-v1');
+    assert.equal(job.decision.assessment.inputTokens, 17); assert.equal(job.decision.assessment.outputTokens, 3);
+    assert.equal(job.decision.evaluation.purpose, 'execution'); assert.equal(job.decision.evaluation.callerContextProvided, true);
+  }
+  assert.equal(f.executions.length, 0);
+});
+
 test('missing thresholds, denied names, disclosure and sensitive-input guards never autoexecute', async t => {
   const f = await fixture(t);
   await f.policy({ commands: [], modelExecution: true });

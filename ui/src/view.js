@@ -1,4 +1,4 @@
-import { decisionText } from './decision.js';
+import { renderDecision } from './decision.js';
 export function createCardView({ document, i18n }) {
   const { t, korean, locale, states } = i18n;
   const el = id => document.getElementById(id);
@@ -51,7 +51,8 @@ export function createCardView({ document, i18n }) {
         text(list, 'dd', label === '크기' ? `${value.toLocaleString(locale)} ${t('바이트')}` : value, label === 'SHA-256' ? 'hash' : '');
       }
     }
-    if (job.decision) text(el('details'), 'p', decisionText(job.decision, korean));
+    if (job.kind === 'command' && job.operation?.context) { const context = text(el('details'), 'details', ''); text(context, 'summary', korean ? '요청자가 제공한 작업 설명' : 'Caller-provided context'); text(context, 'p', job.operation.context); }
+    if (job.decision) renderDecision(document, el('details'), job.decision, korean);
     const output = job.result?.structuredContent?.output;
     if (output && job.kind === 'command') {
       text(el('details'), 'p', korean ? `저장된 실행 결과 · ${output.bytes ?? 0}바이트 · ${output.state}` : `Stored result · ${output.bytes ?? 0} bytes · ${output.state}`);
@@ -84,10 +85,10 @@ export function createCardView({ document, i18n }) {
       fileInput = document.createElement('input'); fileInput.type = 'file'; el('details').append(fileInput);
       overwrite = document.createElement('input'); overwrite.type = 'checkbox'; overwrite.checked = seed.overwrite;
       const replacement = text(el('details'), 'label', t(' 기존 파일 덮어쓰기')); replacement.prepend(overwrite);
-      text(el('details'), 'p', `${t('최대')} ${Math.floor(meta.maxBytes / 1024 / 1024)} MiB. ${t('서버 반영은 승인 후 진행합니다.')}`);
+      text(el('details'), 'p', `${t('최대')} ${Math.floor(meta.maxBytes / 1024 / 1024)} MiB. ` + (korean ? '서버 정책에서 허용한 새 파일은 자동 전송될 수 있습니다. 그 밖의 전송은 승인이 필요합니다.' : 'Owner policy may allow automatic uploads of new files; other transfers require approval.'));
     }
     // The visible input owns its file; a replacement view never inherits it.
-    button(t(seed.direction === 'upload' ? '파일 전송 후 승인 요청' : '다운로드 요청'), () => submit({
+    button(seed.direction === 'upload' ? (korean ? '파일 업로드 요청' : 'Request file upload') : t('다운로드 요청'), () => submit({
       ...(seed.target === undefined ? {} : { target: seed.target }), direction: seed.direction, remotePath: path.value, elevate: elevated.checked, overwrite: overwrite?.checked ?? false,
     }, fileInput?.files?.[0] ?? null), !meta.uiEnabled);
     if (!meta.uiEnabled) text(el('details'), 'p', t('UI 동작은 클라이언트 검증 후 활성화됩니다.'));

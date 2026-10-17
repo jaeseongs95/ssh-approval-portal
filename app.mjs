@@ -87,6 +87,12 @@ export async function createApplication({ registry, classify, executeCommand, au
       onTerminal: job => files?.onTerminal(job),
     });
     const automation = commandState && createCommandAutomation({ queue, state: commandState, definition, classify, evaluators, audit: targetAudit, maxCalls: settings.jevMaxCalls, budget: automationBudget });
+    queue.beforeUploadStart = () => {
+      definition.verify();
+      const policy = commandState?.policy(), rule = policy?.targets.find(rule => rule.targetId === definition.id && rule.targetRevision === definition.revision && rule.profile === writeProfile);
+      if (rule?.automaticUploads !== true) throw Error('Automatic uploads not enabled by the user');
+      return { decision: 'execute', reasonCode: 'upload_policy', policyRevision: policy.revision, targetRevision: definition.revision };
+    };
     commands = createCommandService({ queue, classify, executeCommand: checkedExecute, audit: targetAudit, target, readProfile, claimExecution, automation });
     files = createFileService({ store: targetStore, queue, transfers, claimImport });
     return { ...definition, queue, commands, files, transfers, store: targetStore };
