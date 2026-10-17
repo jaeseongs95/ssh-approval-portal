@@ -16,7 +16,9 @@
 
 자동 평가 질문은 `ssh-command-risk-v3`이며 기존 관측 도구의 v1, 승인 맥락을 보내지 않던 v2와 구분한다. v3는 사용자의 명시적 사전 승인을 인정한 상태에서 인자를 포함한 실제 위험도를 판단한다. 조회 외에도 영향이 제한된 변경과 권한 상승을 평가할 수 있다. `assess-request-risk`는 기존처럼 v1 관측 전용이며 요청을 승인하거나 실행하지 않는다.
 
-처음에는 점수 기준을 입력하지 않고 관측한다. 분리된 평가 사례에서 명령·인자·셸 우회·sudo·승인 맥락·환경 부족과 장애를 실측한 뒤 관리자가 평가자별 `model`, `questionVersion`, `minLowRisk`, `minConfidence`, `validationRef`를 설정한다. `validationRef`는 실제 검증 보고서의 참조이며 시스템이 그 보고서의 품질을 자동 인증하지 않는다. 기존 v1/v2의 점수 기준을 v3에 승계하지 않는다. 저장된 v2 기준은 읽을 수 있지만 v3 실행을 승인하지 못하며, 웹에서 갱신하려면 새 검증 보고서 참조가 필요하다. 점수는 실제 안전 확률이나 사고 확률의 보증이 아니다.
+Jev는 명령을 제안·검토하는 AI의 판단을 돕는 도구다. 점수는 사용자 사전 승인과 기존 실행 권한을 확장하지 않는다. 기준은 **안전 확률**(`probabilities.low_risk`)로 통일하며, 사용자가 선택한 0.9는 90% 이상을 통과시키는 경계다. 모델과 질문 판본·응답 분포가 유효하고 판정이 `low_risk`인 경우에 이 값 하나만 비교한다. `confidence`는 참고 정보와 응답 형식 검증에만 사용하며 별도의 실행 문턱으로 사용하지 않는다. 불확실·위험·장애 응답은 계속 수동 승인으로 보낸다.
+
+관리자는 평가자별 `model`, `questionVersion`, `basis:'safety-probability-v1'`, `minLowRisk`, `validationRef`를 설정한다. `validationRef`는 사용자가 선택한 기준 또는 평가 근거의 참조다. 기준을 선택한 기록과 모델 품질 검증 보고서는 구분하며, 시스템이 근거의 품질을 자동 인증하지 않는다. 확률은 모델의 추정치이며 실제 사고율의 통계적 보증이 아니다. 기존 v2/v3의 `minConfidence` 결합 정책은 읽을 수 있지만 새 확률 기준의 실행을 승인하지 못한다. 웹에서 바꾸려면 새 근거 참조를 입력하고 위험도 피드백과 OK 절차를 거쳐 재등록해야 하며 묵시적으로 승계하지 않는다.
 
 Jev는 기존 로컬 시크릿 참조와 `BRIDGE_JEV_ENABLED=true`를 사용한다. Luna 또는 Sonnet은 신뢰된 호스트가 `createApplication({riskEvaluators})`에 주입한다. 각 항목은 `{model, questionVersion:'ssh-command-risk-v3', assess(input, {signal, question, questionVersion})}`를 제공하며 같은 승인 맥락을 받는다. 결과는 `{status:'assessed', model, label, confidence, probabilities:{low_risk,high_risk,uncertain}}` 형식이다. 확률 분포·모델·질문 판본을 검증한다. 이 포트는 실제 공급자 SDK·AIK backend 연결용이며 임의 endpoint나 에이전트가 주는 점수 입력 도구가 아니다. 독립 실행형 설치에 Luna/Sonnet API 연결을 내장하지 않는다.
 

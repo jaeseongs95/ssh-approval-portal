@@ -1,9 +1,9 @@
-/** Owner-only editor: command names and measured thresholds, never argument allowlists. */
+/** Owner-only editor: command names and safety probability, never argument allowlists. */
 export function createCommandPolicyEditor({ document, api, error }) {
   if (document.body.dataset.commandAutomation !== 'true') return;
   const root = document.createElement('details'); root.className = 'request';
   const heading = document.createElement('summary'); heading.textContent = '명령 자동 실행 정책'; root.append(heading);
-  const note = document.createElement('p'); note.textContent = '명령셋은 이름만 매칭합니다. 먼저 위험도 피드백을 확인하고 OK 해야 등록됩니다. 등록된 명령은 Jev에 사용자가 명시적으로 승인한 것으로 전달합니다. 모델 점수는 실측 후 설정하세요.'; root.append(note);
+  const note = document.createElement('p'); note.textContent = '명령셋은 이름만 매칭합니다. 위험도 피드백을 확인하고 OK 해야 등록됩니다. 등록된 명령은 Jev에 사용자가 명시적으로 승인한 것으로 전달합니다. Jev는 보조 도구이며 기존 실행 권한을 늘리지 않습니다. 안전 확률 기준은 0.9로 설정할 수 있으며 별도 confidence 문턱은 없습니다.'; root.append(note);
   const form = document.createElement('form'); root.append(form);
   const field = (label, tag = 'input', type = 'text') => {
     const box = document.createElement('label'); box.style.display = 'block'; box.textContent = label + ' ';
@@ -18,10 +18,10 @@ export function createCommandPolicyEditor({ document, api, error }) {
   for (const [value, label] of [['', '없음'], ['luna', 'Luna'], ['sonnet', 'Sonnet']]) { const option = document.createElement('option'); option.value = value; option.textContent = label; fallback.append(option); }
   const scores = {};
   for (const provider of ['jev', 'luna', 'sonnet']) {
-    const model = field(`${provider} 검증한 모델 ID`), probability = field(`${provider} 최소 안전 점수 (0~1)`, 'input', 'number');
-    const confidence = field(`${provider} 최소 confidence (0~1)`, 'input', 'number'), evidence = field(`${provider} 검증 보고서 참조`);
-    for (const input of [probability, confidence]) { input.min = '0'; input.max = '1'; input.step = 'any'; }
-    scores[provider] = { model, probability, confidence, evidence };
+    const model = field(`${provider} 모델 ID`), probability = field(`${provider} 최소 안전 확률 (0~1)`, 'input', 'number');
+    const evidence = field(`${provider} 기준 근거 참조`);
+    probability.min = '0'; probability.max = '1'; probability.step = 'any'; probability.placeholder = '0.9';
+    scores[provider] = { model, probability, evidence };
   }
   const refresh = document.createElement('button'); refresh.type = 'button'; refresh.textContent = '정책 불러오기'; root.insertBefore(refresh, form);
   const reviewButton = document.createElement('button'); reviewButton.type = 'button'; reviewButton.textContent = '위험도 확인'; form.append(reviewButton);
@@ -46,7 +46,7 @@ export function createCommandPolicyEditor({ document, api, error }) {
     for (const [provider, inputs] of Object.entries(scores)) {
       const threshold = rule?.thresholds[provider];
       inputs.model.value = threshold?.model ?? (provider === 'jev' ? 'jev-1.13.0' : '');
-      inputs.probability.value = threshold?.minLowRisk ?? ''; inputs.confidence.value = threshold?.minConfidence ?? ''; inputs.evidence.value = threshold?.validationRef ?? '';
+      inputs.probability.value = threshold?.minLowRisk ?? ''; inputs.evidence.value = threshold?.validationRef ?? '';
     }
   };
   target.onchange = show;
@@ -61,11 +61,11 @@ export function createCommandPolicyEditor({ document, api, error }) {
   const proposal = () => {
       const binding = snapshot.bindings.find(item => item.targetId === target.value), thresholds = {};
       for (const [provider, inputs] of Object.entries(scores)) {
-        if (!inputs.probability.value && !inputs.confidence.value && !inputs.evidence.value) continue;
+        if (!inputs.probability.value && !inputs.evidence.value) continue;
         const prior = snapshot.targets.find(item => item.targetId === target.value)?.thresholds[provider];
-        if (prior && prior.questionVersion !== 'ssh-command-risk-v3' && inputs.evidence.value === prior.validationRef) throw Error('v3 질문에 대한 새 검증 보고서 참조가 필요합니다.');
-        thresholds[provider] = { model: inputs.model.value, questionVersion: 'ssh-command-risk-v3',
-          minLowRisk: Number(inputs.probability.value), minConfidence: Number(inputs.confidence.value), validationRef: inputs.evidence.value };
+        if (prior && (prior.questionVersion !== 'ssh-command-risk-v3' || prior.basis !== 'safety-probability-v1') && inputs.evidence.value === prior.validationRef) throw Error('안전 확률 기준으로 재등록하려면 새 기준 근거 참조가 필요합니다.');
+        thresholds[provider] = { model: inputs.model.value, questionVersion: 'ssh-command-risk-v3', basis: 'safety-probability-v1',
+          minLowRisk: Number(inputs.probability.value), validationRef: inputs.evidence.value };
       }
       const rule = { targetId: binding.targetId, targetRevision: binding.targetRevision, profile: binding.profile,
         commands: names(commands), deniedCommands: names(denied), externalDisclosure: disclosure.checked, modelExecution: execution.checked,
@@ -84,7 +84,7 @@ export function createCommandPolicyEditor({ document, api, error }) {
       for (const item of result.feedback) {
         const labels = { low_risk: '낮음', high_risk: '높음', uncertain: '판단 불충분' };
         add(`${item.targetId} · 위험도 ${labels[item.level]} · ${item.commands.join(', ') || '(빈 명령셋)'}`);
-        if (item.assessment) add(`Jev 판정 ${labels[item.assessment.label]} · low_risk ${item.assessment.probabilities.low_risk}, confidence ${item.assessment.confidence}`);
+        if (item.assessment) add(`Jev 판정 ${labels[item.assessment.label]} · 안전 확률 ${item.assessment.probabilities.low_risk} · 참고 confidence ${item.assessment.confidence}`);
         else add('Jev 평가가 제공되지 않았습니다. 안전하다는 뜻이 아닙니다.');
         add(item.warning);
       }

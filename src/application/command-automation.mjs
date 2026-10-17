@@ -1,4 +1,4 @@
-import { inspectCommand, commandDigest, validatedRisk, deniedCommand, explicitUserApproval, AUTOMATION_QUESTION_VERSION, AUTOMATION_QUESTION } from '../domain/command-policy.mjs';
+import { inspectCommand, commandDigest, validatedRisk, deniedCommand, explicitUserApproval, AUTOMATION_QUESTION_VERSION, AUTOMATION_QUESTION, SAFETY_PROBABILITY_BASIS } from '../domain/command-policy.mjs';
 
 /** Owner-recorded approval is evaluator input; execution authority remains a separate port. */
 export function createCommandAutomation({ queue, state, definition, classify, evaluators, audit, maxCalls = 100, budget = { used: 0 }, now = () => Date.now() }) {
@@ -36,8 +36,8 @@ export function createCommandAutomation({ queue, state, definition, classify, ev
       // A valid risky/uncertain/low-scoring result is final: never shop for a second opinion.
       const threshold = rule.thresholds[provider];
       const passed = Boolean(rule.modelExecution && threshold && threshold.model === evaluator.model
-        && threshold.questionVersion === AUTOMATION_QUESTION_VERSION && assessment.label === 'low_risk'
-        && assessment.probabilities.low_risk >= threshold.minLowRisk && assessment.confidence >= threshold.minConfidence);
+        && threshold.questionVersion === AUTOMATION_QUESTION_VERSION && threshold.basis === SAFETY_PROBABILITY_BASIS
+        && assessment.label === 'low_risk' && assessment.probabilities.low_risk >= threshold.minLowRisk);
       return { reasonCode: passed ? 'model_passed' : !rule.modelExecution || !threshold ? 'observation_only' : 'model_review',
         provider, assessment, attempts, questionVersion: AUTOMATION_QUESTION_VERSION,
         ...(threshold ? { threshold: structuredClone(threshold) } : {}) };

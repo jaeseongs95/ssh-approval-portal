@@ -12,7 +12,7 @@ import { createAikSshTool } from '../src/adapters/aik/ssh-tool.mjs';
 const low = { status: 'assessed', model: 'jev-1.13.0', label: 'low_risk', confidence: 1,
   probabilities: { low_risk: 1, high_risk: 0, uncertain: 0 } };
 const env = { BRIDGE_MCP_TOKEN: 'fixture-mcp', BRIDGE_ADMIN_TOKEN: 'fixture-owner', BRIDGE_UI_TICKET_KEY: 'a'.repeat(64), BRIDGE_ADMIN_ORIGIN: 'https://owner.test', BRIDGE_COMMAND_AUTOMATION: 'true' };
-const threshold = model => ({ model, questionVersion: 'ssh-command-risk-v3', minLowRisk: 0.99, minConfidence: 0.99, validationRef: 'synthetic:test-only' });
+const threshold = model => ({ model, questionVersion: 'ssh-command-risk-v3', basis: 'safety-probability-v1', minLowRisk: 0.9, validationRef: 'synthetic:test-only' });
 async function fixture(t, options = {}) {
   const root = await mkdtemp(join(tmpdir(), 'command-automation-')), executions = [], inputs = [], events = [];
   const evaluator = { model: 'jev-1.13.0', questionVersion: 'ssh-command-risk-v3', async assess(input) { inputs.push(input); return low; } };
@@ -66,7 +66,7 @@ test('command set ignores arguments; risky arguments and nested execution do not
   assert.equal(inspectCommand('sudo id', classifyCommand).risky, false);
 });
 
-test('model OR path executes sudo and unmatched commands only with measured provider-specific thresholds', async t => {
+test('model OR path executes sudo and unmatched commands only with explicit provider-specific safety probability policy', async t => {
   const f = await fixture(t); await f.policy({ commands: [], modelExecution: true, thresholds: { jev: threshold('jev-1.13.0') } });
   const job = await f.run('sudo systemctl restart synthetic.service');
   assert.equal(job.state, 'completed'); assert.equal(job.decision.reasonCode, 'model_passed');
@@ -75,6 +75,33 @@ test('model OR path executes sudo and unmatched commands only with measured prov
   assert.deepEqual(Object.keys(f.inputs[0]).sort(), ['command', 'context', 'environment', 'preapprovedCommands', 'target', 'userApproval']);
   assert.deepEqual(f.inputs[0].preapprovedCommands, []); assert.equal(f.inputs[0].userApproval.explicit, false);
   assert.doesNotMatch(JSON.stringify(f.inputs), /threshold|fixture-owner|127\.0\.0\.1/);
+});
+
+test('safety probability0.9 is inclusive and confidence is diagnostic rather than a second gate', async t => {
+  let answer;
+  const f = await fixture(t, { riskEvaluators: { jev: { model: 'jev-1.13.0', assess: async () => answer } } });
+  await f.policy({ commands: [], modelExecution: true, thresholds: { jev: threshold('jev-1.13.0') } });
+  for (const [probability, confidence, expected] of [[0.899, 1, 'pending'], [0.9, 0.1, 'completed'], [0.91, 0.86, 'completed']]) {
+    answer = { ...low, confidence, probabilities: { low_risk: probability, high_risk: 1 - probability, uncertain: 0 } };
+    const job = await f.run('sudo id'); assert.equal(job.state, expected);
+    if (expected === 'completed') { assert.equal(job.decision.threshold.basis, 'safety-probability-v1'); assert.equal(Object.hasOwn(job.decision.threshold, 'minConfidence'), false); }
+  }
+  assert.equal(f.executions.length, 2);
+});
+
+test('legacy combined-confidence policy stays readable but never silently gains probability-only authority', async t => {
+  const f = await fixture(t);
+  const legacy = { model: 'jev-1.13.0', questionVersion: 'ssh-command-risk-v3', minLowRisk: 0.9, minConfidence: 0.9, validationRef: 'synthetic:legacy-combined' };
+  const current = await f.policy({ commands: [], modelExecution: true, thresholds: { jev: legacy } });
+  assert.equal((await f.run('sudo id')).state, 'pending');
+  await f.restart(); assert.equal((await f.run('sudo id')).state, 'pending');
+  assert.equal(f.executions.length, 0);
+  const rule = current.targets[0];
+  for (const value of [{ ...threshold('jev-1.13.0'), minConfidence: 0.99 }, { ...threshold('jev-1.13.0'), basis: 'unknown' }]) {
+    assert.throws(() => validateCommandPolicy({ targets: [{ ...rule, thresholds: { jev: value } }] }));
+  }
+  await f.policy({ commands: [], modelExecution: true, thresholds: { jev: threshold('jev-1.13.0') } });
+  assert.equal((await f.run('sudo id')).state, 'completed');
 });
 
 test('missing thresholds, denied names, disclosure and sensitive-input guards never autoexecute', async t => {
@@ -178,13 +205,13 @@ test('AIK adapter never dispatches before authority and keeps host authorization
   await assert.rejects(denied.run({}), /AIK denied/); assert.equal(calls, 0);
 });
 
-test('uncertain, low confidence, subthreshold and malformed model results require human review', async t => {
+test('uncertain, subthreshold and malformed model results require human review', async t => {
   let answer;
   const f = await fixture(t, { riskEvaluators: { jev: { model: 'jev-1.13.0', assess: async () => answer } } });
   await f.policy({ commands: [], modelExecution: true, thresholds: { jev: threshold('jev-1.13.0') } });
   for (const value of [
     { ...low, label: 'uncertain', probabilities: { low_risk: 0, high_risk: 0, uncertain: 1 } },
-    { ...low, confidence: 0.98 }, { ...low, probabilities: { low_risk: 0.98, high_risk: 0.02, uncertain: 0 } },
+    { ...low, probabilities: { low_risk: 0.899, high_risk: 0.101, uncertain: 0 } },
     { ...low, model: 'wrong-model' }, { ...low, probabilities: { low_risk: 1, high_risk: 1, uncertain: 0 } },
   ]) { answer = value; assert.equal((await f.run('sudo id')).state, 'pending'); }
   assert.equal(f.executions.length, 0);

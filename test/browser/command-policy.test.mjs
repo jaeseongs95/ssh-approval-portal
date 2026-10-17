@@ -63,14 +63,18 @@ test('owner edits command names in the actual bundled page and sees policy execu
     await page.getByRole('button', { name: '정책 불러오기' }).click();
     await page.getByText('정책 revision 2', { exact: true }).waitFor();
     await page.getByRole('button', { name: '위험도 확인', exact: true }).click();
-    await page.getByText('v3 질문에 대한 새 검증 보고서 참조가 필요합니다.', { exact: true }).waitFor();
+    await page.getByText('안전 확률 기준으로 재등록하려면 새 기준 근거 참조가 필요합니다.', { exact: true }).waitFor();
     assert.equal(await save.isDisabled(), true);
-    await page.getByLabel('jev 검증 보고서 참조').fill('synthetic:new-v3-measurement');
+    assert.equal(await page.getByLabel(/최소 confidence/).count(), 0);
+    await page.getByLabel('jev 최소 안전 확률 (0~1)').fill('0.9');
+    await page.getByLabel('jev 기준 근거 참조').fill('synthetic:user-choice-0.9');
     await page.getByRole('button', { name: '위험도 확인', exact: true }).click();
     await page.waitForFunction(() => !Array.from(document.querySelectorAll('input')).find(el => el.parentElement.textContent.includes('피드백을 확인했고')).disabled);
     await ok.check();
     const upgraded = page.waitForResponse(result => result.url().endsWith('/api/command-policy') && result.request().method() === 'POST');
     await save.click(); const result = await upgraded; assert.equal(result.status(), 200);
-    assert.equal((await result.json()).targets[0].thresholds.jev.questionVersion, 'ssh-command-risk-v3');
+    const selected = (await result.json()).targets[0].thresholds.jev;
+    assert.equal(selected.questionVersion, 'ssh-command-risk-v3'); assert.equal(selected.basis, 'safety-probability-v1');
+    assert.equal(selected.minLowRisk, 0.9); assert.equal(Object.hasOwn(selected, 'minConfidence'), false);
   } finally { await browser?.close(); await app?.close(); await rm(root, { recursive: true, force: true }); }
 });
