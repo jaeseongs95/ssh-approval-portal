@@ -1,3 +1,4 @@
+import metadata from '../../../package.json' with { type: 'json' };
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { posix } from 'node:path';
@@ -20,7 +21,7 @@ export function createMcpAdapter({ queue, commands, files, settings, capabilitie
   const identity = target => targets && !targets.legacy ? { ...targets.select(target).identity, target: targets.select(target).target } : undefined;
   const URI = `ui://ssh-approval/card-${hash(uiHtml)}.html`;
   return function mcpServer(requestSignal) {
-    const server = new McpServer({ name: 'SSH Approval Portal', version: '1.1.0' });
+    const server = new McpServer({ name: 'SSH Approval Portal', version: metadata.version });
     server.registerResource('SSH approval card', URI, { mimeType: 'text/html;profile=mcp-app' }, async () => ({ contents: [{ uri: URI, mimeType: 'text/html;profile=mcp-app', text: uiHtml, _meta: { ui: { csp: { connectDomains: [], resourceDomains: [] }, prefersBorder: true } } }] }));
     const tool = (name, schema, outputSchema, handler, { ui = false, appOnly = false, description = name, readOnly = false, meta, openWorld = false } = {}) => server.registerTool(name, {
       description, inputSchema: schema, outputSchema, annotations: { readOnlyHint: readOnly, destructiveHint: !readOnly, ...(openWorld ? { openWorldHint: true } : {}) },

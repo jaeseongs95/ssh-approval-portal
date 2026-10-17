@@ -1,3 +1,4 @@
+import metadata from '../package.json' with { type: 'json' };
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -166,4 +167,8 @@ test('command-only hosts decode a strict context envelope before dispatch; inval
     ]) assert.equal((await f.call('run-command', args)).isError, true);
     assert.equal(seen.length, 1);
   } finally { await f.close(); }
+});
+
+test('health and MCP initialization report the actual package version', async () => {
+ const f=await fixture();try{assert.equal((await (await fetch(f.mcpBase+'/health')).json()).version,metadata.version);assert.equal(f.client.getServerVersion().version,metadata.version);}finally{await f.close();}
 });
