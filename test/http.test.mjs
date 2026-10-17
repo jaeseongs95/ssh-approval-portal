@@ -28,7 +28,8 @@ test('MCP transport, hidden capability, ticket checks, probe-only gate and web o
       assert.ok(probe._meta.sshApproval.privateMarker); assert.ok(!JSON.stringify(probe.content).includes('PRIVATE'));
       for (const name of ['read-command', 'run-command']) {
         const read = await client.callTool({ name, arguments: { command: 'id -un' } });
-        assert.ok(!read.isError); assert.equal(read.content[0].text, 'mcpops');
+        assert.ok(!read.isError); assert.ok(!JSON.stringify(read).includes('"text":"mcpops"'));
+        assert.equal((await client.callTool({ name: 'read-command-output', arguments: { outputId: read.structuredContent.output.id } })).content[0].text, 'mcpops');
         assert.equal(read.structuredContent.state, 'completed');
       }
       calls.length = 0;

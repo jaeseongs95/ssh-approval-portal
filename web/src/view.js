@@ -51,7 +51,25 @@ export function createWebView({ document, i18n }) {
       const button = text(actions, 'button', t(action === 'approve' ? '승인·실행' : '거부'), action === 'approve' ? 'primary' : 'secondary reject');
       button.disabled = deciding; button.onclick = () => handlers.decide(job.id, action); buttons.push(button);
     }
-    if (job.result) {
+    const output = job.kind === 'command' && job.result?.structuredContent?.output;
+    if (output) {
+      text(body, 'p', korean ? `저장된 실행 결과 · ${output.bytes ?? 0}바이트 · ${output.state}` : `Stored result · ${output.bytes ?? 0} bytes · ${output.state}`, 'output-label');
+      text(body, 'p', korean ? '필요할 때만 내용을 읽습니다. SSH 전체 출력의 완전성은 확인되지 않았습니다.' : 'Load only when needed. Complete SSH capture is not guaranteed.', 'target');
+      const area = text(body, 'div', '');
+      const load = async (offset = 0) => {
+        if (!box.isConnected) return;
+        button.disabled = true;
+        try {
+          const page = await handlers.output(output.id, offset);
+          if (!box.isConnected) return;
+          area.replaceChildren(); text(area, 'p', `${page.offsetBytes}–${page.nextOffset} / ${page.totalBytes} bytes`); text(area, 'pre', page.text, 'output');
+          button.textContent = page.eof ? (korean ? '처음부터 보기' : 'Read from start') : (korean ? '다음 부분' : 'Next page');
+          button.onclick = () => load(page.eof ? 0 : page.nextOffset);
+        } catch { if (box.isConnected) { area.replaceChildren(); text(area, 'p', korean ? '출력을 읽을 수 없습니다. 만료·연결 상태를 확인하세요. 명령은 다시 실행하지 않습니다.' : 'Output unavailable. Check expiry/connection; the command is not rerun.', 'error'); } }
+        finally { if (box.isConnected) button.disabled = false; }
+      };
+      const button = text(actions, 'button', korean ? '출력 보기' : 'View output', 'secondary'); button.disabled = output.state !== 'ready'; button.onclick = () => load();
+    } else if (job.result) {
       text(body, 'p', t('실행 결과'), 'output-label');
       const blocks = job.result.content?.filter(x => x.type === 'text');
       text(body, 'pre', blocks?.length ? blocks.map(x => x.text ?? '').join('\n') : JSON.stringify(job.result.structuredContent ?? job.result, null, 2), 'output');

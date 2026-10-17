@@ -28,7 +28,7 @@ async function approve(job) {
   assert.equal(result.structuredContent.state, 'running'); return wait(job.id);
 }
 try {
-  const read = await call('read-command', { command: 'id -un' }); assert.ok(read.content[0].text.includes('mcpops'));
+  const read = await call('read-command', { command: 'id -un' }); assert.ok((await call('read-command-output',{outputId:read.structuredContent.output.id})).content[0].text.includes('mcpops'));
   await approve((await call('run-command', { command: 'sudo -n id -u' })).structuredContent);
   const delayed = (await call('run-command', { command: 'sleep 1' })).structuredContent;
   const delayedCard = await call('show-approval', { id: delayed.id });

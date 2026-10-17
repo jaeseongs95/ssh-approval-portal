@@ -3,8 +3,9 @@ export const MAX_BYTES = 64 * 1024 * 1024;
 export const CHUNK_BYTES = 256 * 1024;
 export const EXPIRES_MS = 600_000;
 export const APPROVAL_EXPIRES_MS = 3_600_000;
+export const OUTPUT_PAGE_BYTES = 16 * 1024;
 
-/** @typedef {{failed:boolean, texts:string[], data?:Object}} OperationOutcome */
+/** @typedef {{failed:boolean, texts:string[], data?:Object, output?:Object}} OperationOutcome */
 /** @typedef {{kind:'command'|'upload'|'download', [key:string]:unknown}} Operation */
 /** @typedef {{id:string, kind:string, operation:Operation, profile:string, commandClass:string, target:string, state:string, createdAt:number, expiresAt:number, finishedAt?:number, result?:OperationOutcome, auditError?:string}} Job */
 /** @typedef {{stream:AsyncIterable<Uint8Array>, expectedSize:number|null, close:()=>void|Promise<void>}} OpenedFile */

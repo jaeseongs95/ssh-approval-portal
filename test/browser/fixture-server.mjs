@@ -9,6 +9,10 @@ export async function fixtureServer(root) {
   const server = createServer(async (request, response) => {
     try {
       const url = new URL(request.url, 'http://fixture.invalid');
+      if (url.pathname.startsWith('/api/outputs/')) {
+        state.outputReads = (state.outputReads ?? 0) + 1; await state.beforeOutput?.();
+        response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify({ text: 'EXPLICIT_WEB_SENTINEL', offsetBytes: 0, nextOffset: 21, totalBytes: 21, eof: true })); return;
+      }
       const download = /^\/api\/([^/]+)\/download$/.exec(url.pathname);
       if (download && request.method === 'POST') {
         await state.beforeDownload?.(download[1]);

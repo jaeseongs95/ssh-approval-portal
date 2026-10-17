@@ -38,5 +38,21 @@ export function createAikSshTool({ authority, mcp }) {
       }
       return job;
     },
+    async output(id, { offsetBytes = 0, maxBytes = 4096, format = 'text' } = {}) {
+      if (typeof authority.revalidateObservation !== 'function') throw Error('AIK output-observation capability unavailable');
+      const authorization = await authority.lookupRequest(id);
+      if (!authorization) throw Error('Original AIK binding required for observation');
+      await authority.revalidateObservation(authorization, { requestId: id });
+      const job = await mcp.call('get-request-status', { id });
+      const output = job?.result?.structuredContent?.output;
+      if (job?.id !== id || output?.executionId !== id || output.state !== 'ready' || !/^[a-f0-9]{48}$/.test(output.id)) throw Error('Original stored output unavailable; do not replay');
+      const observation = { requestId: id, outputId: output.id, targetId: job.targetId ?? 'default', targetRevision: job.targetRevision };
+      await authority.revalidateObservation(authorization, observation);
+      const page = await mcp.call('read-command-output', { outputId: output.id, ...(job.targetId ? { target: job.targetId } : {}), offsetBytes, maxBytes, format });
+      const metadata = page?.structuredContent ?? page;
+      if (metadata?.outputId !== output.id || metadata?.executionId !== id) throw Error('Output observation binding mismatch');
+      await authority.revalidateObservation(authorization, observation);
+      return page;
+    },
   };
 }

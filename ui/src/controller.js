@@ -2,6 +2,7 @@ const stale = Symbol('Card view replaced');
 
 export function createCardController({ state, view, host, document, hashFile, encodeFileChunk, timers = globalThis }) {
   let polling = null;
+  const notified = new Set();
   const t = view.t;
   const stopPolling = () => { timers.clearInterval(polling); polling = null; };
   function check(context) { if (!state.current(context)) throw stale; }
@@ -23,13 +24,34 @@ export function createCardController({ state, view, host, document, hashFile, en
     const context = state.capture();
     if (state.mode === 'probe') return view.probe(state.probeMarker, state.meta);
     if (state.mode === 'transfer') return view.transfer(state.transfer, state.meta, (config, file) => submit(config, file, context), target => selectTarget(target, context));
-    view.job(state.job, state.meta, { decide: action => decide(action, context), save: () => save(context) });
+    view.job(state.job, state.meta, { decide: action => decide(action, context), save: () => save(context), output: () => output(context) });
     if (['pending', 'evaluating', 'running'].includes(state.job.state)) polling = timers.setInterval(() => {
       if (!document.hidden) refresh().catch(() => {
         if (state.current(context)) view.error(t('연결이 끊겼습니다. 명령은 재실행하지 않습니다.'));
       });
     }, 2000);
-    else host.updateModelContext({ structuredContent: { requestId: state.job.id, ...(state.job.targetId ? { targetId: state.job.targetId, targetRevision: state.job.targetRevision } : {}), kind: state.job.kind, state: state.job.state, result: state.job.result } }).catch(() => {});
+    else {
+      const output = state.job.kind === 'command' ? state.job.result?.structuredContent?.output : undefined;
+      const notification = { requestId: state.job.id, ...(state.job.targetId ? { targetId: state.job.targetId, targetRevision: state.job.targetRevision } : {}), kind: state.job.kind, state: state.job.state,
+        ...(output ? { output } : {}), ...(state.job.kind !== 'command' && state.job.result ? { result: state.job.result } : {}) };
+      const key = JSON.stringify(notification);
+      if (!notified.has(key)) {
+        // ponytail: retain only the latest200 terminal notifications per controller.
+        if (notified.size >= 200) notified.delete(notified.values().next().value);
+        notified.add(key); host.updateModelContext({ structuredContent: notification }).catch(() => {});
+      }
+    }
+  }
+  function output(context, offsetBytes = 0) {
+    return act(async context => {
+      const ref = context.job?.result?.structuredContent?.output;
+      if (!ref?.id || ref.state !== 'ready') return;
+      const latest = await call(context, 'show-approval', { id: context.job.id });
+      state.mergeMeta(context, latest._meta?.sshApproval);
+      const page = await call(context, 'ui-read-command-output', { id: context.job.id, outputId: ref.id, ticket: context.meta.viewTicket, offsetBytes });
+      const metadata = page.structuredContent;
+      view.output(page._meta?.sshOutput?.text ?? '', metadata, metadata.eof ? null : () => output(context, metadata.nextOffset));
+    }, context);
   }
   async function refresh() {
     if (state.disposed || state.mode !== 'job') return;
@@ -108,5 +130,5 @@ export function createCardController({ state, view, host, document, hashFile, en
     if (state.current(context) && context.meta.webUrl) await host.openLink({ url: context.meta.webUrl });
   }
   function dispose() { stopPolling(); state.dispose(); view.clear(); }
-  return { receive, refresh, decide, save, submit, selectTarget, openWeb, dispose };
+  return { receive, refresh, decide, save, output, submit, selectTarget, openWeb, dispose };
 }

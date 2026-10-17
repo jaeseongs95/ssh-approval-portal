@@ -44,13 +44,20 @@ export function createWebController({ state, view, api, document, location, time
       if (!state.signedOut && current(context)) location.assign(result.downloadUrl);
     } catch (error) { if (!state.signedOut && current(context)) view.error(error.message); }
   }
+  async function output(outputId, offsetBytes = 0) {
+    if (state.signedOut) throw Error('Signed out');
+    const context = capture();
+    const result = await api(`/api/outputs/${outputId}?offset=${offsetBytes}`);
+    if (state.signedOut || !current(context)) throw Error('Output view replaced');
+    return result;
+  }
   function logout() {
     state.signedOut = true; stopPolling(); view.signedOut();
     location.replace(state.accessMode ? '/cdn-cgi/access/logout' : '/');
   }
   function start() {
-    view.initialize({ accessMode: state.accessMode, load: () => load(true), decide, download, logout });
+    view.initialize({ accessMode: state.accessMode, load: () => load(true), decide, download, output, logout });
     if (state.accessMode) return load();
   }
-  return { start, load, decide, download, logout };
+  return { start, load, decide, download, output, logout };
 }

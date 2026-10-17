@@ -9,9 +9,9 @@ const json = (res, status, value) => { res.writeHead(status, { 'Content-Type': '
 
 const escapeHtml = value => value.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
 
-export function createProtocolAdapters({ queue, commands, files, store, lifecycle, settings, signer, adminAccess, authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal, targets, requestSafety, commandPolicy }) {
+export function createProtocolAdapters({ queue, commands, files, store, lifecycle, settings, signer, adminAccess, authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal, targets, requestSafety, commandPolicy, commandOutputs }) {
   const capabilities = createCapabilities({ queue, store, signer, settings, targets });
-  const mcpServer = createMcpAdapter({ queue, commands, files, settings, capabilities, uiHtml, bindFileSource, shutdownSignal, targets, requestSafety });
+  const mcpServer = createMcpAdapter({ queue, commands, files, settings, capabilities, uiHtml, bindFileSource, shutdownSignal, targets, requestSafety, commandOutputs });
   const mcpHttp = createServer(async (req, res) => {
     let server, disconnect, aborted, closed;
     try {
@@ -43,6 +43,9 @@ export function createProtocolAdapters({ queue, commands, files, store, lifecycl
       const visible = jobs => filter.length ? jobs.filter(job => (job.targetId ?? 'default') === filter[0]) : jobs;
       if (req.method === 'GET' && url.pathname === '/api/targets') return json(res, 200, targets?.list() ?? { targets: [{ id: 'default', displayName: settings.targetDisplayName ?? 'SSH', enabled: true, isDefault: true }], defaultTarget: 'default' });
       if (req.method === 'GET' && url.pathname === '/api/session') return json(res, 200, { mode: adminAccess.mode });
+      const output = /^\/api\/outputs\/([a-f0-9]{48})$/.exec(url.pathname);
+      if (req.method === 'GET' && output) return json(res, 200, commandOutputs.read({ outputId: output[1],
+        offsetBytes: Number(url.searchParams.get('offset') ?? 0), maxBytes: Number(url.searchParams.get('limit') ?? 4096), format: url.searchParams.get('format') ?? 'text' }));
       if (['/api/command-policy', '/api/command-policy/review'].includes(url.pathname) && commandPolicy) {
         if (req.method === 'GET' && url.pathname === '/api/command-policy') return json(res, 200, commandPolicy.get());
         if (req.method === 'POST') {

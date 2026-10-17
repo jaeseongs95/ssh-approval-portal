@@ -125,13 +125,13 @@ test('source/audit/queue rejection cleans private staging and never echoes sourc
     try {
       const result = await f.call(); assert.equal(result.isError, true); noPayloadLeak(result);
       assert.equal(f.calls.length, 0); assert.equal(f.application.store.reserved, 0); assert.equal(f.application.store.size, 0);
-      assert.deepEqual(await readdir(f.root), []); assert.equal(f.application.queue.jobs.size, 0);
+      assert.deepEqual(await readdir(f.root), ['command-outputs']); assert.equal(f.application.queue.jobs.size, 0);
     } finally { await f.close(); }
   }
   const f = await fixture();
   try {
     for (let i = 0; i < 100; i++) f.application.queue.submit('synthetic pending');
-    const result = await f.call(); assert.equal(result.isError, true); assert.equal(f.application.store.reserved, 0); assert.deepEqual(await readdir(f.root), []);
+    const result = await f.call(); assert.equal(result.isError, true); assert.equal(f.application.store.reserved, 0); assert.deepEqual(await readdir(f.root), ['command-outputs']);
   } finally { await f.close(); }
 });
 
@@ -167,7 +167,7 @@ test('HTTP disconnect and application shutdown abort imports and release quota w
       if (stop === 'disconnect') request.destroy(); else await f.application.close();
       await call; await waitFor(() => aborted && f.application.store.size === 0);
       assert.equal(f.application.store.reserved, 0); assert.equal(f.application.queue.jobs.size, 0); assert.equal(f.calls.length, 0);
-      assert.deepEqual(await readdir(f.root), []);
+      assert.deepEqual(await readdir(f.root), ['command-outputs']);
     } finally {
       await f.client.close(); if (stop === 'disconnect') await f.application.close(); await rm(f.root, { recursive: true });
     }

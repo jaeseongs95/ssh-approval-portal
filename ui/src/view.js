@@ -52,7 +52,13 @@ export function createCardView({ document, i18n }) {
       }
     }
     if (job.decision) text(el('details'), 'p', decisionText(job.decision, korean));
-    if (job.result && job.kind === 'command') {
+    const output = job.result?.structuredContent?.output;
+    if (output && job.kind === 'command') {
+      text(el('details'), 'p', korean ? `저장된 실행 결과 · ${output.bytes ?? 0}바이트 · ${output.state}` : `Stored result · ${output.bytes ?? 0} bytes · ${output.state}`);
+      text(el('details'), 'p', korean ? '필요할 때만 내용을 읽습니다. SSH 전체 출력의 완전성은 확인되지 않았습니다.' : 'Load content only when needed. Complete SSH capture is not guaranteed.');
+      if (output.state === 'ready') button(korean ? '출력 보기' : 'View output', actions.output, !meta.uiEnabled || !meta.viewTicket);
+      const area = text(el('details'), 'div', ''); area.id = 'command-output';
+    } else if (job.result && job.kind === 'command') {
       text(el('details'), 'p', t('실행 결과'), 'section-label');
       text(el('details'), 'pre', job.result.content?.map(x => x.text ?? '').join('\n') || JSON.stringify(job.result.structuredContent ?? job.result));
     }
@@ -99,6 +105,12 @@ export function createCardView({ document, i18n }) {
   }
   return {
     t, initialize, job, transfer, theme, clear,
+    output(value, page, next) {
+      const area = el('command-output'); if (!area) return; area.replaceChildren();
+      text(area, 'p', `${page.offsetBytes}–${page.nextOffset} / ${page.totalBytes} bytes`);
+      text(area, 'pre', value);
+      if (next) { const node = text(area, 'button', korean ? '다음 부분' : 'Next page'); node.onclick = event => { if (event.isTrusted) return next(); }; }
+    },
     error: message => { el('error').textContent = message; },
     setBusy: busy => { for (const { node, disabled } of buttons) node.disabled = busy || disabled; },
     probe: (marker, meta = {}) => { clear(); identity(meta); status(t('표시 시험 — 명령은 실행되지 않습니다')); text(el('details'), 'pre', marker ?? t('UI 전용 메타데이터를 받지 못했습니다')); },

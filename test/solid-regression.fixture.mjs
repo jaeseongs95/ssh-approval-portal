@@ -82,7 +82,7 @@ async function scenario(name, root, work) {
         assert.equal(health.busy, false);
       }
       const result = await client.callTool({ name: 'read-command', arguments: { command: 'id recovered' } });
-      assert.equal(result.isError, undefined); assert.equal(result.content[0].text, 'read-ok');
+      assert.equal(result.isError, undefined); assert.equal((await client.callTool({name:'read-command-output',arguments:{outputId:result.structuredContent.output.id}})).content[0].text, 'read-ok');
       return { tools: 2, terminalFailureAudits: events.filter(action => action === 'read-failed').length, busyReleased: true, rawErrorHidden: true };
     } finally { await client.close(); await app.close(); }
   }

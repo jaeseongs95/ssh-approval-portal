@@ -42,14 +42,14 @@ test('MCP contract families preserve tool names, JSON text, private capabilities
   const f = await fixture();
   try {
     const { tools } = await f.client.listTools();
-    assert.deepEqual(tools.map(tool => tool.name), ['list-targets', 'read-command', 'run-command', 'request-safe-command', 'get-request-status', 'assess-request-risk', 'request-upload', 'show-ui-probe', 'show-approval', 'show-file-transfer', 'request-download', 'ui-decide-request', 'ui-upload-begin', 'ui-upload-chunk', 'ui-upload-finish', 'ui-download-link']);
+    assert.deepEqual(tools.map(tool => tool.name), ['list-targets', 'read-command', 'run-command', 'request-safe-command', 'get-request-status', 'assess-request-risk', 'request-upload', 'show-ui-probe', 'show-approval', 'show-file-transfer', 'request-download', 'ui-decide-request', 'ui-upload-begin', 'ui-upload-chunk', 'ui-upload-finish', 'ui-download-link', 'read-command-output', 'ui-read-command-output']);
     for (const tool of tools) assert.equal(tool.outputSchema.type, 'object', tool.name);
     const upload = tools.find(tool => tool.name === 'request-upload');
     assert.deepEqual(upload._meta['openai/fileParams'], ['file']); assert.match(upload.description, /only that host contract/);
     assert.deepEqual(tools.find(tool => tool.name === 'ui-upload-chunk')._meta.ui.visibility, ['app']);
     assert.ok(tools.find(tool => tool.name === 'show-approval').outputSchema.required.includes('id'));
     const immediate = await f.call('read-command', { command: 'id' });
-    assert.equal(immediate.content[0].text, 'fixture-output'); assert.deepEqual(immediate.structuredContent, { state: 'completed', kind: 'command' });
+    assert.equal(JSON.stringify(immediate).includes('fixture-output'), false); assert.deepEqual(immediate.structuredContent, { state: 'completed', kind: 'command', output: { state: 'unavailable' } });
     const result = await f.call('run-command', { command: 'sudo id' });
     assert.deepEqual(JSON.parse(result.content[0].text), result.structuredContent); assert.equal(result.structuredContent.id, identifier);
     const card = await f.call('show-approval', { id: identifier });
@@ -103,7 +103,7 @@ test('web presents neutral outcomes as legacy JSON and approval waits for comple
     const reply = await fetch(f.adminBase + `/api/${identifier}/approve`, { method: 'POST', headers: { Authorization: 'Bearer contract-admin', Origin: 'https://example.test' } });
     assert.equal(reply.status, 200);
     const value = await reply.json(); assert.equal(value.state, 'completed');
-    assert.deepEqual(value.result, { content: [{ type: 'text', text: 'finished' }], structuredContent: { preserved: true } });
+    assert.deepEqual(value.result, { content: [], structuredContent: { output: { state: 'unavailable' } } });
     assert.equal('texts' in value.result, false); assert.equal('data' in value.result, false);
     const badOrigin = await fetch(f.adminBase + `/api/${identifier}/approve`, { method: 'POST', headers: { Authorization: 'Bearer contract-admin', Origin: 'https://evil.test' } });
     assert.equal(badOrigin.status, 403);

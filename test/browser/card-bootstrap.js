@@ -1,4 +1,5 @@
 const calls = [], waiting = new Map();
+const contexts = [];
 let held = '';
 const job = { id: 'old-A', kind: 'command', state: 'completed', command: 'fixture A', target: 'fixture', expiresAt: Date.now() + 60000 };
 async function call(name, args, namespace) {
@@ -8,9 +9,11 @@ async function call(name, args, namespace) {
   if (name === 'show-file-transfer') return { _meta: { sshApproval: { bootstrapTicket: 'synthetic-bootstrap' } } };
   if (name === 'ui-upload-begin') return { structuredContent: { transferId: 'synthetic-upload' }, _meta: { sshApproval: { uploadTicket: 'synthetic-ticket' } } };
   if (name === 'ui-upload-finish') return { structuredContent: job, _meta: { sshApproval: {} } };
+  if (name === 'show-approval') return { _meta: { sshApproval: { viewTicket: 'synthetic-view' } } };
+  if (name === 'ui-read-command-output') return { structuredContent: { outputId: args.outputId, offsetBytes: args.offsetBytes, nextOffset: args.offsetBytes + 20, totalBytes: 20, eof: true }, _meta: { sshOutput: { text: 'EXPLICIT_OUTPUT_SENTINEL' } } };
   return {};
 }
-const host = { call, downloadFile: async () => ({}), openLink: async () => ({}), updateModelContext: async () => ({}) };
+const host = { call, downloadFile: async () => ({}), openLink: async () => ({}), updateModelContext: async value => { contexts.push(value); return {}; } };
 const source = await (await fetch('/fixture/card-source')).text();
 let receive;
 if (source.startsWith('import { App }')) {
@@ -19,7 +22,7 @@ if (source.startsWith('import { App }')) {
     callServerTool({ name, arguments: args }) { return call(name.replace(/^fixture_/, ''), args, 'fixture_'); }
     connect() { return Promise.resolve(); }
     getHostContext() { return {}; }
-    updateModelContext() { return Promise.resolve({}); }
+    updateModelContext(value) { contexts.push(value); return Promise.resolve({}); }
     openLink() { return Promise.resolve({}); }
     downloadFile() { return Promise.resolve({}); }
   };
@@ -36,7 +39,7 @@ if (source.startsWith('import { App }')) {
   });
   view.initialize(controller.openWeb); receive = controller.receive;
 }
-window.fixture = { calls, hold: name => { held = name; }, release: name => { held = ''; waiting.get(name)?.(); }, receive,
+window.fixture = { calls, contexts, hold: name => { held = name; }, release: name => { held = ''; waiting.get(name)?.(); }, receive,
   transfer: (path, target) => receive({ structuredContent: { transfer: { ...(target ? {target} : {}), direction: 'upload', remotePath: path, elevate: false, overwrite: false } },
     _meta: { sshApproval: { ...(target ? {targetId:target,targetRevision:target+'-v1',targetDisplayName:target+' 이름',targets:['alpha','beta'].map(id=>({id,displayName:id+' 이름',enabled:true}))} : {}), uiEnabled: true, namespace: 'fixture_', maxBytes: 67108864, chunkBytes: 2, bootstrapTicket: 'synthetic-bootstrap' } } }),
 };

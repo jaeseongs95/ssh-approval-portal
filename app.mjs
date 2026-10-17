@@ -23,6 +23,8 @@ import { createCommandState } from './src/adapters/storage/command-state.mjs';
 import { createCommandAutomation } from './src/application/command-automation.mjs';
 import { AUTOMATION_QUESTION, AUTOMATION_QUESTION_VERSION, COMMAND_SET_QUESTION } from './src/domain/command-policy.mjs';
 import { createCommandPolicyReview } from './src/application/command-policy-review.mjs';
+import { CommandOutputs } from './src/adapters/storage/command-output.mjs';
+import { hash } from './src/domain/validation.mjs';
 
 // Preserve the original injectable createApplication callback at the composition boundary.
 // Concrete runtime executors already return the neutral outcome accepted by use cases.
@@ -41,6 +43,9 @@ export async function createApplication({ registry, classify, executeCommand, au
   const definitions = resolveTargets(settings, registry);
   const store = new Artifacts(transferRoot, { maxBytes: settings.maxBytes, budget: settings.budget });
   await store.init();
+  const outputs = new CommandOutputs(transferRoot);
+  let commandState;
+  try {
   let risk = riskAssessor, apiKey;
   if (settings.jevEnabled) {
     apiKey = env.JEV_API_KEY;
@@ -51,7 +56,7 @@ export async function createApplication({ registry, classify, executeCommand, au
     }
     risk ??= createJevAssessor({ apiKey });
   }
-  const commandState = settings.commandAutomation ? createCommandState(transferRoot) : undefined;
+  commandState = settings.commandAutomation ? createCommandState(transferRoot) : undefined;
   const evaluators = { ...riskEvaluators };
   const automationBudget = { used: 0 };
   if (settings.jevEnabled && !evaluators.jev) evaluators.jev = { model: 'jev-1.13.0', questionVersion: AUTOMATION_QUESTION_VERSION, ...createJevAssessor({ apiKey, question: AUTOMATION_QUESTION, inputKind: 'execution' }) };
@@ -66,12 +71,18 @@ export async function createApplication({ registry, classify, executeCommand, au
     const targetStore = identity ? scopedArtifacts(store, identity) : store;
     const checkedRegistry = { getOrCreate(profile) { definition.verify(); return registry.getOrCreate(profile); } };
     const transfers = createTransferExecutor(checkedRegistry, targetStore, { readProfile, writeProfile });
-    const checkedExecute = (profile, command) => { definition.verify(); return execute(profile, command); };
+    const binding = (profile, command, executionId) => ({ executionId, targetId: definition.id, targetRevision: definition.revision, profile, operationDigest: hash(command) });
+    const checkedExecute = async (profile, command, id = randomBytes(24).toString('hex')) => {
+      definition.verify();
+      const reservation = outputs.reserve(binding(profile, command, id));
+      try { return outputs.finish(reservation, await execute(profile, command)); }
+      catch (error) { outputs.abandon(reservation); throw error; }
+    };
     const targetAudit = event => audit({ ...event, ...identity });
     let commands, files;
     const queue = new ApprovalQueue({ classify, target, profile: writeProfile, audit: targetAudit, identity, claimExecution,
       externalBusy: () => (commands?.reading() ?? false) || claimExecution.busy(),
-      executeOperation: operation => operation.kind === 'command' ? checkedExecute(writeProfile, operation.command)
+      executeOperation: (operation, id) => operation.kind === 'command' ? checkedExecute(writeProfile, operation.command, id)
         : operation.kind === 'upload' ? transfers.upload(operation) : transfers.download(operation),
       onTerminal: job => files?.onTerminal(job),
     });
@@ -84,8 +95,24 @@ export async function createApplication({ registry, classify, executeCommand, au
   const { queue, commands, files } = targets;
   for (const job of commandState?.list() ?? []) {
     const runtime = runtimes.find(runtime => runtime.id === (job.targetId ?? 'default'));
+    if (runtime && job.kind === 'command' && job.result && !job.result.output) {
+      // Publish before replacing the legacy body. On failure the original DB body survives;
+      // presenters still refuse to expose it. Execution/replay identity is never changed.
+      let migrated = { failed: job.result.failed, texts: [], output: { state: 'unavailable', captureSource: 'redacted-adapter-outcome', sshCompleteness: 'unknown', version: 1 } };
+      try {
+        migrated = outputs.finish(outputs.reserve({ executionId: job.id, targetId: runtime.id, targetRevision: job.targetRevision ?? runtime.revision, profile: job.profile, operationDigest: hash(job.command) }), job.result);
+        if (migrated.output.state === 'ready') commandState.save({ ...job, result: migrated });
+      } catch { /* Preserve the legacy journal; no raw fallback or SSH replay. */ }
+      job.result = migrated;
+    }
     runtime?.queue.restore(job, value => commandState.save(value));
   }
+  const commandOutputs = {
+    read(args) { return outputs.read(args, binding => {
+      const runtime = targets.select(args.target ?? binding.targetId); runtime.verify();
+      if (runtime.id !== binding.targetId || runtime.revision !== binding.targetRevision || ![runtime.readProfile, runtime.writeProfile].includes(binding.profile)) throw Error('Stale output target binding');
+    }); },
+  };
   const policyReview = commandState && createCommandPolicyReview({ state: commandState, audit, nonce: () => randomBytes(24).toString('hex'),
     evaluator: policyRiskAssessor ?? (settings.jevEnabled ? createJevAssessor({ apiKey, question: COMMAND_SET_QUESTION, inputKind: 'registration' }) : undefined),
     maxCalls: settings.jevMaxCalls, budget: automationBudget,
@@ -112,13 +139,14 @@ export async function createApplication({ registry, classify, executeCommand, au
     readFile(new URL('./web/dist/app.js', import.meta.url), 'utf8'),
   ]);
   protocols = createProtocolAdapters({ queue, commands, files, store, lifecycle, settings, signer, adminAccess, targets, requestSafety,
-    authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal: shutdown.signal, commandPolicy });
-  const timer = setInterval(() => lifecycle.reap().catch(() => {}), 30_000); timer.unref();
+    authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal: shutdown.signal, commandPolicy, commandOutputs });
+  const timer = setInterval(() => { lifecycle.reap().catch(() => {}); try { outputs.reap(); } catch { /* Failed deletions stay charged. */ } }, 30_000); timer.unref();
   let closing;
   return { ...protocols, queue, store, targets, transfers: runtimes[0].transfers, enabled: settings.uiEnabled,
     close() {
       clearInterval(timer); shutdown.abort();
-      return closing ??= lifecycle.close(() => Promise.all([protocols.mcpHttp, protocols.adminHttp].map(server => new Promise(resolve => server.close(resolve))))).finally(() => commandState?.close());
+      return closing ??= lifecycle.close(() => Promise.all([protocols.mcpHttp, protocols.adminHttp].map(server => new Promise(resolve => server.close(resolve))))).finally(() => { commandState?.close(); outputs.close(); });
     },
   };
+  } catch (error) { commandState?.close(); outputs.close(); throw error; }
 }

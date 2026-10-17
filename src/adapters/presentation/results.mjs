@@ -5,6 +5,9 @@ const state = z.enum(['pending', 'evaluating', 'running', 'completed', 'failed',
 const content = z.array(z.object({ type: z.literal('text'), text: z.string() }));
 const outcome = z.object({ failed: z.boolean(), texts: z.array(z.string()), data: z.object({}).passthrough().optional() });
 const legacyOutcome = z.object({ content, isError: z.boolean().optional(), structuredContent: z.object({}).passthrough().optional() }).passthrough();
+const outputReference = z.object({ version: z.literal(1), captureSource: z.literal('redacted-adapter-outcome'), sshCompleteness: z.literal('unknown'),
+  id: identifier, executionId: identifier, state: z.enum(['ready', 'unavailable', 'expired']), expiresAt: z.number().int().nonnegative(),
+  bytes: z.number().int().nonnegative().optional(), snapshotBytes: z.number().int().nonnegative().optional(), sha256: z.string().regex(/^[a-f0-9]{64}$/).optional() });
 const operation = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('command'), command: z.string() }).passthrough(),
   z.object({ kind: z.literal('upload'), artifactId: identifier, remotePath: z.string(), fileName: z.string(), size: z.number().int().nonnegative(), sha256: z.string().regex(/^[a-f0-9]{64}$/), overwrite: z.boolean(), elevate: z.boolean() }).passthrough(),
@@ -50,13 +53,22 @@ export function presentOutcome(value) {
   return { content: value.texts.map(text => ({ type: 'text', text })), ...(value.failed ? { isError: true } : {}), ...(value.data !== undefined ? { structuredContent: value.data } : {}) };
 }
 
+// Commands carry only an allowlisted descriptor, including legacy journal entries.
+// Never expand command data or preview text through a default response.
+export function presentCommandOutcome(value) {
+  const parsed = outputReference.safeParse(value.output);
+  const output = parsed.success ? parsed.data : { state: 'unavailable' };
+  if (typeof output.expiresAt === 'number' && Date.now() >= output.expiresAt) output.state = 'expired';
+  return { content: [], ...(value.failed ? { isError: true } : {}), structuredContent: { output } };
+}
+
 export function presentJob(job) {
   const value = { id: job.id, kind: job.kind, operation: { ...job.operation }, command: job.command,
     ...(job.targetId === undefined ? {} : { targetId: job.targetId, targetRevision: job.targetRevision, targetDisplayName: job.targetDisplayName, hostKey: job.hostKey }),
     ...(job.decision ? { decision: structuredClone(job.decision) } : {}), profile: job.profile, commandClass: job.commandClass, target: job.target, state: job.state,
     ...(job.approvalMode ? { approvalMode: job.approvalMode } : {}),
     createdAt: job.createdAt, expiresAt: job.expiresAt, finishedAt: job.finishedAt,
-    result: job.result === undefined ? undefined : presentOutcome(job.result), auditError: job.auditError };
+    result: job.result === undefined ? undefined : job.kind === 'command' ? presentCommandOutcome(job.result) : presentOutcome(job.result), auditError: job.auditError };
   jobSchema.parse(value);
   return value;
 }
@@ -69,7 +81,8 @@ export function publicResult(value, schema) {
 export const jobResult = job => publicResult(presentJob(job), jobSchema);
 export const statusResult = job => job ? jobResult(job) : publicResult({ error: 'Unknown request; server may have restarted' }, unknownSchema);
 export function immediateResult(value, identity) {
-  return { ...presentOutcome(value), structuredContent: { state: value.failed ? 'failed' : 'completed', kind: 'command', ...identity } };
+  const result = presentCommandOutcome(value);
+  return { ...publicResult({ state: value.failed ? 'failed' : 'completed', kind: 'command', ...identity, output: result.structuredContent.output }, immediateSchema), ...(value.failed ? { isError: true } : {}) };
 }
 export const sourceUnavailable = sourceHost => ({ ...publicResult({ error: 'upload-source-not-configured', sourceHost,
   message: 'File was not fetched or queued. An administrator must configure a verified exact hostname or *.domain pattern for this provider; the card file picker remains available.' }, sourceUnavailableSchema), isError: true });

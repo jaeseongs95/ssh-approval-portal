@@ -38,7 +38,7 @@ test('MCP target routing, explicit/default refusal and owner-only HTTP filtering
   const targets=(await f.call('list-targets')).structuredContent;assert.equal(targets.defaultTarget,'alpha');assert.equal(targets.targets.length,4);
   assert.ok(!JSON.stringify(targets).includes('readProfile'));assert.ok(!JSON.stringify(targets).includes('SHA256'));
   for(const target of ['unknown','offline','127.0.0.1','__proto__']) assert.equal((await f.call('run-command',{command:'sudo id',target})).isError,true);
-  const read=await f.call('read-command',{command:'id',target:'beta'});assert.equal(read.structuredContent.targetId,'beta');assert.equal(read.content[0].text,'beta-read');
+  const read=await f.call('read-command',{command:'id',target:'beta'});assert.equal(read.structuredContent.targetId,'beta');assert.equal((await f.call('read-command-output',{outputId:read.structuredContent.output.id,target:'beta'})).content[0].text,'beta-read');
   const a=(await f.call('run-command',{command:'sudo same'})).structuredContent,b=(await f.call('run-command',{command:'sudo same',target:'beta'})).structuredContent;
   assert.equal(a.targetId,'alpha');assert.equal(b.targetId,'beta');assert.equal(a.target,'synthetic@alpha.example.test:22');
   assert.equal((await fetch(f.web+'/api/targets')).status,401);
@@ -69,7 +69,7 @@ test('file bootstrap, staged bytes, approval tickets and cleanup remain target-o
    const runtime=f.app.targets.select(id);runtime.transfers.upload=async op=>{const fd=await runtime.store.verified(op.artifactId);try{const chunks=[];for await(const chunk of fd.createReadStream({start:0,autoClose:false}))chunks.push(chunk);assert.deepEqual(Buffer.concat(chunks),bytes);}finally{await fd.close();}f.calls.push({profile:id+'-upload',artifactId:op.artifactId});return {failed:false,texts:['uploaded']};};
    await f.call('ui-decide-request',{id:job.structuredContent.id,action:'approve',ticket:job._meta.sshApproval.approvalTicket});await f.app.queue.wait(job.structuredContent.id);
   }
-  assert.deepEqual(f.calls.map(x=>x.artifactId),[a.id,b.id]);await f.app.store.reap();assert.equal(f.app.store.reserved,0);assert.deepEqual(await readdir(f.root),[]);
+  assert.deepEqual(f.calls.map(x=>x.artifactId),[a.id,b.id]);await f.app.store.reap();assert.equal(f.app.store.reserved,0);assert.deepEqual(await readdir(f.root),['command-outputs']);
   const reserve=target=>f.app.targets.files.beginUpload({target,fileName:'quota.bin',remotePath:'/tmp/quota.bin',size:64,sha256,overwrite:false,elevate:false});
   const first=await reserve('alpha'),second=await reserve('beta');assert.equal(f.app.store.reserved,128);
   await assert.rejects(reserve('gamma'));assert.equal(f.app.store.size,2);
@@ -90,7 +90,7 @@ test('global execution slots, per-target serialization, audit failures, configur
  }finally{gate.resolve();await f.close();}
  const g=await fixture({auditFails:event=>event.action==='approved'&&event.targetId==='alpha'});try {
   const a=g.app.queue.submit('sudo id',false,'alpha');assert.throws(()=>g.app.queue.start(a.id));assert.equal(g.calls.length,0);
-  assert.equal((await g.app.targets.commands.read('id','beta')).texts[0],'beta-read');
+  const stored=await g.app.targets.commands.read('id','beta');assert.equal(stored.output.state,'ready');assert.deepEqual(stored.texts,[]);
   g.profiles.get('beta-write').host='changed.example';const b=g.app.queue.submit('sudo id',false,'beta');g.app.queue.start(b.id);await g.app.queue.wait(b.id);assert.equal(g.app.queue.get(b.id).state,'failed');assert.equal(g.calls.length,1);
  }finally{await g.close();}
 });
