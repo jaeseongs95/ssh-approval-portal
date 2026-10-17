@@ -12,7 +12,7 @@ export function createCommandPolicyEditor({ document, api, error }) {
   };
   const target = field('대상 서버', 'select'), commands = field('사전 승인 명령 이름 — 줄마다 하나', 'textarea');
   const denied = field('금지할 명령 이름 — 줄마다 하나', 'textarea');
-  const disclosure = field('외부 평가에 명령·대상 맥락·사용자 명시적 승인과 명령셋 전송 허용', 'input', 'checkbox');
+  const disclosure = field('외부 평가에 전체 명령·작업 상황·대상/프로필/접속대상·사용자 명시적 승인과 명령셋 전송 허용', 'input', 'checkbox');
   const execution = field('검증한 점수 기준으로 모델 자동 실행 활성화', 'input', 'checkbox');
   const fallback = field('Jev 평가 불가 시 대체 평가자', 'select');
   for (const [value, label] of [['', '없음'], ['luna', 'Luna'], ['sonnet', 'Sonnet']]) { const option = document.createElement('option'); option.value = value; option.textContent = label; fallback.append(option); }
@@ -63,8 +63,8 @@ export function createCommandPolicyEditor({ document, api, error }) {
       for (const [provider, inputs] of Object.entries(scores)) {
         if (!inputs.probability.value && !inputs.evidence.value) continue;
         const prior = snapshot.targets.find(item => item.targetId === target.value)?.thresholds[provider];
-        if (prior && (prior.questionVersion !== 'ssh-command-risk-v3' || prior.basis !== 'safety-probability-v1') && inputs.evidence.value === prior.validationRef) throw Error('안전 확률 기준으로 재등록하려면 새 기준 근거 참조가 필요합니다.');
-        thresholds[provider] = { model: inputs.model.value, questionVersion: 'ssh-command-risk-v3', basis: 'safety-probability-v1',
+        if (prior && (prior.questionVersion !== 'ssh-command-risk-v4' || prior.basis !== 'safety-probability-v1') && inputs.evidence.value === prior.validationRef) throw Error('안전 확률 기준으로 재등록하려면 새 기준 근거 참조가 필요합니다.');
+        thresholds[provider] = { model: inputs.model.value, questionVersion: 'ssh-command-risk-v4', basis: 'safety-probability-v1',
           minLowRisk: Number(inputs.probability.value), validationRef: inputs.evidence.value };
       }
       const rule = { targetId: binding.targetId, targetRevision: binding.targetRevision, profile: binding.profile,

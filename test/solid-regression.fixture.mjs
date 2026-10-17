@@ -52,7 +52,7 @@ async function scenario(name, root, work) {
     const client = await connect(app);
     try {
       const job = (await client.callTool({ name: 'run-command', arguments: { command: 'printf fixture-never-execute' } })).structuredContent;
-      assert.equal(job.state, 'pending'); clock += 600_001;
+      assert.equal(job.state, 'pending'); clock += 3_600_001;
       const response = await fetch(`http://127.0.0.1:${app.mcpHttp.address().port}/health`);
       assert.equal(response.status, 503, 'Expired-audit exception must be a controlled HTTP failure');
       await response.json();

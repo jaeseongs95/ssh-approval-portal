@@ -32,7 +32,7 @@ test('JEV-01 request has fixed route/model/question, no labels or extra secret f
   assert.equal(calls, 1);
 });
 
-test('v3 sends explicit user approval only for matching owner command names, and registration sends proposals', async () => {
+test('v4 sends explicit user approval only for matching owner command names, and registration sends proposals', async () => {
   const seen = [], fetchImpl = async (_url, options) => { seen.push(JSON.parse(options.body)); return response(wire()); };
   const assessor = createJevAssessor({ apiKey: 'fixture', fetchImpl, question: AUTOMATION_QUESTION, inputKind: 'execution' });
   const approved = { ...input, preapprovedCommands: ['id', 'sudo'], userApproval: explicitUserApproval(input.command, ['id', 'sudo']), threshold: 0.99, ownerToken: 'never-send' };
@@ -57,7 +57,7 @@ test('JEV-02 missing key and invalid input cause zero dispatches', async () => {
   let calls = 0; const fetchImpl = async () => { calls++; return response(wire()); };
   assert.equal((await createJevAssessor({fetchImpl}).assess(input)).reason, 'not_configured');
   const assessor = createJevAssessor({apiKey:'fixture',fetchImpl});
-  for (const value of [null,{}, {...input,command:''},{...input,context:'a'.repeat(4097)}]) assert.equal((await assessor.assess(value)).reason,'invalid_input');
+  for (const value of [null,{}, {...input,command:''},{...input,context:'a'.repeat(12289)}]) assert.equal((await assessor.assess(value)).reason,'invalid_input');
   assert.equal(calls,0);
 });
 

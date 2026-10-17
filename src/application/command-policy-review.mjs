@@ -1,5 +1,6 @@
 import { hash } from '../domain/validation.mjs';
 import { validateCommandPolicy, validatedRisk, COMMAND_SET_QUESTION_VERSION } from '../domain/command-policy.mjs';
+import { assessmentContext } from '../domain/execution-context.mjs';
 
 /** A review is a short-lived, single-use confirmation of the exact policy and revision. */
 export function createCommandPolicyReview({ state, validateTargets, evaluator, audit, nonce, maxCalls, budget, now = () => Date.now() }) {
@@ -31,7 +32,10 @@ export function createCommandPolicyReview({ state, validateTargets, evaluator, a
             const controller = new AbortController();
             try {
               const input = { command: 'Review proposed command-name registration', target: rule.targetId,
-                environment: 'SSH command policy', context: 'Proposed names are not yet approved. Arguments are unrestricted; no command will be executed.', proposedCommands: [...rule.commands] };
+                environment: 'SSH command policy', context: assessmentContext('The user is reviewing proposed command names before registration. Names are not yet approved; arguments will have no name-policy restrictions. No command is executed by this review.',
+                  { targetId: rule.targetId, targetRevision: rule.targetRevision, profile: rule.profile,
+                    policyRevision: expectedRevision, externalDisclosure: rule.externalDisclosure,
+                    modelExecution: rule.modelExecution, fallback: rule.fallback }, 'Give risk feedback for the exact proposed policy before the user can acknowledge and register it'), proposedCommands: [...rule.commands] };
               assessment = validatedRisk(await Promise.race([Promise.resolve().then(() => evaluator.assess(input, { signal: controller.signal })),
                 new Promise(resolve => { timer = setTimeout(() => resolve(null), 10000); })]), 'jev-1.13.0');
             } catch { /* Unavailable feedback is explicitly uncertain, never a safety claim. */ }

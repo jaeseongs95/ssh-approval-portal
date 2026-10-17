@@ -127,3 +127,20 @@ test('download-ready publishes only filename while the renewed URL stays in priv
     assert.equal(JSON.stringify([result.content, result.structuredContent]).includes('ticket='), false);
   } finally { await f.close(); }
 });
+
+test('MCP preserves detailed optional context and rejects oversized descriptions before dispatch', async () => {
+  const seen = [], f = await fixture();
+  f.commands.run = async (...args) => { seen.push(args); return { type: 'job', job: f.pending }; };
+  try {
+    const { tools } = await f.client.listTools();
+    const tool = tools.find(item => item.name === 'run-command');
+    assert.equal(tool.inputSchema.properties.context.maxLength, 8192);
+    assert.equal(tool.inputSchema.required.includes('context'), false);
+    assert.match(tool.description, /evidence already checked/); assert.match(tool.description, /one hour/);
+    const context = 'a'.repeat(8192);
+    const result = await f.call('run-command', { command: 'sudo id', context });
+    assert.equal(result.isError, undefined); assert.deepEqual(seen[0], ['sudo id', undefined, undefined, context]);
+    assert.equal((await f.call('run-command', { command: 'sudo id', context: context + 'a' })).isError, true);
+    assert.equal(seen.length, 1);
+  } finally { await f.close(); }
+});

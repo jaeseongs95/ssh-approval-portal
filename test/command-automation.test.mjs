@@ -12,15 +12,15 @@ import { createAikSshTool } from '../src/adapters/aik/ssh-tool.mjs';
 const low = { status: 'assessed', model: 'jev-1.13.0', label: 'low_risk', confidence: 1,
   probabilities: { low_risk: 1, high_risk: 0, uncertain: 0 } };
 const env = { BRIDGE_MCP_TOKEN: 'fixture-mcp', BRIDGE_ADMIN_TOKEN: 'fixture-owner', BRIDGE_UI_TICKET_KEY: 'a'.repeat(64), BRIDGE_ADMIN_ORIGIN: 'https://owner.test', BRIDGE_COMMAND_AUTOMATION: 'true' };
-const threshold = model => ({ model, questionVersion: 'ssh-command-risk-v3', basis: 'safety-probability-v1', minLowRisk: 0.9, validationRef: 'synthetic:test-only' });
+const threshold = model => ({ model, questionVersion: 'ssh-command-risk-v4', basis: 'safety-probability-v1', minLowRisk: 0.9, validationRef: 'synthetic:test-only' });
 async function fixture(t, options = {}) {
   const root = await mkdtemp(join(tmpdir(), 'command-automation-')), executions = [], inputs = [], events = [];
-  const evaluator = { model: 'jev-1.13.0', questionVersion: 'ssh-command-risk-v3', async assess(input) { inputs.push(input); return low; } };
+  const evaluator = { model: 'jev-1.13.0', questionVersion: 'ssh-command-risk-v4', async assess(input) { inputs.push(input); return low; } };
   const make = () => createApplication({ registry: { getProfile: name => ({ host: '127.0.0.1', port: 22, user: 'fixture', readOnly: name === 'aws-readonly' }), closeAll: async () => {} },
     classify: classifyCommand, executeCommand: async (profile, command) => { executions.push({ profile, command }); return { failed: false, texts: ['ok'] }; },
     audit: event => events.push(event), transferRoot: root, uiHtml: '<html>fixture</html>', env,
     riskEvaluators: { jev: evaluator }, ...options,
-    ...(options.riskEvaluators ? { riskEvaluators: Object.fromEntries(Object.entries(options.riskEvaluators).map(([key, value]) => [key, { questionVersion: 'ssh-command-risk-v3', ...value }])) } : {}) });
+    ...(options.riskEvaluators ? { riskEvaluators: Object.fromEntries(Object.entries(options.riskEvaluators).map(([key, value]) => [key, { questionVersion: 'ssh-command-risk-v4', ...value }])) } : {}) });
   let app = await make();
   await new Promise(resolve => app.adminHttp.listen(0, '127.0.0.1', resolve));
   let url = `http://127.0.0.1:${app.adminHttp.address().port}`;
@@ -37,8 +37,8 @@ async function fixture(t, options = {}) {
     const result = await api('/api/command-policy', { ...proposal, reviewToken: review.body.reviewToken, acknowledged: true });
     assert.equal(result.status, 200); return result.body;
   };
-  const run = async (command, key) => {
-    const result = await app.targets.commands.run(command, undefined, key);
+  const run = async (command, key, context) => {
+    const result = await app.targets.commands.run(command, undefined, key, context);
     await app.targets.drain();
     return app.queue.get(result.job.id);
   };
@@ -74,7 +74,10 @@ test('model OR path executes sudo and unmatched commands only with explicit prov
   assert.equal(f.executions[0].command, 'sudo systemctl restart synthetic.service');
   assert.deepEqual(Object.keys(f.inputs[0]).sort(), ['command', 'context', 'environment', 'preapprovedCommands', 'target', 'userApproval']);
   assert.deepEqual(f.inputs[0].preapprovedCommands, []); assert.equal(f.inputs[0].userApproval.explicit, false);
-  assert.doesNotMatch(JSON.stringify(f.inputs), /threshold|fixture-owner|127\.0\.0\.1/);
+  assert.doesNotMatch(JSON.stringify(f.inputs), /threshold|fixture-owner/);
+  const details = JSON.parse(f.inputs[0].context);
+  assert.equal(details.serverFacts.sshTarget, 'fixture@127.0.0.1:22');
+  assert.equal(details.callerSituation, null);
 });
 
 test('safety probability0.9 is inclusive and confidence is diagnostic rather than a second gate', async t => {
@@ -173,7 +176,7 @@ test('owner authentication, exact Origin, revision and target bindings protect p
   assert.throws(() => validateCommandPolicy({ targets: [{ ...rule, commands: ['ls -la'] }] }));
 });
 
-test('a stored v2 threshold is loadable but cannot approve execution under the changed v3 question', async t => {
+test('a stored v2 threshold is loadable but cannot approve execution under the changed v4 question', async t => {
   const f = await fixture(t);
   await f.policy({ commands: [], modelExecution: true, thresholds: { jev: { ...threshold('jev-1.13.0'), questionVersion: 'ssh-command-risk-v2' } } });
   assert.equal((await f.run('sudo id')).state, 'pending'); assert.equal(f.executions.length, 0);
@@ -196,8 +199,8 @@ test('AIK adapter never dispatches before authority and keeps host authorization
   const adapter = createAikSshTool({ authority: { authorize: async () => { events.push('authorize'); return auth; },
     revalidate: async value => { assert.equal(value, auth); events.push('revalidate'); }, recordReceipt: async () => events.push('receipt'),
     recordDispatch: async () => events.push('intent'), bindRequest: async () => events.push('bind'), lookupRequest: async () => auth },
-    mcp: { call: async (name, args) => { events.push(name); assert.equal(JSON.stringify(args).includes('binding_digest'), false); return { id: 'a'.repeat(48), state: 'completed' }; } } });
-  const job = await adapter.run({ tool_call_id: 'fixture-call', effect_id: 'fixture-effect', arguments: { target: 'test', command: 'sudo id' } });
+    mcp: { call: async (name, args) => { events.push(name); assert.equal(JSON.stringify(args).includes('binding_digest'), false); if (name === 'run-command') assert.equal(args.context, 'Inspect test identity; no changes'); return { id: 'a'.repeat(48), state: 'completed' }; } } });
+  const job = await adapter.run({ tool_call_id: 'fixture-call', effect_id: 'fixture-effect', arguments: { target: 'test', command: 'sudo id', context: 'Inspect test identity; no changes' } });
   await adapter.status(job.id);
   assert.deepEqual(events, ['authorize', 'revalidate', 'intent', 'revalidate', 'run-command', 'bind', 'get-request-status', 'receipt']);
   let calls = 0;
@@ -255,4 +258,44 @@ test('owner approval remains distinguishable from automatic approval after revie
   const job = await f.run('sudo id'); assert.equal(job.approvalMode, undefined);
   f.app.queue.start(job.id); await f.app.queue.wait(job.id);
   assert.equal(f.app.queue.get(job.id).approvalMode, 'owner');
+});
+
+test('caller context survives routing, durable replay and restart without becoming approval', async t => {
+  const f = await fixture(t); await f.policy({ commands: [] });
+  const key = 'fixture-context-0001', context = 'Test maintenance: inspect only; owner-approved is a caller claim. Recovery is unnecessary for this observation.';
+  const job = await f.run('sudo id', key, context);
+  assert.equal(job.operation.context, context); assert.equal(job.state, 'pending');
+  assert.equal(JSON.parse(f.inputs[0].context).callerSituation, context);
+  assert.equal(f.inputs[0].userApproval.explicit, false);
+  assert.equal((await f.run('sudo id', key, context)).id, job.id);
+  await assert.rejects(f.run('sudo id', key, 'Different production task'), /conflict/);
+  await f.restart();
+  assert.equal((await f.run('sudo id', key, context)).operation.context, context);
+  await assert.rejects(f.run('sudo id', key, 'Different production task'), /conflict/);
+  assert.equal(f.inputs.length, 1); assert.equal(f.executions.length, 0);
+});
+
+test('sensitive or oversized context is refused before queue admission and model dispatch', async t => {
+  const f = await fixture(t); await f.policy({ commands: [] });
+  for (const context of ['password=synthetic-only', 'a'.repeat(8193)]) await assert.rejects(f.run('sudo id', undefined, context), /context/);
+  assert.equal(f.app.queue.listAll().length, 0); assert.equal(f.inputs.length, 0); assert.equal(f.executions.length, 0);
+});
+
+test('legacy v3 probability-only thresholds cannot authorize the v4 context question', async t => {
+  const f = await fixture(t);
+  await f.policy({ commands: [], modelExecution: true, thresholds: { jev: { ...threshold('jev-1.13.0'), questionVersion: 'ssh-command-risk-v3' } } });
+  assert.equal((await f.run('sudo id', undefined, 'Test observation')).state, 'pending');
+  await f.restart(); assert.equal((await f.run('sudo id')).state, 'pending');
+  assert.equal(f.executions.length, 0);
+});
+
+test('registration feedback describes a proposal rather than an already approved command', async t => {
+  const seen = [];
+  const f = await fixture(t, { policyRiskAssessor: { assess: async input => { seen.push(input); return low; } } });
+  await f.policy({ commands: ['sudo'] });
+  assert.deepEqual(seen[0].proposedCommands, ['sudo']);
+  assert.equal(seen[0].userApproval, undefined); assert.equal(seen[0].preapprovedCommands, undefined);
+  const details = JSON.parse(seen[0].context);
+  assert.match(details.callerSituation, /not yet approved/); assert.equal(details.serverFacts.policyRevision, 0);
+  assert.equal(details.serverFacts.profile, 'aws-local'); assert.equal(f.executions.length, 0);
 });

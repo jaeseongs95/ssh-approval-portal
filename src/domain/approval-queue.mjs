@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
-import { EXPIRES_MS } from '../contracts/ports.mjs';
+import { APPROVAL_EXPIRES_MS } from '../contracts/ports.mjs';
 import { hash, validateCommand } from './validation.mjs';
+import { callerContext } from './execution-context.mjs';
 
 const COMMAND_AUTHORITY = Symbol('server-command-policy');
 
@@ -19,9 +20,10 @@ export class ApprovalQueue {
     this.identity = identity && Object.freeze({ ...identity }); this.claimExecution = claimExecution;
     this.jobs = new Map(); this.active = null; this.maintenance = false;
   }
-  submit(command, safeOnly = false) {
+  submit(command, safeOnly = false, context = '') {
     const { class: commandClass } = validateCommand(command, this.classify, safeOnly);
-    return this.submitOperation({ kind: 'command', command }, commandClass);
+    context = callerContext(context);
+    return this.submitOperation({ kind: 'command', command, ...(context ? { context } : {}) }, commandClass);
   }
   submitOperation(operation, commandClass = 'privileged') {
     if (this.maintenance) throw Error('Maintenance in progress');
@@ -29,8 +31,9 @@ export class ApprovalQueue {
     if (this.jobs.size >= 100) throw Error('Queue full');
     // Operations contain flat primitives; retain no caller-owned mutable object.
     const op = Object.freeze({ ...operation });
+    const createdAt = this.now();
     const job = { id: this.idFactory(), operation: op, profile: this.profile, commandClass,
-      ...this.identity, target: this.target, state: 'pending', createdAt: this.now(), expiresAt: this.now() + EXPIRES_MS };
+      ...this.identity, target: this.target, state: 'pending', createdAt, expiresAt: createdAt + APPROVAL_EXPIRES_MS };
     this.audit({ action: 'submitted', ...this.public(job) });
     this.jobs.set(job.id, job);
     return this.public(job);

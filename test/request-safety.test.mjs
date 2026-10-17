@@ -20,8 +20,11 @@ test('request assessment freezes server identity and shares an in-flight result 
   const second = service.assess(job.id, 'later context');
   await Promise.resolve();
   assert.equal(count, 1);
-  assert.deepEqual(transmitted, { command: 'sudo id', target: 'test', environment: '시험', context: 'first synthetic context' });
-  assert.ok(!JSON.stringify(transmitted).includes('private-host'));
+  assert.deepEqual({ ...transmitted, context: undefined }, { command: 'sudo id', target: 'test', environment: '시험', context: undefined });
+  const details = JSON.parse(transmitted.context);
+  assert.equal(details.callerSituation, 'first synthetic context');
+  assert.equal(details.serverFacts.sshTarget, 'secret-user@private-host:22');
+  assert.equal(details.serverFacts.profile, 'fixture-write');
   complete({ ...result, injectedSecret: 'must-not-escape' });
   const [a, b] = await Promise.all([first, second]);
   assert.deepEqual(a, b); assert.notEqual(a, b);

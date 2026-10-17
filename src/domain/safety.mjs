@@ -1,3 +1,5 @@
+import { ASSESSMENT_CONTEXT_LIMIT } from './execution-context.mjs';
+
 /** Observation only: these values confer no execution authority. */
 export const SAFETY_LABELS = Object.freeze(['low_risk', 'high_risk', 'uncertain']);
 export const SAFETY_PROTOCOL = Object.freeze({
@@ -47,7 +49,7 @@ export function candidateMatch(assessment) {
 export function safetyInput(input) {
   const result = {};
   for (const key of ['command', 'target', 'environment', 'context']) {
-    if (typeof input?.[key] !== 'string' || !input[key].trim() || input[key].length > 4096) throw Error('Invalid safety input');
+    if (typeof input?.[key] !== 'string' || !input[key].trim() || input[key].length > (key === 'context' ? ASSESSMENT_CONTEXT_LIMIT : 4096)) throw Error('Invalid safety input');
     result[key] = input[key];
   }
   return result;

@@ -74,7 +74,7 @@ test('owner edits command names in the actual bundled page and sees policy execu
     const upgraded = page.waitForResponse(result => result.url().endsWith('/api/command-policy') && result.request().method() === 'POST');
     await save.click(); const result = await upgraded; assert.equal(result.status(), 200);
     const selected = (await result.json()).targets[0].thresholds.jev;
-    assert.equal(selected.questionVersion, 'ssh-command-risk-v3'); assert.equal(selected.basis, 'safety-probability-v1');
+    assert.equal(selected.questionVersion, 'ssh-command-risk-v4'); assert.equal(selected.basis, 'safety-probability-v1');
     assert.equal(selected.minLowRisk, 0.9); assert.equal(Object.hasOwn(selected, 'minConfidence'), false);
   } finally { await browser?.close(); await app?.close(); await rm(root, { recursive: true, force: true }); }
 });

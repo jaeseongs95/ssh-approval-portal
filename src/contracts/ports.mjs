@@ -2,6 +2,7 @@
 export const MAX_BYTES = 64 * 1024 * 1024;
 export const CHUNK_BYTES = 256 * 1024;
 export const EXPIRES_MS = 600_000;
+export const APPROVAL_EXPIRES_MS = 3_600_000;
 
 /** @typedef {{failed:boolean, texts:string[], data?:Object}} OperationOutcome */
 /** @typedef {{kind:'command'|'upload'|'download', [key:string]:unknown}} Operation */

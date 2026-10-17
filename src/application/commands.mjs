@@ -1,4 +1,5 @@
 import { validateCommand } from '../domain/validation.mjs';
+import { callerContext } from '../domain/execution-context.mjs';
 
 /** @typedef {import('../contracts/ports.mjs').OperationOutcome} OperationOutcome */
 /**
@@ -34,13 +35,14 @@ export function createCommandService({ queue, classify, executeCommand, audit, t
   };
   return {
     read,
-    async run(command, requestKey) {
+    async run(command, requestKey, context = '') {
       validateCommand(command, classify);
-      if (automation) return automation.run(command, requestKey);
+      context = callerContext(context);
+      if (automation) return automation.run(command, requestKey, context);
       if (requestKey !== undefined) throw Error('Request keys require command automation');
       return validateCommand(command, classify).class === 'read-only'
         ? { type: 'immediate', outcome: await read(command) }
-        : { type: 'job', job: queue.submit(command) };
+        : { type: 'job', job: queue.submit(command, false, context) };
     },
     busy: () => activeReads > 0 || (automation?.busy() ?? false),
     reading: () => activeReads > 0,

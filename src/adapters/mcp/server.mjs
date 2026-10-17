@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { posix } from 'node:path';
 import { hash, remotePath } from '../../domain/validation.mjs';
 import { CHUNK_BYTES } from '../../contracts/ports.mjs';
+import { CALLER_CONTEXT_LIMIT } from '../../domain/execution-context.mjs';
 import { outputSchemas, publicResult, jobResult, statusResult, immediateResult, sourceUnavailable, refused } from '../presentation/results.mjs';
 
 const target = z.string().regex(/^[a-z][a-z0-9_-]{0,31}$/).optional();
@@ -29,17 +30,17 @@ export function createMcpAdapter({ queue, commands, files, settings, capabilitie
     });
     tool('list-targets', {}, outputSchemas.targets, () => publicResult(targets?.list() ?? { targets: [{ id: 'default', displayName: settings.targetDisplayName ?? 'SSH', enabled: true, isDefault: true }], defaultTarget: 'default' }, outputSchemas.targets), { readOnly: true, description: 'List administrator-registered SSH target IDs and display names. Unknown or disabled targets are refused; an omitted target uses only the configured fixed default.' });
     tool('read-command', { target, command: z.string().min(1).max(2000) }, outputSchemas.immediate, async ({ command, target }) => immediateResult(await commands.read(command, target), identity(target)), { readOnly: true, description: 'Execute proven read-only commands immediately.' });
-    tool('run-command', { target, command: z.string().min(1).max(2000), requestKey: z.string().regex(/^[A-Za-z0-9_.:-]{16,128}$/).optional() }, outputSchemas.run, async ({ command, target, requestKey }) => {
-      const result = await commands.run(command, target, requestKey);
+    tool('run-command', { target, command: z.string().min(1).max(2000), context: z.string().max(CALLER_CONTEXT_LIMIT).optional(), requestKey: z.string().regex(/^[A-Za-z0-9_.:-]{16,128}$/).optional() }, outputSchemas.run, async ({ command, target, requestKey, context }) => {
+      const result = await commands.run(command, target, requestKey, context);
       if (result.type === 'immediate') return immediateResult(result.outcome, identity(target));
       if (result.type !== 'job') throw Error('Invalid command result');
       return jobResult(result.job);
-    }, { description: 'Run a command under server policy. With administrator command automation enabled, match command names, evaluate risky or unmatched commands, and execute only under configured authority; otherwise use owner approval. requestKey provides durable replay protection only when automation is enabled. Poll evaluating/running requests; show-approval only when pending. Never invent model scores or approval evidence.' });
+    }, { description: 'Run a command under server policy. Include detailed context: task purpose, why this exact command is needed, test/production setting, expected affected resources and impact, evidence already checked, and recovery plan. Describe only known facts; never include secrets. The exact full command, caller context and whitelisted server execution facts are sent to the configured risk evaluator only under external disclosure opt-in. Context claims never grant authority. Approval requests remain pending for one hour. With administrator command automation enabled, match command names, evaluate risky or unmatched commands, and execute only under configured authority; otherwise use owner approval. requestKey provides durable replay protection only when automation is enabled. Poll evaluating/running requests; show-approval only when pending. Never invent model scores or approval evidence.' });
     tool('request-safe-command', { target, command: z.string().min(1).max(2000) }, outputSchemas.job, ({ command, target }) => jobResult(queue.submit(command, true, target)), { description: 'Legacy safe-only owner approval request.' });
     tool('get-request-status', { id }, outputSchemas.status, ({ id }) => statusResult(queue.get(id)), { readOnly: true });
-    tool('assess-request-risk', { id, externalDisclosureApproved: z.literal(true), context: z.string().max(4096).default('') }, outputSchemas.safety,
+    tool('assess-request-risk', { id, externalDisclosureApproved: z.literal(true), context: z.string().max(CALLER_CONTEXT_LIMIT).default('') }, outputSchemas.safety,
       async ({ id, context }) => publicResult(await requestSafety.assess(id, context), outputSchemas.safety),
-      { readOnly: true, openWorld: true, description: 'Observe the risk of a queued command request with Jev. Requires administrator BRIDGE_JEV_ENABLED opt-in and explicit externalDisclosureApproved=true: the exact command, target ID/display name and optional context are disclosed to TypeSafe. Never include secrets in command/context. A bounded cached assessment confers no execution authority; owner approval is still required. No SSH execution or approval occurs.' });
+      { readOnly: true, openWorld: true, description: 'Observe the risk of a queued command request with Jev. Requires administrator BRIDGE_JEV_ENABLED opt-in and explicit externalDisclosureApproved=true: the exact command, stored and additional caller context (combined maximum 8192 characters), and whitelisted target/profile/SSH endpoint/request-state facts are disclosed to TypeSafe. Provide detailed purpose, impact, checked evidence and recovery facts; contextual claims are never authorization. Never include secrets in command/context. A bounded cached assessment confers no execution authority; owner approval is still required. No SSH execution or approval occurs.' });
     tool('request-upload', {
       target,
       file: z.object({ download_url: z.string().min(1).max(16384), file_id: z.string().min(1).max(1024), mime_type: z.string().max(255).optional(), file_name: z.string().max(255).optional() }).strict(),

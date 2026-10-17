@@ -21,7 +21,10 @@ test('registration risk feedback precedes persistence and carries proposals rath
   assert.equal(f.events[0].id, feedback.reviewId); assert.notEqual(f.events[0].id, feedback.reviewToken);
   assert.equal(feedback.feedback[0].level, 'high_risk'); assert.match(feedback.feedback[0].warning, /rm/);
   assert.deepEqual(f.calls[0].proposedCommands, ['sudo', 'rm']); assert.equal(f.calls[0].userApproval, undefined);
-  assert.doesNotMatch(JSON.stringify(f.calls[0]), /thresholds|targetRevision|aws-local|explicit/);
+  assert.doesNotMatch(JSON.stringify(f.calls[0]), /thresholds|explicit/);
+  const details = JSON.parse(f.calls[0].context);
+  assert.equal(details.serverFacts.targetRevision, rule().targetRevision); assert.equal(details.serverFacts.profile, 'aws-local');
+  assert.match(details.callerSituation, /not yet approved/);
   assert.equal(f.review.set(policy, 0, feedback.reviewToken, true).revision, 1);
 });
 
