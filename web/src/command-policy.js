@@ -1,4 +1,16 @@
 const RECOMMENDED = { pwd: '현재 위치', ls: '파일 목록', stat: '파일 정보', df: '디스크 여유 공간', du: '폴더 용량', uname: '시스템 정보', uptime: '가동 시간', whoami: '현재 사용자', id: '사용자 권한 정보', hostname: '서버 이름' };
+// Local descriptions help selection; registration risk feedback remains authoritative.
+const CATALOG = [...Object.entries(RECOMMENDED).map(([name, description]) => [name, description, '조회']),
+  ['cat', '파일 내용 보기', '조회'], ['head', '파일 앞부분 보기', '조회'], ['tail', '파일 뒷부분과 로그 보기', '조회'],
+  ['wc', '줄·단어·글자 수 세기', '조회'], ['grep', '파일 내용에서 글자나 문장 검색', '조회'], ['find', '파일·폴더 찾기', '조회·변경'],
+  ['sort', '텍스트 줄 정렬', '조회·변경'], ['uniq', '연속으로 중복된 줄 정리', '조회'], ['ps', '실행 중인 프로세스 목록', '조회'],
+  ['top', '프로세스와 CPU 사용량 보기', '조회'], ['free', '메모리 사용량 보기', '조회'], ['date', '날짜와 시간 확인·설정', '조회·변경'],
+  ['ss', '네트워크 연결과 포트 보기', '조회'], ['ip', '네트워크 주소 확인·설정', '조회·변경'], ['ping', '네트워크 연결 확인', '네트워크'],
+  ['curl', 'URL로 네트워크 요청 보내기', '네트워크·변경'], ['journalctl', '시스템 서비스 로그 확인·관리', '조회·변경'],
+  ['systemctl', '서비스 상태 확인·시작·중지', '조회·변경'], ['cp', '파일 복사', '변경'], ['mv', '파일 이동·이름 변경', '변경'],
+  ['mkdir', '폴더 만들기', '변경'], ['touch', '파일 만들기·수정 시각 변경', '변경'], ['rm', '파일·폴더 삭제', '삭제'],
+  ['chmod', '파일 접근 권한 변경', '권한 변경'], ['chown', '파일 소유자 변경', '권한 변경'], ['tar', '파일 묶기·풀기', '조회·변경'],
+  ['kill', '프로세스에 신호 보내기·종료', '변경'], ['sudo', '다른 사용자 권한으로 명령 실행', '권한 사용']];
 const CURRENT = 'ssh-command-risk-v4', BASIS = 'safety-probability-v1';
 const legacy = threshold => threshold && (threshold.questionVersion !== CURRENT || threshold.basis !== BASIS);
 
@@ -12,7 +24,7 @@ export function createCommandPolicyEditor({ document, api }) {
     return node;
   };
   const root = el('details', '', 'request policy-editor'); root.id = 'command-policy';
-  root.append(el('summary', '자동승인 설정'), el('p', '반복되는 승인 요청을 줄이세요. 명령을 고르고, 위험도를 확인한 뒤 저장하면 됩니다.', 'policy-intro'));
+  root.append(el('summary', '자동승인 설정'), el('p', '기본 조회 명령이 준비돼 있습니다. 필요한 명령을 검색해 고르고, 위험도를 확인한 뒤 저장하세요.', 'policy-intro'));
   const reload = el('button', '다시 불러오기', 'secondary'); reload.type = 'button'; reload.setAttribute('aria-label', '서버 설정 다시 불러오기');
   const message = el('p', '', 'policy-message'); message.setAttribute('role', 'status');
   const toolbar = el('div', '', 'policy-toolbar'); toolbar.append(message, reload); root.append(toolbar);
@@ -38,11 +50,10 @@ export function createCommandPolicyEditor({ document, api }) {
   };
   const one = section(1, '명령 고르기');
   const target = field(one, '설정할 서버', 'select');
-  const recommend = el('button', '조회 명령 10개 추가', 'secondary'); recommend.type = 'button'; one.append(recommend);
-  const examples = el('details', '', 'policy-details'); examples.append(el('summary', '어떤 명령이 추가되나요?'));
-  const list = el('dl', '', 'policy-examples');
-  for (const [name, description] of Object.entries(RECOMMENDED)) list.append(el('dt', name), el('dd', description));
-  examples.append(list); one.append(examples);
+  const search = field(one, '명령 검색', 'input', 'search', '자주 쓰는 Linux 명령을 이름이나 설명으로 찾습니다. 검색은 서버에서 명령을 실행하지 않습니다.');
+  search.placeholder = '예: grep, 파일 찾기, 프로세스'; search.autocomplete = 'off'; search.maxLength = 100;
+  const searchStatus = el('p', '', 'policy-help'); searchStatus.setAttribute('role', 'status'); one.append(searchStatus);
+  const searchResults = el('div', '', 'policy-search-results'); searchResults.setAttribute('role', 'group'); searchResults.setAttribute('aria-label', '명령 검색 결과'); searchResults.hidden = true; one.append(searchResults);
   const commands = field(one, '자동승인할 명령', 'textarea', '', '이름만 한 줄에 하나. 예: ls (-l 같은 옵션은 빼주세요.)'); commands.rows = 5; commands.spellcheck = false;
   const count = el('p', '', 'policy-help'); one.append(count);
   one.append(el('p', '등록된 조회 명령은 추가 승인 없이 실행됩니다. 위험 징후가 있으면 Jev나 사용자에게 확인합니다.', 'policy-help'));
@@ -105,6 +116,8 @@ export function createCommandPolicyEditor({ document, api }) {
   }
   function update() {
     count.textContent = commands.value.split(/\r?\n/).filter(line => line.trim()).length + '개 입력 · 최대 128개';
+    const selected = commands.value.split(/\r?\n/).map(line => line.trim());
+    for (const input of searchResults.querySelectorAll('input')) input.checked = selected.includes(input.value);
     scoreBox.hidden = !disclosure.checked && !execution.checked && !original?.thresholds.jev;
     transmissionNote.hidden = !execution.checked || disclosure.checked;
     transmissionNote.textContent = '정보 전송을 허용하지 않아 Jev 자동 실행은 작동하지 않습니다. 등록 명령의 자동승인은 유지됩니다.';
@@ -129,13 +142,14 @@ export function createCommandPolicyEditor({ document, api }) {
   function show() {
     original = snapshot.targets.find(rule => rule.targetId === target.value);
     changed.clear(); converted.clear(); loadHint.hidden = true; invalidate('설정을 확인하고 위험도 확인을 눌러주세요.');
-    commands.value = (original?.commands ?? []).join('\n'); denied.value = (original?.deniedCommands ?? []).join('\n');
+    commands.value = (original ? original.commands : Object.keys(RECOMMENDED)).join('\n'); denied.value = (original?.deniedCommands ?? []).join('\n');
+    search.value = ''; renderSearch();
     disclosure.checked = original?.externalDisclosure ?? false; execution.checked = original?.modelExecution ?? false; fallback.value = original?.fallback ?? '';
     for (const [provider, inputs] of Object.entries(scores)) {
       inputs.model.value = original?.thresholds[provider]?.model ?? (provider === 'jev' ? 'jev-1.13.0' : '');
       inputs.score.value = String((original?.thresholds[provider]?.minLowRisk ?? 0.9) * 100);
     }
-    message.textContent = nameOf(target.value) + ' · ' + (original?.commands.length ?? 0) + '개 명령이 저장돼 있습니다.';
+    message.textContent = original ? nameOf(target.value) + ' · ' + original.commands.length + '개 명령이 저장돼 있습니다.' : nameOf(target.value) + ' · 기본 조회 명령을 초안에 채웠습니다. 위험도 확인 후 저장하세요.';
     update();
   }
   async function load() {
@@ -151,15 +165,31 @@ export function createCommandPolicyEditor({ document, api }) {
   root.ontoggle = () => { if (root.open && !snapshot && !loading) load(); }; reload.onclick = load;
   target.onchange = () => { error(''); show(); };
   form.oninput = event => {
-    if (event.target === acknowledged || event.target === target) return;
+    if (event.target === acknowledged || event.target === target || event.target === search || searchResults.contains(event.target)) return;
     for (const [provider, inputs] of Object.entries(scores)) if ([inputs.model, inputs.score].includes(event.target)) changed.add(provider);
     loadHint.hidden = false; error(''); invalidate(); update();
   };
-  recommend.onclick = () => {
-    const lines = commands.value.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
-    commands.value = [...lines, ...Object.keys(RECOMMENDED).filter(name => !lines.includes(name))].join('\n');
-    loadHint.hidden = false; invalidate('추천 조회 명령을 추가했습니다. 위험도를 확인해 주세요.'); error(''); update();
-  };
+  function renderSearch() {
+    const query = search.value.trim().toLowerCase(); searchResults.replaceChildren(); searchResults.hidden = !query;
+    if (!query) { searchStatus.textContent = '명령 이름이나 하고 싶은 일을 검색하세요. 목록에 없는 명령은 아래에 직접 입력할 수 있습니다.'; return; }
+    const terms = query.split(/\s+/), matches = CATALOG.filter(item => terms.every(term => item.join(' ').toLowerCase().includes(term)));
+    searchStatus.textContent = matches.length ? matches.length + '개 검색 결과 · 체크하면 자동승인 초안에 추가됩니다.' : '검색 결과가 없습니다. 아래에 명령 이름을 직접 입력할 수 있습니다.';
+    for (const [name, description, category] of matches.slice(0, 12)) {
+      const label = el('label', '', 'policy-command-option'), input = el('input'); input.type = 'checkbox'; input.value = name; input.setAttribute('aria-label', name + ' 선택');
+      const text = el('span'); text.append(el('strong', name), el('small', description + ' · ' + category)); label.append(input, text); searchResults.append(label);
+      input.onchange = () => {
+        const lines = commands.value.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+        if (input.checked && !lines.includes(name) && lines.length >= 128) { input.checked = false; error('자동승인 명령은 최대 128개까지 등록할 수 있습니다.'); return; }
+        commands.value = (input.checked ? [...lines.filter(item => item !== name), name] : lines.filter(item => item !== name)).join('\n');
+        loadHint.hidden = false; invalidate('선택한 명령이 바뀌었습니다. 위험도를 다시 확인해 주세요.'); error(''); update();
+      };
+    }
+    const selected = commands.value.split(/\r?\n/).map(line => line.trim());
+    for (const input of searchResults.querySelectorAll('input')) input.checked = selected.includes(input.value);
+    if (matches.length > 12) searchResults.append(el('p', '처음 12개를 표시합니다. 검색어를 더 입력해 범위를 좁혀주세요.', 'policy-help'));
+  }
+  search.oninput = renderSearch;
+  search.onkeydown = event => { if (event.key === 'Enter' && !event.isComposing) event.preventDefault(); };
   for (const [provider, inputs] of Object.entries(scores)) inputs.convert.onclick = () => { converted.add(provider); changed.add(provider); invalidate('점수 방식 전환을 선택했습니다. 변경 내용과 위험도를 확인해 주세요.'); update(); };
   acknowledged.onchange = () => {
     if (!reviewed || Date.now() >= reviewed.expiresAt) { invalidate('확인 결과가 만료됐습니다. 입력은 유지됩니다. 위험도를 다시 확인해 주세요.'); return; }

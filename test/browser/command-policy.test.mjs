@@ -74,10 +74,14 @@ for (const width of [375, 390]) test('simple registration preserves explicit con
   assert.equal(await page.getByRole('checkbox', { name: /^Jev 판단으로도/ }).isChecked(), false);
   assert.equal(await page.getByLabel('jev 모델 ID', { exact: true }).isVisible(), false);
   assert.equal(await page.getByLabel(/기준 근거 참조/).count(), 0);
+  assert.deepEqual((await names(page).inputValue()).split('\n'), recommended);
+  assert.equal(await page.getByRole('button', { name: '조회 명령 10개 추가' }).count(), 0);
+  assert.equal(f.posts.length, 0); assert.deepEqual((await f.api('/api/command-policy')).targets, []);
   await names(page).fill('ls\nsudo');
-  await page.getByRole('button', { name: '조회 명령 10개 추가' }).click();
-  await page.getByRole('button', { name: '조회 명령 10개 추가' }).click();
-  assert.deepEqual((await names(page).inputValue()).split('\n'), ['ls', 'sudo', ...recommended.filter(name => name !== 'ls')]);
+  await page.getByLabel('명령 검색', { exact: true }).fill('pwd');
+  await page.getByRole('checkbox', { name: 'pwd 선택', exact: true }).check();
+  await page.getByRole('checkbox', { name: 'pwd 선택', exact: true }).check();
+  assert.deepEqual((await names(page).inputValue()).split('\n'), ['ls', 'sudo', 'pwd']);
   assert.equal(await page.getByRole('checkbox', { name: /^Jev에 정보 전송/ }).isChecked(), false);
   await names(page).fill('ls -l'); await review(page).click();
   await page.getByRole('alert').getByText(/1번째 줄/).waitFor();
@@ -101,7 +105,7 @@ for (const width of [375, 390]) test('simple registration preserves explicit con
 }, { width }));
 
 test('Jev 90 percent needs no manual reference and persists exactly the reviewed candidate', async () => fixture(async f => {
-  const { page } = f; await f.open(); await page.getByRole('button', { name: '조회 명령 10개 추가' }).click();
+  const { page } = f; await f.open();
   await page.getByRole('checkbox', { name: /^Jev에 정보 전송/ }).check();
   await page.getByRole('checkbox', { name: /^Jev 판단으로도/ }).check();
   assert.equal(await page.getByLabel('Jev 자동승인 기준 (%)', { exact: true }).inputValue(), '90');
@@ -142,7 +146,7 @@ test('legacy, 80 percent, fallback, denied rules and other targets survive comma
   assert.deepEqual(migrated[0].thresholds.luna, thresholds.luna); assert.deepEqual(migrated[0].thresholds.sonnet, thresholds.sonnet); assert.deepEqual(migrated[1], policy.targets[1]);
 }, { multi: true }));
 
-for (const mode of ['edit', 'recommend', 'target']) test('late review cannot authorize a changed draft: ' + mode, async () => fixture(async f => {
+for (const mode of ['edit', 'select', 'target']) test('late review cannot authorize a changed draft: ' + mode, async () => fixture(async f => {
   const { page } = f; await f.open(); await names(page).fill('ls');
   let entered, release;
   const started = new Promise(resolve => { entered = resolve; }), held = new Promise(resolve => { release = resolve; });
@@ -152,7 +156,7 @@ for (const mode of ['edit', 'recommend', 'target']) test('late review cannot aut
   const response = page.waitForResponse(r => r.url().endsWith('/api/command-policy/review'));
   await review(page).click(); await started;
   if (mode === 'edit') await names(page).fill('pwd');
-  else if (mode === 'recommend') await page.getByRole('button', { name: '조회 명령 10개 추가' }).click();
+  else if (mode === 'select') { await page.getByLabel('명령 검색', { exact: true }).fill('grep'); await page.getByRole('checkbox', { name: 'grep 선택', exact: true }).check(); }
   else {
     const selector = page.getByLabel('설정할 서버', { exact: true });
     await selector.selectOption('beta');
@@ -186,3 +190,45 @@ test('local high-risk warning remains prominent even when Jev reports low risk',
   assert.equal(await page.locator('.policy-risk').getAttribute('data-level'), 'high_risk');
   assert.equal(await save(page).isDisabled(), true); assert.equal((await f.api('/api/command-policy')).targets.length, 0);
 }));
+
+test('command search matches descriptions, preserves review for filters, and selection clears OK', async () => fixture(async f => {
+  const {page}=f;await f.open();const search=page.getByLabel('명령 검색',{exact:true});
+  await search.fill('프로세스');await page.getByRole('checkbox',{name:'ps 선택',exact:true}).waitFor();
+  assert.equal(await page.getByRole('checkbox',{name:'grep 선택',exact:true}).count(),0);
+  await search.fill('파일 찾기');await page.getByRole('checkbox',{name:'find 선택',exact:true}).waitFor();
+  await search.fill('grep');const choice=page.getByRole('checkbox',{name:'grep 선택',exact:true});await choice.check();
+  assert.equal(await choice.evaluate(node=>node===document.activeElement),true);
+  assert.equal((await names(page).inputValue()).split('\n').filter(name=>name==='grep').length,1);
+  await choice.uncheck();assert.deepEqual((await names(page).inputValue()).split('\n'),recommended);
+  await f.checked();await ok(page).check();await search.fill('메모리');
+  assert.equal(await save(page).isDisabled(),false);assert.equal(await ok(page).isChecked(),true);
+  await search.press('Enter');
+  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+  assert.equal(f.posts.filter(item=>item.path==='/api/command-policy').length,0);
+  assert.equal(await ok(page).isChecked(),true);assert.equal(await save(page).isDisabled(),false);
+  await page.getByRole('checkbox',{name:'free 선택',exact:true}).check();
+  assert.equal(await save(page).isDisabled(),true);assert.equal(await ok(page).isChecked(),false);
+  await search.fill('not-a-known-command');await page.getByText(/검색 결과가 없습니다/).waitFor();
+  assert.equal(f.calls.length,0);assert.equal(f.posts.length,1);
+  await search.fill('파일');await screenshot(page,'mobile-search-files');
+  await page.setViewportSize({width:1200,height:900});await search.fill('프로세스');await screenshot(page,'desktop-search-processes');
+}));
+
+test('search Enter keeps the reviewed draft unsaved until the save button is clicked',async()=>fixture(async f=>{
+  await f.open();const {page}=f;await f.checked();await ok(page).check();
+  const search=page.getByLabel('명령 검색',{exact:true});await search.fill('grep');await search.press('Enter');
+  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+  assert.equal(f.posts.filter(item=>item.path==='/api/command-policy').length,0);
+  assert.deepEqual((await f.api('/api/command-policy')).targets,[]);
+  await f.commit();assert.equal(f.posts.filter(item=>item.path==='/api/command-policy').length,1);
+  assert.deepEqual((await f.api('/api/command-policy')).targets[0].commands,recommended);
+}));
+
+test('saved empty and custom command policies are not replaced by defaults',async()=>fixture(async f=>{
+  const initial=await f.api('/api/command-policy');
+  await f.seed({targets:initial.bindings.map((binding,index)=>({targetId:binding.targetId,targetRevision:binding.targetRevision,profile:binding.profile,commands:index?['custom-check']:[],deniedCommands:[],externalDisclosure:false,modelExecution:false,fallback:null,thresholds:{}}))});
+  await f.open();const {page}=f;assert.equal(await names(page).inputValue(),'');
+  await page.getByLabel('설정할 서버',{exact:true}).selectOption('beta');assert.equal(await names(page).inputValue(),'custom-check');
+  await page.getByLabel('설정할 서버',{exact:true}).selectOption('alpha');assert.equal(await names(page).inputValue(),'');
+  assert.equal(f.posts.length,0);
+},{multi:true}));
