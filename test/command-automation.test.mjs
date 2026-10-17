@@ -12,15 +12,15 @@ import { createAikSshTool } from '../src/adapters/aik/ssh-tool.mjs';
 const low = { status: 'assessed', model: 'jev-1.13.0', label: 'low_risk', confidence: 1,
   probabilities: { low_risk: 1, high_risk: 0, uncertain: 0 } };
 const env = { BRIDGE_MCP_TOKEN: 'fixture-mcp', BRIDGE_ADMIN_TOKEN: 'fixture-owner', BRIDGE_UI_TICKET_KEY: 'a'.repeat(64), BRIDGE_ADMIN_ORIGIN: 'https://owner.test', BRIDGE_COMMAND_AUTOMATION: 'true' };
-const threshold = model => ({ model, questionVersion: 'ssh-command-risk-v2', minLowRisk: 0.99, minConfidence: 0.99, validationRef: 'synthetic:test-only' });
+const threshold = model => ({ model, questionVersion: 'ssh-command-risk-v3', minLowRisk: 0.99, minConfidence: 0.99, validationRef: 'synthetic:test-only' });
 async function fixture(t, options = {}) {
   const root = await mkdtemp(join(tmpdir(), 'command-automation-')), executions = [], inputs = [], events = [];
-  const evaluator = { model: 'jev-1.13.0', questionVersion: 'ssh-command-risk-v2', async assess(input) { inputs.push(input); return low; } };
+  const evaluator = { model: 'jev-1.13.0', questionVersion: 'ssh-command-risk-v3', async assess(input) { inputs.push(input); return low; } };
   const make = () => createApplication({ registry: { getProfile: name => ({ host: '127.0.0.1', port: 22, user: 'fixture', readOnly: name === 'aws-readonly' }), closeAll: async () => {} },
     classify: classifyCommand, executeCommand: async (profile, command) => { executions.push({ profile, command }); return { failed: false, texts: ['ok'] }; },
     audit: event => events.push(event), transferRoot: root, uiHtml: '<html>fixture</html>', env,
     riskEvaluators: { jev: evaluator }, ...options,
-    ...(options.riskEvaluators ? { riskEvaluators: Object.fromEntries(Object.entries(options.riskEvaluators).map(([key, value]) => [key, { questionVersion: 'ssh-command-risk-v2', ...value }])) } : {}) });
+    ...(options.riskEvaluators ? { riskEvaluators: Object.fromEntries(Object.entries(options.riskEvaluators).map(([key, value]) => [key, { questionVersion: 'ssh-command-risk-v3', ...value }])) } : {}) });
   let app = await make();
   await new Promise(resolve => app.adminHttp.listen(0, '127.0.0.1', resolve));
   let url = `http://127.0.0.1:${app.adminHttp.address().port}`;
@@ -32,7 +32,9 @@ async function fixture(t, options = {}) {
     const { body: current } = await api('/api/command-policy'), binding = current.bindings[0];
     const rule = { targetId: binding.targetId, targetRevision: binding.targetRevision, profile: binding.profile,
       commands: ['ls', 'sudo', 'rm'], deniedCommands: [], externalDisclosure: true, modelExecution: false, fallback: null, thresholds: {}, ...changes };
-    const result = await api('/api/command-policy', { expectedRevision: current.revision, policy: { targets: [rule] } });
+    const proposal = { expectedRevision: current.revision, policy: { targets: [rule] } };
+    const review = await api('/api/command-policy/review', proposal); assert.equal(review.status, 200);
+    const result = await api('/api/command-policy', { ...proposal, reviewToken: review.body.reviewToken, acknowledged: true });
     assert.equal(result.status, 200); return result.body;
   };
   const run = async (command, key) => {
@@ -55,6 +57,12 @@ test('command set ignores arguments; risky arguments and nested execution do not
     const job = await f.run(command); assert.equal(job.state, 'pending'); assert.equal(job.decision.reasonCode, 'observation_only'); assert.equal(job.approvalMode, undefined);
   }
   assert.equal(f.executions.length, 3); assert.equal(f.inputs.length, 3);
+  for (const input of f.inputs) {
+    assert.deepEqual(input.preapprovedCommands, ['ls', 'sudo', 'rm']);
+    assert.equal(input.userApproval.explicit, true);
+    assert.equal(input.userApproval.statement, '이 명령은 사용자가 명시적으로 승인했습니다.');
+    assert.equal(input.userApproval.scope, 'command-name');
+  }
   assert.equal(inspectCommand('sudo id', classifyCommand).risky, false);
 });
 
@@ -64,8 +72,9 @@ test('model OR path executes sudo and unmatched commands only with measured prov
   assert.equal(job.state, 'completed'); assert.equal(job.decision.reasonCode, 'model_passed');
   assert.equal(job.approvalMode, 'automatic');
   assert.equal(f.executions[0].command, 'sudo systemctl restart synthetic.service');
-  assert.deepEqual(Object.keys(f.inputs[0]).sort(), ['command', 'context', 'environment', 'target']);
-  assert.doesNotMatch(JSON.stringify(f.inputs), /commands|threshold|preapprov|fixture-owner|127\.0\.0\.1/);
+  assert.deepEqual(Object.keys(f.inputs[0]).sort(), ['command', 'context', 'environment', 'preapprovedCommands', 'target', 'userApproval']);
+  assert.deepEqual(f.inputs[0].preapprovedCommands, []); assert.equal(f.inputs[0].userApproval.explicit, false);
+  assert.doesNotMatch(JSON.stringify(f.inputs), /threshold|fixture-owner|127\.0\.0\.1/);
 });
 
 test('missing thresholds, denied names, disclosure and sensitive-input guards never autoexecute', async t => {
@@ -126,12 +135,33 @@ test('durable admission restores interrupted evaluation/execution as unknown and
 test('owner authentication, exact Origin, revision and target bindings protect policy mutations', async t => {
   const f = await fixture(t), initial = await f.api('/api/command-policy');
   assert.equal((await f.api('/api/command-policy', undefined, { Authorization: 'Bearer fixture-mcp' })).status, 401);
+  assert.equal((await f.api('/api/command-policy/review', { expectedRevision: 0, policy: { targets: [] } }, { Authorization: 'Bearer fixture-mcp' })).status, 401);
+  assert.equal((await f.api('/api/command-policy/review', { expectedRevision: 0, policy: { targets: [] } }, { Origin: 'https://other.test' })).status, 403);
+  assert.equal((await f.api('/api/command-policy', { expectedRevision: 0, policy: { targets: [] }, acknowledged: true })).status, 409);
   assert.equal((await f.api('/api/command-policy', { expectedRevision: 0, policy: { targets: [] } }, { Origin: 'https://other.test' })).status, 403);
   await f.policy({});
   assert.equal((await f.api('/api/command-policy', { expectedRevision: initial.body.revision, policy: { targets: [] } })).status, 409);
   const rule = { ...(await f.api('/api/command-policy')).body.targets[0], targetRevision: '0'.repeat(64) };
   assert.equal((await f.api('/api/command-policy', { expectedRevision: 1, policy: { targets: [rule] } })).status, 409);
   assert.throws(() => validateCommandPolicy({ targets: [{ ...rule, commands: ['ls -la'] }] }));
+});
+
+test('a stored v2 threshold is loadable but cannot approve execution under the changed v3 question', async t => {
+  const f = await fixture(t);
+  await f.policy({ commands: [], modelExecution: true, thresholds: { jev: { ...threshold('jev-1.13.0'), questionVersion: 'ssh-command-risk-v2' } } });
+  assert.equal((await f.run('sudo id')).state, 'pending'); assert.equal(f.executions.length, 0);
+  await f.restart(); assert.equal((await f.run('sudo id')).state, 'pending');
+});
+
+test('explicit user approval is communicated but cannot replace risk assessment of dangerous arguments', async t => {
+  const inputs = [];
+  const f = await fixture(t, { riskEvaluators: { jev: { model: 'jev-1.13.0', async assess(input) {
+    inputs.push(input); return { ...low, label: 'high_risk', probabilities: { low_risk: 0, high_risk: 1, uncertain: 0 } };
+  } } } });
+  await f.policy({ commands: ['rm'], modelExecution: true, thresholds: { jev: threshold('jev-1.13.0') } });
+  const job = await f.run('rm -rf /');
+  assert.equal(inputs[0].userApproval.explicit, true); assert.equal(inputs[0].userApproval.commandName, 'rm');
+  assert.equal(job.state, 'pending'); assert.equal(f.executions.length, 0);
 });
 
 test('AIK adapter never dispatches before authority and keeps host authorization out of MCP', async () => {

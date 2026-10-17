@@ -43,13 +43,14 @@ export function createProtocolAdapters({ queue, commands, files, store, lifecycl
       const visible = jobs => filter.length ? jobs.filter(job => (job.targetId ?? 'default') === filter[0]) : jobs;
       if (req.method === 'GET' && url.pathname === '/api/targets') return json(res, 200, targets?.list() ?? { targets: [{ id: 'default', displayName: settings.targetDisplayName ?? 'SSH', enabled: true, isDefault: true }], defaultTarget: 'default' });
       if (req.method === 'GET' && url.pathname === '/api/session') return json(res, 200, { mode: adminAccess.mode });
-      if (url.pathname === '/api/command-policy' && commandPolicy) {
-        if (req.method === 'GET') return json(res, 200, commandPolicy.get());
+      if (['/api/command-policy', '/api/command-policy/review'].includes(url.pathname) && commandPolicy) {
+        if (req.method === 'GET' && url.pathname === '/api/command-policy') return json(res, 200, commandPolicy.get());
         if (req.method === 'POST') {
           const chunks = []; let size = 0;
           for await (const chunk of req) { size += chunk.length; if (size > 65536) throw Error('Policy too large'); chunks.push(chunk); }
           const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-          return json(res, 200, commandPolicy.set(body.policy, body.expectedRevision));
+          if (url.pathname.endsWith('/review')) return json(res, 200, await commandPolicy.review(body.policy, body.expectedRevision));
+          return json(res, 200, commandPolicy.set(body.policy, body.expectedRevision, body.reviewToken, body.acknowledged));
         }
       }
       const match = /^\/downloads\/([a-f0-9]{48})\/([a-f0-9]{32})$/.exec(url.pathname);

@@ -10,15 +10,15 @@
 
 금지 명령 이름은 실행문에서 리터럴 토큰으로 발견되면 차단한다. 이 목록은 프로그램 내부 효과 전체를 차단하는 OS 샌드박스가 아니다. 기존 SSH 프로필과 운영체제의 접근 제한이 최종 실행 경계를 담당한다. 명령 자동화 이외의 기존 조회·파일 경로에는 이 정책을 확대 적용하지 않는다.
 
-명령셋에 맞고 위험 징후가 없는 요청은 외부 평가자를 호출하지 않는다. 나머지 요청도 관리자가 대상별 외부 전송을 허용한 경우에만 평가한다. 모델에는 정확한 명령·대상 별칭·공개 환경 표시명·고정된 사실 맥락만 전달하며, 명령셋·일치 여부·승인 이력·임계값·자격증명은 전달하지 않는다. 알려진 비밀 입력 패턴은 전송하지 않지만 이 검사는 완전한 비밀 탐지기가 아니다. 명령 자체에 비밀을 넣지 말고 서버의 시크릿 참조 경로를 사용한다.
+명령셋에 맞고 위험 징후가 없는 요청은 외부 평가자를 호출하지 않는다. 나머지 요청도 관리자가 대상별 외부 전송을 허용한 경우에만 평가한다. 모델에는 정확한 명령·대상 별칭·공개 환경 표시명·고정 맥락과 등록한 `preapprovedCommands` 목록을 전달한다. 실제 목록과 일치하면 `userApproval.explicit=true`와 **"이 명령은 사용자가 명시적으로 승인했습니다."**라는 진술을 함께 보낸다. 일치하지 않으면 explicit=false이며 승인이 있다고 주장하지 않는다. 승인 범위는 명령 이름이고, 모델은 전체 인자와 실효 위험을 판단한다. 명령문 안에 승인됐다는 문구를 넣어도 이 승인 정보를 바꾸지 못한다. 승인 이력·임계값·자격증명은 전달하지 않는다. 알려진 비밀 입력 패턴은 전송하지 않지만 이 검사는 완전한 비밀 탐지기가 아니다. 명령 자체에 비밀을 넣지 말고 서버의 시크릿 참조 경로를 사용한다.
 
 ## 점수와 대체 평가
 
-자동 평가 질문은 `ssh-command-risk-v2`이며 기존 관측 도구의 v1 질문과 구분한다. v2는 조회 외에도 영향이 제한된 변경과 권한 상승을 평가할 수 있다. 사전 승인·사용자 허가 주장은 위험도를 낮추는 근거가 아니다. `assess-request-risk`는 기존처럼 관측 전용이며 요청을 승인하거나 실행하지 않는다.
+자동 평가 질문은 `ssh-command-risk-v3`이며 기존 관측 도구의 v1, 승인 맥락을 보내지 않던 v2와 구분한다. v3는 사용자의 명시적 사전 승인을 인정한 상태에서 인자를 포함한 실제 위험도를 판단한다. 조회 외에도 영향이 제한된 변경과 권한 상승을 평가할 수 있다. `assess-request-risk`는 기존처럼 v1 관측 전용이며 요청을 승인하거나 실행하지 않는다.
 
-처음에는 점수 기준을 입력하지 않고 관측한다. 분리된 평가 사례에서 명령·인자·셸 우회·sudo·환경 부족과 장애를 실측한 뒤 관리자가 평가자별 `model`, `questionVersion`, `minLowRisk`, `minConfidence`, `validationRef`를 설정한다. `validationRef`는 실제 검증 보고서의 참조이며 시스템이 그 보고서의 품질을 자동 인증하지 않는다. 기존 v1의 미검증 후보값을 v2에 승계하지 않는다. 점수는 실제 안전 확률이나 사고 확률의 보증이 아니다.
+처음에는 점수 기준을 입력하지 않고 관측한다. 분리된 평가 사례에서 명령·인자·셸 우회·sudo·승인 맥락·환경 부족과 장애를 실측한 뒤 관리자가 평가자별 `model`, `questionVersion`, `minLowRisk`, `minConfidence`, `validationRef`를 설정한다. `validationRef`는 실제 검증 보고서의 참조이며 시스템이 그 보고서의 품질을 자동 인증하지 않는다. 기존 v1/v2의 점수 기준을 v3에 승계하지 않는다. 저장된 v2 기준은 읽을 수 있지만 v3 실행을 승인하지 못하며, 웹에서 갱신하려면 새 검증 보고서 참조가 필요하다. 점수는 실제 안전 확률이나 사고 확률의 보증이 아니다.
 
-Jev는 기존 로컬 시크릿 참조와 `BRIDGE_JEV_ENABLED=true`를 사용한다. Luna 또는 Sonnet은 신뢰된 호스트가 `createApplication({riskEvaluators})`에 주입한다. 각 항목은 `{model, questionVersion:'ssh-command-risk-v2', assess(input, {signal, question, questionVersion})}`를 제공한다. 결과는 `{status:'assessed', model, label, confidence, probabilities:{low_risk,high_risk,uncertain}}` 형식이다. 확률 분포·모델·질문 판본을 검증한다. 이 포트는 실제 공급자 SDK·AIK backend 연결용이며 임의 endpoint나 에이전트가 주는 점수 입력 도구가 아니다. 독립 실행형 설치에 Luna/Sonnet API 연결을 내장하지 않는다.
+Jev는 기존 로컬 시크릿 참조와 `BRIDGE_JEV_ENABLED=true`를 사용한다. Luna 또는 Sonnet은 신뢰된 호스트가 `createApplication({riskEvaluators})`에 주입한다. 각 항목은 `{model, questionVersion:'ssh-command-risk-v3', assess(input, {signal, question, questionVersion})}`를 제공하며 같은 승인 맥락을 받는다. 결과는 `{status:'assessed', model, label, confidence, probabilities:{low_risk,high_risk,uncertain}}` 형식이다. 확률 분포·모델·질문 판본을 검증한다. 이 포트는 실제 공급자 SDK·AIK backend 연결용이며 임의 endpoint나 에이전트가 주는 점수 입력 도구가 아니다. 독립 실행형 설치에 Luna/Sonnet API 연결을 내장하지 않는다.
 
 설정된 대체 평가자 하나는 Jev 미설정·장애·평가 불가 때만 사용한다. 유효한 위험·불확실·낮은 점수를 받은 뒤 대체 모델에서 통과를 시도하지 않는다. 평가자별 기준은 공유하지 않는다. 호출당 10초, 한 요청에서 최대 두 평가자, 모든 대상 합산 프로세스 시도 상한은 `BRIDGE_JEV_MAX_CALLS`이다. 기존 명시적 관측 도구는 별도 상한을 사용한다. 재시작하면 이 호출 예산은 초기화되며 영속 비용 상한은 아니다.
 
@@ -28,7 +28,9 @@ Jev는 기존 로컬 시크릿 참조와 `BRIDGE_JEV_ENABLED=true`를 사용한�
 
 실제 실행 승인 시 `approvalMode`를 `automatic` 또는 `owner`로 기록한다. 카드와 관리자 이력은 `automatic`일 때 **자동승인**을 표시하고 실행 중·완료·실패 상태는 별도로 유지한다. 자동 실행 후보라는 이유만으로 승인 대기 요청을 자동승인으로 표시하지 않는다. 이 정보는 재시작 후에도 보존한다.
 
-관리자 전용 `GET /api/command-policy`는 revision·대상 바인딩을 반환한다. `POST /api/command-policy`는 `{expectedRevision,policy:{targets:[...]}}`를 받는다. 각 대상은 `targetId,targetRevision,profile,commands,deniedCommands,externalDisclosure,modelExecution,fallback,thresholds`를 가진다. MCP에는 정책 변경 도구가 없다. 기존 소유자 인증과 정확한 Origin을 요구하며 stale revision·다른 대상 바인딩은 거절한다. 정책 변경 후 진행 중인 이전 자동 결정은 폐기한다.
+관리자 전용 `GET /api/command-policy`는 revision·대상 바인딩을 반환한다. 등록은 **위험도 확인 → 피드백 확인 및 OK → 정책 저장** 순서다. `POST /api/command-policy/review`에 `{expectedRevision,policy:{targets:[...]}}`를 보내면 변경 대상의 피드백과 5분 동안 유효한 일회용 `reviewToken`을 받는다. 등록 전 평가는 별도 `ssh-command-set-risk-v1` 질문을 사용하며 `proposedCommands`만 제안으로 보내고 사용자 승인이 있었다고 주장하지 않는다. 외부 전송 허용 및 Jev 설정·예산이 있으면 실제 점수를 받는다. 평가 불가 시 불확실함을 명시하며 알려진 변경·임의 실행·전송 기능도 별도로 경고한다. sudo 이름만으로 위험 판정하지 않는다.
+
+등록할 때 `POST /api/command-policy`에 같은 정책·revision과 `reviewToken`, `acknowledged:true`를 보내야 한다. 확인 없이 직접 등록하거나 후보를 바꾸거나 만료·사용된 확인값을 재사용하면 거절한다. 사용자 OK는 높은 위험도 피드백을 확인한 경우에도 명령 이름의 명시적 등록 승인이며, 위험 신호가 있는 실제 실행의 모델 판단을 생략하지 않는다. 각 대상은 `targetId,targetRevision,profile,commands,deniedCommands,externalDisclosure,modelExecution,fallback,thresholds`를 가진다. MCP에는 정책 변경 도구가 없다. 기존 소유자 인증과 정확한 Origin을 요구하며 stale revision·다른 대상 바인딩은 거절한다. 정책 변경 후 진행 중인 이전 자동 결정은 폐기한다. 재시작하면 미등록 피드백 확인값은 사라지므로 다시 확인해야 한다.
 
 선택 입력 `requestKey`는 16~128자의 영문·숫자·`_.:-`로 구성한다. 같은 키와 같은 대상·프로필·명령은 기존 상태를 반환하고, 내용이 다르면 충돌이다. 키를 생략한 새 호출은 새 실행 요청이다. 자동화가 꺼져 있으면 키 입력을 거절한다.
 

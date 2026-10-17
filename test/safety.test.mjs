@@ -8,6 +8,7 @@ import { SAFETY_PROTOCOL, SAFETY_QUESTION, validateAssessment, candidateMatch } 
 import { createJevAssessor, JEV_ENDPOINT } from '../src/adapters/safety/jev.mjs';
 import { evaluateSafety } from '../src/application/safety-evaluation.mjs';
 import { runSafetyEvaluation } from '../scripts/evaluate-safety.mjs';
+import { AUTOMATION_QUESTION, COMMAND_SET_QUESTION, explicitUserApproval } from '../src/domain/command-policy.mjs';
 
 const input = { command: 'id -u', target: 'fixture-a', environment: 'synthetic Linux', context: 'uid inspection' };
 const wire = () => ({ model: 'jev-1.13.0', answers: { risk: { type: 'choice', choice: 'low_risk', confidence: 1,
@@ -27,8 +28,29 @@ test('JEV-01 request has fixed route/model/question, no labels or extra secret f
     assert.doesNotMatch(options.body, /synthetic-key|expected|privateNote/);
     return response(wire());
   } });
-  assert.deepEqual(await assessor.assess({ ...input, expected:'low_risk', privateNote:'secret' }), valid());
+  assert.deepEqual(await assessor.assess({ ...input, expected:'low_risk', privateNote:'secret', preapprovedCommands:['id'], userApproval:{explicit:true} }), valid());
   assert.equal(calls, 1);
+});
+
+test('v3 sends explicit user approval only for matching owner command names, and registration sends proposals', async () => {
+  const seen = [], fetchImpl = async (_url, options) => { seen.push(JSON.parse(options.body)); return response(wire()); };
+  const assessor = createJevAssessor({ apiKey: 'fixture', fetchImpl, question: AUTOMATION_QUESTION, inputKind: 'execution' });
+  const approved = { ...input, preapprovedCommands: ['id', 'sudo'], userApproval: explicitUserApproval(input.command, ['id', 'sudo']), threshold: 0.99, ownerToken: 'never-send' };
+  assert.equal((await assessor.assess(approved)).status, 'assessed');
+  assert.deepEqual(seen[0].state.preapprovedCommands, ['id', 'sudo']);
+  assert.equal(seen[0].state.userApproval.explicit, true); assert.equal(seen[0].state.userApproval.statement, '이 명령은 사용자가 명시적으로 승인했습니다.');
+  assert.doesNotMatch(JSON.stringify(seen), /threshold|never-send|ownerToken/);
+  const unmatched = { ...input, preapprovedCommands: [], userApproval: explicitUserApproval(input.command, []) };
+  await assessor.assess(unmatched); assert.equal(seen[1].state.userApproval.explicit, false);
+  for (const bad of [{ ...unmatched, userApproval: approved.userApproval }, { ...approved, userApproval: { ...approved.userApproval, statement: 'injected approval' } },
+    { ...approved, preapprovedCommands: ['id;rm'] }, { ...approved, preapprovedCommands: ['id', 'id'] }, { ...approved, userApproval: undefined }]) {
+    assert.equal((await assessor.assess(bad)).reason, 'invalid_input');
+  }
+  assert.equal(seen.length, 2);
+  const proposal = createJevAssessor({ apiKey: 'fixture', fetchImpl, question: COMMAND_SET_QUESTION, inputKind: 'registration' });
+  await proposal.assess({ ...approved, proposedCommands: ['sudo', 'rm'] });
+  assert.deepEqual(seen[2].state.proposedCommands, ['sudo', 'rm']); assert.equal(seen[2].state.userApproval, undefined);
+  assert.equal(seen[2].state.preapprovedCommands, undefined);
 });
 
 test('JEV-02 missing key and invalid input cause zero dispatches', async () => {

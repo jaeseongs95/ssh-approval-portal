@@ -1,6 +1,6 @@
-import { inspectCommand, commandDigest, validatedRisk, deniedCommand, AUTOMATION_QUESTION_VERSION, AUTOMATION_QUESTION } from '../domain/command-policy.mjs';
+import { inspectCommand, commandDigest, validatedRisk, deniedCommand, explicitUserApproval, AUTOMATION_QUESTION_VERSION, AUTOMATION_QUESTION } from '../domain/command-policy.mjs';
 
-/** Policy and evaluation are separate ports; no preapproval data crosses the evaluator port. */
+/** Owner-recorded approval is evaluator input; execution authority remains a separate port. */
 export function createCommandAutomation({ queue, state, definition, classify, evaluators, audit, maxCalls = 100, budget = { used: 0 }, now = () => Date.now() }) {
   const tasks = new Map();
   const ruleFor = policy => policy.targets.find(rule => rule.targetId === definition.id && rule.targetRevision === definition.revision && rule.profile === definition.writeProfile);
@@ -18,7 +18,8 @@ export function createCommandAutomation({ queue, state, definition, classify, ev
     if (!rule?.externalDisclosure) return { reasonCode: 'disclosure_not_enabled' };
     if (inspectCommand(command, classify).sensitive) return { reasonCode: 'sensitive_input' };
     const input = { command, target: definition.id, environment: definition.displayName,
-      context: 'SSH command execution. Operating system and file contents are not independently verified. Unknown effects require uncertain.' };
+      context: 'SSH command execution. Operating system and file contents are not independently verified. Unknown effects require uncertain.',
+      preapprovedCommands: [...rule.commands], userApproval: explicitUserApproval(command, rule.commands) };
     const attempts = [];
     for (const provider of ['jev', ...(rule.fallback ? [rule.fallback] : [])]) {
       const evaluator = evaluators[provider];

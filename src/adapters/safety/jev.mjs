@@ -1,19 +1,30 @@
 import { SAFETY_PROTOCOL, SAFETY_QUESTION, safetyInput, validateAssessment } from '../../domain/safety.mjs';
+import { explicitUserApproval, approvedCommandNames } from '../../domain/command-policy.mjs';
 
 export const JEV_ENDPOINT = 'https://api.typesafe.ai/v1/systemone';
 const RESPONSE_LIMIT = 64 * 1024;
 const unavailable = reason => ({ status: 'unavailable', reason });
 
 /** Fixed endpoint, no retries/redirects, one outstanding request per adapter. */
-export function createJevAssessor({ apiKey, fetchImpl = globalThis.fetch, timeoutMs = 10_000, question = SAFETY_QUESTION } = {}) {
+export function createJevAssessor({ apiKey, fetchImpl = globalThis.fetch, timeoutMs = 10_000, question = SAFETY_QUESTION, inputKind = 'observation' } = {}) {
   if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30_000) throw Error('Invalid Jev timeout');
+  if (!['observation', 'execution', 'registration'].includes(inputKind)) throw Error('Invalid Jev input kind');
   let busy = false;
   return {
     async assess(input) {
       if (typeof apiKey !== 'string' || !apiKey.trim()) return unavailable('not_configured');
       if (busy) return unavailable('busy');
       let state;
-      try { state = safetyInput(input); } catch { return unavailable('invalid_input'); }
+      try {
+        state = safetyInput(input);
+        if (inputKind === 'execution') {
+          const approval = explicitUserApproval(state.command, input.preapprovedCommands);
+          if (!input.userApproval || Object.keys(input.userApproval).length !== 4
+            || !Object.entries(approval).every(([key, value]) => input.userApproval[key] === value)) throw Error('Invalid user approval');
+          state.preapprovedCommands = [...input.preapprovedCommands]; state.userApproval = approval;
+        }
+        if (inputKind === 'registration') state.proposedCommands = approvedCommandNames(input.proposedCommands);
+      } catch { return unavailable('invalid_input'); }
       const body = JSON.stringify({ model: SAFETY_PROTOCOL.model, state, questions: { risk: question } });
       if (Buffer.byteLength(body) > 24 * 1024) return unavailable('input_too_large');
       busy = true;

@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
 import { ApprovalQueue } from './src/domain/approval-queue.mjs';
 import { createCommandService } from './src/application/commands.mjs';
 import { createFileService } from './src/application/files.mjs';
@@ -20,7 +21,8 @@ import { createSecretService } from './src/application/secret-service.mjs';
 import { createLocalSecretStore } from './src/adapters/secrets/local-file.mjs';
 import { createCommandState } from './src/adapters/storage/command-state.mjs';
 import { createCommandAutomation } from './src/application/command-automation.mjs';
-import { AUTOMATION_QUESTION, AUTOMATION_QUESTION_VERSION } from './src/domain/command-policy.mjs';
+import { AUTOMATION_QUESTION, AUTOMATION_QUESTION_VERSION, COMMAND_SET_QUESTION } from './src/domain/command-policy.mjs';
+import { createCommandPolicyReview } from './src/application/command-policy-review.mjs';
 
 // Preserve the original injectable createApplication callback at the composition boundary.
 // Concrete runtime executors already return the neutral outcome accepted by use cases.
@@ -32,7 +34,7 @@ const commandExecutor = execute => async (profile, command) => {
 };
 
 /** Assemble concrete ports. Business policy belongs to application/domain modules. */
-export async function createApplication({ registry, classify, executeCommand, audit, transferRoot, env = process.env, uiHtml, accessKeySet, uploadSource, riskAssessor, secretResolver, riskEvaluators = {} }) {
+export async function createApplication({ registry, classify, executeCommand, audit, transferRoot, env = process.env, uiHtml, accessKeySet, uploadSource, riskAssessor, policyRiskAssessor, secretResolver, riskEvaluators = {} }) {
   const settings = parseSettings(env);
   const adminAccess = createAdminAccess(env, accessKeySet);
   const signer = new Tickets(env.BRIDGE_UI_TICKET_KEY);
@@ -52,7 +54,7 @@ export async function createApplication({ registry, classify, executeCommand, au
   const commandState = settings.commandAutomation ? createCommandState(transferRoot) : undefined;
   const evaluators = { ...riskEvaluators };
   const automationBudget = { used: 0 };
-  if (settings.jevEnabled && !evaluators.jev) evaluators.jev = { model: 'jev-1.13.0', questionVersion: AUTOMATION_QUESTION_VERSION, ...createJevAssessor({ apiKey, question: AUTOMATION_QUESTION }) };
+  if (settings.jevEnabled && !evaluators.jev) evaluators.jev = { model: 'jev-1.13.0', questionVersion: AUTOMATION_QUESTION_VERSION, ...createJevAssessor({ apiKey, question: AUTOMATION_QUESTION, inputKind: 'execution' }) };
   const source = uploadSource ?? createFileSource({ hosts: settings.uploadHosts, maxBytes: settings.maxBytes });
   const bindFileSource = url => source.bind ? source.bind(url) : {
     inspect() { const policy = source.inspect(url); return { allowed: policy.allowed, sourceHost: policy.sourceHost ?? policy.hostname }; },
@@ -84,16 +86,20 @@ export async function createApplication({ registry, classify, executeCommand, au
     const runtime = runtimes.find(runtime => runtime.id === (job.targetId ?? 'default'));
     runtime?.queue.restore(job, value => commandState.save(value));
   }
-  const commandPolicy = commandState && {
-    get: () => ({ ...commandState.policy(), bindings: runtimes.map(runtime => ({ targetId: runtime.id, targetRevision: runtime.revision, profile: runtime.writeProfile, displayName: runtime.displayName })) }),
-    set(value, expectedRevision) {
-      for (const rule of value.targets ?? []) {
+  const policyReview = commandState && createCommandPolicyReview({ state: commandState, audit, nonce: () => randomBytes(24).toString('hex'),
+    evaluator: policyRiskAssessor ?? (settings.jevEnabled ? createJevAssessor({ apiKey, question: COMMAND_SET_QUESTION, inputKind: 'registration' }) : undefined),
+    maxCalls: settings.jevMaxCalls, budget: automationBudget,
+    validateTargets(value) {
+      for (const rule of value.targets) {
         const runtime = targets.select(rule.targetId); runtime.verify();
         if (rule.targetRevision !== runtime.revision || rule.profile !== runtime.writeProfile) throw Error('Stale command policy target');
       }
-      audit({ action: 'command-policy-change-requested', policyRevision: expectedRevision });
-      return commandState.setPolicy(value, expectedRevision);
     },
+  });
+  const commandPolicy = commandState && {
+    get: () => ({ ...commandState.policy(), bindings: runtimes.map(runtime => ({ targetId: runtime.id, targetRevision: runtime.revision, profile: runtime.writeProfile, displayName: runtime.displayName })) }),
+    review: policyReview.review,
+    set: policyReview.set,
   };
   const requestSafety = createRequestSafety({ queue, maxCalls: settings.jevMaxCalls,
     assessor: settings.jevEnabled ? risk : undefined });
