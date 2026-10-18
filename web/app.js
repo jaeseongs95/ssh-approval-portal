@@ -6,6 +6,7 @@ import { createWebController } from './src/controller.js';
 import { createCommandPolicyEditor } from './src/command-policy.js';
 import { createAdminPages } from './src/pages.js';
 import { createAutomationMetricsPanel } from './src/metrics.js';
+import { createEnvironmentPanel } from './src/environment.js';
 
 const i18n = createWebI18n(navigator.language ?? 'en');
 const state = createWebState(document.body?.dataset.authMode === 'access');
@@ -17,4 +18,5 @@ controller.start();
 const pages = createAdminPages({ document, location, history });
 createCommandPolicyEditor({ document, api, onNavigate: pages.settings });
 createAutomationMetricsPanel({ document, api });
+createEnvironmentPanel({ document, api });
 pages.sync();

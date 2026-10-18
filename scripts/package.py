@@ -10,7 +10,7 @@ import zipfile
 ROOT_FILES = ['package.json', 'package-lock.json', 'bridge.mjs', 'app.mjs',
               'README.md', 'README.ko.md', 'LICENSE', 'THIRD_PARTY_NOTICES.json', '.dockerignore']
 CONFIG_FILES = ['bridge.env.example', 'config.example.toml', 'docker.example.env',
-                'ssh-approval-bridge.service', 'settings-contract.json']
+                'ssh-approval-bridge.service', 'settings-contract.json', 'ssh-approval-env.socket', 'ssh-approval-env@.service']
 SOURCE_TYPES = {
     'src': {'.mjs', '.json'},
     'scripts': {'.mjs', '.py', '.sh'},

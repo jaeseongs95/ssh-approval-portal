@@ -1,0 +1,13 @@
+[Unit]
+Description=SSH Approval Portal environment editor socket
+
+[Socket]
+ListenStream=/run/ssh-approval-env.sock
+SocketUser=mcpbridge
+SocketGroup=mcpbridge
+SocketMode=0600
+Accept=yes
+MaxConnections=8
+
+[Install]
+WantedBy=sockets.target

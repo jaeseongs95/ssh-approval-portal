@@ -10,7 +10,7 @@ const json = (res, status, value) => { res.writeHead(status, { 'Content-Type': '
 
 const escapeHtml = value => value.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
 
-export function createProtocolAdapters({ queue, commands, files, store, lifecycle, settings, signer, adminAccess, authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal, targets, requestSafety, commandPolicy, commandOutputs, automationMetrics }) {
+export function createProtocolAdapters({ queue, commands, files, store, lifecycle, settings, signer, adminAccess, authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal, targets, requestSafety, commandPolicy, commandOutputs, automationMetrics, environmentEditor }) {
   const capabilities = createCapabilities({ queue, store, signer, settings, targets, adminAuthMode: adminAccess.mode });
   const mcpServer = createMcpAdapter({ queue, commands, files, settings, capabilities, uiHtml, bindFileSource, shutdownSignal, targets, requestSafety, commandOutputs });
   const mcpHttp = createServer(async (req, res) => {
@@ -45,6 +45,17 @@ export function createProtocolAdapters({ queue, commands, files, store, lifecycl
       if (req.method === 'GET' && url.pathname === '/api/targets') return json(res, 200, targets?.list() ?? { targets: [{ id: 'default', displayName: settings.targetDisplayName ?? 'SSH', enabled: true, isDefault: true }], defaultTarget: 'default' });
       if (req.method === 'GET' && url.pathname === '/api/session') return json(res, 200, { mode: adminAccess.mode });
       if (req.method === 'GET' && url.pathname === '/api/automation-metrics' && automationMetrics) return json(res,200,automationMetrics(filter[0]));
+      if (['/api/environment', '/api/environment/restart'].includes(url.pathname) && environmentEditor) {
+        try {
+          if (req.method === 'GET' && url.pathname === '/api/environment') return json(res, 200, await environmentEditor.get());
+          if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
+          if (req.headers['content-type'] !== 'application/json') return json(res, 415, { error: 'JSON 형식으로 요청해 주세요.' });
+          const chunks = []; let size = 0;
+          for await (const chunk of req) { size += chunk.length; if (size > 32768) return json(res, 413, { error: 'ENV 변경 내용이 너무 큽니다.' }); chunks.push(chunk); }
+          let body; try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { return json(res, 400, { error: '잘못된 JSON 형식입니다.' }); }
+          return json(res, 200, await environmentEditor.mutate(url.pathname.endsWith('/restart') ? 'restart' : 'save', body));
+        } catch (error) { return json(res, 409, { error: (error.refused ? 'ENV 요청 거절: ' : '') + (error.publicMessage ?? 'ENV 작업을 완료하지 못했습니다. 현재 상태를 다시 조회해 주세요.') }); }
+      }
       const output = /^\/api\/outputs\/([a-f0-9]{48})$/.exec(url.pathname);
       if (req.method === 'GET' && output) return json(res, 200, commandOutputs.read({ outputId: output[1],
         offsetBytes: Number(url.searchParams.get('offset') ?? 0), maxBytes: Number(url.searchParams.get('limit') ?? 4096), format: url.searchParams.get('format') ?? 'text' }));

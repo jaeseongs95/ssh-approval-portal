@@ -27,6 +27,7 @@ import { CommandOutputs } from './src/adapters/storage/command-output.mjs';
 import { hash } from './src/domain/validation.mjs';
 import { createModelCatalog } from './src/application/model-catalog.mjs';
 import { createAutomationMetrics } from './src/application/automation-metrics.mjs';
+import { createEnvironmentEditor } from './src/adapters/config/environment-editor.mjs';
 
 // Preserve the original injectable createApplication callback at the composition boundary.
 // Concrete runtime executors already return the neutral outcome accepted by use cases.
@@ -38,7 +39,7 @@ const commandExecutor = execute => async (profile, command) => {
 };
 
 /** Assemble concrete ports. Business policy belongs to application/domain modules. */
-export async function createApplication({ registry, classify, executeCommand, audit, transferRoot, env = process.env, uiHtml, accessKeySet, uploadSource, riskAssessor, policyRiskAssessor, secretResolver, riskEvaluators = {} }) {
+export async function createApplication({ registry, classify, executeCommand, audit, transferRoot, env = process.env, uiHtml, accessKeySet, uploadSource, riskAssessor, policyRiskAssessor, secretResolver, riskEvaluators = {}, environmentTransport }) {
   const settings = parseSettings(env);
   const adminAccess = createAdminAccess(env, accessKeySet);
   const signer = new Tickets(env.BRIDGE_UI_TICKET_KEY);
@@ -148,13 +149,14 @@ export async function createApplication({ registry, classify, executeCommand, au
   let protocols;
   const lifecycle = createLifecycleService({ queue, store, commands, files, closeConnections: async () => { await targets.drain(); await registry.closeAll(); },
     onReap: () => { protocols?.reapCapabilities(); void modelCatalog.refreshDue(); } });
+  const environmentEditor = createEnvironmentEditor({ lifecycle, audit, ...(environmentTransport ? { transport: environmentTransport } : {}) });
   const shutdown = new AbortController();
   const [webHtml, webJs] = await Promise.all([
     readFile(new URL('./web/index.html', import.meta.url), 'utf8'),
     readFile(new URL('./web/dist/app.js', import.meta.url), 'utf8'),
   ]);
   protocols = createProtocolAdapters({ queue, commands, files, store, lifecycle, settings, signer, adminAccess, targets, requestSafety,
-    authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal: shutdown.signal, commandPolicy, commandOutputs, automationMetrics: createAutomationMetrics({state:commandState}) });
+    authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal: shutdown.signal, commandPolicy, commandOutputs, environmentEditor, automationMetrics: createAutomationMetrics({state:commandState}) });
   const timer = setInterval(() => { lifecycle.reap().catch(() => {}); try { outputs.reap(); } catch { /* Failed deletions stay charged. */ } }, 30_000); timer.unref();
   let closing;
   return { ...protocols, queue, store, targets, transfers: runtimes[0].transfers, enabled: settings.uiEnabled,

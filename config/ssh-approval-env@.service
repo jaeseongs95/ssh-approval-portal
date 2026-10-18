@@ -1,0 +1,18 @@
+[Unit]
+Description=SSH Approval Portal fixed environment operation
+
+[Service]
+Type=exec
+ExecStart=/usr/bin/python3 -I /usr/local/libexec/ssh-approval-environment-helper
+StandardInput=socket
+StandardOutput=null
+StandardError=null
+User=root
+UMask=0077
+TimeoutStartSec=20
+RuntimeMaxSec=25
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/etc /var/lib/ssh-approval-env
