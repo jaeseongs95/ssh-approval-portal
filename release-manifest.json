@@ -1,6 +1,6 @@
 {
   "version": "1.6.0",
-  "status": "candidate-pending-live-host-verification",
+  "status": "release",
   "runtime": "Node.js 24",
   "files": [
     {
@@ -130,8 +130,8 @@
     },
     {
       "path": "docs/roadmap.ko.md",
-      "size": 4826,
-      "sha256": "cb4e82f9e9376d53c66ccec1b11b6ef070b20e4c21f63f5c2859697e617c0337"
+      "size": 5248,
+      "sha256": "7376c12fa53f2ee3d730f003ac6bcca94364c2faddbc8ea8433a7eec7c6adac4"
     },
     {
       "path": "docs/secret-management.ko.md",
