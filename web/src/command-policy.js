@@ -22,7 +22,7 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
   const failure = el('p', '', 'error'); failure.setAttribute('role', 'alert'); failure.hidden = true; root.append(failure);
   const form = el('form'); form.className = 'policy-form';
   const important = el('section', '', 'request policy-editor important-settings'); important.id = 'important-settings';
-  important.append(el('h2', '중요 자동승인 설정'), el('p', '파일 업로드·다운로드와 sudo 허용 여부를 서버별로 설정합니다. 변경 후 위험도 확인·OK·저장을 거쳐야 적용됩니다.', 'policy-help'));
+  important.append(el('h2', '중요 자동승인 설정'), el('p', '파일 업로드·다운로드·sudo와 AI 평가를 통한 자동승인 허용 여부를 서버별로 설정합니다. 변경 후 위험도 확인·OK·저장을 거쳐야 적용됩니다.', 'policy-help'));
   const importantFields = el('fieldset', '', 'policy-fields'); importantFields.disabled = true; important.append(importantFields);
   const importantStatus = el('p', '서버 설정을 불러오면 현재 허용 상태를 표시합니다.', 'policy-message'); importantStatus.setAttribute('role','status'); important.append(importantStatus);
   const quickLoad = el('button', '현재 설정 불러오기', 'secondary'); quickLoad.type = 'button'; important.append(quickLoad);
@@ -60,12 +60,13 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
 
   const sudo = check(importantFields, 'sudo 자동승인 허용', '기본값은 꺼짐입니다. 켜면 sudo 안에서 실행하는 명령까지 사전승인 목록과 비교합니다. 하나라도 미등록이면 전체 명령줄을 Jev로 평가하며, 끄면 sudo는 매번 개별 승인을 받습니다.');
 
+  const execution = check(importantFields, 'Jev·다른 모델을 통한 자동승인 허용', '미등록 명령이 있으면 전체 명령줄을 평가해 저장한 기준을 충족할 때 자동 실행합니다. 정보 전송 허용과 연결된 평가 모델도 필요합니다. 끄면 미등록 명령은 개별 승인하고 사전승인 명령은 계속 자동 실행합니다.');
+
   const two = section(2, 'Jev 도움받기');
   const jevModel = field(two, 'Jev 모델', 'select', '', '선택한 모델로 실제 평가합니다. 바꾼 뒤 위험도 확인과 저장이 필요합니다.');
   const modelNote = el('p', '', 'policy-help'); two.append(modelNote);
   const disclosure = check(two, 'Jev에 정보 전송 허용', '명령·작업 상황·서버 정보를 TypeSafe의 Jev로 보냅니다. 저장 전 위험도 확인부터 전송됩니다.');
   const disclosureDetails = el('details', '', 'policy-details'); disclosureDetails.append(el('summary', '전송 정보 자세히 보기'), el('p', '등록 전에는 후보 명령셋·대상·프로필 정보를 보냅니다. 실행 판단에는 전체 명령, 작업 상황, 대상·프로필·접속대상, 명령셋과 사용자 명시적 승인 여부를 보냅니다.', 'policy-help')); two.append(disclosureDetails);
-  const execution = check(two, 'Jev 판단으로도 자동승인', '미등록 명령이 포함된 전체 명령줄을 평가하고 기준을 넘으면 실행합니다. 끄면 사전승인 목록의 명령만 자동승인합니다.');
   const transmissionNote = el('p', '', 'policy-warning'); two.append(transmissionNote);
   const scoreBox = el('div'); two.append(scoreBox);
   const probability = field(scoreBox, 'Jev 자동승인 기준 (%)', 'input', 'number', '예: 90을 입력하면 90%입니다. 모델의 낮은 위험 점수 기준이며 실제 안전을 보증하지 않습니다.');
@@ -126,8 +127,8 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
   }
   function update() {
     if (snapshot) {
-      const dirty = uploads.checked !== (original?.automaticUploads === true) || downloads.checked !== (original?.automaticDownloads === true) || sudo.checked !== (original?.automaticSudo === true);
-      importantStatus.textContent = nameOf(target.value) + ' · 저장된 설정: 파일 업로드 ' + (original?.automaticUploads === true ? '허용' : '개별 승인') + ' · 다운로드 ' + (original?.automaticDownloads === true ? '허용' : '개별 승인') + ' · sudo ' + (original?.automaticSudo === true ? '허용' : '개별 승인') + (dirty ? ' · 변경 사항은 아직 저장되지 않았습니다.' : '');
+      const dirty = uploads.checked !== (original?.automaticUploads === true) || downloads.checked !== (original?.automaticDownloads === true) || sudo.checked !== (original?.automaticSudo === true) || execution.checked !== (original?.modelExecution === true);
+      importantStatus.textContent = nameOf(target.value) + ' · 저장된 설정: 파일 업로드 ' + (original?.automaticUploads === true ? '허용' : '개별 승인') + ' · 다운로드 ' + (original?.automaticDownloads === true ? '허용' : '개별 승인') + ' · sudo ' + (original?.automaticSudo === true ? '허용' : '개별 승인') + ' · AI 평가 자동승인 ' + (original?.modelExecution === true ? '허용' : '개별 승인') + (dirty ? ' · 변경 사항은 아직 저장되지 않았습니다.' : '');
     }
     count.textContent = commands.value.split(/\r?\n/).filter(line => line.trim()).length + '개 입력 · 최대 128개';
     const selected = commands.value.split(/\r?\n/).map(line => line.trim());
@@ -196,7 +197,7 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
     if (event.target === acknowledged || event.target === target || event.target === search || searchResults.contains(event.target)) return;
     for (const [provider, inputs] of Object.entries(scores)) if ([inputs.model, inputs.score].includes(event.target)) changed.add(provider);
     loadHint.hidden = false; error(''); clearFieldErrors(); invalidate();
-    if ([uploads, downloads, sudo].includes(event.target)) { onNavigate(); root.open = true; }
+    if ([uploads, downloads, sudo, execution].includes(event.target)) { onNavigate(); root.open = true; }
     update();
   };
   function renderSearch() {

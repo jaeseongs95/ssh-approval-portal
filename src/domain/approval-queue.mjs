@@ -22,10 +22,10 @@ export class ApprovalQueue {
     this.identity = identity && Object.freeze({ ...identity }); this.claimExecution = claimExecution;
     this.jobs = new Map(); this.active = null; this.maintenance = false;
   }
-  submit(command, safeOnly = false, context = '') {
+  submit(command, safeOnly = false, context = '', displayContext = '') {
     const { class: commandClass } = validateCommand(command, this.classify, safeOnly);
-    context = callerContext(context);
-    return this.submitOperation({ kind: 'command', command, ...(context ? { context } : {}) }, commandClass);
+    context = callerContext(context); displayContext = callerContext(displayContext);
+    return this.submitOperation({ kind: 'command', command, ...(context ? { context } : {}), ...(displayContext ? { displayContext } : {}) }, commandClass);
   }
   submitOperation(operation, commandClass = 'privileged') {
     if (this.maintenance) throw Error('Maintenance in progress');

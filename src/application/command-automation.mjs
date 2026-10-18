@@ -63,11 +63,11 @@ export function createCommandAutomation({ queue, state, definition, classify, ev
     return { reasonCode: 'evaluation_unavailable', attempts };
   }
   return {
-    run(command, requestKey, context = '') {
-      context = callerContext(context);
+    run(command, requestKey, context = '', displayContext = '') {
+      context = callerContext(context); displayContext = callerContext(displayContext);
       if (requestKey !== undefined && !/^[A-Za-z0-9_.:-]{16,128}$/.test(requestKey)) throw Error('Invalid request key');
       definition.verify();
-      const digest = commandDigest(command, definition.revision, definition.writeProfile, context);
+      const digest = commandDigest(command, definition.revision, definition.writeProfile, context, displayContext);
       if (requestKey) {
         const found = state.find(requestKey);
         if (found) {
@@ -75,7 +75,7 @@ export function createCommandAutomation({ queue, state, definition, classify, ev
           return Promise.resolve({ type: 'job', job: queue.get(found.job.id) ?? found.job });
         }
       }
-      const job = queue.submit(command, false, context), policy = state.policy(), rule = ruleFor(policy);
+      const job = queue.submit(command, false, context, displayContext), policy = state.policy(), rule = ruleFor(policy);
       queue.beginEvaluation(job.id);
       try { state.insert(queue.get(job.id), requestKey, digest); } catch (error) { queue.abortEvaluation(job.id); throw error; }
       const persist = value => state.save(value);

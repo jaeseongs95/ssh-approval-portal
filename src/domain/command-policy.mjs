@@ -23,7 +23,7 @@ export function approvedCommandNames(commands) {
 export function explicitUserApproval(command, commands) {
   approvedCommandNames(commands);
   const commandName = executableName(command), line = commandLineNames(command), explicit = line.complete && line.names.every(name => commands.includes(name));
-  return { explicit, statement: explicit ? '이 명령은 사용자가 명시적으로 승인했습니다.' : '이 명령은 사전 승인 명령셋과 일치하지 않습니다.', scope: 'command-name', commandName };
+  return { explicit, statement: explicit ? 'The user has explicitly approved this command.' : 'This command does not match the preapproved command set.', scope: 'command-name', commandName };
 }
 export const COMMAND_SET_QUESTION_VERSION = 'ssh-command-set-risk-v1';
 export const COMMAND_SET_QUESTION = Object.freeze({
@@ -84,5 +84,5 @@ export function validatedRisk(value, model) {
     probabilities: Object.fromEntries(labels.map(key => [key, value.probabilities[key]])),
     ...Object.fromEntries(['inputTokens', 'outputTokens'].filter(key => Number.isSafeInteger(value[key]) && value[key] >= 0).map(key => [key, value[key]])) };
 }
-export const commandDigest = (command, targetRevision, profile, context = '') => hash(JSON.stringify({ command, targetRevision, profile, ...(context ? { context } : {}) }));
+export const commandDigest = (command, targetRevision, profile, context = '', displayContext = '') => hash(JSON.stringify({ command, targetRevision, profile, ...(context ? { context } : {}), ...(displayContext ? { displayContext } : {}) }));
 export const deniedCommand = (command, rule) => Boolean(rule?.deniedCommands.some(name => commandLineNames(command).names.includes(name) || command.split(/[^A-Za-z0-9_.+-]+/).includes(name)));

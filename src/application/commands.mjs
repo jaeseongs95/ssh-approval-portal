@@ -35,14 +35,14 @@ export function createCommandService({ queue, classify, executeCommand, audit, t
   };
   return {
     read,
-    async run(command, requestKey, context = '') {
+    async run(command, requestKey, context = '', displayContext = '') {
       validateCommand(command, classify);
-      context = callerContext(context);
-      if (automation) return automation.run(command, requestKey, context);
+      context = callerContext(context); displayContext = callerContext(displayContext);
+      if (automation) return automation.run(command, requestKey, context, displayContext);
       if (requestKey !== undefined) throw Error('Request keys require command automation');
       return validateCommand(command, classify).class === 'read-only'
         ? { type: 'immediate', outcome: await read(command) }
-        : { type: 'job', job: queue.submit(command, false, context) };
+        : { type: 'job', job: queue.submit(command, false, context, displayContext) };
     },
     busy: () => activeReads > 0 || (automation?.busy() ?? false),
     reading: () => activeReads > 0,

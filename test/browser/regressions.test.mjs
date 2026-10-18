@@ -323,3 +323,25 @@ for (const [locale, korean] of [['ko-KR', true], ['en-US', false]]) test(`record
     }
   }
 }, locale));
+
+for (const locale of ['ko-KR', 'en-US']) test('owner and assessment details select localized context without mixing evaluator prose ' + locale, async () => browserFixture(async (page, server) => {
+  const context = 'Inspect the synthetic test identity; no mutation. English evaluator description.';
+  const displayContext = '테스트 실행 계정 조회. 변경 없음. <script>window.localizedInjected=true</script>';
+  const value = { id: 'language-pair-fixture', kind: 'command', state: 'completed', approvalMode: 'owner', command: 'sudo id',
+    operation: { kind: 'command', command: 'sudo id', context, displayContext }, target: 'fixture', expiresAt: 2e12,
+    decision: { decision: 'review', reasonCode: 'model_review', reviewReason: 'uncertain', provider: 'jev', evaluation: { callerContextProvided: true },
+      assessment: { model: 'jev-1.14.0', label: 'uncertain', confidence: 1, probabilities: { low_risk: 0, high_risk: 0, uncertain: 1 } } } };
+  const expected = locale === 'ko-KR' ? displayContext : context, excluded = locale === 'ko-KR' ? context : displayContext;
+  server.state.jobs = [value]; await page.goto(server.origin + '/fixture/web');
+  await page.locator('#history > details').evaluate(n => n.open = true);
+  assert.ok((await page.locator('#history').textContent()).includes(expected));
+  assert.ok(!(await page.locator('#history').textContent()).includes(excluded));
+  await page.getByText(locale === 'ko-KR' ? 'AI 평가 상세' : 'AI assessment details', { exact: true }).click();
+  assert.ok((await page.locator('.assessment-details').textContent()).includes(expected));
+  assert.equal(await page.evaluate(() => window.localizedInjected), undefined);
+  await page.goto(server.origin + '/fixture/card'); await page.waitForFunction(() => window.fixture);
+  await page.evaluate(value => window.fixture.receive({ structuredContent: value, _meta: { sshApproval: {} } }), value);
+  assert.ok((await page.locator('body').textContent()).includes(expected));
+  assert.ok(!(await page.locator('body').textContent()).includes(excluded));
+  assert.equal(await page.evaluate(() => window.localizedInjected), undefined);
+}, locale));

@@ -14,7 +14,8 @@ export function createAikSshTool({ authority, mcp }) {
       const requestKey = 'aik:' + hash(JSON.stringify({ toolCall: request.tool_call_id, effect: request.effect_id,
         binding: authorization.binding_digest, revision: authorization.authorization_revision }));
       const args = { target: request.arguments.target, command: request.arguments.command, requestKey,
-        ...(request.arguments.context === undefined ? {} : { context: request.arguments.context }) };
+        ...(request.arguments.context === undefined ? {} : { context: request.arguments.context }),
+        ...(request.arguments.displayContext === undefined ? {} : { displayContext: request.arguments.displayContext }) };
       await authority.recordDispatch(authorization, requestKey);
       await authority.revalidate(authorization);
       let job;

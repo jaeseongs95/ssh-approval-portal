@@ -1,4 +1,4 @@
-import { renderDecision, recordedApprovalMode } from '../../ui/src/decision.js';
+import { renderDecision, recordedApprovalMode, requestContext } from '../../ui/src/decision.js';
 export function createWebView({ document, i18n }) {
   const { t, korean, locale, states, kinds } = i18n;
   const el = id => document.getElementById(id);
@@ -44,7 +44,7 @@ export function createWebView({ document, i18n }) {
     }
     text(body, 'p', `${t('중계기')} · ${bridgeName} / ${t('대상 서버')} · ${job.targetDisplayName ?? targetName}${job.targetId ? ` [${job.targetId}]` : ''} (${job.target})`, 'target');
     if (job.targetId) text(body, 'p', `${t('설정 revision')} · ${job.targetRevision} / ${t('호스트 키')} · ${job.hostKey}`, 'target'); text(body, 'pre', command, 'command');
-    if (job.kind === 'command' && job.operation?.context) { const context = text(body, 'details', ''); text(context, 'summary', korean ? '요청자가 제공한 작업 설명' : 'Caller-provided context'); text(context, 'p', job.operation.context); }
+    if (job.kind === 'command' && requestContext(job, korean)) { const context = text(body, 'details', ''); text(context, 'summary', korean ? '요청자가 제공한 작업 설명' : 'Caller-provided context'); text(context, 'p', requestContext(job, korean)); }
     if (job.decision) renderDecision(document, body, job.decision, korean, job);
     const meta = text(body, 'div', '', 'meta'); text(meta, 'span', `${t('요청')} ${job.id}`, 'request-id');
     const time = waiting ? job.expiresAt : job.finishedAt ?? job.createdAt;

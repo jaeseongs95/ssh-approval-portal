@@ -1,3 +1,8 @@
+export function requestContext(job, korean = true) {
+  const operation = job.operation;
+  return korean ? operation?.displayContext || operation?.context : operation?.context || operation?.displayContext;
+}
+
 const reasons = {
   sudo_not_enabled: ['sudo 자동승인이 꺼져 있어 개별 사용자 승인이 필요합니다.', 'Automatic sudo is disabled; individual owner approval is required.'],
   context_required: ['작업 설명이 없어 AI 평가를 요청하지 않았습니다. 작업 목적·대상·예상 영향·복구 방법을 확인해 주세요.', 'No AI call was made because task context is missing. Check the purpose, target, expected impact and recovery plan.'],
@@ -92,6 +97,6 @@ export function renderDecision(document, parent, decision, korean, job = {}) {
   if (historical) add(body, 'small', korean ? '과거 평가 당시의 기준과 점수를 표시합니다. 이후 설정 변경은 이 기록에 반영되지 않습니다.' : 'These are the historical threshold and scores; later policy changes do not rewrite this record.');
   add(body, 'p', korean ? '모델은 분류 점수만 반환했고 구체적인 위험 근거는 제공하지 않았습니다. 이 점수만으로 실제 안전 여부를 확정할 수 없습니다.' : 'The model returned classification scores without a specific risk rationale. Scores alone do not establish actual safety.');
   if (decision.evaluation && !decision.evaluation.callerContextProvided) add(body, 'p', korean ? '이 평가에는 요청자의 작업 설명이 포함되지 않았습니다.' : 'This assessment did not include caller-provided task context.');
-  if (job.operation?.context) { add(body, 'strong', korean ? '요청에 첨부된 작업 설명' : 'Task context attached to the request'); add(body, 'p', job.operation.context); }
+  if (requestContext(job, korean)) { add(body, 'strong', korean ? '요청에 첨부된 작업 설명' : 'Task context attached to the request'); add(body, 'p', requestContext(job, korean)); }
   add(body, 'small', (korean ? '평가 모델: ' : 'Assessment model: ') + (assessment.model ?? decision.provider ?? 'AI'));
 }

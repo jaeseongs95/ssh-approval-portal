@@ -30,15 +30,18 @@ export function assessmentContext(context, facts, purpose = 'Assess this exact S
  * The envelope is decoded before validation, policy lookup, audit and execution.
  * It carries caller claims only; it cannot change the target or grant authority.
  */
-export function commandRequest(command, context, requestKey) {
+export function commandRequest(command, context, requestKey, displayContext) {
+  const displaySupplied = displayContext !== undefined;
+  displayContext = callerContext(displayContext);
   const prefix = 'ssh-request-v1:';
-  if (!command.startsWith(prefix)) return { command, context: callerContext(context), requestKey };
-  if (context !== undefined || requestKey !== undefined) throw Error('Conflicting command request inputs');
+  if (!command.startsWith(prefix)) return { command, context: callerContext(context), requestKey, ...(displayContext ? { displayContext: callerContext(displayContext) } : {}) };
+  if (context !== undefined || requestKey !== undefined || displaySupplied) throw Error('Conflicting command request inputs');
   const value = JSON.parse(command.slice(prefix.length));
   if (!value || typeof value !== 'object' || Array.isArray(value)
-    || Object.keys(value).some(key => !['command', 'context', 'requestKey'].includes(key))
+    || Object.keys(value).some(key => !['command', 'context', 'requestKey', 'displayContext'].includes(key))
     || typeof value.command !== 'string' || !value.command.length || value.command.length > 2000 || value.command.startsWith(prefix)
     || typeof value.context !== 'string' || !value.context.trim()
+    || (value.displayContext !== undefined && typeof value.displayContext !== 'string')
     || (value.requestKey !== undefined && (typeof value.requestKey !== 'string' || !/^[A-Za-z0-9_.:-]{16,128}$/.test(value.requestKey)))) throw Error('Invalid command request');
-  return { command: value.command, context: callerContext(value.context), requestKey: value.requestKey };
+  return { command: value.command, context: callerContext(value.context), requestKey: value.requestKey, ...(value.displayContext ? { displayContext: callerContext(value.displayContext) } : {}) };
 }

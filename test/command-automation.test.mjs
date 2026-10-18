@@ -407,3 +407,32 @@ test('combined shell flags cannot hide unregistered or disabled sudo names',asyn
  const mixed=await f.run('bash -lc "ls && id"');assert.equal(mixed.state,'pending');assert.equal(f.inputs.at(-1).command,'bash -lc "ls && id"');
  assert.equal(f.executions.length,0);
 });
+
+test('localized owner prose stays out of the real Jev wire body and remains bound across restart and replay', async t => {
+  const payloads = [];
+  const evaluator = createJevAssessor({ apiKey: 'synthetic-language-key', inputKind: 'execution', questionVersion: 'ssh-command-risk-v4',
+    fetchImpl: async (_url, options) => { payloads.push(JSON.parse(options.body)); return new Response(JSON.stringify({
+      model: 'jev-1.14.0', answers: { risk: { type: 'choice', choice: 'uncertain', confidence: 1, probabilities: { low_risk: 0, high_risk: 0, uncertain: 1 } } },
+      usage: { input_tokens: 20, output_tokens: 4 } }), { headers: { 'content-type': 'application/json' } }); } });
+  const f = await fixture(t, { riskEvaluators: { jev: evaluator } });
+  await f.policy({ commands: [], modelExecution: false });
+  const before = payloads.length, command = 'sudo systemctl status fixture.service --no-pager';
+  const context = 'Inspect service metadata on a synthetic test instance. No files change and no service is restarted.';
+  const displayContext = '합성 테스트 서버의 서비스 상태를 조회합니다. 파일 변경이나 서비스 재시작은 없습니다.';
+  const key = 'synthetic-language-request-1';
+  const result = await f.app.targets.commands.run(command, undefined, key, context, displayContext);
+  await f.app.targets.drain(); const job = f.app.queue.get(result.job.id);
+  assert.equal(job.state, 'pending'); assert.equal(f.executions.length, 0);
+  assert.equal(job.operation.context, context); assert.equal(job.operation.displayContext, displayContext);
+  assert.equal(payloads.length, before + 1); const wire = payloads.at(-1);
+  assert.equal(wire.state.command, command); assert.equal(JSON.parse(wire.state.context).callerSituation, context);
+  assert.equal(wire.state.userApproval.statement, 'This command does not match the preapproved command set.');
+  assert.equal(JSON.stringify(wire).includes(displayContext), false);
+  assert.doesNotMatch(JSON.stringify(wire), /[ㄱ-ㅎㅏ-ㅣ가-힣]/u);
+  await f.restart(); const restored = f.app.queue.get(job.id);
+  assert.equal(restored.operation.displayContext, displayContext); assert.equal(restored.operation.context, context);
+  const replay = await f.app.targets.commands.run(command, undefined, key, context, displayContext);
+  assert.equal(replay.job.id, job.id); assert.equal(payloads.length, before + 1);
+  await assert.rejects(f.app.targets.commands.run(command, undefined, key, context, '다른 목적이라고 설명'), /conflict/);
+  assert.equal(f.executions.length, 0);
+});

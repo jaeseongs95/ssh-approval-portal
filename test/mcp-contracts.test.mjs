@@ -172,3 +172,26 @@ test('command-only hosts decode a strict context envelope before dispatch; inval
 test('health and MCP initialization report the actual package version', async () => {
  const f=await fixture();try{assert.equal((await (await fetch(f.mcpBase+'/health')).json()).version,metadata.version);assert.equal(f.client.getServerVersion().version,metadata.version);}finally{await f.close();}
 });
+
+test('MCP keeps English evaluator context separate from the Korean owner explanation, including command-only hosts', async () => {
+  const seen = [], f = await fixture();
+  f.commands.run = async (...args) => { seen.push(args); return { type: 'job', job: f.pending }; };
+  const input = { command: 'sudo id', context: 'Inspect identity on the test host; no mutation or restart.', displayContext: '테스트 서버의 실행 계정을 조회합니다. 변경·재시작은 없습니다.', requestKey: 'synthetic-language-pair-1' };
+  try {
+    const listed = (await f.client.listTools()).tools.find(t => t.name === 'run-command');
+    assert.equal(listed.inputSchema.properties.displayContext.maxLength, 8192);
+    assert.match(listed.description, /context in English/); assert.match(listed.description, /never sent to the evaluator/);
+    assert.equal((await f.call('run-command', input)).isError, undefined);
+    assert.deepEqual(seen[0], [input.command, undefined, input.requestKey, input.context, input.displayContext]);
+    assert.equal((await f.call('run-command', { command: 'ssh-request-v1:' + JSON.stringify(input) })).isError, undefined);
+    assert.deepEqual(seen[1], seen[0]);
+    for (const bad of [
+      { ...input, displayContext: 'a'.repeat(8193) },
+      { ...input, displayContext: 'password=synthetic-only' },
+      { ...input, displayContext: false },
+      { command: 'ssh-request-v1:' + JSON.stringify(input), displayContext: '' },
+      { command: 'ssh-request-v1:' + JSON.stringify({ ...input, displayContext: 0 }) },
+    ]) assert.equal((await f.call('run-command', bad)).isError, true);
+    assert.equal(seen.length, 2);
+  } finally { await f.close(); }
+});

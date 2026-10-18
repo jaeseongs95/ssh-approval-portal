@@ -1,4 +1,4 @@
-import { renderDecision, recordedApprovalMode } from './decision.js';
+import { renderDecision, recordedApprovalMode, requestContext } from './decision.js';
 export function createCardView({ document, i18n }) {
   const { t, korean, locale, states } = i18n;
   const el = id => document.getElementById(id);
@@ -51,7 +51,7 @@ export function createCardView({ document, i18n }) {
         text(list, 'dd', label === '크기' ? `${value.toLocaleString(locale)} ${t('바이트')}` : value, label === 'SHA-256' ? 'hash' : '');
       }
     }
-    if (job.kind === 'command' && job.operation?.context) { const context = text(el('details'), 'details', ''); text(context, 'summary', korean ? '요청자가 제공한 작업 설명' : 'Caller-provided context'); text(context, 'p', job.operation.context); }
+    if (job.kind === 'command' && requestContext(job, korean)) { const context = text(el('details'), 'details', ''); text(context, 'summary', korean ? '요청자가 제공한 작업 설명' : 'Caller-provided context'); text(context, 'p', requestContext(job, korean)); }
     if (job.decision) renderDecision(document, el('details'), job.decision, korean, job);
     const output = job.result?.structuredContent?.output;
     if (output && job.kind === 'command') {

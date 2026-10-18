@@ -4,7 +4,7 @@
 
 An MCP server for reviewing and approving SSH commands and file transfers. It provides MCP Apps cards for ChatGPT and Claude alongside a web administrator interface. One bridge supports up to 32 registered SSH targets. The unified administrator screen shows requests across targets and lets the owner filter and act on each request. See [target configuration](docs/multi-targets.ko.md).
 
-The development [Jev observation/evaluation tool](docs/jev-observation.ko.md) compares risk classifications on synthetic commands. It is separate from the service approval policy; automatic execution remains disabled.
+Jev assists with commands outside the preapproved list. Owner settings determine whether its assessment can lead to automatic approval or requires owner review. A separate [synthetic evaluation tool](docs/jev-observation.ko.md) is also available.
 
 [Secret management (Korean)](docs/secret-management.ko.md) separates secret references from provider adapters. Its first backend is a private POSIX local store managed through a hidden-input operator CLI. Jev resolves a reference at startup; actual values stay out of chat, MCP results, and packages.
 
@@ -21,19 +21,41 @@ The current version is **1.3.0**. Responsibilities are separated into domain, ap
 
 The file-provider hostname allowlist starts empty. `BRIDGE_UPLOAD_SOURCE_HOSTS` accepts a comma-separated mix of exact hostnames and leading `*.domain` patterns, for example `files.example.test,*.downloads.example.test` (fictional). A pattern covers one or more subdomain labels at any depth, excludes the apex domain, and matches at a dot boundary. Bare `*`, other wildcard placements, URLs, IP addresses and ports are rejected. Choosing a wildcard means trusting every subdomain it covers; do not broadly allow a shared CDN without verifying that trust scope. Card approval defaults to `BRIDGE_UI_ENABLED=false`, and web administrator authentication defaults to `BRIDGE_ADMIN_AUTH_MODE=token`. Successful tests of an existing client flow do not establish that the new agent-upload path or another platform works.
 
+## How automatic approval works
+
+**Preapprove recurring commands, and use AI to review commands outside that list.** Settings apply to each server separately.
+
+1. **Register command names.** Choose names such as `ls` and `pwd`, read the risk feedback, then confirm **OK → Save**. Do not enter options or arguments.
+2. **Check the complete command line.** If **every executable name is preapproved, run without Jev or another approval**. If any name is missing or the syntax cannot be resolved, send the complete command line and task context to Jev.
+3. **Apply the model gate.** Model-based automatic approval and external disclosure must be enabled. The assessment must classify the command as low risk and meet the saved low-risk score threshold. Other outcomes—including insufficient context, a low score or evaluation failure—require owner approval.
+4. **Ask the owner when needed.** Pending requests expire after one hour. History labels automatically admitted requests as **Automatic approval**.
+
+With only `ls` and `pwd` registered:
+
+| Request | Result |
+| --- | --- |
+| `pwd && ls -la` | Both names are registered → run without Jev |
+| `pwd && uptime` | `uptime` is unregistered → evaluate the entire line, then approve automatically or ask the owner |
+
+**Approving a command name permits its options and arguments too.** This is not an argument restriction; review the capabilities before registration. Denied names take priority. Disabling model-based approval leaves preapproved-command bypass active. Model scores are not measured incident probabilities or safety guarantees.
+
+**Uploads, downloads and sudo have separate important settings.** Only new ordinary uploads can be automatic; overwrites and elevated uploads still need individual approval. Sudo commands need the sudo opt-in before entering the flow above; elevated downloads need both download and sudo opt-ins. Jev does not inspect file contents. A prepared download must still be saved to the device. No option expands the SSH account's actual permissions.
+
 ## Approval and file transfers
 
-Ordinary read-only operations and ordinary downloads without sudo run immediately. Every other command, upload, overwrite, and sudo transfer requires the owner's approval in a card or the website and then runs once. No upload bytes are sent to the target server, and no destination file is changed, before approval.
+Proven read-only inspections may run immediately. Automatic command and file approvals follow the server policy above; other requests run once after owner approval in a card or the website. Upload bytes reach the target only after automatic or owner approval is established.
+
+Agents provide detailed English `context` for evaluation and a faithful Korean `displayContext` for Korean administrators. The localized explanation is not sent to Jev. Commands and paths remain unchanged. Both explanations are caller claims, not execution authority.
 
 The main tools are listed below. The `ui-*` tools are card-only; approval tickets are not exposed in model responses.
 
 | Tool | Behavior |
 | --- | --- |
 | `read-command` | Runs commands classified as read-only. |
-| `run-command` | Runs read-only commands immediately and queues other commands for approval. |
+| `run-command` | Applies server policy for automatic approval or queues a request for owner approval. |
 | `get-request-status` and `show-approval` | Retrieve request status and display an approval/denial card. |
 | `show-file-transfer` | Displays a card for choosing a PC file to upload or saving a remote file. |
-| `request-download` | Downloads an ordinary file or requests approval for a sudo download. |
+| `request-download` | Automatically prepares a file or asks the owner under server policy. Device saving is separate. |
 | `request-upload` | Stages a ChatGPT/OpenAI file input with `download_url` and `file_id`, then queues an upload for approval. A Claude `file_uuid` alone cannot satisfy this input. |
 | `show-ui-probe` | Checks card and private-metadata delivery without running a command or file. |
 

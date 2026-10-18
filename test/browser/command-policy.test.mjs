@@ -71,7 +71,7 @@ async function screenshot(page, name) {
 for (const width of [375, 390]) test('simple registration preserves explicit consent and fits mobile ' + width, async () => fixture(async f => {
   const { page } = f; await f.open();
   assert.equal(await page.getByRole('checkbox', { name: /^Jev에 정보 전송/ }).isChecked(), false);
-  assert.equal(await page.getByRole('checkbox', { name: /^Jev 판단으로도/ }).isChecked(), false);
+  assert.equal(await page.getByRole('checkbox', { name: /^Jev·다른 모델을 통한/ }).isChecked(), false);
   assert.equal(await page.getByLabel('Jev 모델', { exact: true }).isVisible(), true);
   assert.equal(await page.getByLabel('Jev 모델', { exact: true }).evaluate(node => node.tagName), 'SELECT');
   assert.equal(await page.getByLabel('Jev 모델', { exact: true }).inputValue(), 'jev-1.14.0');
@@ -110,7 +110,7 @@ for (const width of [375, 390]) test('simple registration preserves explicit con
 test('Jev 90 percent needs no manual reference and persists exactly the reviewed candidate', async () => fixture(async f => {
   const { page } = f; await f.open();
   await page.getByRole('checkbox', { name: /^Jev에 정보 전송/ }).check();
-  await page.getByRole('checkbox', { name: /^Jev 판단으로도/ }).check();
+  await page.getByRole('checkbox', { name: /^Jev·다른 모델을 통한/ }).check();
   assert.equal(await page.getByLabel('Jev 자동승인 기준 (%)', { exact: true }).inputValue(), '90');
   await screenshot(page, 'mobile-390-settings');
   await f.checked(); assert.equal(f.calls.length, 1);
@@ -282,7 +282,7 @@ test('model selection is above consent, invalidates review, and threshold errors
   const {page}=f;await f.open();const model=page.getByLabel('Jev 모델',{exact:true}),score=page.getByLabel('Jev 자동승인 기준 (%)',{exact:true});
   assert.equal(await model.evaluate(node=>node.tagName),'SELECT');
   assert.ok(await model.evaluate(node=>Boolean(node.compareDocumentPosition(document.querySelector('.policy-section:nth-child(2) input[type=checkbox]')) & Node.DOCUMENT_POSITION_FOLLOWING)));
-  await page.getByRole('checkbox',{name:/^Jev에 정보 전송/}).check();await page.getByRole('checkbox',{name:/^Jev 판단으로도/}).check();
+  await page.getByRole('checkbox',{name:/^Jev에 정보 전송/}).check();await page.getByRole('checkbox',{name:/^Jev·다른 모델을 통한/}).check();
   await score.fill('50');await review(page).click();
   const note=page.locator('#'+await score.getAttribute('aria-errormessage'));await note.waitFor();
   assert.match(await note.textContent(),/50%보다 크고/);assert.equal(await score.getAttribute('aria-invalid'),'true');
@@ -315,3 +315,29 @@ test('important upload and sudo controls stay between overview and collapsed pol
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   if(process.env.POLICY_UX_SCREENSHOTS)await page.screenshot({path:process.env.POLICY_UX_SCREENSHOTS+'/important-settings.png',fullPage:true});
 },{multi:true}));
+
+test('model autoapproval is visible beside transfer controls and requires review and OK while preserving the saved threshold', async () => fixture(async f => {
+  const current = await f.api('/api/command-policy'), b = current.bindings[0];
+  const rule = { targetId: b.targetId, targetRevision: b.targetRevision, profile: b.profile, commands: ['pwd'], deniedCommands: [],
+    automaticUploads: false, automaticDownloads: true, automaticSudo: false, externalDisclosure: true, modelExecution: false, fallback: null,
+    thresholds: { jev: { model: 'jev-1.14.0', questionVersion: 'ssh-command-risk-v4', basis: 'safety-probability-v1', minLowRisk: 0.51, validationRef: 'fixture:keep-choice' } } };
+  await f.seed({ targets: [rule] });
+  const { page } = f; await page.goto(f.origin); await page.locator('#token').fill('fixture-owner');
+  await page.getByRole('button', { name: '현재 설정 불러오기', exact: true }).click();
+  await page.waitForFunction(() => !document.querySelector('#important-settings fieldset').disabled);
+  const model = page.locator('#important-settings').getByRole('checkbox', { name: /^Jev·다른 모델을 통한/ });
+  assert.equal(await model.isVisible(), true); assert.equal(await model.isChecked(), false);
+  assert.equal(await page.locator('#important-settings input[type=checkbox]').count(), 4);
+  const posts = () => f.posts.filter(p => p.path === '/api/command-policy').length, before = posts();
+  await model.check();
+  await page.waitForURL('**/settings'); assert.equal(await names(page).isVisible(), true);
+  assert.match(await page.locator('#important-settings [role=status]').textContent(), /AI 평가 자동승인 개별 승인.*아직 저장되지/);
+  assert.equal(posts(), before); assert.equal(await save(page).isDisabled(), true);
+  await f.checked(); assert.equal(posts(), before); await f.commit();
+  let saved = (await f.api('/api/command-policy')).targets[0];
+  assert.equal(saved.modelExecution, true); assert.deepEqual(saved.thresholds, rule.thresholds); assert.equal(saved.automaticDownloads, true);
+  await model.uncheck(); assert.equal(posts(), before + 1); await f.checked(); await f.commit();
+  saved = (await f.api('/api/command-policy')).targets[0]; assert.equal(saved.modelExecution, false);
+  assert.deepEqual(saved.commands, ['pwd']); assert.deepEqual(saved.thresholds, rule.thresholds);
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+}, { width: 320 }));

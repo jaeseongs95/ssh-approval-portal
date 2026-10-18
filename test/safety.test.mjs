@@ -38,7 +38,7 @@ test('v4 sends explicit user approval only for matching owner command names, and
   const approved = { ...input, preapprovedCommands: ['id', 'sudo'], userApproval: explicitUserApproval(input.command, ['id', 'sudo']), threshold: 0.99, ownerToken: 'never-send' };
   assert.equal((await assessor.assess(approved)).status, 'assessed');
   assert.deepEqual(seen[0].state.preapprovedCommands, ['id', 'sudo']);
-  assert.equal(seen[0].state.userApproval.explicit, true); assert.equal(seen[0].state.userApproval.statement, '이 명령은 사용자가 명시적으로 승인했습니다.');
+  assert.equal(seen[0].state.userApproval.explicit, true); assert.equal(seen[0].state.userApproval.statement, 'The user has explicitly approved this command.');
   assert.doesNotMatch(JSON.stringify(seen), /threshold|never-send|ownerToken/);
   const unmatched = { ...input, preapprovedCommands: [], userApproval: explicitUserApproval(input.command, []) };
   await assessor.assess(unmatched); assert.equal(seen[1].state.userApproval.explicit, false);
