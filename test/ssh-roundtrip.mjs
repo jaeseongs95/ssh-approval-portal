@@ -50,7 +50,8 @@ try {
     const upload = (await call('ui-upload-finish', { id, ticket })).structuredContent;
     await approve(upload);
     const request = (await call('request-download', { remotePath, elevate })).structuredContent;
-    const downloaded = elevate ? await approve(request) : await wait(request.id);
+    assert.equal(request.state, 'pending', 'Default file policy must require owner approval');
+    const downloaded = await approve(request);
     assert.equal(downloaded.result.structuredContent.sha256, digest(bytes));
     const view = await call('show-approval', { id: request.id });
     const link = await call('ui-download-link', { id: request.id, ticket: view._meta.sshApproval.viewTicket });

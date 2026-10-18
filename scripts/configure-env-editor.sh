@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 [[ $(id -u) == 0 && $# == 0 ]] || { echo 'Run as root without arguments.' >&2; exit 1; }
+exec 9>/var/lib/ssh-mcp/.portal-install.lock
+flock -n 9 || { echo 'An installation is already in progress' >&2; exit 1; }
 source_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 # Do not change the web process identity, sudo grants or NoNewPrivileges.
 install -d -o root -g root -m 0700 /var/lib/ssh-approval-env

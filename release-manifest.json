@@ -1,6 +1,6 @@
 {
   "version": "1.6.0",
-  "status": "release",
+  "status": "candidate-pending-live-host-verification",
   "runtime": "Node.js 24",
   "files": [
     {
@@ -119,6 +119,11 @@
       "sha256": "617f2e625641cce28247348d04c95654376d673dfb1fce9b673b8cd6d20334a4"
     },
     {
+      "path": "docs/install-workflow.ko.md",
+      "size": 3833,
+      "sha256": "696f801534c83d55b3fddabcae9e8f63f4a7fa00e1281d458a18198e4846e721"
+    },
+    {
       "path": "docs/jev-observation.ko.md",
       "size": 7745,
       "sha256": "bf6929f134a692925beabca34ec90235e2a3ca2cb46bae6c553290d0ef3e169d"
@@ -130,8 +135,8 @@
     },
     {
       "path": "docs/roadmap.ko.md",
-      "size": 5535,
-      "sha256": "8c10b92d67cf6f252dd48b8f8da278e6a33a7347ec7f278bbcf0e5f1f71d3e4a"
+      "size": 5840,
+      "sha256": "a8f46f0ae9c63f2409942b69270f5b68efc345c08a49cf13d6f7c052b39b00da"
     },
     {
       "path": "docs/secret-management.ko.md",
@@ -205,8 +210,8 @@
     },
     {
       "path": "scripts/configure-env-editor.sh",
-      "size": 971,
-      "sha256": "9d6b227392912e5083647ebe8dabe31dcc63d119a2d437e4ff62695d7e199efb"
+      "size": 1093,
+      "sha256": "a4a1ca020492eae9ebdb8603bb71d9cd3a69ae22cb63f33b2e1195277aa5ad44"
     },
     {
       "path": "scripts/configure-upload-sources.py",
@@ -267,6 +272,11 @@
       "path": "scripts/package.py",
       "size": 5044,
       "sha256": "64c75a7528e82d9f5a6411043799b1e3face1ad7895a97460db62f1216be1d11"
+    },
+    {
+      "path": "scripts/portal.py",
+      "size": 5402,
+      "sha256": "1a7160e9ae62e3ce4e0a630c9f725e734575e0da0fb54509f54f492ff5606216"
     },
     {
       "path": "scripts/prepare-docker.sh",
@@ -735,8 +745,8 @@
     },
     {
       "path": "test/Dockerfile",
-      "size": 680,
-      "sha256": "fe60b2aa5b4f37d3c5b0bb56ff2acf7acbfe1ba4dd0424de3494c73d02300548"
+      "size": 684,
+      "sha256": "747bc9928dcf917acb566752969e8dde7ac8d2df02ac06d5cec10f349ab8a636"
     },
     {
       "path": "test/download-delivery.test.mjs",
@@ -839,6 +849,11 @@
       "sha256": "0471ce8b57375444106bce52553aa9c692230393a913259cffb0fb445b025655"
     },
     {
+      "path": "test/portal-container-test.sh",
+      "size": 4357,
+      "sha256": "d7bf6836f12ae0e966f8b35e86808d88f5f6b97ddf59e0c64e36bd2ab238681e"
+    },
+    {
       "path": "test/release-version.test.mjs",
       "size": 2224,
       "sha256": "9a6f5b472fdd55b4033a0e9095c6215f23cd57f59cad4fd98a10da2863b5d789"
@@ -920,13 +935,18 @@
     },
     {
       "path": "test/ssh-roundtrip.mjs",
-      "size": 5915,
-      "sha256": "43f563d998daf119dcdaad3ea975bf9717e6d11870a77880d8e812998818ea84"
+      "size": 5975,
+      "sha256": "9c64ac3327eac19a174afd4db9c9cf931da1ae6b38fb10968fefa0ae0b8501b1"
     },
     {
       "path": "test/test_compose_env.py",
       "size": 5590,
       "sha256": "6073afc216de8bab23e0cb19368165a54d5f6ddbc6e41fa16dc290a17db4474c"
+    },
+    {
+      "path": "test/test_env_editor_lock.py",
+      "size": 1496,
+      "sha256": "135a93486aa2ec463bcab3f3973849c1f1b9e3585cdb5f5f5823e9fa13a17194"
     },
     {
       "path": "test/test_environment_helper.py",
@@ -942,6 +962,11 @@
       "path": "test/test_package.py",
       "size": 7559,
       "sha256": "9fe50e886bca9af0189477c5236d5d740c1585f1b609bcd5698e8701b578a681"
+    },
+    {
+      "path": "test/test_portal_setup.py",
+      "size": 5522,
+      "sha256": "ed5c5e2048495b99da1e954fc3ed7ce07c8a50af6b4a8acd920b2c8d0f7532e4"
     },
     {
       "path": "test/test_release_update.py",
