@@ -12,7 +12,12 @@ export function createWebView({ document, i18n }) {
   let targetList = [], changeTarget;
   let handlers;
   let historyOffset=0, historyAnchor, latestJobs=[], latestDeciding=false, pager;
+  let historySearch, historyFilter;
   const historyPageSize=20;
+  const matchesHistory=job=>{
+    const query=historySearch?.value.trim().toLowerCase()??'',filter=historyFilter?.value??'';
+    return !['pending','running','evaluating'].includes(job.state)&&(!filter||job.state===filter)&&(!query||[job.id,job.command,job.kind==='command'?'':JSON.stringify(job.operation),job.targetDisplayName,job.targetId].join(' ').toLowerCase().includes(query));
+  };
   function text(parent, tag, value, className = '') {
     const node = document.createElement(tag); node.textContent = value; node.className = className; parent.append(node); return node;
   }
@@ -128,7 +133,7 @@ export function createWebView({ document, i18n }) {
     const selected = el('target-filter')?.value;
     const visible = selected ? jobs.filter(job => (job.targetId ?? 'default') === selected) : jobs;
     const ordered=[...visible].sort((a,b)=>(b.createdAt??0)-(a.createdAt??0)||a.id.localeCompare(b.id));
-    const historyJobs=ordered.filter(job=>!['pending','running','evaluating'].includes(job.state));
+    const historyJobs=ordered.filter(matchesHistory);
     if(historyAnchor){const anchor=historyJobs.findIndex(job=>job.id===historyAnchor);if(anchor>=0)historyOffset=anchor;else historyAnchor=undefined;}
     historyOffset=Math.min(historyOffset,Math.max(0,historyJobs.length-1));
     const historySlice=historyJobs.slice(historyOffset,historyOffset+historyPageSize),pageIds=new Set(historySlice.map(job=>job.id));
@@ -156,7 +161,7 @@ export function createWebView({ document, i18n }) {
         const previous=text(navigation,'button',korean?'이전':'Previous','secondary'),label=text(navigation,'span',''),next=text(navigation,'button',korean?'다음':'Next','secondary');
         label.setAttribute('aria-live','polite');
         const move=delta=>{historyOffset=Math.max(0,historyOffset+delta);historyAnchor=historyJobsAtOffset();render(latestJobs,latestDeciding);};
-        const historyJobsAtOffset=()=>{const target=el('target-filter')?.value;return [...latestJobs].filter(job=>(!target||(job.targetId??'default')===target)&&!['pending','running','evaluating'].includes(job.state)).sort((a,b)=>(b.createdAt??0)-(a.createdAt??0)||a.id.localeCompare(b.id))[historyOffset]?.id;};
+        const historyJobsAtOffset=()=>{const target=el('target-filter')?.value;return [...latestJobs].filter(job=>(!target||(job.targetId??'default')===target)&&matchesHistory(job)).sort((a,b)=>(b.createdAt??0)-(a.createdAt??0)||a.id.localeCompare(b.id))[historyOffset]?.id;};
         previous.onclick=()=>move(-historyPageSize);next.onclick=()=>move(historyPageSize);pager={previous,label,next};
       }
       navigation.hidden=historyJobs.length<=historyPageSize;
@@ -171,8 +176,16 @@ export function createWebView({ document, i18n }) {
     const serverIdentity = el('server-identity');
     if (serverIdentity) { serverIdentity.textContent = identity; serverIdentity.ariaLabel = t('서버 식별'); }
     if (!korean) for (const node of document.querySelectorAll('[data-en]')) node.textContent = node.dataset.en;
+    document.querySelector?.('.admin-nav')?.setAttribute('aria-label', korean ? '관리 메뉴' : 'Management navigation');
+    el('history-pagination')?.setAttribute('aria-label', korean ? '승인 이력 페이지' : 'History pages');
     el('token').placeholder = el('token').ariaLabel = t('관리자 토큰');
     el('load').onclick = actions.load; el('logout').onclick = actions.logout;
+    const filters=document.createElement('div');filters.className='history-filters';
+    const searchLabel=text(filters,'label',korean?'이력 검색':'Search history');historySearch=text(searchLabel,'input','');historySearch.type='search';historySearch.maxLength=200;historySearch.placeholder=korean?'명령·요청 ID·서버 검색':'Search command, request ID or server';
+    const filterLabel=text(filters,'label',korean?'처리 상태':'Request status');historyFilter=text(filterLabel,'select','');historyFilter.setAttribute('aria-label',korean?'처리 상태':'Request status');
+    for(const value of ['', 'completed','failed','denied','expired','unknown']){const option=text(historyFilter,'option',value?states[value]:(korean?'전체 상태':'All statuses'));option.value=value;}
+    el('history').before(filters);
+    historySearch.oninput=historyFilter.onchange=()=>{historyOffset=0;historyAnchor=undefined;render(latestJobs,latestDeciding);};
     el('token').addEventListener('keydown', event => { if (event.key === 'Enter') actions.load(); });
     el('jobs').replaceChildren(empty(t('요청 목록을 연결해 주세요'), t('관리자 토큰을 입력하고 요청 조회를 누르세요.')));
     el('history').replaceChildren(empty(t('처리 이력을 한눈에'), t('실행 중인 요청부터 완료된 결과까지 확인할 수 있습니다.')));

@@ -89,12 +89,13 @@ const job = (id, state = 'pending') => ({ id, kind: 'command', state, command: '
   ...(state === 'completed' ? { result: { content: [{ type: 'text', text: Array.from({ length: 80 }, (_, i) => `line ${i} fixture result`).join('\n') }] } } : {}) });
 test('UI-S-02 unrelated 10-second refresh preserves node identity, focus, selection, open details and scroll', async () => browserFixture(async (page, server) => {
   server.state.jobs = [job('A'), job('C', 'completed')];
-  await page.clock.install(); await page.goto(server.origin + '/fixture/web'); await page.locator('#jobs .actions button').first().waitFor();
+  // Freeze before navigation so setup actions cannot consume part of the polling interval.
+  await page.clock.install({time:new Date('2026-01-01T00:00:00Z')}); await page.clock.pauseAt(new Date('2026-01-01T00:00:01Z')); await page.goto(server.origin + '/fixture/web'); await page.locator('#jobs .actions button').first().waitFor(); await page.locator('[href="/history"]').click();
   await page.evaluate(() => {
     const pending = document.querySelector('#jobs .request'), history = document.querySelector('#history details'), output = history.querySelector('.output');
     history.open = true; output.scrollTop = 120;
+    const button = history.querySelector('summary'); button.focus();
     const range = document.createRange(); range.setStart(output.firstChild, 0); range.setEnd(output.firstChild, 12); getSelection().removeAllRanges(); getSelection().addRange(range);
-    const button = pending.querySelector('button'); button.focus();
     window.saved = { pending, history, output, button, selected: getSelection().toString(), scroll: output.scrollTop };
   });
   assert.equal(await page.evaluate(() => saved.selected.length), 12);
@@ -182,7 +183,7 @@ test('card target replacement clears selected file and blocks late upload work f
 for (const mode of ['beta-success','beta-error','aba-success','aba-error','unchanged']) test(`web download response belongs to its captured selection generation (${mode})`, async () => browserFixture(async (page, server) => {
   server.state.multiTarget = true;server.state.downloadError=mode.endsWith('error');
   server.state.jobs=['alpha','beta'].map(id=>({...job(id+'-file','completed'),kind:'download',operation:{remotePath:'/tmp/same.bin',elevate:false},targetId:id,targetDisplayName:id+' 이름',targetRevision:id+'-v1',hostKey:'SHA256:'+id}));
-  await page.goto(server.origin+'/fixture/web');await page.locator('#target-filter').waitFor({state:'visible'});
+  await page.goto(server.origin+'/history');await page.locator('#target-filter').waitFor({state:'visible'});
   await page.selectOption('#target-filter','alpha');await page.waitForFunction(()=>document.querySelector('#history details')?.dataset.requestId==='alpha-file'&&document.querySelector('#history-count').textContent==='1');
   await page.locator('#history details').evaluate(node=>node.open=true);
   let entered, release;const started=new Promise(resolve=>entered=resolve),held=new Promise(resolve=>release=resolve);
@@ -197,7 +198,7 @@ for (const mode of ['beta-success','beta-error','aba-success','aba-error','uncha
   if(mode==='unchanged') {await page.waitForURL('**/fixture/download/alpha-file');assert.equal(await page.textContent('body'),'Synthetic download delivered');}
   else {
     await page.waitForLoadState('networkidle');
-    assert.ok(page.url().endsWith('/fixture/web'),'An old selection download must not navigate the replacement view');
+    assert.ok(page.url().endsWith('/history'),'An old selection download must not navigate the replacement view');
     assert.equal(await page.locator('#error').textContent(),'','An old selection error must not be shown in the replacement view');
   }
 }));
@@ -239,7 +240,7 @@ test('approved history keeps historical scores and threshold while explaining th
     decision: { decision: 'review', reasonCode: 'model_review', reviewReason: 'uncertain', decisionRuleVersion: 'command-explanation-v1', provider: 'jev', evaluation: { callerContextProvided: true },
       assessment: { model: 'jev-1.14.0', label: 'uncertain', confidence: 0.505, probabilities: { low_risk: 0.01, high_risk: 0.32, uncertain: 0.67 } }, threshold: { minLowRisk: 0.51 } } };
   server.state.jobs = [value];
-  await page.goto(server.origin + '/fixture/web');
+  await page.goto(server.origin + '/history');
   await page.locator('#history > details').evaluate(node => node.open = true);
   await page.getByText('사용자가 승인한 요청입니다', { exact: true }).waitFor();
   await page.getByText('당시 자동승인을 보류했고, 사용자가 직접 승인해 진행한 요청입니다.', { exact: true }).waitFor();
@@ -261,7 +262,7 @@ test('long history uses a full-width page of 20 and preserves expanded records a
   server.state.multiTarget=true;
   server.state.jobs=Array.from({length:45},(_,i)=>({...job('history-'+i,'completed'),createdAt:100-i,targetId:i%2?'alpha':'beta'}));
   server.state.jobs.push({...job('evaluating-now','evaluating'),createdAt:200},{...job('running-now','running'),createdAt:201});
-  await page.goto(server.origin+'/fixture/web');await page.locator('#history details').first().waitFor();
+  await page.goto(server.origin+'/history');await page.locator('#history details').first().waitFor();
   assert.equal(await page.locator('#history details').count(),20);assert.equal(await page.locator('#history-count').textContent(),'45');
   const counts=await page.locator('#server-overview button').first().textContent();assert.match(counts,/Retained 47/);assert.match(counts,/Assessing 1/);assert.match(counts,/Running 1/);
   const first=page.locator('#history details').first();await first.locator('summary').click();await first.evaluate(n=>window.savedHistory=n);
@@ -332,7 +333,7 @@ for (const locale of ['ko-KR', 'en-US']) test('owner and assessment details sele
     decision: { decision: 'review', reasonCode: 'model_review', reviewReason: 'uncertain', provider: 'jev', evaluation: { callerContextProvided: true },
       assessment: { model: 'jev-1.14.0', label: 'uncertain', confidence: 1, probabilities: { low_risk: 0, high_risk: 0, uncertain: 1 } } } };
   const expected = locale === 'ko-KR' ? displayContext : context, excluded = locale === 'ko-KR' ? context : displayContext;
-  server.state.jobs = [value]; await page.goto(server.origin + '/fixture/web');
+  server.state.jobs = [value]; await page.goto(server.origin + '/history');
   await page.locator('#history > details').evaluate(n => n.open = true);
   assert.ok((await page.locator('#history').textContent()).includes(expected));
   assert.ok(!(await page.locator('#history').textContent()).includes(excluded));

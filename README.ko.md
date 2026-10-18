@@ -1,4 +1,4 @@
-# SSH Approval Portal 1.5.0
+# SSH Approval Portal 1.6.0
 
 [English](README.md) · [관리자 로그인](docs/admin-login.ko.md) · [에이전트 파일 업로드](docs/agent-upload.ko.md) · [구조와 호환성](docs/architecture.ko.md)
 
@@ -8,7 +8,7 @@ Jev는 사전승인 목록 밖의 명령을 평가하는 보조 도구입니다.
 
 [시크릿 관리](docs/secret-management.ko.md)는 비밀 참조와 공급자 포트를 분리합니다. 첫 backend는 POSIX 전용 private 로컬 저장소이며, 관리자 CLI에서 값을 숨김 입력하고 Jev에는 참조로 공급합니다. 실제 키 값은 채팅·MCP 결과·패키지에 넣지 않습니다.
 
-현재 버전은 **1.5.0**입니다. 승인 규칙을 유지하며 도메인·애플리케이션·어댑터의 세 계층으로 책임을 분리합니다. 기존 클라이언트 시험, 새 에이전트 업로드 관측과 구조 변경의 로컬 검증은 구분해 기록합니다.
+현재 작업 후보는 **1.6.0**이며 테스트 서버 검증 대상입니다. 최신 공개 릴리스는 v1.5.0이고 이번 작업은 새 릴리스를 발행하지 않습니다. 승인 규칙을 유지하며 도메인·애플리케이션·어댑터의 세 계층으로 책임을 분리합니다. 기존 클라이언트 시험, 새 에이전트 업로드 관측과 구조 변경의 로컬 검증은 구분해 기록합니다.
 
 | 구분 | 확인한 범위와 남은 제약 |
 | --- | --- |
@@ -70,8 +70,8 @@ PC 파일은 카드에서 고르고 목적지 경로·덮어쓰기·sudo를 지�
 이번 릴리스의 검증 대상은 Ubuntu 22.04/24.04 x86_64입니다. ARM64 설치 경로는 남아 있지만 검증은 후속 고도화로 보류했습니다. 인터넷 연결과 서버 관리자 터미널이 필요합니다. 런타임은 Node 24.2 이상, 25 미만을 요구합니다. Node 24는 전용 경로에 설치하며 시스템 Node를 교체하지 않습니다.
 
 ```sh
-tar -xzf ssh-approval-portal-1.5.0.tar.gz
-cd ssh-approval-portal-1.5.0
+tar -xzf ssh-approval-portal-1.6.0.tar.gz
+cd ssh-approval-portal-1.6.0
 sudo bash scripts/install.sh --admin-origin https://ssh-approve.example.com --grant-sudo-all
 ```
 

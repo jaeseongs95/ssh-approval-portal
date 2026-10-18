@@ -42,3 +42,8 @@ Keep the existing Tunnel route to loopback port39125 and Access protection. The 
 - If locked out, restore the printed `.before-access.*` backup into the native env file and restart from the administrator terminal. Finish active jobs/transfers first. In-memory requests disappear on restart and are never replayed. For Docker, restore the prior secret file and recreate Compose.
 
 Synthetic JWT tests do not prove real provider login. Installation, provider login, approval and file saving require actual acceptance evidence before declaring deployment complete.
+# Approval history and display language
+
+Open **Approval history** or `/history` to search retained results and filter by status. Tab navigation keeps the target, search, status filter, page, expanded records and loaded output. Reloading reopens the history route but resets temporary view state. This is not an all-time archive; output is read only after **View output** is clicked.
+
+Under Settings, **Display language** offers automatic detection, Korean and English. **Apply language and reload** stores only this browser preference and reloads the page. Unsaved drafts are cleared; token authentication requires re-entering the administrator token. If storage is unavailable, automatic detection remains active and an error is shown. Commands, raw output, server policies and English Jev evaluation context remain unchanged.

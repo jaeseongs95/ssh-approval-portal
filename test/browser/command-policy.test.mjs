@@ -110,7 +110,7 @@ for (const width of [375, 390]) test('simple registration preserves explicit con
   const { job } = await f.app.targets.commands.run('ls && pwd'); await f.app.targets.drain();
   assert.equal(f.app.queue.get(job.id).state, 'completed'); assert.equal(f.app.queue.get(job.id).approvalMode, 'automatic');
   await page.getByRole('link',{name:'승인',exact:true}).click();
-  await page.locator('#load').click(); await page.locator('[data-request-id="' + job.id + '"] summary').getByText('자동승인', { exact: true }).waitFor();
+  await page.locator('#load').click(); await page.locator('[data-page-link][href="/history"]').click(); await page.locator('[data-request-id="' + job.id + '"] summary').getByText('자동승인', { exact: true }).waitFor();
 }, { width }));
 
 test('Jev 90 percent needs no manual reference and persists exactly the reviewed candidate', async () => fixture(async f => {
@@ -549,8 +549,9 @@ for(const width of [1200,320])test('command list scroll keeps headers and select
   const before=await region.evaluate(n=>({height:n.clientHeight,total:n.scrollHeight}));assert.ok(before.total>before.height);assert.ok(before.height<=480);
   const raw=await names(page).inputValue(),posts=f.posts.length;
   await region.focus();await region.press('End');
-  await page.waitForFunction(()=>document.querySelector('.command-table-scroll').scrollTop>0);
-  const position=await region.evaluate(n=>({top:n.getBoundingClientRect().top,head:n.querySelector('th').getBoundingClientRect().top}));assert.ok(Math.abs(position.top-position.head)<3);
+  // End uses animated keyboard scrolling: positive movement can precede the caption.
+  await page.waitForFunction(()=>{const n=document.querySelector('.command-table-scroll');return n.scrollTop+n.clientHeight>=n.scrollHeight-2;});
+  const position=await region.evaluate(n=>({top:n.getBoundingClientRect().top,head:n.querySelector('th').getBoundingClientRect().top}));assert.ok(Math.abs(position.top-position.head)<3,JSON.stringify(position));
   assert.equal(await names(page).inputValue(),raw);assert.equal(f.posts.length,posts);
   await table.getByRole('button',{name:'custom-11 상세 보기',exact:true}).click();assert.match(await page.locator('.command-detail').textContent(),/custom-11/);
   await page.getByRole('button',{name:'명령 12개 더 보기',exact:true}).click();assert.equal(await table.locator('tbody tr').count(),24);

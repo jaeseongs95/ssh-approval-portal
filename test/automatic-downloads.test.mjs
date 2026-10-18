@@ -68,6 +68,7 @@ test('global automation OFF still permits owner-approved downloads, never policy
 test('settings is a safe HTML entry while observation data remains owner authenticated and target bound',async()=>fixture(async f=>{
   const origin='http://127.0.0.1:'+f.app.adminHttp.address().port;
   const page=await fetch(origin+'/settings');assert.equal(page.status,200);assert.match(page.headers.get('content-type'),/^text\/html/);
+  const history=await fetch(origin+'/history');assert.equal(history.status,200);assert.match(history.headers.get('content-type'),/^text\/html/);assert.match(await history.text(),/history-panel/);
   const html=await page.text();assert.match(html,/data-page-link/);assert.doesNotMatch(html,/fixture-owner|fixture-mcp/);
   assert.equal((await fetch(origin+'/api/automation-metrics')).status,401);
   const metrics=await f.api('/api/automation-metrics?target=alpha');assert.equal(metrics.status,200);assert.equal(metrics.body.available,true);assert.equal(metrics.body.total,0);

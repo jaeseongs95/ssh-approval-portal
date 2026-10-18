@@ -43,7 +43,7 @@ test('late card output cannot overwrite a replacement request', async () => fixt
   assert.equal(await page.getByText('EXPLICIT_OUTPUT_SENTINEL', { exact: true }).count(), 0);
 }));
 test('web history reads no output before explicit click and keeps content outside polling snapshots', async () => fixture(async (page, server) => {
-  server.state.jobs = [job]; await page.goto(server.origin + '/fixture/web');
+  server.state.jobs = [job]; await page.goto(server.origin + '/history');
   await page.locator('#history details').waitFor(); await page.locator('#history details summary').click();
   assert.equal(server.state.outputReads ?? 0, 0);
   await page.getByRole('button', { name: '출력 보기', exact: true }).click();
@@ -53,7 +53,7 @@ test('web history reads no output before explicit click and keeps content outsid
 test('late web output is discarded through target A to B to A replacement', async () => fixture(async (page, server) => {
   let release; server.state.multiTarget = true; server.state.jobs = [{ ...job, targetId: 'alpha', targetRevision: 'alpha-v1' }];
   server.state.beforeOutput = () => new Promise(resolve => { release = resolve; });
-  await page.goto(server.origin + '/fixture/web'); await page.locator('#history details summary').click();
+  await page.goto(server.origin + '/history'); await page.locator('#history details summary').click();
   await page.getByRole('button', { name: '출력 보기', exact: true }).click(); await page.waitForFunction(() => document.querySelector('#history button').disabled);
   await page.locator('#target-filter').selectOption('beta'); await page.locator('#target-filter').selectOption('alpha'); release();
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
@@ -70,7 +70,7 @@ test('built administrator bundle loads stored result from actual authenticated a
     browser = await chromium.launch({ headless: true, ...(process.env.SOLID_CHROMIUM_PATH ? { executablePath: process.env.SOLID_CHROMIUM_PATH } : {}) });
     const page = await browser.newPage({ locale: 'ko-KR', viewport: { width: 390, height: 844 } }); let outputReads = 0;
     await page.route('**/*', route => { if (new URL(route.request().url()).origin !== origin) return route.abort(); if (route.request().url().includes('/api/outputs/')) outputReads++; return route.continue(); });
-    await page.goto(origin); await page.locator('#token').fill('synthetic-owner'); await page.locator('#load').click();
+    await page.goto(origin); await page.locator('#token').fill('synthetic-owner'); await page.locator('#load').click(); await page.locator('[href="/history"]').click();
     await page.locator('#history details summary').click(); assert.equal(outputReads, 0); assert.equal(await page.getByText('ACTUAL_OUTPUT_SENTINEL', { exact: true }).count(), 0);
     await page.getByRole('button', { name: '출력 보기', exact: true }).click(); await page.getByText('ACTUAL_OUTPUT_SENTINEL', { exact: true }).waitFor(); assert.equal(outputReads, 1);
   } finally { await browser?.close(); await app?.close(); await rm(root, { recursive: true, force: true }); }

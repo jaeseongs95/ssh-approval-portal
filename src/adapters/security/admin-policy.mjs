@@ -8,7 +8,7 @@ export async function authorizeAdminRequest(req, { adminAccess, adminToken, admi
   const routeKind = ['/api/maintenance/reserve', '/api/maintenance/release'].includes(pathname) ? 'maintenance'
     : method === 'GET' && pathname === '/api/session' ? 'session'
     : ['GET', 'HEAD'].includes(method) && /^\/downloads\/[a-f0-9]{48}\/[a-f0-9]{32}$/.test(pathname) ? 'download'
-    : method === 'GET' && ['/', '/settings', '/app.js'].includes(pathname) ? 'static' : 'api';
+    : method === 'GET' && ['/', '/settings', '/history', '/app.js'].includes(pathname) ? 'static' : 'api';
   const deny = status => ({ allowed: false, status, routeKind });
   if (routeKind === 'maintenance') {
     if (!authenticated(req, adminToken)) return deny(401);

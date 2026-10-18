@@ -19,7 +19,7 @@ test('Access web requires signed owner, cookie POST origin and separate maintena
   const owner={'cf-access-jwt-assertion':token,Origin:origin};
   try {
     await listen(app.adminHttp);await listen(app.mcpHttp);const url=`http://127.0.0.1:${app.adminHttp.address().port}`;
-    for(const path of ['/','/app.js','/api/session','/api/requests','/downloads/'+'1'.repeat(48)+'/'+'2'.repeat(32)])assert.equal((await fetch(url+path,{headers:{Authorization:'Bearer fixture-admin','cf-access-authenticated-user-email':'owner@example.test'}})).status,401,path);
+    for(const path of ['/','/settings','/history','/app.js','/api/session','/api/requests','/downloads/'+'1'.repeat(48)+'/'+'2'.repeat(32)])assert.equal((await fetch(url+path,{headers:{Authorization:'Bearer fixture-admin','cf-access-authenticated-user-email':'owner@example.test'}})).status,401,path);
     const html=await(await fetch(url,{headers:owner})).text();assert.match(html,/data-auth-mode="access"/);assert.ok(!html.includes(token));
     const session=await(await fetch(url+'/api/session',{headers:owner})).json();assert.deepEqual(session,{mode:'access'});
     const job=app.queue.submit('sudo fixture');assert.equal(calls,0);

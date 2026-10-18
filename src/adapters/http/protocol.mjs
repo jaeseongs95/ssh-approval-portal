@@ -81,7 +81,7 @@ export function createProtocolAdapters({ queue, commands, files, store, lifecycl
         }
         return;
       }
-      if (req.method === 'GET' && ['/', '/settings', '/app.js'].includes(url.pathname)) {
+      if (req.method === 'GET' && ['/', '/settings', '/history', '/app.js'].includes(url.pathname)) {
         res.writeHead(200, { 'Content-Type': url.pathname !== '/app.js' ? 'text/html; charset=utf-8' : 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'", 'Referrer-Policy': 'no-referrer' });
         return res.end(url.pathname !== '/app.js' ? webHtml.replace('data-auth-mode="token"', () => `data-auth-mode="${adminAccess.mode}" data-command-automation="${Boolean(commandPolicy)}" data-multi-target="${settings.targets ? 'true' : 'false'}" data-bridge-display-name="${escapeHtml(settings.bridgeDisplayName)}" data-target-display-name="${escapeHtml(settings.targetDisplayName)}"`)
           .replace('<title>SSH 승인 · Approval Portal</title>', () => `<title>${escapeHtml(settings.bridgeDisplayName)} · ${escapeHtml(settings.targetDisplayName)} · SSH Approval Portal</title>`) : webJs);

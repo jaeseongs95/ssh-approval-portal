@@ -24,6 +24,8 @@ function harness(language, access = false, jobs) {
       return selector==='*'?descendants:descendants.filter(node=>selector==='button'?node.tag==='button':selector==='details[open]'?node.tag==='details'&&node.open:false);
     }
     addEventListener(type, fn) { this[type]=fn; }
+    setAttribute(name,value) { this[name]=value; }
+    before(node) { if(this.parent)this.parent.insertBefore(node,this); }
     removeAttribute() {}
     get childElementCount() { return this.children.length; }
     remove() { if(this.parent){this.parent.children=this.parent.children.filter(x=>x!==this);this.parent=null;} }

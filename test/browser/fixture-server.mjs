@@ -49,8 +49,8 @@ export async function fixtureServer(root) {
         if (url.pathname.endsWith('legacy-card.js')) text = text.replace("import { App } from '@modelcontextprotocol/ext-apps';", 'const App = window.FixtureApp;');
       } else if (url.pathname === '/src/domain/command-risks.json') {
         text = await readFile(resolve(root, 'src/domain/command-risks.json'), 'utf8'); type = 'application/json';
-      } else if (url.pathname === '/' || url.pathname === '/fixture/web') {
-        text = (await readFile(resolve(root, 'web/index.html'), 'utf8')).replace('data-auth-mode="token"', () => `data-auth-mode="access" data-multi-target="${state.multiTarget}" data-bridge-display-name="${escape(state.bridgeDisplayName)}" data-target-display-name="${escape(state.targetDisplayName)}"`).replace('<script src="/app.js" defer></script>', '<script type="module" src="/web/app.js"></script>'); type = 'text/html';
+      } else if (['/', '/settings', '/history', '/fixture/web'].includes(url.pathname)) {
+        text = (await readFile(resolve(root, 'web/index.html'), 'utf8')).replace('data-auth-mode="token"', () => `data-auth-mode="access" data-command-automation="${state.commandAutomation === true}" data-multi-target="${state.multiTarget}" data-bridge-display-name="${escape(state.bridgeDisplayName)}" data-target-display-name="${escape(state.targetDisplayName)}"`).replace('data-command-automation="false"', () => `data-command-automation="${state.commandAutomation === true}"`).replace('<script src="/app.js" defer></script>', '<script type="module" src="/web/app.js"></script>'); type = 'text/html';
       } else {
         const path = resolve(root, '.' + url.pathname);
         if (!path.startsWith(resolve(root) + sep) || !/^\/(?:ui|web)\/(?:src\/[^/]+\.js|app\.js)$/.test(url.pathname)) { response.writeHead(404); response.end(); return; }
