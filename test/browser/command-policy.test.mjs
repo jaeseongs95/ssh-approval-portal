@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, mkdir } from 'node:fs/promises';
+import { mkdtemp, rm, mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { chromium } from 'playwright';
@@ -40,6 +40,7 @@ async function fixture(run, { multi = false, assess = async () => low, width = 3
     const context = await browser.newContext({ locale: 'ko-KR', viewport: { width, height: 844 }, colorScheme: 'dark' });
     await context.route('**/*', async route => {
       if (new URL(route.request().url()).origin !== origin) return route.abort();
+      if (process.env.POLICY_UX_ROOT && new URL(route.request().url()).pathname === '/app.js') return route.fulfill({ status: 200, contentType: 'text/javascript', body: await readFile(join(process.env.POLICY_UX_ROOT, 'web/dist/app.js'), 'utf8') });
       if (route.request().method() === 'POST') {
         posts.push({ path: new URL(route.request().url()).pathname, body: route.request().postDataJSON() });
         const response = await route.fetch({ maxRedirects: 0, headers: { ...route.request().headers(), origin: 'https://owner.test' } });
@@ -304,7 +305,7 @@ test('important upload and sudo controls stay between overview and collapsed pol
   assert.equal(await sudo.isChecked(),false);assert.equal(await upload.isChecked(),false);
   assert.equal(await page.locator('#important-settings').evaluate(n=>Boolean(document.querySelector('#overview-section').compareDocumentPosition(n)&Node.DOCUMENT_POSITION_FOLLOWING)&&Boolean(n.compareDocumentPosition(document.querySelector('#command-policy'))&Node.DOCUMENT_POSITION_FOLLOWING)),true);
   await sudo.check();assert.equal(await page.locator('#command-policy').evaluate(n=>n.open),true);
-  assert.match(await page.locator('#important-settings [role=status]').textContent(),/아직 저장되지/);
+  assert.match(await page.locator('#important-settings .policy-message').textContent(),/아직 저장되지/);
   assert.equal(f.posts.filter(p=>p.path==='/api/command-policy').length,0);assert.equal(await save(page).isDisabled(),true);
   await f.checked();await page.getByText(/sudo 자동승인을 켜면/).waitFor();await f.commit();
   let policy=(await f.api('/api/command-policy'));assert.equal(policy.targets[0].automaticSudo,true);
@@ -331,7 +332,7 @@ test('model autoapproval is visible beside transfer controls and requires review
   const posts = () => f.posts.filter(p => p.path === '/api/command-policy').length, before = posts();
   await model.check();
   await page.waitForURL('**/settings'); assert.equal(await names(page).isVisible(), true);
-  assert.match(await page.locator('#important-settings [role=status]').textContent(), /AI 평가 자동승인 개별 승인.*아직 저장되지/);
+  assert.match(await page.locator('#important-settings .policy-message').textContent(), /AI 평가 자동승인 개별 승인.*아직 저장되지/);
   assert.equal(posts(), before); assert.equal(await save(page).isDisabled(), true);
   await f.checked(); assert.equal(posts(), before); await f.commit();
   let saved = (await f.api('/api/command-policy')).targets[0];
@@ -341,3 +342,113 @@ test('model autoapproval is visible beside transfer controls and requires review
   assert.deepEqual(saved.commands, ['pwd']); assert.deepEqual(saved.thresholds, rule.thresholds);
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
 }, { width: 320 }));
+
+
+test('target drafts preserve raw inputs but never reuse review; other-target updates use the newest snapshot', async () => fixture(async f => {
+  const {page}=f; await f.open(); const selector=page.getByLabel('설정할 서버',{exact:true});
+  await names(page).fill('ls\npwd'); const upload=page.getByRole('checkbox',{name:/^파일 자동업로드 허용/}); await upload.check();
+  await page.getByRole('checkbox',{name:/^Jev·다른 모델을 통한/}).check();
+  await page.getByLabel('Jev 자동승인 기준 (%)',{exact:true}).fill('51');
+  await f.checked(); await ok(page).check(); await selector.selectOption('beta'); await names(page).fill('custom-beta');
+  await selector.selectOption('alpha'); assert.equal(await names(page).inputValue(),'ls\npwd'); assert.equal(await upload.isChecked(),true);
+  assert.equal(await page.getByLabel('Jev 자동승인 기준 (%)',{exact:true}).inputValue(),'51'); assert.equal(await ok(page).isChecked(),false); assert.equal(await save(page).isDisabled(),true);
+  const before=await f.api('/api/command-policy'), b=before.bindings.find(b=>b.targetId==='beta');
+  const beta={targetId:b.targetId,targetRevision:b.targetRevision,profile:b.profile,commands:['stat'],deniedCommands:[],externalDisclosure:false,modelExecution:false,fallback:null,thresholds:{}};
+  await f.seed({targets:[beta]}); await page.getByRole('button',{name:'서버 설정 다시 불러오기',exact:true}).click();
+  await page.getByText(/보존한 초안입니다/).waitFor(); assert.equal(await selector.inputValue(),'alpha'); assert.equal(await names(page).inputValue(),'ls\npwd');
+  await f.checked(); const candidate=f.posts.filter(p=>p.path.endsWith('/review')).at(-1).body;
+  assert.deepEqual(candidate.policy.targets.find(t=>t.targetId==='beta'),beta); assert.equal(candidate.policy.targets.find(t=>t.targetId==='alpha').thresholds.jev.minLowRisk,0.51);
+  assert.notEqual(candidate.expectedRevision,before.revision); assert.equal(f.posts.filter(p=>p.path==='/api/command-policy').length,0);
+}, {multi:true}));
+
+test('same-target policy conflicts preserve the old raw draft for copying and require explicit latest start', async () => fixture(async f => {
+  const {page}=f; await f.open(); await names(page).fill('ls -l\ncustom-check');
+  const current=await f.api('/api/command-policy'), b=current.bindings[0];
+  const latest={targetId:b.targetId,targetRevision:b.targetRevision,profile:b.profile,commands:['pwd'],deniedCommands:['rm'],externalDisclosure:false,modelExecution:false,fallback:null,thresholds:{}};
+  await f.seed({targets:[latest]}); await page.getByRole('button',{name:'서버 설정 다시 불러오기',exact:true}).click();
+  await page.getByText(/서버의 정책 또는 연결 정보가 바뀌었습니다/).waitFor();
+  assert.equal(await names(page).isDisabled(),true); assert.equal(await review(page).isDisabled(),true);
+  await page.getByText('보존한 초안 보기 · 복사 가능',{exact:true}).click(); assert.match(await page.locator('.policy-warning pre').textContent(),/ls -l\ncustom-check/);
+  await page.getByRole('button',{name:'최신 설정으로 새 초안 시작',exact:true}).click(); assert.equal(await names(page).isDisabled(),false); assert.equal(await names(page).inputValue(),'pwd');
+  assert.match(await page.locator('.policy-warning pre').textContent(),/ls -l\ncustom-check/); assert.equal(await save(page).isDisabled(),true); assert.equal(f.posts.length,0);
+}));
+
+test('changed target bindings never silently rebind a preserved draft', async () => fixture(async f => {
+  const {page}=f; await f.open(); await names(page).fill('ls\ncustom-check');
+  await page.route('**/api/command-policy',async route=>{
+    if(route.request().method()!=='GET')return route.continue();
+    const response=await route.fetch(),body=await response.json(); body.bindings[0].targetRevision+='-changed'; await route.fulfill({response,json:body});
+  });
+  await page.getByRole('button',{name:'서버 설정 다시 불러오기',exact:true}).click(); await page.getByText(/서버의 정책 또는 연결 정보가 바뀌었습니다/).waitFor();
+  assert.equal(await review(page).isDisabled(),true); assert.equal(await names(page).isDisabled(),true); assert.equal(f.posts.length,0);
+}));
+
+test('unknown save locks authority edits; failed read stays unknown and matching read reports only current equality', async () => fixture(async f => {
+  const {page}=f; await f.open(); await names(page).fill('ls'); await f.checked(); await ok(page).check(); let writes=0,failRead=false;
+  await page.route('**/api/command-policy',async route=>{
+    if(route.request().method()==='POST'){writes++;const response=await route.fetch({headers:{...route.request().headers(),origin:'https://owner.test'}});assert.equal(response.status(),200);failRead=true;return route.abort('failed');}
+    if(failRead)return route.abort('failed'); return route.continue();
+  });
+  await save(page).click(); await page.getByText(/저장 결과를 확인하지 못했습니다/).waitFor();
+  assert.equal(await names(page).isDisabled(),true); assert.equal(await review(page).isDisabled(),true); assert.equal(await page.getByLabel('설정할 서버',{exact:true}).isDisabled(),true);
+  const status=page.locator('#important-settings .policy-message'); assert.match(await status.textContent(),/이미 적용됐을 수/); assert.doesNotMatch(await status.textContent(),/아직 저장되지/);
+  await page.getByRole('button',{name:'현재 적용 설정 확인',exact:true}).click(); await page.getByText(/설정을 불러오지 못했습니다/).waitFor(); assert.equal(await names(page).isDisabled(),true); assert.match(await status.textContent(),/이미 적용됐을 수/);
+  failRead=false; await page.getByRole('button',{name:'현재 적용 설정 확인',exact:true}).click(); await page.getByText(/현재 적용값은 요청한 설정과 같습니다/).waitFor();
+  assert.equal(await names(page).isDisabled(),false); assert.equal(await names(page).inputValue(),'ls'); assert.equal(await save(page).isDisabled(),true); assert.equal(writes,1);
+  assert.deepEqual((await f.api('/api/command-policy')).targets[0].commands,['ls']); assert.equal(f.posts.filter(p=>p.path==='/api/command-policy').length,0);
+}));
+
+test('uncommitted unknown save keeps a differing draft; later conflicting current policy is never overwritten', async () => fixture(async f => {
+  const {page}=f;await f.open();await names(page).fill('custom-check');await f.checked();await ok(page).check();let writes=0;
+  await page.route('**/api/command-policy',async route=>{if(route.request().method()==='POST'){writes++;return route.abort('failed');}return route.continue();});
+  await save(page).click();await page.getByText(/저장 결과를 확인하지 못했습니다/).waitFor();
+  const c=await f.api('/api/command-policy'),b=c.bindings[0];await f.seed({targets:[{targetId:b.targetId,targetRevision:b.targetRevision,profile:b.profile,commands:['pwd'],deniedCommands:[],externalDisclosure:false,modelExecution:false,fallback:null,thresholds:{}}]});
+  await page.getByRole('button',{name:'현재 적용 설정 확인',exact:true}).click();await page.getByText(/현재 적용값과 요청한 설정이 다릅니다/).waitFor();
+  assert.equal(await names(page).isDisabled(),true);await page.getByText('보존한 초안 보기 · 복사 가능',{exact:true}).click();assert.match(await page.locator('.policy-warning pre').textContent(),/custom-check/);assert.equal(writes,1);
+}));
+
+test('selection exposes capability and same-count deltas; 128 names remain filterable and removable on narrow screens', async () => fixture(async f=>{
+  const {page}=f;const c=await f.api('/api/command-policy'),b=c.bindings[0];await f.seed({targets:[{targetId:b.targetId,targetRevision:b.targetRevision,profile:b.profile,commands:['ls'],deniedCommands:['rm'],externalDisclosure:false,modelExecution:false,fallback:null,thresholds:{}}]});
+  await f.open();await names(page).fill('rm');const delta=page.locator('.policy-change-summary');assert.match(await delta.textContent(),/자동승인 명령 추가: rm · 제외: ls/);assert.match(await page.getByText(/^명령 이름에 대한 기본 안내:/).textContent(),/금지 목록과 겹침: rm/);
+  const list=Array.from({length:128},(_,i)=>'custom-'+String(i).padStart(3,'0'));await names(page).fill(list.join('\n'));
+  await page.getByText('선택 명령 확인 · 기능과 위험 안내',{exact:true}).click();assert.equal(await page.locator('.policy-selected-row').count(),12);
+  await page.getByRole('button',{name:'선택 명령 12개 더 보기',exact:true}).click();assert.equal(await page.locator('.policy-selected-row').count(),24);
+  const filter=page.getByLabel('선택 명령 필터',{exact:true});await filter.fill('custom-127');await f.checked();await ok(page).check();
+  await page.getByRole('button',{name:'custom-127 제외',exact:true}).click();assert.equal(await save(page).isDisabled(),true);assert.equal(await ok(page).isChecked(),false);
+  assert.equal((await names(page).inputValue()).split('\n').length,127);assert.equal(await filter.evaluate(n=>n===document.activeElement),true);assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  await screenshot(page,'command-selection-320');
+},{width:320}));
+
+test('hidden advanced errors open their ancestors and expired consent restores keyboard focus',async()=>fixture(async f=>{
+  const {page}=f;const c=await f.api('/api/command-policy'),b=c.bindings[0];await f.seed({targets:[{targetId:b.targetId,targetRevision:b.targetRevision,profile:b.profile,commands:['ls'],deniedCommands:[],externalDisclosure:false,modelExecution:false,fallback:null,thresholds:{luna:{model:'custom-luna',questionVersion:'ssh-command-risk-v4',basis:'safety-probability-v1',minLowRisk:0.9,validationRef:'fixture:luna'}}}]});
+  await page.clock.install();await f.open();const advanced=page.locator('.policy-advanced');await advanced.locator('summary').first().click();const score=page.getByLabel('luna 자동승인 기준 (%)',{exact:true});await score.fill('50');await advanced.locator('summary').first().click();
+  await review(page).click();assert.equal(await advanced.evaluate(n=>n.open),true);assert.equal(await score.evaluate(n=>n===document.activeElement),true);assert.equal(await score.getAttribute('aria-invalid'),'true');
+  await score.fill('90');await f.checked();await ok(page).check();await save(page).focus();await page.clock.fastForward(300001);assert.equal(await review(page).evaluate(n=>n===document.activeElement),true);assert.equal(await save(page).isDisabled(),true);
+}));
+
+test('late feedback does not steal search focus and search descriptions remain available to accessibility APIs',async()=>fixture(async f=>{
+  const {page}=f;await f.open();let entered,release;const started=new Promise(r=>entered=r),held=new Promise(r=>release=r);
+  await page.route('**/api/command-policy/review',async route=>{const response=await route.fetch({headers:{...route.request().headers(),origin:'https://owner.test'}});entered();await held;await route.fulfill({response});});
+  await review(page).click();await started;const search=page.getByLabel('명령 검색',{exact:true});await search.focus();release();await ok(page).waitFor({state:'visible'});assert.equal(await search.evaluate(n=>n===document.activeElement),true);
+  await search.fill('파일');const first=page.locator('.policy-search-results input').first();assert.ok(await first.getAttribute('aria-describedby'));const count=await page.locator('.policy-search-results input').count();
+  if(await page.getByRole('button',{name:'검색 결과 12개 더 보기',exact:true}).count()){await page.getByRole('button',{name:'검색 결과 12개 더 보기',exact:true}).click();assert.ok(await page.locator('.policy-search-results input').count()>count);}
+  assert.equal(await save(page).isDisabled(),true);assert.equal(f.posts.filter(p=>p.path==='/api/command-policy').length,0);
+}));
+
+
+for(const mode of ['collapsed','approvals'])test('expiration remains announced outside hidden settings without stealing focus '+mode,async()=>fixture(async f=>{
+  const {page}=f;await page.clock.install();await f.open();await f.checked();await ok(page).check();
+  const focused=mode==='collapsed'?page.locator('#command-policy>summary'):page.getByRole('link',{name:'승인',exact:true});await focused.click();
+  await page.clock.fastForward(300001);const status=page.locator('#policy-activity');await status.getByText(/확인 결과가 만료됐습니다/).waitFor();
+  assert.equal(await status.isVisible(),true);assert.equal(await focused.evaluate(n=>n===document.activeElement),true);assert.equal(await save(page).isDisabled(),true);
+  if(mode==='collapsed')assert.equal(await page.locator('#command-policy').evaluate(n=>n.open),false);else assert.equal(await page.locator('#command-policy').isVisible(),false);
+}));
+
+for(const outcome of ['complete','failed'])test('late feedback reports outside collapsed settings and preserves navigation focus '+outcome,async()=>fixture(async f=>{
+  const {page}=f;await f.open();let entered,release;const started=new Promise(r=>entered=r),held=new Promise(r=>release=r);
+  await page.route('**/api/command-policy/review',async route=>{let response;if(outcome==='complete')response=await route.fetch({headers:{...route.request().headers(),origin:'https://owner.test'}});entered();await held;if(response)await route.fulfill({response});else await route.abort('failed');});
+  await review(page).click();await started;const heading=page.locator('#command-policy>summary');await heading.click();release();
+  const status=page.locator('#policy-activity');await status.getByText(outcome==='complete'?/OK를/:/위험도를 확인하지 못했습니다/).waitFor();
+  assert.equal(await status.isVisible(),true);assert.equal(await heading.evaluate(n=>n===document.activeElement),true);assert.equal(await page.locator('#command-policy').evaluate(n=>n.open),false);
+  assert.equal(f.posts.filter(p=>p.path==='/api/command-policy').length,0);
+}));
