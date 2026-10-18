@@ -130,23 +130,23 @@
     },
     {
       "path": "package-lock.json",
-      "size": 100102,
-      "sha256": "2ec43933e823720eb2395d7fe1faa3dc8e13dc7cd6e9cd3c243f4b17bec0234a"
+      "size": 100104,
+      "sha256": "99a8fa601408c797b376bd745deefd0e7770f58ee946787df26372b8742d6580"
     },
     {
       "path": "package.json",
-      "size": 738,
-      "sha256": "a841ca9d13863c798de221e304aa106317fffdc2a889a14a3de0b62abdf2bf4c"
+      "size": 740,
+      "sha256": "c7b30c2186a5c63f12666edd11f03deb1db0d6f06554c669e604e21e32b715c5"
     },
     {
       "path": "README.ko.md",
-      "size": 19443,
-      "sha256": "174271c958e9ae3d7e588065936b635985e83d5f6f873e4874df91fefe293c1c"
+      "size": 19504,
+      "sha256": "8f58c562236457ed855ce5fe0c1c6a28c4d8c962d1ad0336070860f3819dfaf2"
     },
     {
       "path": "README.md",
-      "size": 17893,
-      "sha256": "eed98fe53a7d0e4da6ef541b404dd527d94518d08aec7d86271002696efdcd9d"
+      "size": 17957,
+      "sha256": "eadc08bbc523e2ceca50e70cc20bef9a126adad2d43a113fe8f645452c374183"
     },
     {
       "path": "scripts/admin-access-config.mjs",
