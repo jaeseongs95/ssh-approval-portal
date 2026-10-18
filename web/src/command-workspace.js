@@ -24,7 +24,8 @@ export function createCommandWorkspace({ document, container, commands, denied, 
   const status = el('p', '', 'policy-help'); status.setAttribute('role', 'status'); master.append(status);
   const table = el('table', '', 'command-grid'), caption = el('caption', '명령을 선택해 상세 내용과 설정을 확인하세요.'); caption.id = 'command-grid-help'; table.append(caption);
   const head = el('thead'), headings = el('tr'); for (const text of ['명령', '기본 위험', '초안 상태']) { const th = el('th', text); th.scope = 'col'; headings.append(th); } head.append(headings); table.append(head);
-  const list = el('tbody', '', 'command-rules'); table.append(list); master.append(table);
+  const list = el('tbody', '', 'command-rules'); table.append(list);
+  const scroll = el('div', '', 'command-table-scroll'); scroll.tabIndex = 0; scroll.setAttribute('role', 'region'); scroll.setAttribute('aria-label', '명령 목록 스크롤'); scroll.append(table); master.append(scroll);
   const more = button('명령 12개 더 보기', () => { const previous = limit; limit += 12; refresh(); list.children[previous]?.querySelector('button')?.focus(); }); master.append(more);
   const detail = el('section', '', 'command-detail'); detail.setAttribute('aria-label', '선택한 명령 상세'); layout.append(detail);
   const help = el('p', '이름을 등록하면 옵션·인자·출력 리다이렉션도 허용합니다. 명령줄의 명령이 모두 등록돼 있으면 인자 위험도·Jev 평가 없이 실행합니다. 제외는 차단이 아니며, 미등록 명령도 모델 평가에 따라 자동 실행될 수 있습니다.', 'policy-warning'); help.id = 'command-authority-warning'; container.append(help);

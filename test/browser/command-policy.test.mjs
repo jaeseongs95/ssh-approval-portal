@@ -541,3 +541,19 @@ for (const width of [1200,320]) test('command master detail separates selection 
   await page.getByLabel('명령 검색',{exact:true}).fill('does-not-exist');assert.equal(await grid.locator('tbody tr').count(),0);assert.match(await detail.textContent(),/선택할 명령이 없습니다/);
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await screenshot(page,'master-detail-'+width);
 },{width}));
+
+for(const width of [1200,320])test('command list scroll keeps headers and selection independent '+width,async()=>fixture(async f=>{
+  const {page}=f;await f.open();await names(page).fill(Array.from({length:24},(_,i)=>'custom-'+String(i).padStart(2,'0')).join('\n'));
+  const region=page.getByRole('region',{name:'명령 목록 스크롤',exact:true}),table=page.locator('.command-grid');
+  assert.equal(await region.getAttribute('tabindex'),'0');
+  const before=await region.evaluate(n=>({height:n.clientHeight,total:n.scrollHeight}));assert.ok(before.total>before.height);assert.ok(before.height<=480);
+  const raw=await names(page).inputValue(),posts=f.posts.length;
+  await region.focus();await region.press('End');
+  await page.waitForFunction(()=>document.querySelector('.command-table-scroll').scrollTop>0);
+  const position=await region.evaluate(n=>({top:n.getBoundingClientRect().top,head:n.querySelector('th').getBoundingClientRect().top}));assert.ok(Math.abs(position.top-position.head)<3);
+  assert.equal(await names(page).inputValue(),raw);assert.equal(f.posts.length,posts);
+  await table.getByRole('button',{name:'custom-11 상세 보기',exact:true}).click();assert.match(await page.locator('.command-detail').textContent(),/custom-11/);
+  await page.getByRole('button',{name:'명령 12개 더 보기',exact:true}).click();assert.equal(await table.locator('tbody tr').count(),24);
+  assert.equal(await names(page).inputValue(),raw);assert.equal(f.posts.length,posts);assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  await screenshot(page,'command-scroll-'+width);
+},{width}));
