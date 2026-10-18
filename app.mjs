@@ -162,7 +162,11 @@ export async function createApplication({ registry, classify, executeCommand, au
   return { ...protocols, queue, store, targets, transfers: runtimes[0].transfers, enabled: settings.uiEnabled,
     close() {
       clearInterval(timer); shutdown.abort();
-      return closing ??= lifecycle.close(() => Promise.all([protocols.mcpHttp, protocols.adminHttp].map(server => new Promise(resolve => server.close(resolve))))).finally(() => { commandState?.close(); outputs.close(); });
+      return closing ??= lifecycle.close(() => Promise.all([protocols.mcpHttp, protocols.adminHttp].map(server => new Promise(resolve => {
+        // Drain normal responses, then close unfinished HTTP bodies before systemd times out.
+        const deadline = setTimeout(() => server.closeAllConnections(), 5000); deadline.unref();
+        server.close(() => { clearTimeout(deadline); resolve(); });
+      })))).finally(() => { commandState?.close(); outputs.close(); });
     },
   };
   } catch (error) { commandState?.close(); outputs.close(); throw error; }

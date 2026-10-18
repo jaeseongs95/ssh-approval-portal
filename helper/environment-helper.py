@@ -123,9 +123,9 @@ def patch_env(data, changes):
     return encoded
 
 
-def clean_run(args, **kwargs):
+def clean_run(args, timeout=40, **kwargs):
     return subprocess.run(args, env={'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}, stdin=subprocess.DEVNULL,
-                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=40, check=True, **kwargs)
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=timeout, check=True, **kwargs)
 
 
 def validate(data):
@@ -225,7 +225,7 @@ class Editor:
                    '/usr/bin/python3', '-I', HELPER, '--restart', job])
 
     def restart(self, job, restart=None, healthy=None):
-        restart = restart or (lambda: clean_run(['/usr/bin/systemctl', 'restart', SERVICE]))
+        restart = restart or (lambda: clean_run(['/usr/bin/systemctl', 'restart', SERVICE], timeout=200))
         healthy = healthy or self.healthy
         self.initialize()
         fd = os.open(self.root / 'lock', os.O_RDWR | os.O_NOFOLLOW)

@@ -80,7 +80,7 @@ export function createEnvironmentPanel({ document, api, delay = ms => new Promis
       message.textContent = '연결이 끊겼습니다. 재시작 요청 결과를 확인하는 중…';
     }
     // Only reads repeat. A missing response never triggers a second restart.
-    for (let attempt = 0; attempt < 30; attempt++) {
+    for (let attempt = 0; attempt < 120; attempt++) {
       await delay(2000);
       if (token !== generation) { busy = false; return; }
       try {

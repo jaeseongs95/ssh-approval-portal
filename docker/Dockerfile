@@ -7,7 +7,7 @@ RUN architecture="$TARGETARCH"; [ "$architecture" != amd64 ] || architecture=x64
     cd / && grep "  node-v24.21.0-linux-$architecture.tar.xz\$" SHASUMS256.txt | sed 's|  node-.*|  node.tar.xz|' | sha256sum -c - && \
     mkdir /runtime && tar -xJf /node.tar.xz -C /runtime --strip-components=1
 ENV PATH=/runtime/bin:${PATH}
-ARG PACKAGE_ARCHIVE=dist/ssh-approval-portal-1.4.1.tar.gz
+ARG PACKAGE_ARCHIVE=dist/ssh-approval-portal-1.5.0.tar.gz
 COPY ${PACKAGE_ARCHIVE} /package.tar.gz
 RUN mkdir /app && tar -xzf /package.tar.gz -C /app --strip-components=1 && cd /app && node scripts/verify.mjs . && npm ci --omit=dev --ignore-scripts && node scripts/check-package-imports.mjs
 
