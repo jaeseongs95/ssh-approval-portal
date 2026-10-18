@@ -36,6 +36,12 @@ node scripts/verify.mjs
 
 Ubuntu 22.04/24.04의 네이티브·Docker·Compose는 fresh·update·reinstall·failed-start·rollback과 실제 격리 SSH 파일 왕복을 확인합니다. 각 검증은 합성 설정·데이터를 사용하고 현재 운영 서비스나 자격을 사용하지 않습니다. 현재 1.0.0 릴리스 범위는 amd64이며 ARM64 검증은 사용자 지시로 후속 고도화에 이관했습니다. Windows·WSL·ARM64 에뮬레이션과 실제 ARM 하드웨어 결과를 구분합니다. 실행하지 않은 환경은 NOT_RUN으로 남깁니다.
 
+Windows의 Docker driver는 `package.json` 버전에 맞는 `dist/ssh-approval-portal-VERSION.tar.gz`를 기본으로 사용합니다. 패키지 생성 후 `pwsh -File test/driver-common.test.ps1`로 기본 경로·명시 경로·누락 파일 거부를 확인합니다. 실제 Docker·Compose 검사는 각 `test/docker-runtime.ps1`·`test/compose-runtime.ps1`에서 수행합니다. Compose 시작 실패 시 합성 서비스 로그와 health 기록을 정리 전에 남기며 원래 실패 코드는 유지합니다. 구버전 기준 이미지는 해당 설정을 지원해야 합니다. 새 키를 모르는 이미지의 설정 검증을 우회하거나 키를 자동 삭제하지 않습니다.
+
+Compose 갱신 검사는 같은 후보의 SSH 프로토콜 검사 클라이언트로 기준 버전과 후보 서비스를 각각 검사합니다. 검사 클라이언트는 별도 제한 컨테이너에서 합성 시크릿만 읽으며 Docker socket을 받지 않습니다. 구버전 이미지에 포함된 옛 테스트의 자동승인 가정을 적용하지 않고 기본 다운로드의 owner 승인을 실제로 수행합니다.
+
+이 합성 보존 사례에서만 서비스 시작 전에 명령 정책·journal 기능을 활성화합니다. 기준 서비스에 비기본 정책을 검토·저장하고, 완료 명령과 저장 출력의 owner API 응답을 private fixture volume에 digest로 보관합니다. 갱신·명시적 rollback·재갱신·비기본 포트·시작 실패 복구 뒤 정책 revision/규칙·기존 명령·실제 출력 읽기와 SSH config 원문 일치를 검사합니다. 서비스에는 이 proof 경로를 마운트하지 않으며 live SQLite의 exclusive lock을 우회하지 않습니다.
+
 ## 에이전트 파일 입력과 실제 클라이언트
 
 OpenAI fileParams의 필수 `download_url`·`file_id`와 선택 `mime_type`·`file_name`을 구분합니다. opaque `file_uuid`나 빈 주소는 지원하지 않습니다. URL·파일 바이트·티켓이 일반 응답·audit에 나타나지 않는지 확인합니다. 입력 취소·큐 실패·유지보수·실제 HTTP 연결 종료·서비스 종료에서 staging과 예산 정리를 검사합니다.

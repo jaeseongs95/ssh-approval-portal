@@ -8,6 +8,11 @@ function Assert-TaskImageTarget([string]$Image, [string]$TaskTag) {
 }
 
 function New-PackageContext([string]$CandidateArchive, [string]$BaselineArchive, [string]$BaselineSha256) {
+  if (!$CandidateArchive) {
+    $taskRoot = Split-Path -Parent $PSScriptRoot
+    $version = (Get-Content -Raw -LiteralPath (Join-Path $taskRoot 'package.json') -Encoding utf8 | ConvertFrom-Json).version
+    $CandidateArchive = Join-Path $taskRoot "dist/ssh-approval-portal-$version.tar.gz"
+  }
   $candidate = (Resolve-Path -LiteralPath $CandidateArchive).Path
   if ($BaselineArchive) {
     $baseline = (Resolve-Path -LiteralPath $BaselineArchive).Path

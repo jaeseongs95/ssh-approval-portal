@@ -1,7 +1,7 @@
 param(
   [ValidateSet('amd64','arm64')][string]$Architecture = 'amd64',
   [string]$TaskTag = ('solid-' + [Guid]::NewGuid().ToString('N').Substring(0,10)),
-  [string]$CandidateArchive = (Join-Path (Split-Path -Parent $PSScriptRoot) 'dist/ssh-approval-portal-1.0.0.tar.gz'),
+  [string]$CandidateArchive = '',
   [string]$RuntimeImage = '',
   [string]$BaselineImage = '',
   [string]$FixtureImage = '',

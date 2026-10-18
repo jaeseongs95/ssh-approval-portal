@@ -140,8 +140,8 @@
     },
     {
       "path": "docs/roadmap.ko.md",
-      "size": 6538,
-      "sha256": "cf3e3394360163d42ff64daedabb2f623eaae697530491e2eb76a59ddf88b33d"
+      "size": 7465,
+      "sha256": "446028aaa2b1607a97c36d0e457ecf8256765de42114df1e520b086b1e433e3b"
     },
     {
       "path": "docs/secret-management.ko.md",
@@ -705,8 +705,8 @@
     },
     {
       "path": "test/compose-driver.sh",
-      "size": 4146,
-      "sha256": "8b56c810d292ababaced6222008bf11214bf503a73ad2d6d8d92b4e8594bc406"
+      "size": 5883,
+      "sha256": "85564b465e354c1176e816100b46fa142521d2bf8dedc11bc8f4f2b732ffe9ed"
     },
     {
       "path": "test/compose-env-fixture.sh",
@@ -715,8 +715,13 @@
     },
     {
       "path": "test/compose-runtime.ps1",
-      "size": 3772,
-      "sha256": "ba15a962b79d7d8570459ea77450cac6047937287904028894ab244077dc2e61"
+      "size": 3688,
+      "sha256": "539be6d5635b109216771abae7360292aa775cccb7b64c4ee3732b3daeecca8f"
+    },
+    {
+      "path": "test/compose-state.mjs",
+      "size": 3748,
+      "sha256": "563b93b3eb3cba97dab894e9db79add92f32ba5cda4dd71885f29e882e5fc7da"
     },
     {
       "path": "test/config-contracts.test.mjs",
@@ -745,13 +750,13 @@
     },
     {
       "path": "test/docker-runtime.ps1",
-      "size": 6076,
-      "sha256": "580ae0e6cdfb4f9f93c9910542e1a4dc9e40950f10ca209d014bc2a86364d927"
+      "size": 5992,
+      "sha256": "1dda9803f3547db3973dcb56a37a9d410e2eee251aad7e0d2e52b141c3143b98"
     },
     {
       "path": "test/docker-tests.ps1",
-      "size": 2624,
-      "sha256": "6be749bba1f526826754e5eefb2f4564925e2626230ef3f7b68a0d68a6098e21"
+      "size": 2540,
+      "sha256": "af88fe1835a9f5b8b17d9d5b13118113990d69ac5decb1bb204c196b29fe93ee"
     },
     {
       "path": "test/Dockerfile",
@@ -765,8 +770,13 @@
     },
     {
       "path": "test/driver-common.ps1",
-      "size": 2289,
-      "sha256": "ae998e3e91aabe1a76760028ef64dcc5a95e049bf84e4a0eafded64c5894e90c"
+      "size": 2583,
+      "sha256": "2e085110b395495fe2d4ab3c429a64b588d6010654e0f4f61a90fda127732d7e"
+    },
+    {
+      "path": "test/driver-common.test.ps1",
+      "size": 1347,
+      "sha256": "f5174a0eef2a50f82ee35f608bb929c851e48d9a3e12d1314c14e24a738697aa"
     },
     {
       "path": "test/environment.test.mjs",
@@ -870,8 +880,8 @@
     },
     {
       "path": "test/PLAN.md",
-      "size": 5152,
-      "sha256": "0471ce8b57375444106bce52553aa9c692230393a913259cffb0fb445b025655"
+      "size": 6878,
+      "sha256": "c32d780bfb557b0f42eef3a444e5cfac1bec3ad86e801134548d9d73baa1f41d"
     },
     {
       "path": "test/portal-container-test.sh",

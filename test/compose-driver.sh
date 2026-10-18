@@ -44,21 +44,57 @@ volumes:
     name: $TEST_STATE
 YAML
 compose=(docker compose -p "$TEST_PROJECT" --env-file "$BRIDGE_COMPOSE_ENV_FILE" -f docker/compose.yaml -f "$BRIDGE_COMPOSE_OVERRIDE")
-trap '"${compose[@]}" down || true' EXIT
+cleanup() {
+  rc=$?
+  if [[ "$rc" != 0 ]]; then
+    # Synthetic fixtures only: retain startup/probe evidence before removing them.
+    "${compose[@]}" logs --no-color --tail 30 bridge || true
+    id=$("${compose[@]}" ps -a -q bridge) || true
+    [[ -z "$id" ]] || docker inspect "$id" --format '{{json .State.Health}}' || true
+  fi
+  "${compose[@]}" down || true
+  exit "$rc"
+}
+trap cleanup EXIT
+mkdir -m 0700 /var/lib/ssh-mcp/compose-proof
+chown "$TEST_UID:$TEST_GID" /var/lib/ssh-mcp/compose-proof
+probe() {
+  # One current protocol oracle for baseline and candidate; do not run stale image tests.
+  docker run --rm --name "$TEST_PROJECT-probe" --label "io.ssh-approval.solid-task=$TEST_TASK_TAG" \
+    --network "container:$TEST_TARGET" --user "$TEST_UID:$TEST_GID" --read-only --cap-drop ALL \
+    --security-opt no-new-privileges --pids-limit 128 \
+    --env BRIDGE_TEST_ENV_FILE=/run/secrets/bridge_config \
+    --mount "type=bind,src=$TEST_SECRET_SOURCE/docker-secrets.env,target=/run/secrets/bridge_config,readonly" \
+    --mount "type=volume,src=$TEST_STATE,target=/proof,volume-subpath=compose-proof" \
+    "$TEST_IMAGE" node "$@"
+}
+ssh_roundtrip() { probe test/ssh-roundtrip.mjs; }
+config_before=$(sha256sum /var/lib/ssh-mcp/.config/ssh-mcp/config.toml)
+verify_state() {
+  [[ $(sha256sum /var/lib/ssh-mcp/.config/ssh-mcp/config.toml) == "$config_before" ]]
+  probe test/compose-state.mjs verify
+}
+# This synthetic preservation case needs the durable policy/journal API enabled.
+docker exec "$TEST_TARGET" sed -i 's/^BRIDGE_COMMAND_AUTOMATION=false$/BRIDGE_COMMAND_AUTOMATION=true/' /etc/ssh-approval-portal/docker-secrets.env
+docker exec "$TEST_TARGET" grep -Fqx BRIDGE_COMMAND_AUTOMATION=true /etc/ssh-approval-portal/docker-secrets.env
 "${compose[@]}" up -d --no-build --wait --wait-timeout 45
-"${compose[@]}" exec -T bridge node test/ssh-roundtrip.mjs
+ssh_roundtrip
+probe test/compose-state.mjs capture
 baseline_id=$(docker inspect "$("${compose[@]}" ps -q bridge)" --format '{{.Image}}')
 before=$(sha256sum "$TEST_SECRET_SOURCE/docker-secrets.env")
 bash scripts/compose-update.sh "$TEST_IMAGE"
+verify_state
 [[ $("${compose[@]}" config --images) == "$TEST_IMAGE" ]]
 "${compose[@]}" exec -T bridge node test/delivery-runtime.mjs
-"${compose[@]}" exec -T bridge node test/ssh-roundtrip.mjs
+ssh_roundtrip
 if [[ -n ${TEST_BASELINE_IMAGE:-} ]]; then
   bash scripts/compose-update.sh "$baseline_id"
   [[ $("${compose[@]}" config --images) == "$baseline_id" ]]
   [[ $(docker inspect "$("${compose[@]}" ps -q bridge)" --format '{{.Image}}') == "$baseline_id" ]]
   [[ $(sha256sum "$TEST_SECRET_SOURCE/docker-secrets.env") == "$before" ]]
+  verify_state
   bash scripts/compose-update.sh "$TEST_IMAGE"
+  verify_state
 fi
 # The old baseline image healthcheck uses the default port. Verify its real
 # upgrade/rollback first, then exercise candidate custom ports independently.
@@ -66,9 +102,11 @@ fi
 "${compose[@]}" down
 docker exec "$TEST_TARGET" python3 /source/test/delivery-fixture.py docker-settings /etc/ssh-approval-portal/docker-secrets.env
 BRIDGE_IMAGE="$TEST_IMAGE" "${compose[@]}" up -d --no-build --wait --wait-timeout 45
+verify_state
 old=$(docker inspect "$("${compose[@]}" ps -q bridge)" --format '{{.Image}}')
 before=$(sha256sum "$TEST_SECRET_SOURCE/docker-secrets.env")
 bash scripts/compose-update.sh "$TEST_IMAGE"
+verify_state
 "${compose[@]}" exec -T bridge node test/delivery-runtime.mjs
 mkdir /work/broken
 printf 'FROM %s\nCMD ["node","test/broken-start.fixture.mjs"]\n' "$TEST_IMAGE" > /work/broken/Dockerfile
@@ -78,5 +116,6 @@ if bash scripts/compose-update.sh "$broken"; then echo 'Broken image update unex
 [[ $("${compose[@]}" config --images) == "$old" ]]
 [[ $(docker inspect "$("${compose[@]}" ps -q bridge)" --format '{{.Image}}') == "$old" ]]
 [[ $(sha256sum "$TEST_SECRET_SOURCE/docker-secrets.env") == "$before" ]]
+verify_state
 "${compose[@]}" exec -T bridge node test/delivery-runtime.mjs
 echo "ACTUAL COMPOSE: secret file, SSH roundtrip, custom ports, idempotent update, failed-start rollback, same image/secret preservation PASS; baseline=${TEST_BASELINE_IMAGE:-none}"
