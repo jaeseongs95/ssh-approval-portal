@@ -1,7 +1,6 @@
 import { readFile, lstat, readdir } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { resolve, dirname, relative } from 'node:path';
-import { pathToFileURL } from 'node:url';
 
 export async function verifyRelease(root) {
   root = resolve(root);
@@ -35,6 +34,6 @@ export async function verifyRelease(root) {
   return manifest.files.length;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+if (import.meta.main) {
   console.log('Release manifest verified: ' + await verifyRelease(process.argv[2] ?? '.') + ' files');
 }

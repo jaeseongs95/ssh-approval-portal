@@ -1,6 +1,4 @@
 #!/usr/bin/env node
-import path from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { createLocalSecretStore } from '../src/adapters/secrets/local-file.mjs';
 import { readHiddenSecret } from '../src/adapters/secrets/hidden-input.mjs';
 import { createSecretService, parseSecretReference, SecretError } from '../src/application/secret-service.mjs';
@@ -24,7 +22,7 @@ export async function runSecretCommand(args, { readValue = readHiddenSecret, wri
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+if (import.meta.main) {
   try { await runSecretCommand(process.argv.slice(2)); }
   catch (error) {
     const safeCodes = new Set(['invalid_arguments', 'invalid_reference', 'provider_unavailable', 'terminal_required', 'input_cancelled', 'confirmation_mismatch', 'unsafe_store', 'unsafe_record', 'unsupported_platform', 'invalid_record', 'invalid_value', 'store_busy', 'commit_uncertain']);

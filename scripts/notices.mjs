@@ -1,6 +1,5 @@
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 
 export async function collectNotices(root = process.cwd()) {
@@ -50,7 +49,7 @@ export async function collectNotices(root = process.cwd()) {
   return [...records.values()].sort((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version));
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+if (import.meta.main) {
   const { values } = parseArgs({ options: { root: { type: 'string' }, output: { type: 'string' } } });
   const root = resolve(values.root ?? '.');
   const records = await collectNotices(root);

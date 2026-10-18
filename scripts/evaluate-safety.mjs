@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import { readFile, open } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
-import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
 import { SAFETY_PROTOCOL, SAFETY_QUESTION, SAFETY_LABELS } from '../src/domain/safety.mjs';
 import { evaluateSafety } from '../src/application/safety-evaluation.mjs';
@@ -72,4 +71,4 @@ export async function main(argv = process.argv.slice(2)) {
   } finally { await file?.close(); }
 }
 
-if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) process.exitCode = await main();
+if (import.meta.main) process.exitCode = await main();

@@ -50,6 +50,9 @@ def terminal(args, value, cancel=False):
 
 with tempfile.TemporaryDirectory(prefix='ssh-secret-pty-') as directory:
     os.chmod(directory, 0o700)
+    active = Path(directory) / 'approval-bridge'
+    active.symlink_to(Path(script).resolve().parent.parent, target_is_directory=True)
+    script = str(active / 'scripts' / 'manage-secrets.mjs')
     store = Path(directory) / 'secrets'
     prefix = ['--store', str(store)]
     subprocess.run([node, script, *prefix, 'init'], check=True, capture_output=True)
