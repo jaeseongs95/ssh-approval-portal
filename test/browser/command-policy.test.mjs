@@ -168,7 +168,7 @@ for (const mode of ['edit', 'select', 'target']) test('late review cannot author
   if (mode === 'edit') { await commandTab(page); await names(page).fill('pwd'); }
   else if (mode === 'select') { await catalog(page); await page.getByLabel('명령 검색', { exact: true }).fill('grep'); await choice(page, 'grep').click(); }
   else {
-    const selector = page.getByLabel('설정할 서버', { exact: true });
+    const selector = page.getByLabel('정책 편집 대상', { exact: true });
     await selector.selectOption('beta');
   }
   release(); await (await response).finished(); await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
@@ -238,8 +238,8 @@ test('saved empty and custom command policies are not replaced by defaults',asyn
   const initial=await f.api('/api/command-policy');
   await f.seed({targets:initial.bindings.map((binding,index)=>({targetId:binding.targetId,targetRevision:binding.targetRevision,profile:binding.profile,commands:index?['custom-check']:[],deniedCommands:[],externalDisclosure:false,modelExecution:false,fallback:null,thresholds:{}}))});
   await f.open();const {page}=f;assert.equal(await names(page).inputValue(),'');
-  await page.getByLabel('설정할 서버',{exact:true}).selectOption('beta');assert.equal(await names(page).inputValue(),'custom-check');
-  await page.getByLabel('설정할 서버',{exact:true}).selectOption('alpha');assert.equal(await names(page).inputValue(),'');
+  await page.getByLabel('정책 편집 대상',{exact:true}).selectOption('beta');assert.equal(await names(page).inputValue(),'custom-check');
+  await page.getByLabel('정책 편집 대상',{exact:true}).selectOption('alpha');assert.equal(await names(page).inputValue(),'');
   assert.equal(f.posts.length,0);
 },{multi:true}));
 
@@ -248,8 +248,8 @@ test('download opt-in is visible, exact-review-bound and isolated per target',as
   assert.equal(await download.isChecked(),false);await download.check();assert.equal(await save(f.page).isDisabled(),true);
   await f.checked();await f.page.getByText(/파일 자동다운로드를 켜면/).waitFor();await f.commit();
   let policy=await f.api('/api/command-policy');assert.equal(policy.targets[0].automaticDownloads,true);assert.equal(policy.targets[0].automaticSudo,undefined);
-  await f.page.getByLabel('설정할 서버',{exact:true}).selectOption('beta');assert.equal(await download.isChecked(),false);
-  await f.page.getByLabel('설정할 서버',{exact:true}).selectOption('alpha');assert.equal(await download.isChecked(),true);
+  await f.page.getByLabel('정책 편집 대상',{exact:true}).selectOption('beta');assert.equal(await download.isChecked(),false);
+  await f.page.getByLabel('정책 편집 대상',{exact:true}).selectOption('alpha');assert.equal(await download.isChecked(),true);
   await download.uncheck();await f.checked();await f.commit();policy=await f.api('/api/command-policy');assert.equal(policy.targets[0].automaticDownloads,false);
 },{multi:true}));
 
@@ -275,10 +275,10 @@ test('upload opt-in is explicit, review-bound, preserved per target and reversib
   assert.ok((await page.locator('.policy-change-summary').textContent()).includes('설정/인증/자동 실행 파일도 포함'));
   await f.checked(); await page.getByText(/종합 위험도 높음/).waitFor(); await f.commit();
   const stored = await f.api('/api/command-policy'); assert.equal(stored.targets[0].automaticUploads, true);
-  await page.getByLabel('설정할 서버', { exact: true }).selectOption('beta'); assert.equal(await upload.isChecked(), false);
+  await page.getByLabel('정책 편집 대상', { exact: true }).selectOption('beta'); assert.equal(await upload.isChecked(), false);
   await commandTab(page); await names(page).fill('ls'); await f.checked(); await f.commit();
   const other = (await f.api('/api/command-policy')).targets; assert.equal(other[0].automaticUploads, true); assert.equal(Object.hasOwn(other[1], 'automaticUploads'), false);
-  await page.getByLabel('설정할 서버', { exact: true }).selectOption('alpha'); assert.equal(await upload.isChecked(), true);
+  await page.getByLabel('정책 편집 대상', { exact: true }).selectOption('alpha'); assert.equal(await upload.isChecked(), true);
   await upload.uncheck(); await f.checked(); await f.commit();
   assert.equal((await f.api('/api/command-policy')).targets[0].automaticUploads, false);
   assert.equal(f.calls.length, 0);
@@ -314,8 +314,8 @@ test('important upload and sudo controls stay between overview and collapsed pol
   assert.equal(f.posts.filter(p=>p.path==='/api/command-policy').length,0);assert.equal(await save(page).isDisabled(),true);
   await f.checked();await page.getByText(/sudo 자동승인을 켜면/).waitFor();await f.commit();
   let policy=(await f.api('/api/command-policy'));assert.equal(policy.targets[0].automaticSudo,true);
-  await page.getByLabel('설정할 서버',{exact:true}).selectOption('beta');assert.equal(await sudo.isChecked(),false);
-  await page.getByLabel('설정할 서버',{exact:true}).selectOption('alpha');assert.equal(await sudo.isChecked(),true);
+  await page.getByLabel('정책 편집 대상',{exact:true}).selectOption('beta');assert.equal(await sudo.isChecked(),false);
+  await page.getByLabel('정책 편집 대상',{exact:true}).selectOption('alpha');assert.equal(await sudo.isChecked(),true);
   await sudo.uncheck();await f.checked();await f.commit();assert.equal((await f.api('/api/command-policy')).targets[0].automaticSudo,false);
   await tab(page,'명령 관리').click();await page.setViewportSize({width:390,height:844});
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
@@ -350,7 +350,7 @@ test('model autoapproval is visible beside transfer controls and requires review
 
 
 test('target drafts preserve raw inputs but never reuse review; other-target updates use the newest snapshot', async () => fixture(async f => {
-  const {page}=f; await f.open(); const selector=page.getByLabel('설정할 서버',{exact:true});
+  const {page}=f; await f.open(); const selector=page.getByLabel('정책 편집 대상',{exact:true});
   await commandTab(page); await names(page).fill('ls\npwd'); const upload=page.getByRole('checkbox',{name:/^파일 자동업로드 허용/}); await upload.check();
   await page.getByRole('checkbox',{name:/^Jev·다른 모델을 통한/}).check();
   await modelTab(page); await page.getByLabel('Jev 자동승인 기준 (%)',{exact:true}).fill('51');
@@ -395,7 +395,7 @@ test('unknown save locks authority edits; failed read stays unknown and matching
     if(failRead)return route.abort('failed'); return route.continue();
   });
   await save(page).click(); await page.getByText(/저장 결과를 확인하지 못했습니다/).waitFor();
-  assert.equal(await names(page).isDisabled(),true); assert.equal(await review(page).isDisabled(),true); assert.equal(await page.getByLabel('설정할 서버',{exact:true}).isDisabled(),true);
+  assert.equal(await names(page).isDisabled(),true); assert.equal(await review(page).isDisabled(),true); assert.equal(await page.getByLabel('정책 편집 대상',{exact:true}).isDisabled(),true);
   const status=page.locator('#important-settings .policy-message'); assert.match(await status.textContent(),/이미 적용됐을 수/); assert.doesNotMatch(await status.textContent(),/아직 저장되지/);
   await page.getByRole('button',{name:'현재 적용 설정 확인',exact:true}).click(); await page.getByText(/설정을 불러오지 못했습니다/).waitFor(); assert.equal(await names(page).isDisabled(),true); assert.match(await status.textContent(),/이미 적용됐을 수/);
   failRead=false; await page.getByRole('button',{name:'현재 적용 설정 확인',exact:true}).click(); await page.getByText(/현재 적용값은 요청한 설정과 같습니다/).waitFor();

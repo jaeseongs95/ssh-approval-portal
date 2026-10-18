@@ -3,6 +3,9 @@ import { hash } from '../domain/validation.mjs';
 import { validateCommandPolicy, validatedRisk, COMMAND_SET_QUESTION_VERSION } from '../domain/command-policy.mjs';
 import { assessmentContext } from '../domain/execution-context.mjs';
 import { SAFETY_PROTOCOL } from '../domain/safety.mjs';
+// Validated policy JSON: ignore object key order only; preserve arrays and optional fields.
+const ruleJSON = rule => JSON.stringify(rule, (_, value) => value && !Array.isArray(value) && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]])) : value);
+const sameRule = (left, right) => ruleJSON(left) === ruleJSON(right);
 
 /** A review is a short-lived, single-use confirmation of the exact policy and revision. */
 export function createCommandPolicyReview({ state, validateTargets, evaluator, audit, nonce, maxCalls, budget, now = () => Date.now() }) {
@@ -10,8 +13,10 @@ export function createCommandPolicyReview({ state, validateTargets, evaluator, a
   let reviewing = false;
   const checked = (value, revision) => {
     const policy = validateCommandPolicy(value);
-    if (state.policy().revision !== revision) throw Error('Policy revision conflict');
-    validateTargets(policy);
+    const current = state.policy();
+    if (current.revision !== revision) throw Error('Policy revision conflict');
+    // Preserve unchanged historical rules without rebinding or granting new authority.
+    validateTargets({ targets: policy.targets.filter(rule => !sameRule(current.targets.find(item => item.targetId === rule.targetId), rule)) });
     return policy;
   };
   const sweep = () => { for (const [token, review] of reviews) if (review.expiresAt <= now()) reviews.delete(token); };
@@ -24,7 +29,7 @@ export function createCommandPolicyReview({ state, validateTargets, evaluator, a
       try {
         const current = state.policy(), feedback = [];
         for (const rule of policy.targets) {
-          if (JSON.stringify(current.targets.find(item => item.targetId === rule.targetId)) === JSON.stringify(rule)) continue;
+          if (sameRule(current.targets.find(item => item.targetId === rule.targetId), rule)) continue;
           checked(policy, expectedRevision);
           let assessment, evaluation, reason = 'external_disclosure_not_enabled';
           const commandRisks = rule.commands.filter(name => name !== 'sudo').map(name => ({ name, ...(risks.commands[name] ?? risks.defaultRisk) }));

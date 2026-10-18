@@ -3,7 +3,7 @@ import { uiText as tr } from './ui-text.js';
 export function createEnvironmentPanel({ document, api, delay = ms => new Promise(resolve => setTimeout(resolve, ms)) }) {
   const el = (tag, text, cls) => { const n = document.createElement(tag); if (text) n.textContent = tr(text); if (cls) n.className = cls; return n; };
   const root = el('section', '', 'request environment-editor'); root.id = 'environment-editor';
-  root.append(el('h2', tr('서버 환경설정 · ENV')), el('p', tr('이 서버의 ENV 파일을 편집합니다. 자동승인 정책은 위 설정에서 관리하며, ENV 저장 내용은 서비스 재시작 후 적용됩니다.'), 'policy-help'));
+  root.append(el('h2', tr('중계기 전체 환경설정 · ENV')), el('p', tr('이 중계기 서비스 전체의 ENV와 재시작을 관리합니다. 위에서 선택한 정책 대상에 한정되지 않으며, 등록된 모든 대상의 연결과 요청에 영향을 줄 수 있습니다. ENV 저장 내용은 서비스 재시작 후 적용됩니다.'), 'policy-help'));
   const message = el('p', '', 'policy-message'); message.setAttribute('role', 'status'); root.append(message);
   const load = el('button', tr('ENV 불러오기'), 'secondary'); load.type = 'button'; root.append(load);
   const failure = el('p', '', 'error'); failure.setAttribute('role', 'alert'); root.append(failure);
@@ -98,5 +98,5 @@ export function createEnvironmentPanel({ document, api, delay = ms => new Promis
   document.querySelector('#load')?.addEventListener('click', () => { if (!snapshot) reload(); });
   document.getElementById('logout')?.addEventListener('click', () => { generation++; uncertain = true; for (const { input } of inputs.values()) input.value = ''; lock(); });
   if (document.body.dataset.authMode === 'access') queueMicrotask(reload);
-  lock(); return { root, reload };
+  lock(); return { root, reload, reloadState: () => ({ blocked: busy || uncertain, dirty: Object.keys(changes()).length ? ['ENV'] : [] }) };
 }

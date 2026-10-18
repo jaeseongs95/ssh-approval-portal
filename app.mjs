@@ -140,7 +140,7 @@ export async function createApplication({ registry, classify, executeCommand, au
     },
   });
   const commandPolicy = commandState && {
-    get: async () => ({ ...commandState.policy(), evaluators: await modelCatalog.get(), bindings: runtimes.map(runtime => ({ targetId: runtime.id, targetRevision: runtime.revision, profile: runtime.writeProfile, displayName: runtime.displayName })) }),
+    get: async () => ({ ...commandState.policy(), evaluators: await modelCatalog.get(), bindings: runtimes.map(runtime => ({ targetId: runtime.id, targetRevision: runtime.revision, profile: runtime.writeProfile, displayName: runtime.displayName, enabled: runtime.enabled })) }),
     review: policyReview.review,
     set: policyReview.set,
   };

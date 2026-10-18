@@ -1,5 +1,14 @@
 /** UI-owned strings only. Never apply this catalog to commands, output or user input. */
 const english = {
+  '정책 편집 대상':'Policy edit target',
+  '현재 미적용 정책':'Currently inactive policies',
+  ' · 현재 미적용 (비활성·미등록·설정 변경). 이 정책 삭제를 초안에 포함':' · Not applied (disabled, unregistered or changed configuration). Include deletion of this policy in the draft',
+  '삭제할 정책: ':'Policies to delete: ',
+  ' · 사용 중지':' · Disabled', ' · 미등록 정책':' · Unregistered policy',
+  '처리 중이거나 저장 결과 확인이 필요해 정책 대상을 바꿀 수 없습니다.':'Cannot change policy target while an operation is in progress or its save result needs checking.',
+  '등록된 정책 대상을 선택해 주세요.':'Select a registered policy target.',
+  '중계기 전체 환경설정 · ENV':'Bridge-wide environment · ENV',
+  '이 중계기 서비스 전체의 ENV와 재시작을 관리합니다. 위에서 선택한 정책 대상에 한정되지 않으며, 등록된 모든 대상의 연결과 요청에 영향을 줄 수 있습니다. ENV 저장 내용은 서비스 재시작 후 적용됩니다.':'Manage ENV and restart for this entire bridge service. The policy target selected above does not limit this scope; all registered targets and requests may be affected. Saved ENV changes apply after service restart.',
   '자동승인 설정':'Automation settings',
   '탭을 오가며 이 서버의 하나의 초안을 수정합니다. 변경은 검토·OK·저장 후 함께 적용됩니다.':'Edit one draft across tabs. Changes apply together after review, explicit OK and save.',
   '다시 불러오기':'Reload settings', '서버 설정 다시 불러오기':'Reload server settings', '변경 확인·저장':'Review and save',

@@ -31,7 +31,7 @@ export async function fixtureServer(root) {
         response.setHeader('Content-Type','application/json');response.end(JSON.stringify(job));return;
       }
       if (url.pathname === '/api/targets') {
-        response.setHeader('Content-Type', 'application/json');response.end(JSON.stringify({ targets: ['alpha','beta'].map(id=>({id,displayName:id+' 이름',enabled:true,isDefault:id==='alpha'})),defaultTarget:'alpha' }));return;
+        response.setHeader('Content-Type', 'application/json');response.end(JSON.stringify({ targets: state.targets ?? ['alpha','beta'].map(id=>({id,displayName:id+' 이름',enabled:true,isDefault:id==='alpha'})),defaultTarget:'alpha' }));return;
       }
       if (url.pathname === '/api/requests') {
         state.reads++; state.requests.push({ method: request.method, authorization: request.headers.authorization ?? null });

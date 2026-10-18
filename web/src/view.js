@@ -9,7 +9,15 @@ export function createWebView({ document, i18n }) {
   let selectionRevision = 0;
   const records = new Map();
   const serverRecords = new Map();
-  let targetList = [], changeTarget;
+  let targetList = [], changeTarget, policyAction;
+  const scrolls = new Map(); let lastTarget = '';
+  function identify() {
+    const settings = document.body.dataset.page === 'settings';
+    const selected = targetList.find(item => item.id === el('target-filter')?.value);
+    const name = settings ? (korean ? '중계기 설정 · 정책 대상은 아래에서 선택' : 'Bridge settings · select the policy target below') : selected ? `${selected.displayName} [${selected.id}]` : multiTarget ? t('전체 대상') : targetName;
+    document.title = `${bridgeName} · ${name} · ${korean ? 'SSH 승인' : 'SSH approvals'}`;
+    if (el('server-identity')) el('server-identity').textContent = `${t('중계기')} · ${bridgeName} / ${name}`;
+  }
   let handlers;
   let historyOffset=0, historyAnchor, latestJobs=[], latestDeciding=false, pager;
   let historySearch, historyFilter, historyFrom, historyTo, historyDateError, historyRange={};
@@ -64,8 +72,8 @@ export function createWebView({ document, i18n }) {
     } else {
       const head = text(box, 'div', '', 'request-top'); text(head, 'span', kinds[job.kind] ?? job.kind, 'kind'); text(head, 'span', t('승인 대기'), 'badge pending');
     }
-    text(body, 'p', `${t('중계기')} · ${bridgeName} / ${t('대상 서버')} · ${job.targetDisplayName ?? targetName}${job.targetId ? ` [${job.targetId}]` : ''} (${job.target})`, 'target');
-    if (job.targetId) text(body, 'p', `${t('설정 revision')} · ${job.targetRevision} / ${t('호스트 키')} · ${job.hostKey}`, 'target'); text(body, 'pre', command, 'command');
+    const targetContext = text(body, 'p', `${t('중계기')} · ${bridgeName} / ${t('대상 서버')} · ${job.targetDisplayName ?? targetName}${job.targetId ? ` [${job.targetId}]` : ''} (${job.target}) · ${t('요청')} ${job.id}`, 'target'); targetContext.id = 'request-target-' + job.id;
+    if (job.targetId) targetContext.textContent += ` · ${t('설정 revision')} ${job.targetRevision} / ${t('호스트 키')} ${job.hostKey}`; text(body, 'pre', command, 'command');
     if (job.kind === 'command' && requestContext(job, korean)) { const context = text(body, 'details', ''); text(context, 'summary', korean ? '요청자가 제공한 작업 설명' : 'Caller-provided context'); text(context, 'p', requestContext(job, korean)); }
     if (job.decision) renderDecision(document, body, job.decision, korean, job);
     const meta = text(body, 'div', '', 'meta'); text(meta, 'span', `${t('요청')} ${job.id}`, 'request-id');
@@ -75,11 +83,16 @@ export function createWebView({ document, i18n }) {
     if (waiting) for (const action of ['approve', 'deny']) {
       const button = text(actions, 'button', t(action === 'approve' ? '승인·실행' : '거부'), action === 'approve' ? 'primary' : 'secondary reject');
       button.disabled = deciding; button.onclick = () => handlers.decide(job.id, action); buttons.push(button);
+      button.setAttribute('aria-describedby', targetContext.id);
+    }
+    if (document.body.dataset.commandAutomation === 'true') {
+      const policy = text(body, 'button', korean ? '이 서버 정책 열기' : 'Open this target policy', 'secondary'); policy.type = 'button';
+      policy.setAttribute('aria-describedby', targetContext.id); policy.onclick = () => policyAction?.(job.targetId ?? 'default');
     }
     const output = job.kind === 'command' && job.result?.structuredContent?.output;
     if (output) {
       text(body, 'p', korean ? `저장된 실행 결과 · ${output.bytes ?? 0}바이트 · ${output.state}` : `Stored result · ${output.bytes ?? 0} bytes · ${output.state}`, 'output-label');
-      text(body, 'p', korean ? '필요할 때만 내용을 읽습니다. SSH 전체 출력의 완전성은 확인되지 않았습니다.' : 'Load only when needed. Complete SSH capture is not guaranteed.', 'target');
+      text(body, 'p', korean ? '저장 상태와 현재 읽기 권한은 다릅니다. 열 때 대상 활성화·설정 revision·만료를 다시 확인합니다. SSH 전체 출력의 완전성은 확인되지 않았습니다.' : 'Storage state is separate from read access. Opening rechecks target activation, configuration revision and expiry. Complete SSH capture is not guaranteed.', 'target');
       const area = text(body, 'div', '');
       const load = async (offset = 0) => {
         if (!box.isConnected) return;
@@ -145,6 +158,7 @@ export function createWebView({ document, i18n }) {
     reconcile(root, nodes); el('overview-section').hidden = false;
   }
   function render(jobs, deciding = false) {
+    if (new Set(jobs.map(job => job.id)).size !== jobs.length) { render([]); throw Error(korean ? '중복된 요청 ID가 있어 승인을 중단했습니다.' : 'Duplicate request IDs: approvals are unavailable.'); }
     latestJobs=jobs; latestDeciding=deciding;
     updateHistoryRange();
     overview(jobs);
@@ -155,7 +169,7 @@ export function createWebView({ document, i18n }) {
     if(historyAnchor){const anchor=historyJobs.findIndex(job=>job.id===historyAnchor);if(anchor>=0)historyOffset=anchor;else historyAnchor=undefined;}
     historyOffset=Math.min(historyOffset,Math.max(0,historyJobs.length-1));
     const historySlice=historyJobs.slice(historyOffset,historyOffset+historyPageSize),pageIds=new Set(historySlice.map(job=>job.id));
-    const live = new Set(visible.map(job => job.id)), pending = [], running = [], history = [];
+    const live = new Set(jobs.map(job => job.id)), pending = [], running = [], history = [];
     for (const [id, record] of records) if (!live.has(id)) { record.node.remove(); records.delete(id); }
     // Aggregate queues arrive grouped by target, so insertion order is not chronology.
     for (const job of ordered) {
@@ -190,6 +204,7 @@ export function createWebView({ document, i18n }) {
   }
   function initialize(actions) {
     handlers = actions;
+    document.addEventListener?.('admin-scope-change', identify);
     document.documentElement.lang = korean ? 'ko' : 'en';
     document.title = `${bridgeName} · ${targetName} · ${korean ? 'SSH 승인' : 'SSH approvals'}`;
     const serverIdentity = el('server-identity');
@@ -223,6 +238,8 @@ export function createWebView({ document, i18n }) {
     }
   }
   return {
+    set openPolicy(action) { policyAction = action; },
+    uncertainDecisionMessage: () => korean ? '승인·거부 결과를 확인하지 못했습니다. 요청을 반복하지 말고 목록을 새로 조회해 처리 상태를 확인해 주세요. 계속 확인되지 않으면 서버 기록을 확인한 뒤 다시 로그인해 주세요.' : 'Approval or denial result needs checking. Refresh requests to reconcile the state; do not repeat the action. If it remains unresolved, inspect server records before signing in again.',
     initialize, render, multiTarget,
     target: () => el('target-filter')?.value || undefined,
     selectionRevision: () => selectionRevision,
@@ -231,26 +248,22 @@ export function createWebView({ document, i18n }) {
       const select = el('target-filter'); select.replaceChildren();
       const all = text(select, 'option', t('전체 대상')); all.value = '';
       for (const target of data.targets) { const option = text(select, 'option', `${target.displayName} (${target.id})${target.enabled ? '' : ` · ${t('사용 중지')}`}`); option.value = target.id; }
-      select.ariaLabel = t('대상 서버'); el('target-filter-label').hidden = false;
-      const identify = () => {
-        const target = data.targets.find(target => target.id === select.value);
-        const name = target ? `${target.displayName} [${target.id}]` : t('전체 대상');
-        document.title = `${bridgeName} · ${name} · ${korean ? 'SSH 승인' : 'SSH approvals'}`;
-        el('server-identity').textContent = `${t('중계기')} · ${bridgeName} / ${t('대상 서버')} · ${name}`;
-      };
+      select.ariaLabel = korean ? '요청 조회 대상' : 'Request query target'; el('target-filter-label').hidden = false;
       identify(); changeTarget = select.onchange = () => {
-        selectionRevision++; render([]); identify();
-        if (el('overview-section')) el('overview-section').hidden = true;
+        scrolls.set(lastTarget, ['jobs','running','history'].map(id => el(id)?.scrollTop ?? 0)); lastTarget = select.value;
+        selectionRevision++; historyOffset = 0; historyAnchor = undefined; render(latestJobs, latestDeciding); identify();
+        ['jobs','running','history'].forEach((id,i) => { if (el(id)) el(id).scrollTop = scrolls.get(lastTarget)?.[i] ?? 0; });
+        document.dispatchEvent?.(new Event('admin-scope-change'));
         el('error').textContent = ''; el('error').hidden = true; changed();
       };
     },
     token: () => el('token').value,
     unauthorized: () => { el('sign-in').hidden = false; },
     error: (message = '') => { el('error').textContent = message; el('error').hidden = !message; },
-    loading: busy => { el('load').disabled = busy; },
-    deciding: busy => { for (const record of records.values()) for (const button of record.buttons) button.disabled = busy; },
+    loading: busy => { el('load').disabled = false; el('load').setAttribute('aria-busy', String(busy)); },
+    deciding: busy => { latestDeciding = busy; for (const record of records.values()) for (const button of record.buttons) button.disabled = busy; },
     connected: () => {
-      el('connection').classList.add('connected'); el('connection-text').textContent = t('연결됨'); el('logout').hidden = false; el('sign-in').hidden = true;
+      el('connection').classList.add('connected'); el('connection-text').textContent = korean ? '관리자 연결됨' : 'Administrator connected'; el('logout').hidden = false; el('sign-in').hidden = true;
       el('updated').textContent = `${t('마지막 갱신')} ${new Date().toLocaleTimeString(locale)} · ${t('10초마다 갱신')}`;
     },
     disconnected: () => { el('connection').classList.remove('connected'); el('connection-text').textContent = t('연결 확인 필요'); },

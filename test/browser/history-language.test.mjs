@@ -114,7 +114,7 @@ test('English settings translate dynamic command controls, input errors and ENV 
   await page.goto(server.origin+'/settings');await page.getByRole('tab',{name:'Commands',exact:true}).waitFor();
   await page.getByText('Registered commands',{exact:true}).waitFor();await page.locator('.command-direct summary').click();await page.getByLabel('Command name to add',{exact:true}).fill('ls -l');await page.getByRole('button',{name:'Add to preapproval draft',exact:true}).click();
   await page.getByText('Enter a command name without options, e.g. ls instead of ls -l.',{exact:true}).waitFor();
-  assert.equal(await page.getByLabel('Bridge display name',{exact:true}).inputValue(),'자동승인 설정');assert.equal(await page.locator('#important-settings select').textContent(),'자동승인 설정');assert.deepEqual([...new Set(posts)],['GET']);
+  assert.equal(await page.getByLabel('Bridge display name',{exact:true}).inputValue(),'자동승인 설정');assert.equal(await page.locator('#important-settings select').textContent(),'자동승인 설정 [default]');assert.deepEqual([...new Set(posts)],['GET']);
   if(process.env.UI_SCREENSHOTS)await page.screenshot({path:process.env.UI_SCREENSHOTS+'/settings-english.png',fullPage:true});
 },{locale:'en-US'}));
 

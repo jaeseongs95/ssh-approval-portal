@@ -20,8 +20,12 @@ const api = createWebApi({ fetch: globalThis.fetch.bind(globalThis), accessMode:
 const controller = createWebController({ state, view, api, document, location });
 controller.start();
 const pages = createAdminPages({ document, location, history });
-createCommandPolicyEditor({ document, api, onNavigate: pages.settings });
+const policyEditor = createCommandPolicyEditor({ document, api, onNavigate: pages.settings });
+view.openPolicy = id => policyEditor?.openTarget(id);
 createAutomationMetricsPanel({ document, api });
-createEnvironmentPanel({ document, api });
-createAppearancePanel({ document, storage, location, choice: preference.choice, korean: i18n.korean });
+const environment = createEnvironmentPanel({ document, api });
+createAppearancePanel({ document, storage, location, choice: preference.choice, korean: i18n.korean, reloadState: () => {
+  const states = [policyEditor?.reloadState(), environment.reloadState()];
+  return { blocked: controller.reloadState().blocked || states.some(value => value?.blocked), dirty: states.flatMap(value => value?.dirty ?? []) };
+} });
 pages.sync();

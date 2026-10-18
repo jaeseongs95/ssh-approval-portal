@@ -20,9 +20,10 @@ export function createTargetRouter(runtimes, { defaultTarget, legacy, store, aud
     return target;
   };
   const jobOwner = id => {
-    const runtime = runtimes.find(runtime => runtime.queue.jobs.has(id));
-    if (!runtime) throw Error('Unknown request');
-    return runtime;
+    const owners = runtimes.filter(runtime => runtime.queue.jobs.has(id));
+    if (!owners.length) throw Error('Unknown request');
+    if (owners.length !== 1) throw Error('Ambiguous request');
+    return owners[0];
   };
   const artifactOwner = id => {
     const item = store.get(id), runtime = select(item.targetId ?? (legacy ? 'default' : undefined));

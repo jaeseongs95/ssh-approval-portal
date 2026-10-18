@@ -162,7 +162,8 @@ test('multi-target web filter retires a delayed old response and updates visible
   server.state.beforeRequests=async()=>{entered();await held;};
   await page.selectOption('#target-filter','alpha');await started;
   await page.selectOption('#target-filter','beta');
-  assert.ok((await page.title()).includes('beta 이름 [beta]')); assert.equal(await page.locator('#jobs .request').count(),0);
+  assert.ok((await page.title()).includes('beta 이름 [beta]')); assert.equal(await page.locator('#jobs .request').count(),1);
+  assert.equal(await page.locator('#jobs .request').getAttribute('data-request-id'),'beta-request','cached snapshot is filtered immediately while the next read is pending');
   release();await page.waitForFunction(()=>document.querySelector('#jobs .request')?.dataset.requestId==='beta-request');
   assert.equal(await page.locator('#jobs .request').count(),1);assert.ok((await page.locator('#jobs').textContent()).includes('beta 이름 [beta]'));
 }));

@@ -51,10 +51,41 @@ function harness(language, access = false, jobs) {
   return {roots,document,timers,requests,navigations,cleared,payload,controller,deferNextGet(){let release;deferredGet={promise:new Promise(resolve=>release=resolve)};return release;},deferNextPost(){let release;deferredPost={promise:new Promise(resolve=>release=resolve)};return release;},allText(node){return [node.textContent??'',...node.children.map(n=>this.allText(n))].join('\n')}};
 }
 const settle=()=>new Promise(resolve=>setImmediate(resolve));
+
+test('GET deadline and supersession settle even if transport ignores abort; POST remains single and untimed',async()=>{
+  const calls=[];let release;
+  const api=createWebApi({fetch:async(path,options)=>{calls.push(options);return new Promise(resolve=>release=()=>resolve({ok:true,json:async()=>({ok:true})}));},accessMode:true,isSignedOut:()=>false,unauthorized:()=>{},t:s=>s});
+  const controller=new AbortController(),pending=api('/read','GET',undefined,{signal:controller.signal});controller.abort();
+  await assert.rejects(pending,{name:'AbortError'});assert.equal(calls[0].signal.aborted,true);release();
+  await assert.rejects(api('/read','GET',undefined,{timeoutMs:5}),{name:'TimeoutError'});release();
+  let complete=false;const post=api('/write','POST',{}, {timeoutMs:1}).then(()=>complete=true);
+  await new Promise(resolve=>setTimeout(resolve,10));assert.equal(complete,false);assert.equal(calls[2].signal,undefined);assert.equal(calls.length,3);release();await post;
+});
+
+test('initial/transient read failures recover by polling, authorization denial stops it and POST is never retried',async()=>{
+  let count=0,posts=0;const renders=[],errors=[],cleared=[],ticks=[];
+  const state=createWebState(true),view={target:()=>undefined,selectionRevision:()=>0,initialize(){},loading(){},render:v=>renders.push(v),connected(){},disconnected(){},error:e=>errors.push(e),deciding(){}};
+  const api=async(path,method='GET')=>{if(method==='POST'){posts++;throw Error('response lost');}count++;if([1,3].includes(count))throw Object.assign(Error('temporary'),{status:503});if(count===5)throw Object.assign(Error('denied'),{status:403});return[count];};
+  const c=createWebController({state,view,api,document:{hidden:false},location:{},timers:{setInterval:fn=>{ticks.push(fn);return ticks.length;},clearInterval:id=>cleared.push(id)}});
+  await c.load();assert.equal(ticks.length,1);assert.notEqual(state.polling,null,'initial transient failure keeps read recovery scheduled');await ticks[0]();await settle();assert.deepEqual(renders,[[2]]);
+  await c.load();assert.notEqual(state.polling,null,'polling transient failure keeps read recovery scheduled');await ticks[0]();await settle();assert.deepEqual(renders,[[2],[4]]);
+  await c.decide('fixed-request','approve');assert.equal(posts,1);
+  assert.ok(cleared.includes(1));assert.equal(state.polling,null);assert.equal(count,5,'lost decision response triggers one reconciliation read');assert.equal(c.reloadState().blocked,true);
+});
+
+test('lost approval observation keeps unknown state until the fixed request is reconciled',async()=>{
+  let posts=0,jobState='pending';const state=createWebState(true);
+  const view={target:()=>undefined,selectionRevision:()=>0,initialize(){},loading(){},render(){},connected(){},disconnected(){},error(){},deciding(){}};
+  const api=async(path,method='GET')=>{if(method==='POST'){posts++;throw Error('accepted response lost');}return[{id:'fixed',state:jobState}];};
+  const c=createWebController({state,view,api,document:{hidden:false},location:{},timers:{setInterval:()=>1,clearInterval(){}}});
+  await c.decide('fixed','approve');assert.equal(c.reloadState().blocked,true,'unreconciled approval blocks reload');
+  await c.decide('fixed','approve');assert.equal(posts,1,'unknown approval never replays POST');await c.load(true);assert.equal(c.reloadState().blocked,true);
+  jobState='running';await c.load(true);assert.equal(c.reloadState().blocked,false);assert.equal(posts,1);
+});
 test('English web labels, ten-second automatic timer and immediate manual/action refresh',async()=>{
   const h=harness('en-US');await h.roots.load.onclick();
   assert.equal(h.timers[0].ms,10000);
-  assert.equal(h.roots['connection-text'].textContent,'Connected');assert.match(h.roots.updated.textContent,/Refreshes every 10 seconds/);
+  assert.equal(h.roots['connection-text'].textContent,'Administrator connected');assert.match(h.roots.updated.textContent,/Refreshes every 10 seconds/);
   assert.match(h.allText(h.roots.jobs),/Approve and run/);assert.match(h.allText(h.roots.jobs),/echo 한글 원문/);
   const before=h.requests.length;await h.roots.load.onclick();assert.equal(h.requests.length,before+1);
   const button=h.roots.jobs.children[0].children.find(x=>x.className==='actions').children[0];await button.onclick();
@@ -62,7 +93,7 @@ test('English web labels, ten-second automatic timer and immediate manual/action
   h.document.hidden=true;const count=h.requests.length;h.timers[0].fn();assert.equal(h.requests.length,count);
 });
 test('Korean browser language preserves Korean UI; other locales fall back to English',async()=>{
-  for(const [lang,expected] of [['ko-KR','연결됨'],['ko','연결됨'],['de-DE','Connected']]){
+  for(const [lang,expected] of [['ko-KR','관리자 연결됨'],['ko','관리자 연결됨'],['de-DE','Administrator connected']]){
     const h=harness(lang);await h.roots.load.onclick();assert.equal(h.roots['connection-text'].textContent,expected);
     assert.match(h.allText(h.roots.jobs),/echo 한글 원문/);
   }
@@ -73,7 +104,7 @@ test('decision refresh survives an in-flight automatic GET without waiting for t
     const button=h.roots.jobs.children[0].children.find(x=>x.className==='actions').children[action==='approve'?0:1];
     const release=h.deferNextGet();h.timers[0].fn();await settle();
     const decision=button.onclick();await settle();
-    assert.equal(h.requests.length,3,'initial GET, automatic GET and decision POST');
+    assert.equal(h.requests.length,4,'forced refresh cancels the previous read without waiting');
     release();await decision;await settle();
     assert.deepEqual(h.requests.map(x=>x.method),['GET','GET','POST','GET']);
     assert.equal(h.roots['pending-count'].textContent,0);

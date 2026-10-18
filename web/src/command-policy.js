@@ -43,6 +43,7 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
   const quickLoad = el('button', tr('현재 설정 불러오기'), 'secondary'); quickLoad.type = 'button'; important.append(quickLoad);
   form.append(important, root);
   const fields = el('fieldset', '', 'policy-fields'); fields.hidden = true; root.append(fields);
+  const inactiveRules = el('section', '', 'target-rule-status'); inactiveRules.setAttribute('aria-label', tr('현재 미적용 정책')); fields.before(inactiveRules);
   const section = (number, title) => {
     const node = el('section', '', 'policy-section'); node.append(el('h3', title)); fields.append(node); return node;
   };
@@ -62,7 +63,7 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
     const text = el('span'); text.append(el('strong', title), el('small', explanation)); label.append(input, text); parent.append(label); return input;
   };
   const one = section(1, tr('명령 고르기'));
-  const target = field(importantFields, tr('설정할 서버'), 'select');
+  const target = field(importantFields, tr('정책 편집 대상'), 'select');
   const workspaceRoot = el('div'); one.append(workspaceRoot);
   const bulk = el('details', '', 'policy-details command-bulk'); bulk.append(el('summary', tr('목록 일괄 편집'))); one.append(bulk);
   bulk.append(el('p', tr('행 목록과 같은 초안입니다. 이름을 한 줄에 하나씩 입력합니다. 잘못된 입력은 위험도 확인에서 해당 위치를 알려줍니다.'), 'policy-help'));
@@ -125,14 +126,14 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
 
   let snapshot, original, reviewed, generation = 0, expiry, busy = false, loading = false;
   let currentTarget, conflict = false, unknownSave;
-  const drafts = new Map(), archives = new Map();
+  const drafts = new Map(), archives = new Map(), removals = new Set();
   const bindingOf = id => { const b = snapshot?.bindings.find(b => b.targetId === id); return b && { targetId: b.targetId, targetRevision: b.targetRevision, profile: b.profile }; };
   const announce = (node, text) => { if (node.textContent !== text) node.textContent = text; };
   const rawInputs = () => [commands, denied, search, selectedFilter, disclosure, execution, uploads, downloads, sudo, fallback, ...Object.values(scores).flatMap(p => [p.model, p.score])];
   function remember() {
     if (!currentTarget || !snapshot || conflict || unknownSave) return;
     drafts.set(currentTarget, { binding: bindingOf(currentTarget), original: structuredClone(original), revision: snapshot.revision,
-      values: rawInputs().map(input => input.type === 'checkbox' ? input.checked : input.value), changed: [...changed], converted: [...converted] });
+      values: rawInputs().map(input => input.type === 'checkbox' ? input.checked : input.value), changed: [...changed], converted: [...converted], dirty: hasChanges() });
   }
   function preserve(draft) {
     archives.set(target.value, draft); conflictBox.hidden = false;
@@ -148,9 +149,25 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
     reviewButton.disabled = !snapshot || busy || loading || !!unknownSave || conflict;
     reload.disabled = quickLoad.disabled = busy || loading;
     reconcile.disabled = busy || loading; latest.disabled = busy || loading || !!unknownSave;
+    for (const input of inactiveRules.querySelectorAll('input')) input.disabled = busy || loading || !!unknownSave;
   }
   const changed = new Set(), converted = new Set();
-  const nameOf = id => snapshot?.bindings.find(binding => binding.targetId === id)?.displayName ?? id;
+  const nameOf = id => { const name = snapshot?.bindings.find(binding => binding.targetId === id)?.displayName; return name ? `${name} [${id}]` : id; };
+  const activeRule = rule => snapshot?.bindings.some(binding => binding.targetId === rule.targetId && binding.enabled !== false && binding.targetRevision === rule.targetRevision && binding.profile === rule.profile);
+  function showInactiveRules() {
+    inactiveRules.replaceChildren();
+    for (const rule of snapshot.targets.filter(rule => !activeRule(rule))) {
+      const label = el('label'), remove = el('input'); remove.type = 'checkbox'; remove.checked = removals.has(rule.targetId);
+      label.append(remove, el('span', nameOf(rule.targetId) + tr(' · 현재 미적용 (비활성·미등록·설정 변경). 이 정책 삭제를 초안에 포함'))); inactiveRules.append(label);
+      remove.onchange = () => { if (remove.checked) removals.add(rule.targetId); else removals.delete(rule.targetId); invalidate(); update(); };
+    }
+  }
+  function hasChanges() {
+    if (!snapshot || !original && loadHint.hidden) return false;
+    return !same(linesOf(commands.value), original?.commands ?? []) || !same(linesOf(denied.value), original?.deniedCommands ?? []) ||
+      disclosure.checked !== (original?.externalDisclosure === true) || execution.checked !== (original?.modelExecution === true) || uploads.checked !== (original?.automaticUploads === true) ||
+      downloads.checked !== (original?.automaticDownloads === true) || sudo.checked !== (original?.automaticSudo === true) || (fallback.value || null) !== (original?.fallback ?? null) || changed.size > 0 || converted.size > 0;
+  }
   const error = text => { failure.textContent = text; failure.hidden = !text; };
   const clearFieldErrors = () => { for (const [input, note] of fieldErrors) { note.hidden = true; note.textContent = ''; input.removeAttribute('aria-invalid'); input.removeAttribute('aria-errormessage'); } };
   const invalid = (input, message) => {
@@ -181,9 +198,7 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
       announce(importantStatus, (unknownSave ? tr('저장 결과 확인 필요 · 이미 적용됐을 수 있습니다. 현재값을 확인하기 전까지 편집이 잠깁니다. 마지막 확인값: ') : '') + nameOf(target.value) + tr(' · 저장된 설정: 파일 업로드 ') + (original?.automaticUploads === true ? tr('허용') : tr('개별 승인')) + tr(' · 다운로드 ') + (original?.automaticDownloads === true ? tr('허용') : tr('개별 승인')) + ' · sudo ' + (original?.automaticSudo === true ? tr('허용') : tr('개별 승인')) + tr(' · AI 평가 자동승인 ') + (original?.modelExecution === true ? tr('허용') : tr('개별 승인')) + (!unknownSave && dirty ? tr(' · 변경 사항은 아직 저장되지 않았습니다.') : ''));
     }
     const chosen = [...new Set(linesOf(commands.value))]; workspace.refresh();
-    const draftDirty = !same(linesOf(commands.value), original?.commands ?? []) || !same(linesOf(denied.value), original?.deniedCommands ?? []) ||
-      disclosure.checked !== (original?.externalDisclosure === true) || execution.checked !== (original?.modelExecution === true) || uploads.checked !== (original?.automaticUploads === true) ||
-      downloads.checked !== (original?.automaticDownloads === true) || sudo.checked !== (original?.automaticSudo === true) || (fallback.value || null) !== (original?.fallback ?? null) || changed.size > 0 || converted.size > 0;
+    const draftDirty = hasChanges() || removals.size > 0;
     announce(draftStatus, unknownSave ? tr('적용 미확인 · 현재 적용 설정을 확인해 주세요.') : conflict ? tr('초안 충돌 · 편집 잠금') : busy ? tr('요청 처리 중 · 입력한 초안을 유지합니다.') : draftDirty ? tr('미저장 초안 · 변경 사항은 아직 적용되지 않았습니다.') : tr('저장된 설정과 같은 초안입니다.'));
     scoreBox.hidden = !disclosure.checked && !execution.checked && !original?.thresholds.jev;
     transmissionNote.hidden = !execution.checked || disclosure.checked;
@@ -197,6 +212,7 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
     advancedHeading.textContent = tr('대체 평가·이전 기준 · 대체 ') + (original?.fallback ?? tr('없음'));
     advancedNote.textContent = tr('저장된 점수 설정: ') + active + tr('. 수정하지 않은 값은 그대로 보존합니다. 연결 상태는 미확인입니다.');
     summary.replaceChildren(el('strong', (nameOf(target.value) || tr('서버')) + tr('에 적용할 내용')));
+    if (removals.size) summary.append(el('p', tr('삭제할 정책: ') + [...removals].map(nameOf).join(', ')));
     const lines = [tr('명령 ') + commands.value.split(/\r?\n/).filter(line => line.trim()).length + tr('개 · 금지 명령 ') + denied.value.split(/\r?\n/).filter(line => line.trim()).length + tr('개'),
       tr('정보 전송 ') + (disclosure.checked ? tr('허용 (위험도 확인부터 전송)') : tr('허용 안 함')) + tr(' · Jev 기준 자동 실행 ') + (execution.checked ? tr('사용 (명령셋 밖도 포함)') : tr('사용 안 함'))];
     const threshold = original?.thresholds.jev;
@@ -250,7 +266,7 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
     }
     if (!conflict) { conflictBox.hidden = !archives.has(target.value); latest.hidden = true; if (archives.has(target.value)) { preserve(archives.get(target.value)); conflictText.textContent = tr('이전 초안은 참고용으로 보존됐습니다. 현재 입력에 자동 적용하지 않습니다.'); } }
     else latest.hidden = false;
-    workspace.refresh(); update(); lock();
+    showInactiveRules(); workspace.refresh(); update(); lock();
   }
   latest.onclick = () => { drafts.delete(target.value); show(); tabs.select(0); search.focus(); };
   async function load() {
@@ -260,9 +276,10 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
     try {
       const fresh = await api('/api/command-policy');
       const unresolved = unknownSave; snapshot = fresh; target.replaceChildren();
-      for (const binding of snapshot.bindings) { const option = el('option', binding.displayName); option.value = binding.targetId; target.append(option); }
+      for (const binding of snapshot.bindings) { const option = el('option', nameOf(binding.targetId) + (binding.enabled === false ? tr(' · 사용 중지') : '')); option.value = binding.targetId; target.append(option); }
+      for (const rule of snapshot.targets.filter(rule => !snapshot.bindings.some(binding => binding.targetId === rule.targetId))) { const option = el('option', rule.targetId + tr(' · 미등록 정책')); option.value = rule.targetId; target.append(option); }
       if (snapshot.bindings.some(b => b.targetId === selectedTarget)) target.value = selectedTarget;
-      target.parentElement.hidden = snapshot.bindings.length === 1; fields.hidden = false;
+      target.parentElement.hidden = target.options.length === 1; fields.hidden = false;
       if (unresolved) {
         unknownSave = undefined; reconcile.hidden = true;
         const current = snapshot.targets.find(rule => rule.targetId === unresolved.targetId), requested = unresolved.candidate.policy.targets.find(rule => rule.targetId === unresolved.targetId);
@@ -276,7 +293,7 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
   reload.onclick = quickLoad.onclick = reconcile.onclick = load;
   document.querySelector('#load')?.addEventListener('click', () => { if (!snapshot) load(); });
   if (document.body.dataset.authMode === 'access') queueMicrotask(load);
-  target.onchange = () => { remember(); error(''); show(); };
+  target.onchange = () => { remember(); error(''); show(); document.dispatchEvent(new Event('admin-scope-change')); };
   form.oninput = event => {
     if (event.target === acknowledged || event.target === target || workspace.controls.includes(event.target)) return;
     for (const [provider, inputs] of Object.entries(scores)) if ([inputs.model, inputs.score].includes(event.target)) changed.add(provider);
@@ -290,8 +307,9 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
     save.disabled = !acknowledged.checked; announce(next, acknowledged.checked ? tr('확인한 설정을 이 서버에 저장할 수 있습니다.') : tr('위험도와 변경 내용을 읽고 OK를 체크해 주세요.'));
   };
   function proposal() {
+    if (removals.has(target.value)) return { expectedRevision: snapshot.revision, policy: { targets: structuredClone(snapshot.targets.filter(rule => !removals.has(rule.targetId))) } };
     const binding = snapshot.bindings.find(item => item.targetId === target.value);
-    if (!binding || original && (original.targetRevision !== binding.targetRevision || original.profile !== binding.profile)) throw Error(tr('서버 연결 정보가 기존 정책과 다릅니다. 자동으로 연결을 바꾸지 않습니다. 관리자에게 확인해 주세요.'));
+    if (!binding || binding.enabled === false || original && !activeRule(original)) throw Error(tr('서버 연결 정보가 기존 정책과 다릅니다. 자동으로 연결을 바꾸지 않습니다. 관리자에게 확인해 주세요.'));
     const rule = original ? structuredClone(original) : { targetId: binding.targetId, targetRevision: binding.targetRevision, profile: binding.profile, commands: [], deniedCommands: [], externalDisclosure: false, modelExecution: false, fallback: null, thresholds: {} };
     Object.assign(rule, { commands: names(commands, tr('자동승인 명령')), deniedCommands: names(denied, tr('금지 명령')), externalDisclosure: disclosure.checked, modelExecution: execution.checked, fallback: fallback.value || null });
     if (uploads.checked || Object.hasOwn(rule, 'automaticUploads')) rule.automaticUploads = uploads.checked;
@@ -305,7 +323,7 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
       if (!/^[A-Za-z0-9_.:-]{1,100}$/.test(inputs.model.value)) invalid(inputs.model, tr('연결된 모델을 선택해 주세요.'));
       rule.thresholds[provider] = { model: inputs.model.value, questionVersion: CURRENT, basis: BASIS, minLowRisk: score, validationRef: 'user-choice:' + Date.now() + ':' + globalThis.crypto.randomUUID() };
     }
-    const policy = structuredClone({ targets: snapshot.targets });
+    const policy = structuredClone({ targets: snapshot.targets.filter(rule => !removals.has(rule.targetId)) });
     const index = policy.targets.findIndex(item => item.targetId === rule.targetId);
     if (index < 0) policy.targets.push(rule); else policy.targets[index] = rule;
     return { expectedRevision: snapshot.revision, policy };
@@ -346,9 +364,22 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
     remember(); const checked = reviewed, draft = drafts.get(target.value), submittedTarget = target.value; clearTimeout(expiry); busy = true; fields.disabled = importantFields.disabled = true; reload.disabled = quickLoad.disabled = true; save.disabled = true; error('');
     try {
       const result = await api('/api/command-policy', 'POST', { ...checked.candidate, reviewToken: checked.reviewToken, acknowledged: true });
-      snapshot = { ...result, bindings: snapshot.bindings, evaluators: snapshot.evaluators }; drafts.delete(submittedTarget); const server = nameOf(target.value); show();
+      snapshot = { ...result, bindings: snapshot.bindings, evaluators: snapshot.evaluators }; drafts.delete(submittedTarget); removals.clear(); const server = nameOf(target.value); show();
       message.textContent = server + tr('에 명령 ') + (original?.commands.length ?? 0) + tr('개를 저장했습니다.'); announce(next, tr('저장 완료. 이후 요청부터 이 설정을 적용합니다.'));
     } catch (failure) { unknownSave = { candidate: checked.candidate, targetId: submittedTarget, draft }; reconcile.hidden = false; preserve(draft); latest.hidden = true; conflictText.textContent = tr('저장 요청에 보낸 초안입니다. 현재 적용값은 아직 확인하지 못했습니다.'); invalidate(tr('저장 결과를 확인하지 못했습니다. 이미 적용됐을 수 있습니다. 현재 적용 설정 확인을 눌러주세요.')); error(tr('저장을 확인하지 못했습니다. ') + failure.message); }
     finally { busy = false; update(); lock(); }
+  };
+  return {
+    async openTarget(id) {
+      onNavigate();
+      if (busy || loading || unknownSave) { error(tr('처리 중이거나 저장 결과 확인이 필요해 정책 대상을 바꿀 수 없습니다.')); return; }
+      if (!snapshot) await load();
+      if (!snapshot || ![...target.options].some(option => option.value === id)) { error(tr('등록된 정책 대상을 선택해 주세요.')); return; }
+      remember(); target.value = id; error(''); show(); document.dispatchEvent(new Event('admin-scope-change')); target.focus();
+    },
+    reloadState() {
+      remember();
+      return { blocked: busy || loading || !!unknownSave, dirty: [...new Set([...drafts].filter(([, draft]) => draft.dirty).map(([id]) => nameOf(id)).concat([...archives.keys()].map(nameOf), [...removals].map(nameOf)))] };
+    },
   };
 }
