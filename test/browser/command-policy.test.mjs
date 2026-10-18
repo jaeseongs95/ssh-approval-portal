@@ -203,9 +203,9 @@ test('local high-risk warning remains prominent even when Jev reports low risk',
 
 test('command search matches descriptions, preserves review for filters, and selection clears OK', async () => fixture(async f => {
   const {page}=f;await f.open();const search=page.getByLabel('명령 검색',{exact:true});
-  await catalog(page); await search.fill('프로세스');await choice(page, 'ps').waitFor();
-  assert.equal(await choice(page, 'grep').count(),0);
-  await catalog(page); await search.fill('파일 찾기');await choice(page, 'find').waitFor();
+  await catalog(page); await search.fill('프로세스');await page.getByRole('button',{name:'ps 상세 보기',exact:true}).waitFor();
+  assert.equal(await page.getByRole('button',{name:'grep 상세 보기',exact:true}).count(),0);
+  await catalog(page); await search.fill('파일 찾기');await page.getByRole('button',{name:'find 상세 보기',exact:true}).waitFor();
   await catalog(page); await search.fill('grep');const selected=choice(page, 'grep');await selected.click();
   assert.equal(await selected.evaluate(node=>node===document.activeElement),true);
   assert.equal((await names(page).inputValue()).split('\n').filter(name=>name==='grep').length,1);
@@ -476,10 +476,10 @@ test('settings workspace tabs preserve one reviewed draft through keyboard navig
 test('settings workspace shows saved and draft rule membership and preserves overlapping deny on edits', async () => fixture(async f => {
   const {page}=f,c=await f.api('/api/command-policy'),b=c.bindings[0];
   await f.seed({targets:[{targetId:b.targetId,targetRevision:b.targetRevision,profile:b.profile,commands:['ls','rm'],deniedCommands:['rm'],externalDisclosure:false,modelExecution:false,fallback:null,thresholds:{}}]});await f.open();
-  const ls=page.locator('[data-command-name=ls]'),rm=page.locator('[data-command-name=rm]');
+  const ls=page.locator('.command-detail'),rm=ls;await page.getByRole('button',{name:'ls 상세 보기',exact:true}).click();
   await ls.getByRole('button',{name:'ls 자동승인에서 제외',exact:true}).click();
   assert.match(await ls.textContent(),/마지막 저장값: 자동승인 목록/);assert.match(await ls.textContent(),/제외 예정/);
-  assert.match(await rm.textContent(),/차단 우선 · 자동승인 목록에도 포함/);
+  await page.getByRole('button',{name:'rm 상세 보기',exact:true}).click();assert.match(await rm.textContent(),/차단 우선 · 자동승인 목록에도 포함/);
   await rm.getByRole('button',{name:'rm 차단 해제',exact:true}).click();assert.equal(await names(page).inputValue(),'rm');
   assert.equal(await page.getByLabel('항상 차단할 명령',{exact:true}).inputValue(),'');
   assert.match(await rm.textContent(),/마지막 저장값: 차단 우선/);assert.match(await rm.textContent(),/저장할 초안: 자동승인 목록/);
@@ -496,7 +496,7 @@ test('settings workspace direct names and catalog navigation never silently regi
   const name=page.getByLabel('추가할 명령 이름',{exact:true});await name.fill('__proto__');await name.press('Enter');assert.equal(f.posts.length,0);
   await page.getByRole('button',{name:'자동승인 초안에 추가',exact:true}).click();
   assert.match(await names(page).inputValue(),/ls -l\nls\nls\npwd\n__proto__/);
-  assert.match(await page.locator('[data-command-name=__proto__]').textContent(),/내장 안내 없음/);assert.doesNotMatch(await page.locator('[data-command-name=__proto__]').textContent(),/undefined/);
+  assert.match(await page.locator('.command-detail').textContent(),/내장 안내 없음/);assert.doesNotMatch(await page.locator('.command-detail').textContent(),/undefined/);
   await reviewTab(page);await review(page).click();assert.equal(await tab(page,'명령 관리').getAttribute('aria-selected'),'true');
   assert.equal(await names(page).evaluate(n=>n===document.activeElement),true);assert.equal(f.posts.length,0);
 }));
@@ -521,3 +521,23 @@ test('settings workspace tab navigation stays available while an unknown save lo
   assert.equal(await page.getByRole('button',{name:'현재 적용 설정 확인',exact:true}).isVisible(),true);
   assert.equal(writes,1);assert.match(await page.locator('.policy-draft-status').textContent(),/적용 미확인/);
 }));
+
+for (const width of [1200,320]) test('command master detail separates selection from edits and keeps review '+width,async()=>fixture(async f=>{
+  const {page}=f,c=await f.api('/api/command-policy'),b=c.bindings[0];
+  await f.seed({targets:[{targetId:b.targetId,targetRevision:b.targetRevision,profile:b.profile,commands:['ls','pwd','rm'],deniedCommands:['rm'],externalDisclosure:false,modelExecution:false,fallback:null,thresholds:{}}]});await f.open();
+  const grid=page.locator('.command-grid'),detail=page.getByRole('region',{name:'선택한 명령 상세',exact:true});
+  assert.equal(await grid.getByRole('columnheader').count(),3);assert.equal(await grid.locator('[data-command-action]').count(),0);
+  await f.checked();await ok(page).check();await tab(page,'명령 관리').click();const before=f.posts.length;
+  const selected=page.getByRole('button',{name:'rm 상세 보기',exact:true});await selected.focus();await selected.press('Enter');
+  assert.equal(await selected.getAttribute('aria-pressed'),'true');assert.equal(await selected.evaluate(n=>n===document.activeElement),true);
+  assert.equal(await grid.locator('[aria-pressed=true]').count(),1);assert.match(await detail.textContent(),/차단이 우선합니다/);
+  assert.equal(await ok(page).isChecked(),true);assert.equal(await save(page).isDisabled(),false);assert.equal(f.posts.length,before);
+  const positions=await page.evaluate(()=>{const a=document.querySelector('.command-master').getBoundingClientRect(),b=document.querySelector('.command-detail').getBoundingClientRect();return {left:a.x,right:a.right,top:a.y,bx:b.x,by:b.y};});
+  if(width===1200)assert.ok(positions.bx>positions.right);else assert.ok(positions.by>positions.top);
+  await detail.getByRole('button',{name:'rm 차단 해제',exact:true}).click();
+  assert.equal(await page.getByLabel('항상 차단할 명령',{exact:true}).inputValue(),'');assert.equal(await names(page).inputValue(),'ls\npwd\nrm');
+  assert.equal(await ok(page).isChecked(),false);assert.equal(await save(page).isDisabled(),true);assert.equal(f.posts.length,before);
+  assert.match(await detail.textContent(),/마지막 저장값: 차단 우선/);assert.match(await detail.textContent(),/저장할 초안: 자동승인 목록/);
+  await page.getByLabel('명령 검색',{exact:true}).fill('does-not-exist');assert.equal(await grid.locator('tbody tr').count(),0);assert.match(await detail.textContent(),/선택할 명령이 없습니다/);
+  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await screenshot(page,'master-detail-'+width);
+},{width}));
