@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chromium } from 'playwright';
+import {launchBrowser} from './browser.mjs';
 import { fileURLToPath } from 'node:url';
 import { fixtureServer } from './fixture-server.mjs';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -12,7 +12,7 @@ const job = { id, kind: 'command', state: 'completed', command: 'sudo id', targe
 async function fixture(run) {
   const server = await fixtureServer(fileURLToPath(new URL('../../', import.meta.url))); let browser;
   try {
-    browser = await chromium.launch({ headless: true, ...(process.env.SOLID_CHROMIUM_PATH ? { executablePath: process.env.SOLID_CHROMIUM_PATH } : {}) });
+    browser = await launchBrowser();
     const page = await browser.newPage({ locale: 'ko-KR', viewport: { width: 390, height: 844 } });
     await page.route('**/*', route => new URL(route.request().url()).origin === server.origin ? route.continue() : route.abort());
     await run(page, server);
@@ -67,7 +67,7 @@ test('built administrator bundle loads stored result from actual authenticated a
     const requested = app.queue.submit('sudo id'); await app.queue.approve(requested.id);
     await new Promise(resolve => app.adminHttp.listen(0, '127.0.0.1', resolve));
     const origin = 'http://127.0.0.1:' + app.adminHttp.address().port;
-    browser = await chromium.launch({ headless: true, ...(process.env.SOLID_CHROMIUM_PATH ? { executablePath: process.env.SOLID_CHROMIUM_PATH } : {}) });
+    browser = await launchBrowser();
     const page = await browser.newPage({ locale: 'ko-KR', viewport: { width: 390, height: 844 } }); let outputReads = 0;
     await page.route('**/*', route => { if (new URL(route.request().url()).origin !== origin) return route.abort(); if (route.request().url().includes('/api/outputs/')) outputReads++; return route.continue(); });
     await page.goto(origin); await page.locator('#token').fill('synthetic-owner'); await page.locator('#load').click(); await page.locator('[href="/history"]').click();

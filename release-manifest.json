@@ -99,6 +99,11 @@
       "sha256": "976b3474cbecc0ecc0a42813f1cb98e0655720cd5482f8c26b71c3239b8f8518"
     },
     {
+      "path": "docs/browser-testing.ko.md",
+      "size": 2446,
+      "sha256": "65b00a9659240b0dd3a7613b924d74543765f5804c9e66d053ba13cc9e57dcc9"
+    },
+    {
       "path": "docs/command-automation.ko.md",
       "size": 26613,
       "sha256": "f09f71dc6a0bd0749e03e1ee8665bb46b1f71ea1760bd0bf5e1eec9bcc7399fc"
@@ -594,24 +599,29 @@
       "sha256": "821fd69a7936b3f1a0aa4edb8e124b0cec8fabddd7a1054c6fb169b2c1c96a75"
     },
     {
+      "path": "test/browser/browser.mjs",
+      "size": 442,
+      "sha256": "f9ddfc1e5a4be36596906d018cd540065cda0174327361d30212cd65176ab542"
+    },
+    {
       "path": "test/browser/card-bootstrap.js",
       "size": 4096,
       "sha256": "649983c6e797ee9ba2c6be2245d194e072d455a9190c365394a5f2ec1a3a58fa"
     },
     {
       "path": "test/browser/command-output.test.mjs",
-      "size": 7879,
-      "sha256": "b8de86b18088cc4579aac5d291e8ac39462ab8d31de176e4c27d608337c51ec9"
+      "size": 7651,
+      "sha256": "654a9cda8abb916869016dd6345838bfa58983995238679a7b533b64d3277132"
     },
     {
       "path": "test/browser/command-policy.test.mjs",
-      "size": 57504,
-      "sha256": "50b58e82e17b0500b3c79f5c4013e86654b9f600e6b59d91945e5936c261e1e0"
+      "size": 57500,
+      "sha256": "fadd979c17fa4c406def2a787d24cefc757ed40b600c205cbbf7372fcb4faf78"
     },
     {
       "path": "test/browser/environment.test.mjs",
-      "size": 7690,
-      "sha256": "f1c3b0eba61118a1d49e8bf7cf4555bd183d228c88cac33d43ee76db655dc40f"
+      "size": 7590,
+      "sha256": "9360608fbbce3f3d6b125efc566eae97df28ece65d3841f780e5680a37c5f706"
     },
     {
       "path": "test/browser/fixture-server.mjs",
@@ -620,13 +630,18 @@
     },
     {
       "path": "test/browser/history-language.test.mjs",
-      "size": 16768,
-      "sha256": "31208652a528f99df181bf86ec11bb5150ba5e17903b0dd09ef3250a37b858d3"
+      "size": 17132,
+      "sha256": "c6f7e50e58d37d6fb21e221c93fa610dbe694b17a42773bfb94f6e5e278101d0"
     },
     {
       "path": "test/browser/regressions.test.mjs",
-      "size": 34120,
-      "sha256": "bc9846acb1f004bc8230ee5206e44f29292d48a61015102b1806e94a3b09f50d"
+      "size": 34192,
+      "sha256": "0075e5187facfda25b88d7b1d22d954cf01fbd19e25977285cd5beeb5671a9d6"
+    },
+    {
+      "path": "test/browser/run.mjs",
+      "size": 3047,
+      "sha256": "eaf4ce3e38d97b63f2bc391b9ddc15544ed21eb1f00751cccb21b03e58a836cd"
     },
     {
       "path": "test/cli-entrypoint.test.mjs",

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { chromium } from 'playwright';
+import {launchBrowser} from './browser.mjs';
 import { classifyCommand } from 'ssh-mcp/build/policy/classifier.js';
 import { createApplication } from '../../app.mjs';
 
@@ -42,7 +42,7 @@ async function fixture(run, { multi = false, assess = async () => low, width = 3
       const checked = await api('/api/command-policy/review', proposal);
       return api('/api/command-policy', { ...proposal, reviewToken: checked.reviewToken, acknowledged: true });
     };
-    browser = await chromium.launch({ headless: true, ...(process.env.SOLID_CHROMIUM_PATH ? { executablePath: process.env.SOLID_CHROMIUM_PATH } : {}) });
+    browser = await launchBrowser();
     const context = await browser.newContext({ locale: 'ko-KR', viewport: { width, height: 844 }, colorScheme: 'dark' });
     await context.route('**/*', async route => {
       if (new URL(route.request().url()).origin !== origin) return route.abort();
@@ -206,7 +206,7 @@ test('command search matches descriptions, preserves review for filters, and sel
   await catalog(page); await search.fill('프로세스');await page.getByRole('button',{name:'ps 상세 보기',exact:true}).waitFor();
   assert.equal(await page.getByRole('button',{name:'grep 상세 보기',exact:true}).count(),0);
   await catalog(page); await search.fill('파일 찾기');await page.getByRole('button',{name:'find 상세 보기',exact:true}).waitFor();
-  await catalog(page); await search.fill('grep');const selected=choice(page, 'grep');await selected.click();
+  await catalog(page); await search.fill('grep');const selected=choice(page, 'grep');await selected.focus();await selected.press('Enter');
   assert.equal(await selected.evaluate(node=>node===document.activeElement),true);
   assert.equal((await names(page).inputValue()).split('\n').filter(name=>name==='grep').length,1);
   await selected.click();assert.deepEqual((await names(page).inputValue()).split('\n'),recommended);
@@ -419,7 +419,7 @@ test('selection exposes capability and same-count deltas; 128 names remain filte
   assert.equal(await page.locator('.command-rule').count(),12);
   await page.getByRole('button',{name:'명령 12개 더 보기',exact:true}).click();assert.equal(await page.locator('.command-rule').count(),24);
   const filter=page.getByLabel('명령 검색',{exact:true});await filter.fill('custom-127');await f.checked();await ok(page).check();await commandTab(page);
-  await page.getByRole('button',{name:'custom-127 자동승인에서 제외',exact:true}).click();assert.equal(await save(page).isDisabled(),true);assert.equal(await ok(page).isChecked(),false);
+  const remove=page.getByRole('button',{name:'custom-127 자동승인에서 제외',exact:true});await remove.focus();await remove.press('Enter');assert.equal(await save(page).isDisabled(),true);assert.equal(await ok(page).isChecked(),false);
   assert.equal((await names(page).inputValue()).split('\n').length,127);assert.equal(await filter.evaluate(n=>n===document.activeElement),true);assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   await screenshot(page,'command-selection-320');
 },{width:320}));
@@ -443,7 +443,7 @@ test('late feedback does not steal search focus and search descriptions remain a
 
 for(const mode of ['commands','approvals'])test('expiration remains announced outside hidden settings without stealing focus '+mode,async()=>fixture(async f=>{
   const {page}=f;await page.clock.install();await f.open();await f.checked();await ok(page).check();
-  const focused=mode==='commands'?tab(page,'명령 관리'):page.getByRole('link',{name:'승인',exact:true});await focused.click();
+  const focused=mode==='commands'?tab(page,'명령 관리'):page.getByRole('link',{name:'승인',exact:true});await focused.focus();await focused.press('Enter');
   await page.clock.fastForward(300001);const status=page.locator('#policy-activity');await status.getByText(/확인 결과가 만료됐습니다/).waitFor();
   assert.equal(await status.isVisible(),true);assert.equal(await focused.evaluate(n=>n===document.activeElement),true);assert.equal(await save(page).isDisabled(),true);
   if(mode==='commands')assert.equal(await page.locator('#settings-panel-2').isVisible(),false);else assert.equal(await page.locator('#command-policy').isVisible(),false);

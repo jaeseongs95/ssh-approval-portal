@@ -1,14 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
-import { chromium } from 'playwright';
+import {launchBrowser,browserName} from './browser.mjs';
 import { fixtureServer } from './fixture-server.mjs';
 
 async function fixture(run, { locale='ko-KR', width=1280, height=900, mobile=false, initialize }={}) {
   const server=await fixtureServer(process.env.UI_SOURCE_ROOT??fileURLToPath(new URL('../../',import.meta.url)));let browser;
   try {
-    browser=await chromium.launch({headless:true,...(process.env.SOLID_CHROMIUM_PATH?{executablePath:process.env.SOLID_CHROMIUM_PATH}:{})});
-    const context=await browser.newContext({locale,viewport:{width,height},hasTouch:mobile,isMobile:mobile});
+    browser=await launchBrowser();
+    const context=await browser.newContext({locale,viewport:{width,height},hasTouch:mobile,...(browserName==='chromium'?{isMobile:mobile}:{})});
     await context.route('**/*',route=>new URL(route.request().url()).origin===server.origin?route.continue():route.abort());
     if(initialize)await context.addInitScript(initialize);
     const page=await context.newPage();page.setDefaultTimeout(6000);const errors=[];page.on('pageerror',error=>errors.push(error.message));
@@ -92,9 +92,11 @@ for(const viewport of [
   const fits=async stage=>{const g=await page.evaluate(()=>({width:innerWidth,documentWidth:document.documentElement.scrollWidth,nav:Array.from(document.querySelectorAll('.admin-nav a'),n=>{const r=n.getBoundingClientRect();return {left:r.left,right:r.right,width:r.width,height:r.height};})}));g.draft=await page.locator('.policy-draft-bar').evaluate(n=>{const r=n.getBoundingClientRect(),s=n.querySelector('.policy-draft-status').getBoundingClientRect(),b=n.querySelector('button').getBoundingClientRect();return {visible:r.width>0,barWidth:r.width,statusWidth:s.width,statusHeight:s.height,buttonWithin:b.right<=r.right&&b.left>=r.left,flexDirection:getComputedStyle(n).flexDirection};});geometry.push({stage,...g});if(g.draft.visible&&g.draft.statusWidth<Math.min(160,g.draft.barWidth-32)&&process.env.UI_SCREENSHOTS)await page.screenshot({path:process.env.UI_SCREENSHOTS+'/layout-fail-'+viewport.name+'-'+stage+'.png',fullPage:true});if(g.draft.visible){assert.ok(g.draft.statusWidth>=Math.min(160,g.draft.barWidth-32),JSON.stringify({stage,...g.draft}));assert.ok(g.draft.statusHeight<200,JSON.stringify({stage,...g.draft}));assert.ok(g.draft.buttonWithin);}assert.ok(g.documentWidth<=g.width,JSON.stringify({stage,...g}));assert.ok(g.nav.every(n=>n.left>=0&&n.right<=g.width&&n.height>=40));};
   await page.goto(server.origin+'/history');await page.getByRole('searchbox',{name:'이력 검색'}).fill('matrix-');await page.getByLabel('처리 상태',{exact:true}).selectOption('completed');
   assert.equal(await page.locator('#history details').count(),13);await page.locator('#history details summary').first().click();await page.getByRole('button',{name:'출력 보기',exact:true}).first().click();await page.locator('#history .output').first().waitFor();await fits('history-ko');
-  const scrollEnd=async(selector)=>{const n=page.locator(selector).first();await n.hover();const original=await n.textContent();await page.mouse.wheel(0,100000);await page.waitForFunction(selector=>{const n=document.querySelector(selector);return n.scrollHeight>n.clientHeight&&n.scrollTop+n.clientHeight>=n.scrollHeight-2;},selector);assert.equal(await n.textContent(),original);geometry.push({stage:'scroll-end-'+selector,...await n.evaluate(n=>({top:n.scrollTop,height:n.clientHeight,total:n.scrollHeight}))});};
+  const scrollEnd=async(selector)=>{const n=page.locator(selector).first();await n.hover();const original=await n.textContent();// Firefox limits a single wheel delta; repeat real input while preserving the end-position oracle.
+    for(let attempt=0;attempt<200;attempt++){if(await n.evaluate(n=>n.scrollTop+n.clientHeight>=n.scrollHeight-2))break;await page.mouse.wheel(0,600);await page.waitForTimeout(80);}
+    await page.waitForFunction(selector=>{const n=document.querySelector(selector);return n.scrollHeight>n.clientHeight&&n.scrollTop+n.clientHeight>=n.scrollHeight-2;},selector);assert.equal(await n.textContent(),original);geometry.push({stage:'scroll-end-'+selector,...await n.evaluate(n=>({top:n.scrollTop,height:n.clientHeight,total:n.scrollHeight}))});};
   await scrollEnd('#history .command');await scrollEnd('#history .output');assert.equal(outputReads,1);
-  await page.locator('.intro').hover();await page.mouse.wheel(0,100000);await page.waitForFunction(()=>scrollY+innerHeight>=document.documentElement.scrollHeight-3);geometry.push({stage:'page-bottom',reached:true});
+  await page.locator('.intro').hover();for(let attempt=0;attempt<200;attempt++){if(await page.evaluate(()=>scrollY+innerHeight>=document.documentElement.scrollHeight-3))break;await page.mouse.wheel(0,600);await page.waitForTimeout(80);}await page.waitForFunction(()=>scrollY+innerHeight>=document.documentElement.scrollHeight-3);geometry.push({stage:'page-bottom',reached:true});
   await page.getByRole('link',{name:'설정',exact:true}).click();await page.getByRole('tab',{name:'명령 관리',exact:true}).waitFor();await fits('settings-ko');
   await page.getByRole('button',{name:'명령 찾아 추가',exact:true}).click();const detailBeforeScroll=await page.locator('.command-detail').textContent();await scrollEnd('.command-table-scroll');const sticky=await page.locator('.command-table-scroll').evaluate(n=>({top:n.getBoundingClientRect().top,head:n.querySelector('th').getBoundingClientRect().top}));assert.ok(Math.abs(sticky.top-sticky.head)<3,JSON.stringify(sticky));assert.equal(await page.locator('.command-detail').textContent(),detailBeforeScroll);await page.getByLabel('명령 검색',{exact:true}).fill('pwd');await page.getByRole('button',{name:'pwd 상세 보기',exact:true}).click();
   assert.match(await page.locator('.command-detail').textContent(),/pwd/);await fits('command-detail-ko');

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { chromium } from 'playwright';
+import {launchBrowser} from './browser.mjs';
 import { createApplication } from '../../app.mjs';
 
 async function fixture(run, { width = 1280, available = true } = {}) {
@@ -35,7 +35,7 @@ async function fixture(run, { width = 1280, available = true } = {}) {
   try {
     await new Promise(resolve=>app.adminHttp.listen(0,'127.0.0.1',resolve));
     const origin='http://127.0.0.1:'+app.adminHttp.address().port;
-    browser=await chromium.launch({headless:true,...(process.env.SOLID_CHROMIUM_PATH?{executablePath:process.env.SOLID_CHROMIUM_PATH}:{})});
+    browser=await launchBrowser();
     const context=await browser.newContext({locale:'ko-KR',viewport:{width,height:900}});
     await context.route('**/*',async route=>{
       const request=route.request(); if(!request.url().startsWith(origin+'/'))return route.abort();

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
-import { chromium } from 'playwright';
+import {launchBrowser} from './browser.mjs';
 import { fixtureServer } from './fixture-server.mjs';
 
 const root = resolve(process.env.SOLID_BROWSER_ROOT ?? fileURLToPath(new URL('../../', import.meta.url)));
@@ -10,7 +10,7 @@ async function browserFixture(run, locale = 'en-US') {
   const server = await fixtureServer(root);
   let browser;
   try {
-    browser = await chromium.launch({ headless: true, ...(process.env.SOLID_CHROMIUM_PATH ? { executablePath: process.env.SOLID_CHROMIUM_PATH } : {}) });
+    browser = await launchBrowser();
     const context = await browser.newContext({ locale });
     await context.route('**/*', route => new URL(route.request().url()).origin === server.origin ? route.continue() : route.abort());
     const page = await context.newPage();
@@ -154,6 +154,8 @@ test('multi-target web filter retires a delayed old response and updates visible
   server.state.multiTarget = true;
   server.state.jobs = ['alpha','beta'].map(id=>({...job(id+'-request'),targetId:id,targetDisplayName:id+' 이름',targetRevision:id+'-v1',hostKey:'SHA256:'+id}));
   await page.goto(server.origin+'/fixture/web'); await page.locator('#target-filter').waitFor({state:'visible'});
+  // The filter becomes visible before the asynchronous initial snapshot finishes rendering.
+  await page.waitForFunction(()=>document.querySelectorAll('#jobs .request').length===2);
   assert.equal(await page.locator('#jobs .request').count(),2);
   let entered, release; const held=new Promise(resolve=>release=resolve), started=new Promise(resolve=>entered=resolve);
   // The console now requests one global snapshot; filtering is local to that snapshot.
