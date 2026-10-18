@@ -165,13 +165,13 @@
     },
     {
       "path": "README.ko.md",
-      "size": 19649,
-      "sha256": "f80a99874e0a54ff3e3deb355690f07c3f4b47ac6a5aa3a8d49560c2309dae0e"
+      "size": 19683,
+      "sha256": "205c77246ee44ad7ad21ac28acbb48d5c8f75f84a994e6f85f56c0fc5e1e4b81"
     },
     {
       "path": "README.md",
-      "size": 18067,
-      "sha256": "4b5ec9998f326cafbe55a96aa6d711c18449bfb3363f29eddf834c12deec2406"
+      "size": 18119,
+      "sha256": "e7c890ea43c34ea2fef75d2b89505c49c42f94bc1f0ef0d3394c1f7cd5908977"
     },
     {
       "path": "scripts/admin-access-config.mjs",
