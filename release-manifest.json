@@ -140,8 +140,8 @@
     },
     {
       "path": "docs/roadmap.ko.md",
-      "size": 8765,
-      "sha256": "2ccb48586a1d91a65359c8044c26379284d2a3279654639181a9b5af3e18d605"
+      "size": 9425,
+      "sha256": "0382232bf7c822f3f21d304e978c1dc0cbb4f41fb67e34e33b2e4da3c96cbe05"
     },
     {
       "path": "docs/secret-management.ko.md",
@@ -655,8 +655,8 @@
     },
     {
       "path": "test/browser/multi-admin.test.mjs",
-      "size": 18354,
-      "sha256": "576198540563fbf2ce82cb6c990e702d30e3b5ab79012e952e7ddd4f83446b3b"
+      "size": 20566,
+      "sha256": "f7165a1615b83f52e7d00d972d26e6799e5ba68c21d1f712fb2a1387f7c512a9"
     },
     {
       "path": "test/browser/regressions.test.mjs",
@@ -1165,8 +1165,8 @@
     },
     {
       "path": "web/src/controller.js",
-      "size": 4392,
-      "sha256": "8f20daafc74236095446ef539c8e741640d72bfdcbc5239a296be4bb0d7eaac5"
+      "size": 4708,
+      "sha256": "7e10fa4365db5194c7e4ebb9cff39266f1e7ac27ecf5525171c4c75c8263a7af"
     },
     {
       "path": "web/src/environment.js",

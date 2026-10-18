@@ -142,3 +142,25 @@ test('download link POST blocks language while pending and cannot navigate after
   assert.equal(new URL(page.url()).pathname,'/settings');assert.equal(posts,1);
   await page.getByLabel('관리자 화면 언어',{exact:true}).selectOption('en');await page.getByRole('button',{name:'언어 적용·새로고침'}).click();await page.waitForFunction(()=>document.documentElement.lang==='en');assert.equal(new URL(page.url()).pathname,'/settings');
 }));
+
+for(const navigation of ['click','back','unchanged'])for(const outcome of ['success','error'])test('download page generation rejects stale responses ('+navigation+'-'+outcome+')',()=>fixture(async({page,server})=>{
+  server.state.jobs=[{...job('page-download','alpha','completed'),kind:'download',operation:{remotePath:'/tmp/synthetic.bin'}}];
+  let entered,release,posts=0;const started=new Promise(resolve=>entered=resolve),held=new Promise(resolve=>release=resolve);
+  await page.route('**/api/page-download/download',async route=>{posts++;entered();await held;await route.fulfill(outcome==='success'?{json:{downloadUrl:'/fixture/download/page-download'}}:{status:409,json:{error:'synthetic page download error'}}).catch(()=>{});});
+  await page.goto(server.origin+'/history');await page.locator('#history details summary').click();await page.locator('#history').getByRole('button',{name:'파일 저장',exact:true}).click();await started;
+  if(navigation!=='unchanged'){
+    await page.getByRole('link',{name:'설정',exact:true}).click();
+    if(navigation==='back')await page.goBack();else await page.getByRole('link',{name:'승인 이력',exact:true}).click();
+    await page.waitForURL('**/history');
+  }else await page.getByRole('link',{name:'승인 이력',exact:true}).click();
+  await page.locator('#error').evaluate(node=>node.textContent='Current page notice');
+  const response=page.waitForResponse(reply=>reply.url().endsWith('/api/page-download/download'));release();await(await response).finished();
+  if(navigation==='unchanged'&&outcome==='success'){
+    await page.waitForURL('**/fixture/download/page-download');assert.equal(await page.textContent('body'),'Synthetic download delivered');
+  }else{
+    await page.waitForLoadState('networkidle');
+    assert.equal(new URL(page.url()).pathname,'/history','Stale page download must not navigate the replacement page');
+    assert.equal(await page.locator('#error').textContent(),navigation==='unchanged'?'synthetic page download error':'Current page notice','Stale page error must not replace the current page notice');
+  }
+  assert.equal(posts,1,'Page navigation must not retry the download POST');
+},{width:navigation==='back'?320:1440}));

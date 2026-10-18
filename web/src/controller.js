@@ -2,6 +2,11 @@ export function createWebController({ state, view, api, document, location, time
   const capture = () => ({ target: view.target?.(), revision: view.selectionRevision?.() });
   const current = context => context.target === view.target?.() && context.revision === view.selectionRevision?.();
   let generation = 0, activeRead, uncertainDecision, activeDownloads = 0;
+  let page = document.body?.dataset.page, pageRevision = 0;
+  document.addEventListener?.('admin-scope-change', () => {
+    const next = document.body?.dataset.page;
+    if (next !== page) { page = next; pageRevision++; }
+  });
   const uncertainMessage = () => view.uncertainDecisionMessage?.() ?? 'Approval result needs checking. Refresh requests; do not repeat the action.';
   function stopPolling() { timers.clearInterval(state.polling); state.polling = null; }
   async function load(force = false) {
@@ -45,11 +50,12 @@ export function createWebController({ state, view, api, document, location, time
   async function download(id) {
     if (state.signedOut || activeDownloads) return;
     activeDownloads++;
-    const context = capture(), page = document.body?.dataset.page;
+    const context = capture(), revision = pageRevision, originPage = document.body?.dataset.page;
+    const currentPage = () => !state.signedOut && current(context) && originPage === document.body?.dataset.page && revision === pageRevision;
     try {
       const result = await api(`/api/${id}/download`, 'POST');
-      if (!state.signedOut && current(context) && page === document.body?.dataset.page) location.assign(result.downloadUrl);
-    } catch (error) { if (!state.signedOut && current(context)) view.error(error.message); }
+      if (currentPage()) location.assign(result.downloadUrl);
+    } catch (error) { if (currentPage()) view.error(error.message); }
     finally { activeDownloads--; }
   }
   async function output(outputId, offsetBytes = 0) {
