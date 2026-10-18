@@ -9,7 +9,7 @@ import { createWebI18n } from '../web/src/i18n.js';
 const html = readFileSync(new URL('../web/index.html', import.meta.url), 'utf8');
 function harness(language, access = false, jobs) {
   class Node {
-    constructor(tag) { this.tag=tag;this.children=[];this.dataset={};this.value='';this.classList={add(){},remove(){}}; }
+    constructor(tag) { this.tag=tag;this.children=[];this.dataset={};this.value='';this.validity={badInput:false};this.classList={add(){},remove(){}}; }
     append(node) { this.insertBefore(node,null); }
     insertBefore(node,before) {
       node.remove(); const at=before===null?this.children.length:this.children.indexOf(before);

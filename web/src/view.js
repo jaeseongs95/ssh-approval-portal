@@ -12,11 +12,27 @@ export function createWebView({ document, i18n }) {
   let targetList = [], changeTarget;
   let handlers;
   let historyOffset=0, historyAnchor, latestJobs=[], latestDeciding=false, pager;
-  let historySearch, historyFilter;
+  let historySearch, historyFilter, historyFrom, historyTo, historyDateError, historyRange={};
   const historyPageSize=20;
+  function updateHistoryRange() {
+    const boundary=(input,nextDay=false)=>{
+      if(!input?.value)return undefined;
+      const date=new Date(input.value+'T00:00:00');
+      if(nextDay)date.setDate(date.getDate()+1);
+      return date.getTime();
+    };
+    const from=boundary(historyFrom),to=boundary(historyTo,true);
+    const invalid=[historyFrom,historyTo].some(input=>input?.validity.badInput)||[from,to].some(value=>value!==undefined&&!Number.isFinite(value));
+    const reversed=from!==undefined&&to!==undefined&&from>=to;
+    const message=invalid?(korean?'올바른 날짜를 입력해 주세요.':'Enter a valid date.'):reversed?(korean?'종료일은 시작일과 같거나 이후여야 합니다.':'End date must be on or after start date.') : '';
+    historyRange={from,to,invalid:!!message};
+    if(historyDateError){historyDateError.textContent=message;historyDateError.hidden=!message;}
+    for(const input of [historyFrom,historyTo])input?.setAttribute('aria-invalid',String(!!message));
+  }
   const matchesHistory=job=>{
     const query=historySearch?.value.trim().toLowerCase()??'',filter=historyFilter?.value??'';
-    return !['pending','running','evaluating'].includes(job.state)&&(!filter||job.state===filter)&&(!query||[job.id,job.command,job.kind==='command'?'':JSON.stringify(job.operation),job.targetDisplayName,job.targetId].join(' ').toLowerCase().includes(query));
+    const {from,to,invalid}=historyRange,hasRange=from!==undefined||to!==undefined;
+    return !invalid&&(!hasRange||(Number.isFinite(job.createdAt)&&(from===undefined||job.createdAt>=from)&&(to===undefined||job.createdAt<to)))&&!['pending','running','evaluating'].includes(job.state)&&(!filter||job.state===filter)&&(!query||[job.id,job.command,job.kind==='command'?'':JSON.stringify(job.operation),job.targetDisplayName,job.targetId].join(' ').toLowerCase().includes(query));
   };
   function text(parent, tag, value, className = '') {
     const node = document.createElement(tag); node.textContent = value; node.className = className; parent.append(node); return node;
@@ -28,6 +44,7 @@ export function createWebView({ document, i18n }) {
   const placeholders = {
     pending: empty(t('대기 중인 요청이 없습니다'), t('새 승인 요청이 들어오면 여기에 표시됩니다.')),
     history: empty(t('아직 승인 이력이 없습니다'), t('승인·거부된 요청의 상태와 결과가 여기에 표시됩니다.')),
+    filteredHistory: empty(korean?'검색 조건에 맞는 승인 이력이 없습니다':'No approval history matches your filters',korean?'조회기간·검색어·상태·대상 서버를 확인해 주세요.':'Check the date range, search, status and target server.'),
     running: empty(t('실행 중인 요청이 없습니다'), t('승인 후 실행 중인 명령과 파일 전송이 표시됩니다.')),
   };
   function createRecord(job, deciding, previous) {
@@ -129,6 +146,7 @@ export function createWebView({ document, i18n }) {
   }
   function render(jobs, deciding = false) {
     latestJobs=jobs; latestDeciding=deciding;
+    updateHistoryRange();
     overview(jobs);
     const selected = el('target-filter')?.value;
     const visible = selected ? jobs.filter(job => (job.targetId ?? 'default') === selected) : jobs;
@@ -151,7 +169,8 @@ export function createWebView({ document, i18n }) {
       (job.state === 'pending' ? pending : ['running', 'evaluating'].includes(job.state) ? running : history).push(record.node);
     }
     reconcile(el('jobs'), pending.length ? pending : [placeholders.pending]);
-    reconcile(el('history'), history.length ? history : [placeholders.history]);
+    const filtered=historySearch?.value.trim()||historyFilter?.value||historyFrom?.value||historyTo?.value||historyRange.invalid||selected;
+    reconcile(el('history'), history.length ? history : [filtered?placeholders.filteredHistory:placeholders.history]);
     if (el('running')) reconcile(el('running'), running.length ? running : [placeholders.running]);
     el('pending-count').textContent = pending.length; el('history-count').textContent = historyJobs.length;
     if (el('running-count')) el('running-count').textContent = running.length;
@@ -184,8 +203,16 @@ export function createWebView({ document, i18n }) {
     const searchLabel=text(filters,'label',korean?'이력 검색':'Search history');historySearch=text(searchLabel,'input','');historySearch.type='search';historySearch.maxLength=200;historySearch.placeholder=korean?'명령·요청 ID·서버 검색':'Search command, request ID or server';
     const filterLabel=text(filters,'label',korean?'처리 상태':'Request status');historyFilter=text(filterLabel,'select','');historyFilter.setAttribute('aria-label',korean?'처리 상태':'Request status');
     for(const value of ['', 'completed','failed','denied','expired','unknown']){const option=text(historyFilter,'option',value?states[value]:(korean?'전체 상태':'All statuses'));option.value=value;}
+    const dateInput=label=>{const input=text(text(filters,'label',label),'input','');input.type='date';input.setAttribute('aria-describedby','history-date-note history-date-error');return input;};
+    historyFrom=dateInput(korean?'시작일':'Start date');historyTo=dateInput(korean?'종료일':'End date');
+    const clearDates=text(filters,'button',korean?'기간 초기화':'Clear dates','secondary');clearDates.type='button';
+    const zone=Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const note=text(filters,'p',korean?`요청 생성일 기준 · 현지시간 (${zone}) · 시작일·종료일 포함`:`Request creation date · Local time (${zone}) · Both dates included`,'history-date-note');note.id='history-date-note';
+    historyDateError=text(filters,'p','','error history-date-error');historyDateError.id='history-date-error';historyDateError.setAttribute('role','alert');historyDateError.hidden=true;
     el('history').before(filters);
-    historySearch.oninput=historyFilter.onchange=()=>{historyOffset=0;historyAnchor=undefined;render(latestJobs,latestDeciding);};
+    const filterChanged=()=>{historyOffset=0;historyAnchor=undefined;render(latestJobs,latestDeciding);};
+    historySearch.oninput=historyFilter.onchange=historyFrom.oninput=historyTo.oninput=filterChanged;
+    clearDates.onclick=()=>{historyFrom.value=historyTo.value='';filterChanged();};
     el('token').addEventListener('keydown', event => { if (event.key === 'Enter') actions.load(); });
     el('jobs').replaceChildren(empty(t('요청 목록을 연결해 주세요'), t('관리자 토큰을 입력하고 요청 조회를 누르세요.')));
     el('history').replaceChildren(empty(t('처리 이력을 한눈에'), t('실행 중인 요청부터 완료된 결과까지 확인할 수 있습니다.')));

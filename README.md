@@ -8,7 +8,7 @@ Jev assists with commands outside the preapproved list. Owner settings determine
 
 [Secret management (Korean)](docs/secret-management.ko.md) separates secret references from provider adapters. Its first backend is a private POSIX local store managed through a hidden-input operator CLI. Jev resolves a reference at startup; actual values stay out of chat, MCP results, and packages.
 
-Version **1.6.0** adds a separate approval-history tab and browser-local administrator display language selection. The release’s `VALIDATION.json` records the verified server and browser scope. Responsibilities are separated into domain, application, and adapter layers while preserving approval rules. Existing client tests, agent-upload observations, and local validation of the restructuring are recorded separately.
+Version **1.6.0** adds an approval-history tab with date-range search and browser-local administrator display language selection. The release’s `VALIDATION.json` records the verified server and browser scope. Responsibilities are separated into domain, application, and adapter layers while preserving approval rules. Existing client tests, agent-upload observations, and local validation of the restructuring are recorded separately.
 
 | Area | Verified scope and remaining limits |
 | --- | --- |
@@ -97,7 +97,7 @@ Version 0.3 updates and rollbacks reserve maintenance through the administrator 
 
 ## Web administrator interface and sign-in
 
-The website displays pending requests, history, and execution results. After connecting, it refreshes every 10 seconds while the page is visible. Manual refreshes and approval/denial actions refresh immediately. Browser languages starting with `ko` use Korean; all other languages use English.
+The website displays pending requests, history, and execution results. After connecting, it refreshes every 10 seconds while the page is visible. Manual refreshes and approval/denial actions refresh immediately. Display language can be automatic, Korean or English and is saved only in this browser. Search retained approval history by request creation date, text, status and target together. Date ranges include both calendar dates in the browser’s local time; blank dates show the full retained period.
 
 Administrator-token authentication is the default. Cloudflare, Google, and GitHub sign-in are **web administrator sign-in through Cloudflare Access**; they do not replace SSH login or MCP connection authentication. Configure and test the providers and actual sign-in before explicitly enabling Access mode. See the [administrator sign-in guide](docs/admin-login.en.md) for setup, access restrictions, and recovery.
 
