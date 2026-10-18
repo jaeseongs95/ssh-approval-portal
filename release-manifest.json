@@ -134,9 +134,14 @@
       "sha256": "ad8e61432b173b46efc0807c846a98c8f02c2f42d97ffed53b2287fadd9a4875"
     },
     {
+      "path": "docs/non-cloudflare-https.ko.md",
+      "size": 2426,
+      "sha256": "c5a40d3c575be3663ac265ccfa8330d9e06709dbd94054a16010a3ce16b14067"
+    },
+    {
       "path": "docs/roadmap.ko.md",
-      "size": 5840,
-      "sha256": "a8f46f0ae9c63f2409942b69270f5b68efc345c08a49cf13d6f7c052b39b00da"
+      "size": 5914,
+      "sha256": "b86e92b092ba9a85cded0b842d923f1f0461541f548c1a8c1399fe2accf82d87"
     },
     {
       "path": "docs/secret-management.ko.md",
@@ -842,6 +847,16 @@
       "path": "test/multi-target.test.mjs",
       "size": 14220,
       "sha256": "32b4a9b2cd006c9483b6f805cff0d76457f80eec52611f20deeb28da4cf709e6"
+    },
+    {
+      "path": "test/non-cloudflare-container-test.sh",
+      "size": 1479,
+      "sha256": "df21502d4a40a33154828551853207c9f1a28276e73c9d01328424140251d738"
+    },
+    {
+      "path": "test/non-cloudflare-https.mjs",
+      "size": 7094,
+      "sha256": "6cf0921dd146cdcfd6597c8fe55604a98c8ff9aa94169909bd662af524264cf4"
     },
     {
       "path": "test/PLAN.md",
