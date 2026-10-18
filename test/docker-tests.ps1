@@ -1,6 +1,7 @@
 param(
   [string[]]$Versions = @('22.04','24.04'),
   [ValidateSet('amd64','arm64')][string]$Architecture = 'amd64',
+  [ValidateSet('native','portal')][string]$Workflow = 'native',
   [string]$TaskTag = ('solid-' + [Guid]::NewGuid().ToString('N').Substring(0,10)),
   [string]$CandidateArchive = '',
   [string]$BaselineArchive = '',
@@ -26,7 +27,8 @@ try {
       if ($LASTEXITCODE -ne 0) { throw 'Image build failed' }
       docker run -d --platform "linux/$Architecture" --label "io.ssh-approval.solid-task=$TaskTag" --privileged --tmpfs /run --tmpfs /run/lock --name $container $tag
       if ($LASTEXITCODE -ne 0) { throw 'Test container failed' }
-      docker exec $container bash /source/test/container-test.sh
+      $entry = if ($Workflow -eq 'portal') { '/source/test/portal-container-test.sh' } else { '/source/test/container-test.sh' }
+      docker exec $container bash $entry
       if ($LASTEXITCODE -ne 0) {
         docker exec $container journalctl -u ssh.service -u ssh-approval-bridge.service -n 30 --no-pager
         throw "Ubuntu $version test failed"

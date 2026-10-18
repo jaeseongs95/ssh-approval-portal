@@ -111,7 +111,8 @@ verify_state
 mkdir /work/broken
 printf 'FROM %s\nCMD ["node","test/broken-start.fixture.mjs"]\n' "$TEST_IMAGE" > /work/broken/Dockerfile
 broken=$TEST_PROJECT:broken
-docker build --label "io.ssh-approval.solid-task=$TEST_TASK_TAG" -t "$broken" /work/broken
+platform=$(docker image inspect "$TEST_IMAGE" --format '{{.Os}}/{{.Architecture}}')
+docker build --platform "$platform" --label "io.ssh-approval.solid-task=$TEST_TASK_TAG" -t "$broken" /work/broken
 if bash scripts/compose-update.sh "$broken"; then echo 'Broken image update unexpectedly succeeded' >&2; exit 1; fi
 [[ $("${compose[@]}" config --images) == "$old" ]]
 [[ $(docker inspect "$("${compose[@]}" ps -q bridge)" --format '{{.Image}}') == "$old" ]]

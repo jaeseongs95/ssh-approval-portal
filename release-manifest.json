@@ -140,8 +140,8 @@
     },
     {
       "path": "docs/roadmap.ko.md",
-      "size": 7465,
-      "sha256": "446028aaa2b1607a97c36d0e457ecf8256765de42114df1e520b086b1e433e3b"
+      "size": 8182,
+      "sha256": "d9c6529ed6b230adc11176f0347f3dba9fac8310a64e3b741f276d80a7047543"
     },
     {
       "path": "docs/secret-management.ko.md",
@@ -705,8 +705,8 @@
     },
     {
       "path": "test/compose-driver.sh",
-      "size": 5883,
-      "sha256": "85564b465e354c1176e816100b46fa142521d2bf8dedc11bc8f4f2b732ffe9ed"
+      "size": 5990,
+      "sha256": "8928e323030700bee64e917615b09823e523e349c70034de83db79c65ac68445"
     },
     {
       "path": "test/compose-env-fixture.sh",
@@ -730,8 +730,8 @@
     },
     {
       "path": "test/container-test.sh",
-      "size": 4075,
-      "sha256": "3aa670120c40b3a922678c820ff80ca31685534beea0118f5ef2ba682e3d985a"
+      "size": 4861,
+      "sha256": "cbb14bf3318bd80d4b26ff92a080612f0fd599fe2b63a0eb32ae874c90254d79"
     },
     {
       "path": "test/core.test.mjs",
@@ -755,8 +755,8 @@
     },
     {
       "path": "test/docker-tests.ps1",
-      "size": 2540,
-      "sha256": "af88fe1835a9f5b8b17d9d5b13118113990d69ac5decb1bb204c196b29fe93ee"
+      "size": 2709,
+      "sha256": "e17611e25a2aa718534134838b9b4324dd41e1a7c5f94e49aa427211d991c9a2"
     },
     {
       "path": "test/Dockerfile",
@@ -880,13 +880,13 @@
     },
     {
       "path": "test/PLAN.md",
-      "size": 6878,
-      "sha256": "c32d780bfb557b0f42eef3a444e5cfac1bec3ad86e801134548d9d73baa1f41d"
+      "size": 8252,
+      "sha256": "dbe1d6cd179738bddd60f38199a4a1bbfe2de300fb98a6eefa751cba5fa76610"
     },
     {
       "path": "test/portal-container-test.sh",
-      "size": 4357,
-      "sha256": "d7bf6836f12ae0e966f8b35e86808d88f5f6b97ddf59e0c64e36bd2ab238681e"
+      "size": 5143,
+      "sha256": "c138b9d40e7571eadea1afb37198c6ecbc4592fcc5e54cdcfa8ee11ba07f0631"
     },
     {
       "path": "test/release-version.test.mjs",

@@ -34,9 +34,13 @@ node scripts/verify.mjs
 
 파일 helper는 Linux 임시 디렉터리에서 실제 바이너리·빈 파일 업다운로드, overwrite=false, mode와 SHA 불일치 시 기존 파일 보존, symlink·FIFO·디렉터리 거부를 확인합니다. root/sudo 경계는 격리된 설치 시험으로 따로 확인합니다.
 
-Ubuntu 22.04/24.04의 네이티브·Docker·Compose는 fresh·update·reinstall·failed-start·rollback과 실제 격리 SSH 파일 왕복을 확인합니다. 각 검증은 합성 설정·데이터를 사용하고 현재 운영 서비스나 자격을 사용하지 않습니다. 현재 1.0.0 릴리스 범위는 amd64이며 ARM64 검증은 사용자 지시로 후속 고도화에 이관했습니다. Windows·WSL·ARM64 에뮬레이션과 실제 ARM 하드웨어 결과를 구분합니다. 실행하지 않은 환경은 NOT_RUN으로 남깁니다.
+Ubuntu 22.04/24.04의 네이티브·Docker·Compose는 fresh·update·reinstall·failed-start·rollback과 실제 격리 SSH 파일 왕복을 확인합니다. 각 검증은 합성 설정·데이터를 사용하고 현재 운영 서비스나 자격을 사용하지 않습니다. Windows·WSL·ARM64 에뮬레이션과 실제 ARM 하드웨어 결과를 구분합니다. ARM64 컨테이너에서 Node가 실행되더라도 호스트 커널의 ARM 부팅이나 물리 장비를 검증한 것으로 확대하지 않습니다. 실행하지 않은 환경은 NOT_RUN으로 남깁니다.
 
 Windows의 Docker driver는 `package.json` 버전에 맞는 `dist/ssh-approval-portal-VERSION.tar.gz`를 기본으로 사용합니다. 패키지 생성 후 `pwsh -File test/driver-common.test.ps1`로 기본 경로·명시 경로·누락 파일 거부를 확인합니다. 실제 Docker·Compose 검사는 각 `test/docker-runtime.ps1`·`test/compose-runtime.ps1`에서 수행합니다. Compose 시작 실패 시 합성 서비스 로그와 health 기록을 정리 전에 남기며 원래 실패 코드는 유지합니다. 구버전 기준 이미지는 해당 설정을 지원해야 합니다. 새 키를 모르는 이미지의 설정 검증을 우회하거나 키를 자동 삭제하지 않습니다.
+
+`test/docker-tests.ps1`의 `-Workflow native`는 기존 설치 스크립트 경로이며 기본값입니다. `-Workflow portal`은 사용자가 쓰는 통합 CLI의 install·update·rollback과 ENV 편집 연결·공유 설치 잠금까지 검사합니다. 현재 후보를 빈 환경에 설치하는 실행과 호환 기준 버전에서 갱신하는 실행은 별도로 수행합니다. 후자는 `-BaselineArchive`와 `-BaselineSha256`를 함께 지정합니다. 기준 버전의 최초 설치만으로 현재 후보의 새 설치를 검증했다고 표시하지 않습니다. 두 경로 모두 같은 owner API로 비기본 정책·기존 완료 명령·저장 출력의 실제 읽기를 캡처하고 재설치·롤백·실패 복구 후 비교합니다.
+
+ARM64 Compose 검사는 서비스 이미지와 실제 Node 아키텍처를 확인하고, 의도적인 시작 실패용 파생 이미지도 후보 이미지의 OS·아키텍처로 빌드합니다. Docker 호스트의 기본 아키텍처에 맡기면 고장 이미지 자체를 만들지 못해 복구 검사를 실행한 것으로 볼 수 없습니다. non-root·읽기 전용 루트·cap-drop·no-new-privileges·제한된 tmpfs와 보호된 마운트는 실제 서비스 컨테이너에서 확인합니다. Docker 소켓을 쓰는 시험 제어기와 서비스를 구분합니다.
 
 Compose 갱신 검사는 같은 후보의 SSH 프로토콜 검사 클라이언트로 기준 버전과 후보 서비스를 각각 검사합니다. 검사 클라이언트는 별도 제한 컨테이너에서 합성 시크릿만 읽으며 Docker socket을 받지 않습니다. 구버전 이미지에 포함된 옛 테스트의 자동승인 가정을 적용하지 않고 기본 다운로드의 owner 승인을 실제로 수행합니다.
 
