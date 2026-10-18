@@ -10,8 +10,8 @@
     },
     {
       "path": "app.mjs",
-      "size": 13165,
-      "sha256": "a0c6d6db9b0deddc3e67bd3738d0d649297b2ba52ea0b641d8e60946fc7cf0b7"
+      "size": 13642,
+      "sha256": "3612965f1127722e0b84e5dc8b8503a6ac82b8f584a97de82cfd196e94f9af3c"
     },
     {
       "path": "bridge.mjs",
@@ -20,8 +20,8 @@
     },
     {
       "path": "config/bridge.env.example",
-      "size": 1983,
-      "sha256": "37f341f91cdeebca0991337706727670e2ac2150c414ce8ae8d30837fceca217"
+      "size": 2345,
+      "sha256": "2c1548feebaa68eaffd38975f72f1946a397b14e3424a22861dd52de149493fa"
     },
     {
       "path": "config/config.example.toml",
@@ -35,8 +35,8 @@
     },
     {
       "path": "config/settings-contract.json",
-      "size": 5970,
-      "sha256": "c9e52b13a4695cd24c190110c381fa0611dae6ab63fffcae83b0f1432055a993"
+      "size": 6140,
+      "sha256": "ec6401177d594d8b9413788c58e171b0902e6c406c25c0cc6bd4b1074bbff026"
     },
     {
       "path": "config/ssh-approval-bridge.service",
@@ -140,13 +140,13 @@
     },
     {
       "path": "docs/roadmap.ko.md",
-      "size": 8182,
-      "sha256": "d9c6529ed6b230adc11176f0347f3dba9fac8310a64e3b741f276d80a7047543"
+      "size": 8765,
+      "sha256": "2ccb48586a1d91a65359c8044c26379284d2a3279654639181a9b5af3e18d605"
     },
     {
       "path": "docs/secret-management.ko.md",
-      "size": 4769,
-      "sha256": "7f209a4cee01f0870e9397b7fba151ca8a28d818d74f0f75ddaf40802f2e1180"
+      "size": 7625,
+      "sha256": "4cc512791092d3bbb1ce989dbdec066c3a30ddd4f252e38bccdbd98f76bc7922"
     },
     {
       "path": "helper/environment-helper.py",
@@ -360,8 +360,8 @@
     },
     {
       "path": "src/adapters/config/settings.mjs",
-      "size": 4571,
-      "sha256": "ac2db32975c8f19fce8b71882441fc89b37639bcc0d3498ee21b1b64dd82c0d7"
+      "size": 5220,
+      "sha256": "530c61db530769d64733eddba1e09f0951b56c515787e179923f19d7ae2075e3"
     },
     {
       "path": "src/adapters/config/targets.mjs",
@@ -407,6 +407,11 @@
       "path": "src/adapters/secrets/local-file.mjs",
       "size": 8063,
       "sha256": "209e9ca8a2b4ca9a898996483f00260d68213ff09e095e6f640d8345ecd7daa9"
+    },
+    {
+      "path": "src/adapters/secrets/vault-kv.mjs",
+      "size": 4070,
+      "sha256": "878516871b97a9187a37d28207e89216d3241b317cf2358c03f73e555f94b147"
     },
     {
       "path": "src/adapters/security/admin-access.mjs",
@@ -725,8 +730,8 @@
     },
     {
       "path": "test/config-contracts.test.mjs",
-      "size": 12275,
-      "sha256": "fc9320c51c1bd7cefa9493d967a909e6112fd3a4c97d1cc6eb7f05e93eaddbfd"
+      "size": 12667,
+      "sha256": "58ec1b8d2b80162f00aec1feb852d08253a0b02d3d0e4b098c2a44d2fceeaf46"
     },
     {
       "path": "test/container-test.sh",
@@ -880,8 +885,8 @@
     },
     {
       "path": "test/PLAN.md",
-      "size": 8252,
-      "sha256": "dbe1d6cd179738bddd60f38199a4a1bbfe2de300fb98a6eefa751cba5fa76610"
+      "size": 10156,
+      "sha256": "066861a69bf8e9e5f88c3ff2b3c1b9eb8b0a58d95a569502fb6847b84d008b32"
     },
     {
       "path": "test/portal-container-test.sh",
@@ -1010,8 +1015,8 @@
     },
     {
       "path": "test/test_settings_contract.py",
-      "size": 5531,
-      "sha256": "37ae3f6f4fc4fdfd83e2ca603ce73dbbb91daba66ef6446ef53f631ab0104a13"
+      "size": 6238,
+      "sha256": "d7d791e5e4a3c62a49b0e5cebb1da619e69c2fe65037834a06dcd27c4b0e80cf"
     },
     {
       "path": "test/test_upload_sources.py",
@@ -1027,6 +1032,31 @@
       "path": "test/ui-bundle.test.mjs",
       "size": 1722,
       "sha256": "d286b070ec4a6a4765f3e04347d7d3fc9b3ae000c362eba63ff7cef1f808ebf2"
+    },
+    {
+      "path": "test/vault-container.Dockerfile",
+      "size": 814,
+      "sha256": "51ff76899f2f01692700920e091bb155bb31dde4dabf16f7e9cb955fc2f948c1"
+    },
+    {
+      "path": "test/vault-integration.mjs",
+      "size": 18564,
+      "sha256": "f8add169a2899ee7e7944a76064016ed6173c9b066ba8a64811dac0de45d3391"
+    },
+    {
+      "path": "test/vault-kv.test.mjs",
+      "size": 2875,
+      "sha256": "59af1bf72ea9e30b86ed21c5a99f8f2f572b1e98c5fd991cc854402140f91301"
+    },
+    {
+      "path": "test/vault-runtime.ps1",
+      "size": 6620,
+      "sha256": "f0bdb6a65838dc64f3a282f620512999ea71e22d6c7f4947aa5345c093153cdf"
+    },
+    {
+      "path": "test/vault-worker.fixture.mjs",
+      "size": 3782,
+      "sha256": "0861fc8e387d5d1197cad6f6f26e15ab31c75f070ca8d6a7931cc664330de632"
     },
     {
       "path": "test/web-session.test.mjs",

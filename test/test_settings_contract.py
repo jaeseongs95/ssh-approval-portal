@@ -12,6 +12,16 @@ spec.loader.exec_module(settings)
 
 
 class SettingsContract(unittest.TestCase):
+    def test_vault_metadata_names_are_preserved_by_private_env_parser(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'private.env'
+            path.write_text('BRIDGE_VAULT_URL=https://vault.example.test:8200\nBRIDGE_VAULT_MOUNT=secret\nBRIDGE_VAULT_TOKEN_REF=secret://local-file/vault-reader-token\n', encoding='utf-8')
+            path.chmod(0o600)
+            values = settings.read_env(path)
+            self.assertEqual(values['BRIDGE_VAULT_URL'], 'https://vault.example.test:8200')
+            self.assertEqual(values['BRIDGE_VAULT_MOUNT'], 'secret')
+            self.assertEqual(values['BRIDGE_VAULT_TOKEN_REF'], 'secret://local-file/vault-reader-token')
+
     def test_shared_upload_host_vectors(self):
         for vector in settings.contract['uploadHostVectors']:
             with self.subTest(value=vector['value']):

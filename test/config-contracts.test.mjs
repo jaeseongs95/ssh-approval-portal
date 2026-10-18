@@ -15,6 +15,11 @@ import { parseUploadHosts, matchesUploadHost, UPLOAD_HOSTS_MAX_BYTES } from '../
 const origin = 'https://admin.example.test';
 const env = { BRIDGE_MCP_TOKEN: 'fixture-mcp', BRIDGE_ADMIN_TOKEN: 'fixture-admin', BRIDGE_ADMIN_ORIGIN: origin };
 
+test('native ENV loader preserves Vault public metadata and reference without evaluation', () => {
+  const values = parseSecretText('BRIDGE_VAULT_URL=https://vault.example.test:8200\nBRIDGE_VAULT_MOUNT=secret\nBRIDGE_VAULT_TOKEN_REF=secret://local-file/vault-reader-token\n');
+  assert.equal(parseSettings({ ...env, ...values }).vaultTokenRef, 'secret://local-file/vault-reader-token');
+});
+
 test('runtime upload settings share exact and wildcard policy vectors with deployment tools', () => {
   for (const { value, expected, valid } of settingsContract.uploadHostVectors) {
     if (valid === false) {

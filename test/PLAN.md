@@ -1,5 +1,15 @@
 # 검증 계획
 
+## Vault KV v2 로컬 통합
+
+worker의 Node·SDK 모듈 준비는 30초, 그 뒤 앱 생성과 MCP 준비는 12초로 나눠 검사한다. 시작 중 프로세스 종료는 즉시 실패로 처리하고 각 단계의 실제 시간을 기록한다. 에뮬레이션의 모듈 준비 시간을 제품 요청의 제한시간과 혼동하지 않는다. Vault 네트워크의 5초 전체 기한과 모든 기능 assertion은 그대로 유지한다.
+
+`test/vault-runtime.ps1`은 고정된 후보와 SHA-256으로 검증한 이전 패키지로 amd64 또는 ARM64 격리 시험 이미지를 만든다. 서비스 시험 컨테이너는 network none·non-root·읽기 전용 root·cap-drop ALL·no-new-privileges·제한된 PID·noexec 임시 공간을 사용하고 Docker 소켓과 호스트 비밀을 공유하지 않는다.
+
+실제 Vault 2.0.3 TLS 서버와 최소 읽기 ACL을 사용한다. 같은 worker와 초기 합성 입력으로 이전 앱의 공개 MCP 초기 평가 실패와 새 앱의 성공을 구분한다. 초기 평가 뒤 키 A→B 교체 전후의 프로세스 캐시, 새 프로세스의 B 사용, 최신 버전 soft delete·영구 destroy, reader 토큰 취소 뒤 재시작을 확인한다. 실행 중 캐시와 Jev 키 발급처의 폐기는 별개다. 실제 Jev 호출은 하지 않고 요청의 인증 키 버전을 독립 fixture가 확인한다.
+
+별도 TLS peer로 CA·호스트명·redirect·권한 오류·잘못된 UTF-8/JSON·응답 상한·중단·전체 기한을 검증한다. 기존 ENV 우선순위·비활성·주입 resolver·local-file 회귀, 전체 Node 검사와 Python 설정 검사도 실행한다. 생성한 Vault root/unseal 출력은 수집하지 않는다. 실제 Node 아키텍처와 Vault ELF machine을 함께 기록하며 ARM64는 Docker Desktop의 사용자 공간 에뮬레이션 범위다. 실행하지 않은 사례는 통과로 기록하지 않는다.
+
 이 문서는 시험의 목적과 필요한 근거를 정리합니다. 실행 결과표가 아니며, 아래 명령이나 사례가 적혀 있다는 이유만으로 통과를 뜻하지 않습니다. 최종 후보의 해시·환경·명령·종료 코드·원시 결과를 함께 기록합니다.
 
 ## 기본 명령과 실행 범위

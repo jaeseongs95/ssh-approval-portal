@@ -53,11 +53,16 @@ export function parseSettings(env) {
   if (typeof secretStoreDir !== 'string' || (secretStoreDir && (!path.isAbsolute(secretStoreDir) || path.resolve(secretStoreDir) !== secretStoreDir))) throw Error('Configure a canonical secret store directory');
   if (typeof jevKeyRef !== 'string') throw Error('Configure a secret reference');
   if (jevKeyRef) parseSecretReference(jevKeyRef);
+  const vaultOrigin = value('BRIDGE_VAULT_URL'), vaultMount = value('BRIDGE_VAULT_MOUNT'), vaultTokenRef = value('BRIDGE_VAULT_TOKEN_REF');
+  if (typeof vaultOrigin !== 'string') throw Error('Configure a canonical Vault HTTPS origin');
+  if (vaultOrigin) validateOrigin(vaultOrigin);
+  if (typeof vaultMount !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(vaultMount)) throw Error('Configure a flat Vault mount');
+  if (typeof vaultTokenRef !== 'string' || (vaultTokenRef && parseSecretReference(vaultTokenRef).provider !== 'local-file')) throw Error('Configure a local-file Vault token reference');
   return Object.freeze({ mcpToken, adminToken, adminOrigin,
     targets: parseTargets(value('BRIDGE_TARGETS'), value('BRIDGE_DEFAULT_TARGET')),
     jevEnabled: value('BRIDGE_JEV_ENABLED') === 'true', jevMaxCalls,
     commandAutomation: value('BRIDGE_COMMAND_AUTOMATION') === 'true',
-    secretStoreDir, jevKeyRef,
+    secretStoreDir, jevKeyRef, vaultOrigin, vaultMount, vaultTokenRef,
     defaultTarget: value('BRIDGE_DEFAULT_TARGET') || undefined,
     bridgeDisplayName: displayName(value('BRIDGE_DISPLAY_NAME')) || new URL(adminOrigin).host,
     targetDisplayName: displayName(value('BRIDGE_TARGET_DISPLAY_NAME')) || 'SSH', uiEnabled: value('BRIDGE_UI_ENABLED') === 'true', prefix, maxBytes, budget,

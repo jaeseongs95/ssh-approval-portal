@@ -19,6 +19,7 @@ import { createJevAssessor } from './src/adapters/safety/jev.mjs';
 import { createRequestSafety } from './src/application/request-safety.mjs';
 import { createSecretService } from './src/application/secret-service.mjs';
 import { createLocalSecretStore } from './src/adapters/secrets/local-file.mjs';
+import { createVaultSecretStore } from './src/adapters/secrets/vault-kv.mjs';
 import { createCommandState } from './src/adapters/storage/command-state.mjs';
 import { createCommandAutomation } from './src/application/command-automation.mjs';
 import { AUTOMATION_QUESTION, AUTOMATION_QUESTION_VERSION, COMMAND_SET_QUESTION } from './src/domain/command-policy.mjs';
@@ -53,9 +54,18 @@ export async function createApplication({ registry, classify, executeCommand, au
   if (settings.jevEnabled) {
     apiKey = env.JEV_API_KEY;
     if (!apiKey && settings.jevKeyRef) {
-      const resolver = secretResolver ?? createSecretService(settings.secretStoreDir
-        ? { 'local-file': createLocalSecretStore(settings.secretStoreDir) } : {});
-      try { apiKey = await resolver.resolve(settings.jevKeyRef); } catch { /* Missing keys grant no authority. */ }
+      try {
+        let resolver = secretResolver;
+        if (!resolver) {
+          const providers = settings.secretStoreDir ? { 'local-file': createLocalSecretStore(settings.secretStoreDir) } : {};
+          const local = createSecretService(providers);
+          if (settings.vaultOrigin && settings.vaultTokenRef) providers.vault = createVaultSecretStore({
+            origin: settings.vaultOrigin, mount: settings.vaultMount, getToken: () => local.resolve(settings.vaultTokenRef),
+          });
+          resolver = createSecretService(providers);
+        }
+        apiKey = await resolver.resolve(settings.jevKeyRef);
+      } catch { /* Missing keys grant no authority. */ }
     }
     risk ??= createJevAssessor({ apiKey });
   }
