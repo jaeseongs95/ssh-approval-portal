@@ -101,3 +101,19 @@ test('sudo opt-in is high-risk feedback, separately acknowledged and exact-revie
   const saved=f.review.set(policy,0,result.reviewToken,true);assert.equal(saved.targets[0].automaticSudo,true);
   assert.equal(result.feedback[0].commandRisks[0].name,'ls');assert.equal(result.feedback[0].commandRisks[0].riskLevel,'low');
 });
+
+test('D-REGISTRATION feedback and audit retain only sanitized failure details; explicit OK still required', async () => {
+  let calls=0;
+  const f=fixture({evaluator:{async assess(){calls++;return {status:'unavailable',reason:'invalid_response',diagnostic:'PROBABILITY_SUM',raw:'private-provider-body',probabilitySum:0.99999};}}});
+  const policy={targets:[rule()]}, result=await f.review.review(policy,0);
+  const expected={reason:'invalid_response',diagnostic:'PROBABILITY_SUM'};
+  assert.deepEqual(result.feedback[0].failure,expected);
+  assert.deepEqual(f.events[0].evaluations[0].failure,expected);
+  assert.equal(result.feedback[0].reason,'evaluation_unavailable');assert.equal(result.feedback[0].assessment,null);
+  assert.equal(f.state.policy().revision,0);assert.equal(calls,1);
+  assert.throws(()=>f.review.set(policy,0,result.reviewToken,false));
+  assert.doesNotMatch(JSON.stringify([result,f.events]),/private-provider-body|probabilitySum/);
+  const good=fixture(),ok=await good.review.review(policy,0);assert.equal(ok.feedback[0].failure,undefined);
+  const unknown=fixture({evaluator:{assess:async()=>({status:'unavailable',reason:'invalid_response',diagnostic:'private-provider-body'})}});
+  assert.deepEqual((await unknown.review.review(policy,0)).feedback[0].failure,{reason:'invalid_response'});
+});

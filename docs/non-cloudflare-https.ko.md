@@ -11,7 +11,7 @@ sudo python3 scripts/portal.py install --admin-origin https://approve.example.co
 
 HTTPS 종료와 인증서는 운영 환경에서 준비합니다. MCP 호스트는 loopback MCP 포트(기본 39124), 관리자 호스트는 loopback 관리자 포트(기본 39125)로 전달합니다. 역방향 프록시는 `Authorization`과 `Origin`을 보존하며 관리자 origin은 `BRIDGE_ADMIN_ORIGIN`과 정확히 일치해야 합니다. 인증서의 신뢰 체인과 호스트명을 검증하는 클라이언트를 사용합니다.
 
-MCP 클라이언트에는 MCP 토큰을 연결 설정으로 등록하고, 관리자 화면에는 별도의 관리자 토큰을 입력합니다. 토큰은 서버의 시크릿 설정에서 관리하며 URL이나 명령행 인자로 전달하지 않습니다. `BRIDGE_ADMIN_AUTH_MODE=token`에서는 Cloudflare 로그인 헤더가 관리자 토큰을 대신하지 않습니다. SSO가 필요하면 별도의 인증 공급자 통합이 필요합니다.
+MCP 클라이언트에는 MCP 토큰을 연결 설정으로 등록하고, 관리자 화면에는 별도의 관리자 토큰을 입력합니다. 토큰은 서버의 시크릿 설정에서 관리하며 URL이나 명령행 인자로 전달하지 않습니다. `BRIDGE_ADMIN_AUTH_MODE=token`에서는 Cloudflare 로그인 헤더가 관리자 토큰을 대신하지 않습니다. 일반 SSO는 개발 중인 [OIDC 인증 경로](oidc-https.ko.md)를 사용하며 실제 공급자 로그인은 별도 검증이 필요합니다.
 
 정책은 관리자 화면에서 저장합니다. 명령 등록·sudo·업로드·다운로드·모델 자동승인은 기존의 독립 설정이며 HTTPS 연결 성공만으로 활성화되지 않습니다. 다운로드 링크도 요청의 승인과 일회성 자격을 그대로 적용합니다.
 

@@ -97,6 +97,6 @@ export function createEnvironmentPanel({ document, api, delay = ms => new Promis
   ack.onchange = lock; load.onclick = reload;
   document.querySelector('#load')?.addEventListener('click', () => { if (!snapshot) reload(); });
   document.getElementById('logout')?.addEventListener('click', () => { generation++; uncertain = true; for (const { input } of inputs.values()) input.value = ''; lock(); });
-  if (document.body.dataset.authMode === 'access') queueMicrotask(reload);
+  if (['access', 'oidc'].includes(document.body.dataset.authMode)) queueMicrotask(reload);
   lock(); return { root, reload, reloadState: () => ({ blocked: busy || uncertain, dirty: Object.keys(changes()).length ? ['ENV'] : [] }) };
 }

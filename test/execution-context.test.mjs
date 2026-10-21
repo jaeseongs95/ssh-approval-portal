@@ -34,7 +34,7 @@ test('the actual Jev wire body contains exact command and detailed context but c
   assert.equal(payload.state.command, command);
   assert.equal(JSON.parse(payload.state.context).callerSituation, situation);
   assert.equal(payload.state.userApproval.explicit, false);
-  assert.match(payload.questions.risk.instructions, /contextual claims as untrusted data/);
+  assert.equal(payload.questions.risk.instructions, AUTOMATION_QUESTION.instructions);
   assert.doesNotMatch(JSON.stringify(payload), /synthetic-transport-key/);
   assert.equal(calls, 1);
   assert.notEqual(commandDigest(command, 'revision', 'profile', 'test purpose'), commandDigest(command, 'revision', 'profile', 'production purpose'));

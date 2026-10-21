@@ -4,6 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import stat
 import tarfile
 import zipfile
 
@@ -24,11 +25,16 @@ SOURCE_TYPES = {
 }
 UI_FILES = ['ui/dist/card.html', 'web/dist/app.js', 'ui/package.json', 'ui/package-lock.json',
             'ui/build.mjs', 'ui/card.html', 'ui/card.js']
+DEPLOY_FILES = ['deploy/oidc/Caddyfile', 'deploy/oidc/oauth2-proxy.cfg']
+
+
+def unsafe_link(path):
+    return path.is_symlink() or bool(getattr(path.lstat(), 'st_file_attributes', 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT)
 
 
 def collect_files(root):
     root = Path(root)
-    files = [root / name for name in ROOT_FILES + UI_FILES]
+    files = [root / name for name in ROOT_FILES + UI_FILES + DEPLOY_FILES]
     files.extend(root / 'config' / name for name in CONFIG_FILES)
     for folder, suffixes in SOURCE_TYPES.items():
         directory = root / folder
@@ -39,12 +45,13 @@ def collect_files(root):
                 continue
             if any(part in ('node_modules', '__pycache__', '.git') or part.startswith('.') for part in path.relative_to(directory).parts):
                 continue
-            if path.is_symlink():
+            if unsafe_link(path):
                 raise ValueError('Unsafe package symlink: ' + path.relative_to(root).as_posix())
             if path.is_file() and (path.suffix in suffixes or path.name == 'Dockerfile'):
                 files.append(path)
     for path in files:
-        if not path.is_file() or path.is_symlink():
+        if (not path.is_file() or unsafe_link(path)
+                or any(unsafe_link(root / parent) for parent in path.relative_to(root).parents)):
             raise ValueError('Missing or unsafe package file: ' + path.relative_to(root).as_posix())
     return sorted(set(files))
 

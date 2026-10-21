@@ -1,4 +1,4 @@
-/** Same-origin pages share only in-memory state; administrator tokens never enter browser storage. */
+/** Navigation state is in memory. CLI restoration stores public request hints only; administrator tokens never enter browser storage. */
 export function createAdminPages({document, location, history, events=globalThis}) {
   const page=()=>['/settings','/history'].includes(location.pathname)?location.pathname.slice(1):'approvals';
   const settings=()=>page()==='settings';

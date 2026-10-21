@@ -19,7 +19,7 @@ export async function verifyRelease(root) {
     const bytes = await readFile(full), digest = createHash('sha256').update(bytes).digest('hex');
     if (digest !== file.sha256 || bytes.length !== file.size) throw Error('Release digest mismatch: ' + file.path);
   }
-  for (const path of ['package.json', 'package-lock.json', 'bridge.mjs', 'app.mjs', 'scripts/check-package-imports.mjs', 'config/settings-contract.json', 'ui/dist/card.html', 'web/dist/app.js']) {
+  for (const path of ['package.json', 'package-lock.json', 'bridge.mjs', 'app.mjs', 'scripts/check-package-imports.mjs', 'config/settings-contract.json', 'ui/dist/card.html', 'web/dist/app.js', 'deploy/oidc/Caddyfile', 'deploy/oidc/oauth2-proxy.cfg']) {
     if (!paths.has(path)) throw Error('Required package entry missing: ' + path);
   }
   async function checkSource(folder) {

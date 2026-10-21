@@ -1,10 +1,12 @@
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { settingsContract } from '../config/settings.mjs';
+import { oidcConfiguration, createOidcAccess } from './oidc-access.mjs';
 
 export function accessConfiguration(env) {
   const mode = env.BRIDGE_ADMIN_AUTH_MODE ?? settingsContract.defaults.BRIDGE_ADMIN_AUTH_MODE;
-  if (!['token', 'access'].includes(mode)) throw Error('Invalid administrator authentication mode');
+  if (!['token', 'access', 'oidc'].includes(mode)) throw Error('Invalid administrator authentication mode');
   if (mode === 'token') return { mode };
+  if (mode === 'oidc') return oidcConfiguration(env);
   const issuer = env.BRIDGE_ACCESS_TEAM_DOMAIN;
   const audience = env.BRIDGE_ACCESS_AUD;
   const owners = (env.BRIDGE_ACCESS_OWNER_EMAILS ?? '').split(',').map(x => x.trim().toLowerCase());
@@ -17,6 +19,7 @@ export function accessConfiguration(env) {
 export function createAdminAccess(env, keySet) {
   const config = accessConfiguration(env);
   if (config.mode === 'token') return { mode: 'token' };
+  if (config.mode === 'oidc') return createOidcAccess(env, keySet);
   // One cached JWKS per application; never follow a key URL supplied by a token.
   const keys = keySet ?? createRemoteJWKSet(new URL(config.issuer + '/cdn-cgi/access/certs'), { timeoutDuration: 5000, cooldownDuration: 30000, cacheMaxAge: 600000 });
   return { mode: 'access', async authenticated(req) {

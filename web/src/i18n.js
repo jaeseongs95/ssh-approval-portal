@@ -21,6 +21,7 @@ const en = {
   '본인 계정으로 연결됨': 'Connected with your account', 'Cloudflare Access에서 확인한 본인 계정으로 요청을 처리합니다.': 'Manage requests with your owner account verified by Cloudflare Access.',
   '로그인이 만료되었거나 접근할 수 없습니다. 다시 로그인해 주세요.': 'Your session expired or access was denied. Please sign in again.',
   '로그아웃되었습니다.': 'You have signed out.',
+  'SSO에서 확인한 본인 계정으로 요청을 처리합니다.': 'Manage requests with your owner account verified by SSO.',
 };
 const t = value => korean ? value : en[value] ?? value;
 const states = Object.fromEntries(Object.entries({ pending: '승인 대기', evaluating: '위험 평가 중', unknown: '실행 결과 불명', running: '실행 중', completed: '완료', failed: '실패', denied: '거부', expired: '만료' }).map(([key,value]) => [key,t(value)]));

@@ -9,6 +9,10 @@ export async function fixtureServer(root) {
   const server = createServer(async (request, response) => {
     try {
       const url = new URL(request.url, 'http://fixture.invalid');
+      if(url.pathname.startsWith('/api/agent-cli')){
+        if(state.agentCli){await state.agentCli(request,response,url);return;}
+        response.setHeader('Content-Type','application/json');response.end(JSON.stringify({available:false,providers:[],bindings:[]}));return;
+      }
       if (url.pathname.startsWith('/api/outputs/')) {
         state.outputReads = (state.outputReads ?? 0) + 1; await state.beforeOutput?.();
         response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify({ text: 'EXPLICIT_WEB_SENTINEL', offsetBytes: 0, nextOffset: 21, totalBytes: 21, eof: true })); return;
@@ -39,7 +43,7 @@ export async function fixtureServer(root) {
         await state.beforeRequests?.(target);
         response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify(jobs)); return;
       }
-      if (url.pathname === '/cdn-cgi/access/logout') { response.end('Synthetic signed out'); return; }
+      if (['/cdn-cgi/access/logout','/oauth2/sign_out'].includes(url.pathname)) { response.end('Synthetic signed out'); return; }
       let text, type = 'text/javascript';
       if (url.pathname === '/fixture/card') {
         text = (await readFile(resolve(root, 'ui/card.html'), 'utf8')).replace('<!-- SCRIPT -->', '<script type="module" src="/fixture/card-bootstrap.js"></script>'); type = 'text/html';
@@ -47,10 +51,12 @@ export async function fixtureServer(root) {
       else if (url.pathname === '/fixture/card-source' || url.pathname === '/fixture/legacy-card.js') {
         text = await readFile(resolve(root, 'ui/card.js'), 'utf8');
         if (url.pathname.endsWith('legacy-card.js')) text = text.replace("import { App } from '@modelcontextprotocol/ext-apps';", 'const App = window.FixtureApp;');
+      } else if (url.pathname === '/src/domain/command-line.mjs') {
+        text = await readFile(resolve(root, 'src/domain/command-line.mjs'), 'utf8');
       } else if (url.pathname === '/src/domain/command-risks.json') {
         text = await readFile(resolve(root, 'src/domain/command-risks.json'), 'utf8'); type = 'application/json';
       } else if (['/', '/settings', '/history', '/fixture/web'].includes(url.pathname)) {
-        text = (await readFile(resolve(root, 'web/index.html'), 'utf8')).replace('data-auth-mode="token"', () => `data-auth-mode="access" data-command-automation="${state.commandAutomation === true}" data-multi-target="${state.multiTarget}" data-bridge-display-name="${escape(state.bridgeDisplayName)}" data-target-display-name="${escape(state.targetDisplayName)}"`).replace('data-command-automation="false"', () => `data-command-automation="${state.commandAutomation === true}"`).replace('<script src="/app.js" defer></script>', '<script type="module" src="/web/app.js"></script>'); type = 'text/html';
+        text = (await readFile(resolve(root, 'web/index.html'), 'utf8')).replace('data-auth-mode="token"', () => `data-auth-mode="${state.oidc===true?'oidc':'access'}" data-command-automation="${state.commandAutomation === true}" data-multi-target="${state.multiTarget}" data-bridge-display-name="${escape(state.bridgeDisplayName)}" data-target-display-name="${escape(state.targetDisplayName)}"`).replace('data-command-automation="false"', () => `data-command-automation="${state.commandAutomation === true}"`).replace('<script src="/app.js" defer></script>', '<script type="module" src="/web/app.js"></script>'); type = 'text/html';
       } else {
         const path = resolve(root, '.' + url.pathname);
         if (!path.startsWith(resolve(root) + sep) || !/^\/(?:ui|web)\/(?:src\/[^/]+\.js|app\.js)$/.test(url.pathname)) { response.writeHead(404); response.end(); return; }

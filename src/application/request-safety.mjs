@@ -1,4 +1,4 @@
-import { SAFETY_FAILURES, validateAssessment } from '../domain/safety.mjs';
+import { safetyFailureDetails, validateAssessment } from '../domain/safety.mjs';
 import { assessmentContext, callerContext } from '../domain/execution-context.mjs';
 
 /** Observation only. No execution, decision, or credential ports. Process-local cache. */
@@ -10,6 +10,8 @@ export function createRequestSafety({ queue, assessor, maxCalls = 100, now = () 
     async assess(id, context = '') {
       const job = queue.get(id);
       if (!job || job.kind !== 'command') throw Error('Select a command request');
+      // This legacy observation path has no source disclosure grant or private body.
+      if (job.operation.sourceContract) throw Error('Use the recorded source evaluation; receiver-only observation is unavailable');
       const situation = [callerContext(job.operation?.context), callerContext(context)].filter(Boolean).join('\n\n');
       const detailedContext = assessmentContext(situation, { targetId: job.targetId ?? 'default',
         targetDisplayName: job.targetDisplayName, targetRevision: job.targetRevision,
@@ -42,7 +44,7 @@ export function createRequestSafety({ queue, assessor, maxCalls = 100, now = () 
           context: detailedContext }); }
         catch { result = { status: 'unavailable', reason: 'request_failed' }; }
         const assessment = validateAssessment(result) ?? { status: 'unavailable',
-          reason: result?.status === 'unavailable' && SAFETY_FAILURES.includes(result.reason) ? result.reason : 'invalid_response' };
+          ...safetyFailureDetails(result) };
         return { ...base, assessment, provenance: { purpose: 'observation', cached: false, assessedAt,
           latencyMs: Math.max(0, now() - assessedAt), requestState: job.state, inputRevision: 1,
           storedContextProvided: Boolean(job.operation?.context), additionalContextApplied: true,

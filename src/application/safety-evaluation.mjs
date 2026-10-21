@@ -1,4 +1,4 @@
-import { SAFETY_LABELS, SAFETY_PROTOCOL, SAFETY_FAILURES, safetyInput, validateAssessment, candidateMatch } from '../domain/safety.mjs';
+import { SAFETY_LABELS, SAFETY_PROTOCOL, safetyFailureDetails, safetyInput, validateAssessment, candidateMatch } from '../domain/safety.mjs';
 
 /** Bounded sequential observation. This module has no command executor/queue port. */
 export async function evaluateSafety({ cases, assessor, source }) {
@@ -12,13 +12,13 @@ export async function evaluateSafety({ cases, assessor, source }) {
   const confusion = Object.fromEntries(SAFETY_LABELS.map(label => [label, Object.fromEntries(SAFETY_LABELS.map(prediction => [prediction, 0]))]));
   const records = []; let correct = 0, unavailable = 0, candidates = 0, falseCandidates = 0, inputTokens = 0, outputTokens = 0;
   for (const item of frozen) {
-    let result, reason = 'invalid_response';
+    let result, failure = { reason: 'invalid_response' };
     try {
       const raw = await assessor.assess(item.input);
       result = validateAssessment(raw);
-      if (raw?.status === 'unavailable' && SAFETY_FAILURES.includes(raw.reason)) reason = raw.reason;
-    } catch { reason = 'request_failed'; }
-    if (!result) { unavailable++; records.push({ id: item.id, expected: item.expected, status: 'unavailable', reason, candidateMatch: false }); continue; }
+      failure = safetyFailureDetails(raw);
+    } catch { failure = { reason: 'request_failed' }; }
+    if (!result) { unavailable++; records.push({ id: item.id, expected: item.expected, status: 'unavailable', ...failure, candidateMatch: false }); continue; }
     const candidate = candidateMatch(result);
     confusion[item.expected][result.label]++;
     correct += Number(result.label === item.expected);

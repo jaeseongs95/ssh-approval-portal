@@ -62,7 +62,7 @@ test('WIRE-03 fragmented real HTTP response decodes correctly; unknown keys/mode
   try {
     const assessor = make(fixture);
     assert.equal((await assessor.assess(input)).status, 'assessed');
-    for (let index = 0; index < 3; index++) assert.deepEqual(await assessor.assess(input), { status: 'unavailable', reason: 'invalid_response' });
+    for (const diagnostic of ['MODEL_MISMATCH', 'ANSWER_KEYS', 'ANSWER_TYPE']) assert.deepEqual(await assessor.assess(input), { status: 'unavailable', reason: 'invalid_response', diagnostic });
     assert.equal((await assessor.assess(input)).status, 'assessed');
     assert.equal(fixture.records.length, 5);
   } finally { await fixture.close(); }

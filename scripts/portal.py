@@ -24,7 +24,20 @@ def arguments(argv=None):
         if action == 'install':
             command.add_argument('--grant-sudo-all', action='store_true', help='mcpops NOPASSWD ALL 명시적 선택')
         if action == 'connect':
-            command.add_argument('component', choices=['access', 'upload-sources', 'env-editor'])
+            command.add_argument('component', choices=['access', 'oidc', 'upload-sources', 'env-editor', 'cloudflare'])
+            command.add_argument('--config', help='Cloudflare 공개 연결 설정 JSON (비밀 제외)')
+            mode = command.add_mutually_exclusive_group()
+            mode.add_argument('--apply', action='store_true', help='새 Cloudflare 자원 생성')
+            mode.add_argument('--cleanup', action='store_true', help='이 실행이 생성한 Cloudflare 자원 정리')
+            mode.add_argument('--connector', action='store_true', help='이번 터널 전용 connector 서비스 설치')
+            mode.add_argument('--remove-connector', action='store_true', help='이번 connector 서비스만 제거')
+            mode.add_argument('--link-environment', action='store_true', help='이번 관리자 Access 앱을 ENV에 연결')
+            mode.add_argument('--restore-environment', action='store_true', help='이번 ENV 연결 전 인증 설정 복원')
+            mode.add_argument('--sync-server', action='store_true', help='연결된 이번 MCP 서버의 기능 목록 동기화')
+            command.add_argument('--state-dir', help='Cloudflare 실행 기록 폴더 (Linux 전용)')
+            binary = command.add_mutually_exclusive_group()
+            binary.add_argument('--cloudflared', help='설치된 root 소유 cloudflared 절대 경로')
+            binary.add_argument('--install-cloudflared', action='store_true', help='공식 cloudflared를 전용 경로에 검증·설치')
         if action == 'rollback':
             command.add_argument('backup')
     return parser.parse_args(argv)
@@ -53,9 +66,28 @@ def plan(options, source=SOURCE):
             argv += ['--grant-sudo-all']
         steps = [step(action, argv), *verify]
     elif action == 'connect':
-        name = {'access': 'configure-admin-access.sh', 'upload-sources': 'configure-upload-sources.sh',
+        if options.component == 'cloudflare':
+            argv = [sys.executable, str(source / 'scripts/cloudflare_setup.py')]
+            if options.config:
+                argv += ['--config', options.config]
+            argv += [*(['--apply'] if options.apply else []), *(['--cleanup'] if options.cleanup else [])]
+            argv += [*(['--connector'] if options.connector else []), *(['--remove-connector'] if options.remove_connector else [])]
+            argv += [*(['--link-environment'] if options.link_environment else []), *(['--restore-environment'] if options.restore_environment else [])]
+            argv += ['--sync-server'] if options.sync_server else []
+            if options.state_dir:
+                argv += ['--state-dir', options.state_dir]
+            if options.cloudflared:
+                argv += ['--cloudflared', options.cloudflared]
+            if options.install_cloudflared:
+                argv += ['--install-cloudflared']
+            mutating = bool(options.apply or options.cleanup or options.connector or options.remove_connector or options.link_environment or options.restore_environment or options.sync_server)
+            return {'action': action, 'steps': [step('cloudflare-change' if mutating else 'cloudflare-read-only', argv)],
+                    'externalMutation': mutating and not options.dry_run, 'interactive': True}
+        if options.config or options.apply or options.cleanup or options.state_dir or options.connector or options.remove_connector or options.cloudflared or options.install_cloudflared or options.link_environment or options.restore_environment or options.sync_server:
+            raise ValueError('--config는 Cloudflare 연결에서만 사용할 수 있습니다.')
+        name = {'access': 'configure-admin-access.sh', 'oidc': 'configure-admin-access.sh', 'upload-sources': 'configure-upload-sources.sh',
                 'env-editor': 'configure-env-editor.sh'}[options.component]
-        steps = [step(options.component, script(name)), *verify]
+        steps = [step(options.component, script(name, *(['--oidc'] if options.component == 'oidc' else []))), *verify]
     elif action == 'verify':
         steps = verify
     elif action == 'status':
@@ -85,6 +117,22 @@ def execute(work, runner=subprocess.run):
 
 def main(argv=None):
     options = arguments(argv)
+    if options.action == 'connect' and options.component == 'cloudflare':
+        # A read-only dry run must not populate scripts/__pycache__ on a new install.
+        sys.dont_write_bytecode = True
+        from cloudflare_setup import main as cloudflare_main
+        args = ['--config', options.config] if options.config else []
+        args += [*(['--apply'] if options.apply else []), *(['--cleanup'] if options.cleanup else [])]
+        args += [*(['--connector'] if options.connector else []), *(['--remove-connector'] if options.remove_connector else [])]
+        args += [*(['--link-environment'] if options.link_environment else []), *(['--restore-environment'] if options.restore_environment else [])]
+        args += ['--sync-server'] if options.sync_server else []
+        if options.state_dir:
+            args += ['--state-dir', options.state_dir]
+        if options.cloudflared:
+            args += ['--cloudflared', options.cloudflared]
+        if options.install_cloudflared:
+            args += ['--install-cloudflared']
+        return cloudflare_main([*args, *(['--dry-run'] if options.dry_run else [])])
     work = plan(options)
     if options.dry_run:
         print(json.dumps({'status': 'DRY_RUN', **work}, ensure_ascii=False, indent=2))

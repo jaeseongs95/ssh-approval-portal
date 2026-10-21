@@ -58,7 +58,9 @@ export function createTargetRouter(runtimes, { defaultTarget, legacy, store, aud
     legacy, select, jobOwner, artifactOwner, queue,
     list: () => ({ targets: runtimes.map(({ id, displayName, enabled }) => ({ id, displayName, enabled, isDefault: id === defaultTarget })), defaultTarget: defaultTarget ?? null }),
     canonicalTransfer(args) { const runtime = select(args.target); return legacy && args.target === undefined ? args : { ...args, target: runtime.id }; },
-    commands: { read: (command, target) => select(target).commands.read(command), run: (command, target, requestKey, context, displayContext) => select(target).commands.run(command, requestKey, context, displayContext), busy: () => runtimes.some(runtime => runtime.commands.busy()) },
+    commands: { read: (command, target) => select(target).commands.read(command), run: (command, target, requestKey, context, displayContext) => select(target).commands.run(command, requestKey, context, displayContext),
+      runSource: (args, target) => select(target).commands.runSource(args), source: id => { const runtime = jobOwner(id); select(runtime.id).verify(); return runtime.commands.source(id); },
+      busy: () => runtimes.some(runtime => runtime.commands.busy()) },
     files: {
       requestUpload: (args, options) => select(args.target).files.requestUpload(args, options),
       requestDownload: args => select(args.target).files.requestDownload(args),
@@ -69,6 +71,6 @@ export function createTargetRouter(runtimes, { defaultTarget, legacy, store, aud
       reap: () => store.reap(),
       close: () => Promise.all(runtimes.map(runtime => runtime.files.close())),
     },
-    async drain() { await Promise.all(runtimes.flatMap(runtime => [runtime.queue.active?.completion, runtime.commands.drain()])); },
+    async drain() { await Promise.all(runtimes.flatMap(runtime => [runtime.queue.active?.completion, runtime.commands.drain(),runtime.cliDrain?.()])); },
   };
 }

@@ -333,7 +333,7 @@ test('model autoapproval is visible beside transfer controls and requires review
   await page.waitForFunction(() => !document.querySelector('#important-settings fieldset').disabled);
   const model = page.locator('#important-settings').getByRole('checkbox', { name: /^Jev·다른 모델을 통한/ });
   assert.equal(await model.isVisible(), true); assert.equal(await model.isChecked(), false);
-  assert.equal(await page.locator('#important-settings input[type=checkbox]').count(), 4);
+  assert.equal(await page.locator('#important-settings input[type=checkbox]').count(), 5);
   const posts = () => f.posts.filter(p => p.path === '/api/command-policy').length, before = posts();
   await model.check();
   await page.waitForURL('**/settings'); assert.equal(await tab(page,'명령 관리').getAttribute('aria-selected'), 'true');
@@ -469,7 +469,7 @@ test('settings workspace tabs preserve one reviewed draft through keyboard navig
   await tab(page,'Jev·모델').press('Home');assert.equal(await tab(page,'명령 관리').getAttribute('aria-selected'),'true');
   await tab(page,'명령 관리').press('Enter');assert.equal(f.posts.length,count);
   assert.equal(await names(page).inputValue(),'ls\ncustom-health');
-  assert.equal(await page.getByRole('tabpanel').count(),1);assert.equal(await page.locator('#important-settings input[type=checkbox]').count(),4);
+  assert.equal(await page.getByRole('tabpanel').count(),1);assert.equal(await page.locator('#important-settings input[type=checkbox]').count(),5);
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
 },{width:320}));
 

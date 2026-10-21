@@ -27,15 +27,16 @@ export class ApprovalQueue {
     context = callerContext(context); displayContext = callerContext(displayContext);
     return this.submitOperation({ kind: 'command', command, ...(context ? { context } : {}), ...(displayContext ? { displayContext } : {}) }, commandClass);
   }
-  submitOperation(operation, commandClass = 'privileged') {
+  submitOperation(operation, commandClass = 'privileged', { expiresAt } = {}) {
     if (this.maintenance) throw Error('Maintenance in progress');
     this.reap();
     if (this.jobs.size >= 100) throw Error('Queue full');
     // Operations contain flat primitives; retain no caller-owned mutable object.
     const op = Object.freeze({ ...operation });
     const createdAt = this.now();
+    if (expiresAt !== undefined && (!Number.isSafeInteger(expiresAt) || expiresAt <= createdAt || expiresAt > createdAt + APPROVAL_EXPIRES_MS)) throw Error('Invalid approval deadline');
     const job = { id: this.idFactory(), operation: op, profile: this.profile, commandClass,
-      ...this.identity, target: this.target, state: 'pending', createdAt, expiresAt: createdAt + APPROVAL_EXPIRES_MS };
+      ...this.identity, target: this.target, state: 'pending', createdAt, expiresAt: expiresAt ?? createdAt + APPROVAL_EXPIRES_MS };
     this.audit({ action: 'submitted', ...this.public(job) });
     this.jobs.set(job.id, job);
     return this.public(job);
@@ -79,19 +80,19 @@ export class ApprovalQueue {
     const job = this.jobs.get(id);
     if (!job || this.get(id).state !== 'pending') throw Error('Request is not pending');
     this.audit({ action: 'denied', id });
-    job.state = 'denied'; job.finishedAt = this.now(); job.persist?.(this.public(job)); this.onTerminal(job); return this.public(job);
+    job.state = 'denied'; job.finishedAt = this.now(); try { job.persist?.(this.public(job)); } finally { this.onTerminal(job); } return this.public(job);
   }
   restore(job, persist) { this.jobs.set(job.id, { ...job, operation: Object.freeze({ ...job.operation }), persist }); }
   track(id, persist) { this.jobs.get(id).persist = persist; }
   beginEvaluation(id) { this.jobs.get(id).state = 'evaluating'; }
-  abortEvaluation(id) { const job = this.jobs.get(id); job.state = 'unknown'; job.finishedAt = this.now(); }
+  abortEvaluation(id) { const job = this.jobs.get(id); job.state = 'unknown'; job.finishedAt = this.now(); this.onTerminal(job); }
   setDecision(id, decision) { const job = this.jobs.get(id); job.decision = structuredClone(decision); job.persist?.(this.public(job)); }
   finishEvaluation(id, state = 'pending') {
     const job = this.jobs.get(id);
     if (this.get(id).state !== 'evaluating') throw Error('Request is not evaluating');
     job.state = state;
     if (state !== 'pending') job.finishedAt = this.now();
-    job.persist?.(this.public(job));
+    try { job.persist?.(this.public(job)); } finally { if (state !== 'pending') this.onTerminal(job); }
   }
   startCommand(id) {
     const job = this.jobs.get(id);
@@ -113,7 +114,10 @@ export class ApprovalQueue {
     if (!job || this.get(id).state !== 'pending') throw Error('Request is not pending');
     if (automatic) throw Error('Server policy authority required');
     if (this.busy()) throw Error('A request is already executing');
-    if (job.operation.kind === 'command') validateCommand(job.operation.command, this.classify);
+    // Source requests use the exact private-plan guard; the fixed quoted receiver
+    // contains newlines that the legacy string-command boundary rightly rejects.
+    if (job.operation.kind === 'command' && !job.operation.sourceContract) validateCommand(job.operation.command, this.classify);
+    if (job.operation.sourceContract && !this.beforeCommandStart) throw Error('Source plan verification required');
     if (job.operation.kind === 'command') this.beforeCommandStart?.(this.public(job));
     if (authority === UPLOAD_AUTHORITY || authority === DOWNLOAD_AUTHORITY) {
       const decision = (authority === UPLOAD_AUTHORITY ? this.beforeUploadStart : this.beforeDownloadStart)?.(this.public(job));
@@ -126,7 +130,12 @@ export class ApprovalQueue {
     try {
       this.audit({ action: policyAuthority ? 'policy-execution-started' : automatic ? 'read-started' : 'approved', ...this.public(job), approvalMode });
       job.approvalMode = approvalMode; job.state = 'running'; job.persist?.(this.public(job));
-    } catch (error) { delete job.approvalMode; if (job.state === 'running') { job.state = 'unknown'; job.finishedAt = this.now(); } release(); throw error; }
+    } catch (error) {
+      delete job.approvalMode;
+      try { if (job.state === 'running') { job.state = 'unknown'; job.finishedAt = this.now(); this.onTerminal(job); } }
+      finally { release(); }
+      throw error;
+    }
     this.active = job;
     // The claim and audit complete synchronously before any external side effect.
     job.completion = Promise.resolve().then(async () => {
@@ -135,7 +144,7 @@ export class ApprovalQueue {
         job.state = job.result.failed ? 'failed' : 'completed';
       } catch {
         job.result = { failed: true, texts: ['Operation failed; check the protected server diagnostics.'] };
-        job.state = 'failed';
+        job.state = job.operation.sourceContract ? 'unknown' : 'failed';
       } finally {
         job.finishedAt = this.now();
         try { this.audit({ action: job.state, id }); job.persist?.(this.public(job)); } catch { job.auditError = 'Final audit write failed; operation must not be retried automatically'; }

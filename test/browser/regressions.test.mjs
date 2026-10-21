@@ -23,6 +23,24 @@ async function card(page, server) {
   await page.locator('input[type=file]').setInputFiles({ name: 'fixture.bin', mimeType: 'application/octet-stream', buffer: Buffer.from([1, 2, 3, 4]) });
 }
 
+for(const locale of ['ko-KR','en-US'])for(const [width,height]of [[1440,900],[1280,800],[1024,768],[768,1024],[390,844],[320,740],[844,390]])test(`OIDC browser uses cookie login and local logout ${locale} ${width}x${height}`,async()=>browserFixture(async(page,server)=>{
+  server.state.oidc=true;server.state.commandAutomation=true;
+  const binding={targetId:'default',targetRevision:'a'.repeat(64),profile:'aws-local',displayName:'fixture',enabled:true};
+  let policyReads=0;
+  await page.route('**/api/command-policy',route=>{policyReads++;return route.fulfill({json:{revision:1,bindings:[binding],targets:[{targetId:binding.targetId,targetRevision:binding.targetRevision,profile:binding.profile,commands:['id'],deniedCommands:[],externalDisclosure:false,modelExecution:false,fallback:null,thresholds:{}}]}});});
+  await page.route('**/api/environment',route=>route.fulfill({json:{available:true,revision:'a'.repeat(64),fields:[{key:'BRIDGE_DISPLAY_NAME',label:'중계기 표시 이름',type:'text',value:'fixture'}],readOnlyKeys:[],restart:{state:'idle'}}}));
+  await page.setViewportSize({width,height});await page.goto(server.origin+'/settings');
+  await page.locator('#connection.connected').waitFor();
+  await page.locator('#env-BRIDGE_DISPLAY_NAME').waitFor({state:'attached'});
+  await page.waitForFunction(()=>document.querySelector('#important-settings select')?.options.length===1);
+  assert.equal(policyReads,1,'SSO settings load without an administrator-token click');
+  assert.equal(await page.locator('#token').isVisible(),false);
+  assert.equal(await page.locator('#auth-note').textContent(),locale==='ko-KR'?'SSO에서 확인한 본인 계정으로 요청을 처리합니다.':'Manage requests with your owner account verified by SSO.');
+  assert.ok(server.state.requests.some(r=>r.method==='GET'&&r.authorization===null));
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  await page.locator('#logout').click();await page.waitForURL('**/oauth2/sign_out');
+},locale));
+
 test('approval card labels actual automatic approval and removes it for owner approval', async () => browserFixture(async (page, server) => {
   await page.goto(server.origin + '/fixture/card'); await page.waitForFunction(() => window.fixture);
   await page.evaluate(() => window.fixture.receive({ structuredContent: { id: 'automatic-fixture', kind: 'command', state: 'failed',

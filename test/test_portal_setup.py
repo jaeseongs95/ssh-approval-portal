@@ -25,7 +25,7 @@ class PortalWorkflow(unittest.TestCase):
         self.assertFalse(work['sudoGrantRequested'])
 
     def test_all_plans_do_not_execute_or_require_linux_root(self):
-        cases = [['install'], ['update'], ['verify'], ['status'], ['connect', 'access'],
+        cases = [['install'], ['update'], ['verify'], ['status'], ['connect', 'access'], ['connect', 'oidc'],
                  ['connect', 'upload-sources'], ['connect', 'env-editor'],
                  ['policy', '--admin-origin', 'https://example.test'],
                  ['rollback', '/var/lib/ssh-mcp/app/backups/prior']]
@@ -34,6 +34,16 @@ class PortalWorkflow(unittest.TestCase):
                     patch.object(portal.sys, 'platform', 'win32'), contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(portal.main([*args, '--dry-run']), 0)
                 execute.assert_not_called()
+
+    def test_oidc_reuses_owner_transaction_and_rejects_cloudflare_only_options(self):
+        work = portal.plan(portal.arguments(['connect', 'oidc']))
+        self.assertEqual(work['steps'][0]['argv'][-2:], [str(SOURCE/'scripts/configure-admin-access.sh'), '--oidc'])
+        self.assertTrue(work['interactive'])
+        self.assertEqual([step['name'] for step in work['steps']], ['oidc', 'package', 'health'])
+        self.assertEqual(portal.plan(portal.arguments(['connect', 'access']))['steps'][0]['argv'], ['bash', str(SOURCE/'scripts/configure-admin-access.sh')])
+        for option in ['--apply', '--connector', '--restore-environment', '--install-cloudflared', '--sync-server']:
+            with self.subTest(option=option), self.assertRaises(ValueError):
+                portal.plan(portal.arguments(['connect', 'oidc', option]))
 
     def test_update_never_forwards_install_only_authority_or_origin(self):
         work = portal.plan(portal.arguments(['update']))

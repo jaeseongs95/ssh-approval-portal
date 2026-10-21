@@ -1,4 +1,5 @@
 import { ASSESSMENT_CONTEXT_LIMIT } from './execution-context.mjs';
+import { COMMAND_MAX_BYTES, utf8WithinLimit } from '../contracts/ports.mjs';
 
 /** Observation only: these values confer no execution authority. */
 export const SAFETY_LABELS = Object.freeze(['low_risk', 'high_risk', 'uncertain']);
@@ -50,8 +51,36 @@ export function candidateMatch(assessment) {
 export function safetyInput(input) {
   const result = {};
   for (const key of ['command', 'target', 'environment', 'context']) {
-    if (typeof input?.[key] !== 'string' || !input[key].trim() || input[key].length > (key === 'context' ? ASSESSMENT_CONTEXT_LIMIT : 4096)) throw Error('Invalid safety input');
+    if (typeof input?.[key] !== 'string' || !input[key].trim() || (key === 'command' ? !utf8WithinLimit(input[key], COMMAND_MAX_BYTES) : input[key].length > (key === 'context' ? ASSESSMENT_CONTEXT_LIMIT : 4096))) throw Error('Invalid safety input');
     result[key] = input[key];
   }
   return result;
+}
+
+/** Fixed vocabulary only: no provider text, payload, numeric metadata or credentials. */
+export const SAFETY_DIAGNOSTICS = Object.freeze(['ASSESSMENT_STATUS', 'MODEL_MISMATCH', 'LABEL_DOMAIN',
+  'CONFIDENCE_RANGE', 'PROBABILITY_KEYS', 'PROBABILITY_RANGE', 'PROBABILITY_SUM', 'CHOICE_NOT_MAX',
+  'USAGE_SCHEMA', 'ANSWER_KEYS', 'ANSWER_TYPE', 'CONTENT_TYPE', 'BODY_MISSING', 'BODY_READ',
+  'UTF8_DECODE', 'JSON_PARSE', 'UNCLASSIFIED_VALIDATION_FAILURE']);
+
+/** Additive explanation only. validateAssessment remains the acceptance authority. */
+export function assessmentDiagnostic(value, model = SAFETY_PROTOCOL.model) {
+  if (validateAssessment(value, model)) return null;
+  if (value?.status !== 'assessed') return 'ASSESSMENT_STATUS';
+  if (!isJevModel(model) || value.model !== model) return 'MODEL_MISMATCH';
+  if (!SAFETY_LABELS.includes(value.label)) return 'LABEL_DOMAIN';
+  if (!unit(value.confidence)) return 'CONFIDENCE_RANGE';
+  const p = value.probabilities;
+  if (!p || Object.keys(p).length !== SAFETY_LABELS.length || !SAFETY_LABELS.every(k => Object.hasOwn(p, k))) return 'PROBABILITY_KEYS';
+  if (!SAFETY_LABELS.every(k => unit(p[k]))) return 'PROBABILITY_RANGE';
+  if (Math.abs(SAFETY_LABELS.reduce((sum, k) => sum + p[k], 0) - 1) > 1e-6) return 'PROBABILITY_SUM';
+  if (SAFETY_LABELS.some(k => p[k] > p[value.label])) return 'CHOICE_NOT_MAX';
+  if (!Number.isSafeInteger(value.inputTokens) || value.inputTokens < 0 || !Number.isSafeInteger(value.outputTokens) || value.outputTokens < 0) return 'USAGE_SCHEMA';
+  return 'UNCLASSIFIED_VALIDATION_FAILURE';
+}
+
+/** Rebuild failures at every provider boundary. Unknown strings are never retained. */
+export function safetyFailureDetails(value) {
+  if (value?.status !== 'unavailable' || !SAFETY_FAILURES.includes(value.reason)) return { reason: 'invalid_response' };
+  return { reason: value.reason, ...(SAFETY_DIAGNOSTICS.includes(value.diagnostic) ? { diagnostic: value.diagnostic } : {}) };
 }

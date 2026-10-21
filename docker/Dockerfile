@@ -5,7 +5,7 @@ RUN architecture="$TARGETARCH"; [ "$architecture" != amd64 ] || architecture=x64
     curl -fsS --proto '=https' "https://nodejs.org/dist/v24.21.0/node-v24.21.0-linux-$architecture.tar.xz" -o /node.tar.xz && \
     curl -fsS --proto '=https' https://nodejs.org/dist/v24.21.0/SHASUMS256.txt -o /SHASUMS256.txt && \
     cd / && grep "  node-v24.21.0-linux-$architecture.tar.xz\$" SHASUMS256.txt | sed 's|  node-.*|  node.tar.xz|' | sha256sum -c - && \
-    mkdir /runtime && tar -xJf /node.tar.xz -C /runtime --strip-components=1
+    mkdir /runtime && tar --no-same-owner --no-same-permissions -xJf /node.tar.xz -C /runtime --strip-components=1
 ENV PATH=/runtime/bin:${PATH}
 ARG PACKAGE_ARCHIVE=dist/ssh-approval-portal-1.6.0.tar.gz
 COPY ${PACKAGE_ARCHIVE} /package.tar.gz
@@ -13,7 +13,7 @@ RUN mkdir /app && tar -xzf /package.tar.gz -C /app --strip-components=1 && cd /a
 
 FROM ubuntu:24.04
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates libstdc++6 && rm -rf /var/lib/apt/lists/*
-COPY --from=build /runtime/bin/node /usr/local/bin/node
+COPY --from=build --chown=0:0 /runtime/bin/node /usr/local/bin/node
 COPY --from=build /runtime/LICENSE /usr/share/licenses/node/LICENSE
 COPY --from=build /app /opt/portal
 WORKDIR /opt/portal

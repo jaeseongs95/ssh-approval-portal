@@ -10,7 +10,7 @@ const json = (res, status, value) => { res.writeHead(status, { 'Content-Type': '
 
 const escapeHtml = value => value.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
 
-export function createProtocolAdapters({ queue, commands, files, store, lifecycle, settings, signer, adminAccess, authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal, targets, requestSafety, commandPolicy, commandOutputs, automationMetrics, environmentEditor }) {
+export function createProtocolAdapters({ queue, commands, files, store, lifecycle, settings, signer, adminAccess, authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal, targets, requestSafety, commandPolicy, commandOutputs, automationMetrics, environmentEditor,agentCli }) {
   const capabilities = createCapabilities({ queue, store, signer, settings, targets, adminAuthMode: adminAccess.mode });
   const mcpServer = createMcpAdapter({ queue, commands, files, settings, capabilities, uiHtml, bindFileSource, shutdownSignal, targets, requestSafety, commandOutputs });
   const mcpHttp = createServer(async (req, res) => {
@@ -44,6 +44,24 @@ export function createProtocolAdapters({ queue, commands, files, store, lifecycl
       const visible = jobs => filter.length ? jobs.filter(job => (job.targetId ?? 'default') === filter[0]) : jobs;
       if (req.method === 'GET' && url.pathname === '/api/targets') return json(res, 200, targets?.list() ?? { targets: [{ id: 'default', displayName: settings.targetDisplayName ?? 'SSH', enabled: true, isDefault: true }], defaultTarget: 'default' });
       if (req.method === 'GET' && url.pathname === '/api/session') return json(res, 200, { mode: adminAccess.mode });
+      if(agentCli && req.method==='GET' && url.pathname==='/api/agent-cli')return json(res,200,agentCli.get());
+      if(agentCli && req.method==='GET' && url.pathname==='/api/agent-cli/lookup'){
+        const keys=['key','targetId','provider'];
+        if([...url.searchParams].length!==3||keys.some(key=>url.searchParams.getAll(key).length!==1))throw Error('Invalid CLI lookup fields');
+        const value=agentCli.lookup(Object.fromEntries(url.searchParams));
+        return json(res,200,value.found?{...value,job:presentJob(value.job)}:value);
+      }
+      const cliRequest=/^\/api\/agent-cli\/requests\/([a-f0-9]{48})$/.exec(url.pathname);
+      if(agentCli && req.method==='GET' && cliRequest){const value=agentCli.request(cliRequest[1]);return json(res,200,{...value,job:presentJob(value.job)});}
+      const cliAction=/^\/api\/agent-cli\/(preview|submit|start|reconcile)$/.exec(url.pathname);
+      if(agentCli && cliAction){
+        if(req.method!=='POST')return json(res,405,{error:'Method not allowed'});
+        if(req.headers['content-type']!=='application/json')return json(res,415,{error:'JSON required'});
+        const chunks=[];let size=0;
+        for await(const chunk of req){size+=chunk.length;if(size>8192)return json(res,413,{error:'CLI request too large'});chunks.push(chunk);}
+        let body;try{body=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(Buffer.concat(chunks)));}catch{return json(res,400,{error:'Invalid JSON'});}
+        const value=await agentCli[cliAction[1]](body);return json(res,200,['submit','start'].includes(cliAction[1])?presentJob(value):value);
+      }
       if (req.method === 'GET' && url.pathname === '/api/automation-metrics' && automationMetrics) return json(res,200,automationMetrics(filter[0]));
       if (['/api/environment', '/api/environment/restart'].includes(url.pathname) && environmentEditor) {
         try {
@@ -56,6 +74,8 @@ export function createProtocolAdapters({ queue, commands, files, store, lifecycl
           return json(res, 200, await environmentEditor.mutate(url.pathname.endsWith('/restart') ? 'restart' : 'save', body));
         } catch (error) { return json(res, 409, { error: (error.refused ? 'ENV 요청 거절: ' : '') + (error.publicMessage ?? 'ENV 작업을 완료하지 못했습니다. 현재 상태를 다시 조회해 주세요.') }); }
       }
+      const sourceRequest = /^\/api\/([a-f0-9]{48})\/source$/.exec(url.pathname);
+      if (req.method === 'GET' && sourceRequest) return json(res, 200, commands.source(sourceRequest[1]));
       const output = /^\/api\/outputs\/([a-f0-9]{48})$/.exec(url.pathname);
       if (req.method === 'GET' && output) return json(res, 200, commandOutputs.read({ outputId: output[1],
         offsetBytes: Number(url.searchParams.get('offset') ?? 0), maxBytes: Number(url.searchParams.get('limit') ?? 4096), format: url.searchParams.get('format') ?? 'text' }));

@@ -1,9 +1,10 @@
-import { SAFETY_PROTOCOL, SAFETY_QUESTION, safetyInput, validateAssessment, isJevModel } from '../../domain/safety.mjs';
+import { SAFETY_PROTOCOL, SAFETY_QUESTION, safetyInput, validateAssessment, isJevModel, assessmentDiagnostic } from '../../domain/safety.mjs';
+import { COMMAND_REQUEST_MAX_BYTES } from '../../contracts/ports.mjs';
 import { explicitUserApproval, approvedCommandNames } from '../../domain/command-policy.mjs';
 
 export const JEV_ENDPOINT = 'https://api.typesafe.ai/v1/systemone';
 const RESPONSE_LIMIT = 64 * 1024;
-const unavailable = reason => ({ status: 'unavailable', reason });
+const unavailable = (reason, diagnostic) => ({ status: 'unavailable', reason, ...(diagnostic ? { diagnostic } : {}) });
 
 /** Fixed endpoint, no retries/redirects, one outstanding request per adapter. */
 export function createJevAssessor({ apiKey, fetchImpl = globalThis.fetch, timeoutMs = 10_000, question = SAFETY_QUESTION, questionVersion, inputKind = 'observation', model = SAFETY_PROTOCOL.model, admission = { busy: false } } = {}) {
@@ -46,10 +47,10 @@ export function createJevAssessor({ apiKey, fetchImpl = globalThis.fetch, timeou
         if (inputKind === 'registration') state.proposedCommands = approvedCommandNames(input.proposedCommands);
       } catch { return unavailable('invalid_input'); }
       const body = JSON.stringify({ model, state, questions: { risk: question } });
-      if (Buffer.byteLength(body) > 24 * 1024) return unavailable('input_too_large');
+      if (Buffer.byteLength(body) > COMMAND_REQUEST_MAX_BYTES) return unavailable('input_too_large');
       admission.busy = true;
       const controller = new AbortController();
-      let timer, reader;
+      let timer, reader, responseStage;
       const deadline = new Promise(resolve => {
         timer = setTimeout(() => { controller.abort(); if (reader) void reader.cancel().catch(() => {}); resolve(unavailable('timeout')); }, timeoutMs);
       });
@@ -59,9 +60,10 @@ export function createJevAssessor({ apiKey, fetchImpl = globalThis.fetch, timeou
             headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' }, body });
           if (controller.signal.aborted) { void response.body?.cancel().catch(() => {}); return unavailable('timeout'); }
           if (!response.ok) { void response.body?.cancel().catch(() => {}); return unavailable('http_error'); }
-          if (!/^application\/json(?:\s*;|$)/i.test(response.headers.get('content-type') || '')) return unavailable('invalid_response');
+          if (!/^application\/json(?:\s*;|$)/i.test(response.headers.get('content-type') || '')) return unavailable('invalid_response', 'CONTENT_TYPE');
           reader = response.body?.getReader();
-          if (!reader) return unavailable('invalid_response');
+          if (!reader) return unavailable('invalid_response', 'BODY_MISSING');
+          responseStage = 'BODY_READ';
           const chunks = []; let size = 0;
           for (;;) {
             const { value, done } = await reader.read();
@@ -70,13 +72,20 @@ export function createJevAssessor({ apiKey, fetchImpl = globalThis.fetch, timeou
             if (size > RESPONSE_LIMIT) return unavailable('response_too_large');
             chunks.push(value);
           }
-          const raw = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)));
-          const answer = raw?.answers?.risk;
-          if (answer?.type !== 'choice' || Object.keys(raw.answers).length !== 1) return unavailable('invalid_response');
-          return validateAssessment({ status: 'assessed', model: raw.model, label: answer.choice,
+          responseStage = 'UTF8_DECODE';
+          const text = new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks));
+          responseStage = 'JSON_PARSE';
+          const raw = JSON.parse(text);
+          responseStage = undefined;
+          if (!raw?.answers || typeof raw.answers !== 'object' || Array.isArray(raw.answers)
+            || Object.keys(raw.answers).length !== 1 || !Object.hasOwn(raw.answers, 'risk')) return unavailable('invalid_response', 'ANSWER_KEYS');
+          const answer = raw.answers.risk;
+          if (answer?.type !== 'choice') return unavailable('invalid_response', 'ANSWER_TYPE');
+          const value = { status: 'assessed', model: raw.model, label: answer.choice,
             confidence: answer.confidence, probabilities: answer.probabilities,
-            inputTokens: raw.usage?.input_tokens, outputTokens: raw.usage?.output_tokens }, model) || unavailable('invalid_response');
-        } catch { return unavailable(controller.signal.aborted ? 'timeout' : 'request_failed'); }
+            inputTokens: raw.usage?.input_tokens, outputTokens: raw.usage?.output_tokens };
+          return validateAssessment(value, model) || unavailable('invalid_response', assessmentDiagnostic(value, model));
+        } catch { return unavailable(controller.signal.aborted ? 'timeout' : 'request_failed', controller.signal.aborted ? undefined : responseStage); }
         finally { if (reader) void reader.cancel().catch(() => {}); }
       };
       // A timeout does not prove the remote call was unprocessed or free. Keep the

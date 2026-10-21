@@ -35,6 +35,9 @@ export function createCommandService({ queue, classify, executeCommand, audit, t
   };
   return {
     read,
+    runSource(args) { if (!automation) throw Error('Source requests require command automation'); return automation.runSource(args); },
+    source(id) { if (!automation) throw Error('Source unavailable'); return automation.source(id); },
+    close: () => automation?.close(),
     async run(command, requestKey, context = '', displayContext = '') {
       validateCommand(command, classify);
       context = callerContext(context); displayContext = callerContext(displayContext);

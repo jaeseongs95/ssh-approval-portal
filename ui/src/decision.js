@@ -4,6 +4,10 @@ export function requestContext(job, korean = true) {
 }
 
 const reasons = {
+  source_execution_not_enabled: ['제출 코드 평가·실행이 허용되지 않아 사용자 승인이 필요합니다.', 'Submitted code assessment/execution is not enabled; owner approval is required.'],
+  source_privilege_policy_review: ['임의 코드의 권한을 이름만으로 제한할 수 없어 현재 sudo 정책에서는 개별 승인합니다.', 'Arbitrary code privileges cannot be constrained by names; this sudo policy requires individual approval.'],
+  source_command_policy_review: ['임의 코드 안의 금지 명령 사용을 이름만으로 확인할 수 없어 개별 승인합니다.', 'Denied command use inside arbitrary code cannot be established by name scanning; individual approval is required.'],
+  source_evidence_too_large: ['코드와 설명이 평가 입력 한도를 넘어 사용자 확인이 필요합니다. 내용을 잘라 보내지 않았습니다.', 'Source and context exceed the assessment input limit. Nothing was truncated; owner review is required.'],
   sudo_not_enabled: ['sudo 자동승인이 꺼져 있어 개별 사용자 승인이 필요합니다.', 'Automatic sudo is disabled; individual owner approval is required.'],
   context_required: ['작업 설명이 없어 AI 평가를 요청하지 않았습니다. 작업 목적·대상·예상 영향·복구 방법을 확인해 주세요.', 'No AI call was made because task context is missing. Check the purpose, target, expected impact and recovery plan.'],
   command_set: ['사전 승인 명령셋에 일치', 'Matched the preapproved command set'],

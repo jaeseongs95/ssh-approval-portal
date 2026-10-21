@@ -1,14 +1,18 @@
 import importlib.util
+import hashlib
 import json
 from pathlib import Path
 import shutil
 import subprocess
 import sys
+import re
+import tarfile
 import tempfile
 import unittest
 import zipfile
 
 SOURCE = Path(__file__).resolve().parents[1]
+OIDC_EXAMPLES = ['deploy/oidc/Caddyfile', 'deploy/oidc/oauth2-proxy.cfg']
 spec = importlib.util.spec_from_file_location('delivery_package', SOURCE / 'scripts/package.py')
 packager = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(packager)
@@ -20,7 +24,7 @@ class PackageContract(unittest.TestCase):
         self.root = Path(self.temporary.name) / 'candidate'
         for folder in packager.SOURCE_TYPES:
             (self.root / folder).mkdir(parents=True, exist_ok=True)
-        names = packager.ROOT_FILES + packager.UI_FILES + ['config/' + name for name in packager.CONFIG_FILES]
+        names = packager.ROOT_FILES + packager.UI_FILES + ['config/' + name for name in packager.CONFIG_FILES] + OIDC_EXAMPLES
         for name in names:
             path = self.root / name
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -96,6 +100,108 @@ class PackageContract(unittest.TestCase):
         result = self.run_node(script, self.root)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('Source missing from manifest', result.stderr)
+
+    def test_oidc_proxy_examples_are_in_both_archives_and_manifest_with_working_doc_links(self):
+        for name in OIDC_EXAMPLES:
+            shutil.copyfile(SOURCE/name, self.root/name)
+        shutil.copyfile(SOURCE/'docs/oidc-https.ko.md', self.root/'docs/oidc-https.ko.md')
+        for name in ['deploy/oidc/client-secret', 'deploy/oidc/operator.cfg', 'deploy/private.json']:
+            self.write(name, 'synthetic-operator-private-do-not-package')
+        archives, _ = packager.package(self.root)
+        manifest = json.loads((self.root/'release-manifest.json').read_text(encoding='utf-8'))
+        entries = {entry['path']:entry for entry in manifest['files']}
+        self.assertEqual({name for name in entries if name.startswith('deploy/')}, set(OIDC_EXAMPLES))
+        links = re.findall(r'\]\((\.\./deploy/oidc/[^)]+)\)', (self.root/'docs/oidc-https.ko.md').read_text(encoding='utf-8'))
+        self.assertEqual({name.removeprefix('../') for name in links}, set(OIDC_EXAMPLES))
+        for archive_path in archives:
+            with self.subTest(archive=archive_path.suffix):
+                prefix = 'ssh-approval-portal-0.3.0/'
+                if archive_path.suffix == '.zip':
+                    with zipfile.ZipFile(archive_path) as archive:
+                        data = {name:archive.read(name) for name in archive.namelist() if name.startswith(prefix+'deploy/')}
+                else:
+                    with tarfile.open(archive_path, 'r:gz') as archive:
+                        members = [entry for entry in archive.getmembers() if entry.name.startswith(prefix+'deploy/')]
+                        self.assertTrue(all(entry.isfile() and entry.uid == entry.gid == 0 and entry.mode == 0o644 for entry in members))
+                        data = {entry.name:archive.extractfile(entry).read() for entry in members}
+                self.assertEqual(set(data), {prefix+name for name in OIDC_EXAMPLES})
+                for name in OIDC_EXAMPLES:
+                    raw = (self.root/name).read_bytes()
+                    self.assertEqual(data[prefix+name], raw)
+                    self.assertEqual(entries[name]['size'], len(raw))
+                    self.assertEqual(entries[name]['sha256'], hashlib.sha256(raw).hexdigest())
+
+    def test_oidc_example_leaf_and_parent_symlinks_are_rejected(self):
+        outside = Path(self.temporary.name)/'outside'
+        outside.mkdir()
+        for name in ['Caddyfile', 'oauth2-proxy.cfg']:
+            (outside/name).write_text('synthetic outside template\n', encoding='utf-8')
+        leaf = self.root/OIDC_EXAMPLES[0]
+        leaf.unlink()
+        try:
+            leaf.symlink_to(outside/'Caddyfile')
+        except OSError:
+            self.skipTest('OS symlink permission is unavailable; Linux fixture must exercise this case')
+        with self.assertRaisesRegex(ValueError, 'unsafe'):
+            packager.package(self.root)
+        self.assertFalse((self.root/'release-manifest.json').exists())
+        leaf.unlink()
+        (self.root/OIDC_EXAMPLES[1]).unlink()
+        parent = leaf.parent
+        self.assertEqual(parent, self.root/'deploy/oidc')
+        parent.rmdir()
+        parent.symlink_to(outside, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, 'unsafe'):
+            packager.package(self.root)
+        self.assertFalse((self.root/'release-manifest.json').exists())
+        self.assertEqual((outside/'Caddyfile').read_text(encoding='utf-8'), 'synthetic outside template\n')
+
+    def test_oidc_template_private_key_is_rejected_before_manifest(self):
+        marker = 'synthetic-not-a-real-key'
+        self.write(OIDC_EXAMPLES[1], '-----BEGIN RSA PRIVATE KEY-----\n'+marker+'\n')
+        with self.assertRaisesRegex(ValueError, 'Private key') as caught:
+            packager.package(self.root)
+        self.assertNotIn(marker, str(caught.exception))
+        self.assertFalse((self.root/'release-manifest.json').exists())
+
+    @unittest.skipUnless(sys.platform == 'win32', 'Windows junction filesystem contract')
+    def test_oidc_example_parent_junction_is_rejected_without_reading_target(self):
+        import _winapi
+        outside = Path(self.temporary.name)/'junction-target'
+        outside.mkdir()
+        for name in ['Caddyfile', 'oauth2-proxy.cfg']:
+            (outside/name).write_text('synthetic outside template\n', encoding='utf-8')
+        for name in OIDC_EXAMPLES:
+            (self.root/name).unlink()
+        parent = self.root/'deploy/oidc'
+        parent.rmdir()
+        _winapi.CreateJunction(str(outside), str(parent))
+        try:
+            with self.assertRaisesRegex(ValueError, 'unsafe'):
+                packager.package(self.root)
+            self.assertFalse((self.root/'release-manifest.json').exists())
+            self.assertEqual((outside/'Caddyfile').read_text(encoding='utf-8'), 'synthetic outside template\n')
+        finally:
+            # Remove only this fixture's junction; never recurse through its target.
+            parent.rmdir()
+
+    def test_manifest_requires_oidc_proxy_examples_and_rejects_template_tampering(self):
+        packager.package(self.root)
+        manifest = self.root/'release-manifest.json'
+        original = manifest.read_bytes()
+        for name in OIDC_EXAMPLES:
+            with self.subTest(path=name):
+                data = json.loads(original)
+                data['files'] = [entry for entry in data['files'] if entry['path'] != name]
+                manifest.write_text(json.dumps(data), encoding='utf-8')
+                result = self.run_node(self.root/'scripts/verify.mjs', self.root)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('Required package entry missing', result.stderr)
+        manifest.write_bytes(original)
+        self.write(OIDC_EXAMPLES[1], 'changed template\n')
+        result = self.run_node(self.root/'scripts/verify.mjs', self.root)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Release digest mismatch', result.stderr)
 
     def test_source_release_can_prepare_default_docker_archive(self):
         dockerfile = (SOURCE / 'docker/Dockerfile').read_text(encoding='utf-8')

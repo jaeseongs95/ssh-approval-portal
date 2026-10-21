@@ -9,7 +9,7 @@ export function createWebView({ document, i18n }) {
   let selectionRevision = 0;
   const records = new Map();
   const serverRecords = new Map();
-  let targetList = [], changeTarget, policyAction;
+  let targetList = [], changeTarget, policyAction, commandImportAction;
   const scrolls = new Map(); let lastTarget = '';
   function identify() {
     const settings = document.body.dataset.page === 'settings';
@@ -75,6 +75,24 @@ export function createWebView({ document, i18n }) {
     const targetContext = text(body, 'p', `${t('중계기')} · ${bridgeName} / ${t('대상 서버')} · ${job.targetDisplayName ?? targetName}${job.targetId ? ` [${job.targetId}]` : ''} (${job.target}) · ${t('요청')} ${job.id}`, 'target'); targetContext.id = 'request-target-' + job.id;
     if (job.targetId) targetContext.textContent += ` · ${t('설정 revision')} ${job.targetRevision} / ${t('호스트 키')} ${job.hostKey}`; text(body, 'pre', command, 'command');
     if (job.kind === 'command' && requestContext(job, korean)) { const context = text(body, 'details', ''); text(context, 'summary', korean ? '요청자가 제공한 작업 설명' : 'Caller-provided context'); text(context, 'p', requestContext(job, korean)); }
+    if (job.operation?.sourceContract) {
+      const op = job.operation;
+      text(body, 'p', 'Python · ' + op.sourceContract + ' · ' + op.sourceBytes + ' bytes · SHA-256 ' + op.sourceSha256, 'target');
+      text(body, 'pre', JSON.stringify({ cwd: op.sourceCwd, argv: JSON.parse(op.sourceArgvJson), elevate: op.sourceElevate }, null, 2), 'command');
+      if (waiting) {
+        const button = text(body, 'button', korean ? '제출 코드 원문 보기' : 'View submitted source', 'secondary'), area = text(body, 'div', '');
+        button.type = 'button';
+        button.onclick = async () => {
+          button.disabled = true;
+          try {
+            const result = await handlers.source(job.id);
+            if (!box.isConnected) return;
+            area.replaceChildren(); text(area, 'pre', result.source, 'command submitted-source');
+          } catch { if (box.isConnected) { area.replaceChildren(); text(area, 'p', korean ? '코드 원문을 읽을 수 없습니다. 만료·재시작·처리 상태를 확인하세요. 다시 실행하지 않습니다.' : 'Source unavailable. Check expiry, restart and request state; no execution is retried.', 'error'); } }
+          finally { if (box.isConnected) button.disabled = false; }
+        };
+      } else text(body, 'p', korean ? '처리된 코드 원문은 보관하지 않습니다. 실행 계획 정보만 표시합니다.' : 'Finished source is not retained. Only execution plan metadata is shown.', 'target');
+    }
     if (job.decision) renderDecision(document, body, job.decision, korean, job);
     const meta = text(body, 'div', '', 'meta'); text(meta, 'span', `${t('요청')} ${job.id}`, 'request-id');
     const time = waiting ? job.expiresAt : job.finishedAt ?? job.createdAt;
@@ -88,6 +106,16 @@ export function createWebView({ document, i18n }) {
     if (document.body.dataset.commandAutomation === 'true') {
       const policy = text(body, 'button', korean ? '이 서버 정책 열기' : 'Open this target policy', 'secondary'); policy.type = 'button';
       policy.setAttribute('aria-describedby', targetContext.id); policy.onclick = () => policyAction?.(job.targetId ?? 'default');
+    }
+    if (document.body.dataset.commandAutomation === 'true' && job.kind === 'command' && !job.operation?.sourceContract && !['pending', 'running', 'evaluating'].includes(job.state)) {
+      const register = text(body, 'button', korean ? '이력의 명령 이름 등록' : 'Register names from this command', 'secondary'); register.type = 'button';
+      const bound = [job.targetId, job.targetRevision, job.profile, job.command].every(value => typeof value === 'string' && value.length);
+      register.disabled = !bound; register.setAttribute('aria-describedby', targetContext.id);
+      if (!bound) register.title = korean ? '현재 대상 정보가 없는 이력은 자동으로 연결하지 않습니다.' : 'History without target binding cannot be linked automatically.';
+      register.onclick = async () => { register.disabled = true;
+        try { await commandImportAction?.({ targetId: job.targetId, targetRevision: job.targetRevision, profile: job.profile, command: job.command }); }
+        finally { if (register.isConnected) register.disabled = !bound; }
+      };
     }
     const output = job.kind === 'command' && job.result?.structuredContent?.output;
     if (output) {
@@ -234,11 +262,12 @@ export function createWebView({ document, i18n }) {
     if (actions.accessMode) {
       el('token').hidden = true; el('logout').hidden = false;
       el('auth-label').textContent = t('본인 계정으로 연결됨'); el('auth-label').removeAttribute('for');
-      el('auth-note').textContent = t('Cloudflare Access에서 확인한 본인 계정으로 요청을 처리합니다.');
+      el('auth-note').textContent = t(document.body.dataset.authMode === 'oidc' ? 'SSO에서 확인한 본인 계정으로 요청을 처리합니다.' : 'Cloudflare Access에서 확인한 본인 계정으로 요청을 처리합니다.');
     }
   }
   return {
     set openPolicy(action) { policyAction = action; },
+    set importCommandNames(action) { commandImportAction = action; },
     uncertainDecisionMessage: () => korean ? '승인·거부 결과를 확인하지 못했습니다. 요청을 반복하지 말고 목록을 새로 조회해 처리 상태를 확인해 주세요. 계속 확인되지 않으면 서버 기록을 확인한 뒤 다시 로그인해 주세요.' : 'Approval or denial result needs checking. Refresh requests to reconcile the state; do not repeat the action. If it remains unresolved, inspect server records before signing in again.',
     initialize, render, multiTarget,
     target: () => el('target-filter')?.value || undefined,

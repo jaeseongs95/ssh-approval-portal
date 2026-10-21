@@ -43,7 +43,7 @@ test('MCP contract families preserve tool names, JSON text, private capabilities
   const f = await fixture();
   try {
     const { tools } = await f.client.listTools();
-    assert.deepEqual(tools.map(tool => tool.name), ['list-targets', 'read-command', 'run-command', 'request-safe-command', 'get-request-status', 'assess-request-risk', 'request-upload', 'show-ui-probe', 'show-approval', 'show-file-transfer', 'request-download', 'ui-decide-request', 'ui-upload-begin', 'ui-upload-chunk', 'ui-upload-finish', 'ui-download-link', 'read-command-output', 'ui-read-command-output']);
+    assert.deepEqual(tools.map(tool => tool.name), ['list-targets', 'read-command', 'run-command', 'run-python-source', 'request-safe-command', 'get-request-status', 'assess-request-risk', 'request-upload', 'show-ui-probe', 'show-approval', 'show-file-transfer', 'request-download', 'ui-decide-request', 'ui-upload-begin', 'ui-upload-chunk', 'ui-upload-finish', 'ui-download-link', 'read-command-output', 'ui-read-command-output']);
     for (const tool of tools) assert.equal(tool.outputSchema.type, 'object', tool.name);
     const upload = tools.find(tool => tool.name === 'request-upload');
     assert.deepEqual(upload._meta['openai/fileParams'], ['file']); assert.match(upload.description, /only that host contract/);
@@ -194,4 +194,20 @@ test('MCP keeps English evaluator context separate from the Korean owner explana
     ]) assert.equal((await f.call('run-command', bad)).isError, true);
     assert.equal(seen.length, 2);
   } finally { await f.close(); }
+});
+
+test('LIMIT-MCP actual HTTP schema and dispatch retain long command/envelope and refuse overflow',async()=>{
+ const f=await fixture(),seen=[];f.commands.run=async(command,_target,_key,context)=>{seen.push({command,context});return{type:'job',job:f.pending};};
+ try{
+  const tools=(await f.client.listTools()).tools;
+  assert.equal(tools.find(t=>t.name==='read-command').inputSchema.properties.command.maxLength,32768);
+  assert.equal(tools.find(t=>t.name==='run-command').inputSchema.properties.command.maxLength,524288);
+  const command='printf '+'x'.repeat(32768-7-8)+'END_TAIL';
+  assert.equal(Buffer.byteLength(command),32768);
+  assert.equal((await f.call('run-command',{command})).isError,undefined);assert.equal(seen.at(-1).command,command);
+  const context='Synthetic purpose '.repeat(300),wire='ssh-request-v1:'+JSON.stringify({command,context});
+  assert.equal((await f.call('run-command',{command:wire})).isError,undefined);assert.deepEqual(seen.at(-1),{command,context});
+  for(const value of [command+'x','printf '+'가'.repeat(11000),'printf \ud800'])assert.equal((await f.call('run-command',{command:value})).isError,true);
+  assert.equal(seen.length,2);
+ }finally{await f.close();}
 });

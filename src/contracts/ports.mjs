@@ -4,6 +4,11 @@ export const CHUNK_BYTES = 256 * 1024;
 export const EXPIRES_MS = 600_000;
 export const APPROVAL_EXPIRES_MS = 3_600_000;
 export const OUTPUT_PAGE_BYTES = 16 * 1024;
+export const COMMAND_MAX_BYTES = 32 * 1024;
+export const COMMAND_REQUEST_MAX_BYTES = 512 * 1024;
+/** Reject rather than truncate; shared by server boundaries and browser parsing. */
+export const utf8WithinLimit = (value, maxBytes) => typeof value === 'string' && value.length <= maxBytes
+  && value.isWellFormed() && new TextEncoder().encode(value).byteLength <= maxBytes;
 
 /** @typedef {{failed:boolean, texts:string[], data?:Object, output?:Object}} OperationOutcome */
 /** @typedef {{kind:'command'|'upload'|'download', [key:string]:unknown}} Operation */

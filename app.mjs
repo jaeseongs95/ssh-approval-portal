@@ -22,13 +22,19 @@ import { createLocalSecretStore } from './src/adapters/secrets/local-file.mjs';
 import { createVaultSecretStore } from './src/adapters/secrets/vault-kv.mjs';
 import { createCommandState } from './src/adapters/storage/command-state.mjs';
 import { createCommandAutomation } from './src/application/command-automation.mjs';
-import { AUTOMATION_QUESTION, AUTOMATION_QUESTION_VERSION, COMMAND_SET_QUESTION } from './src/domain/command-policy.mjs';
+import { AUTOMATION_QUESTION, AUTOMATION_QUESTION_VERSION, COMMAND_SET_QUESTION, deniedCommand } from './src/domain/command-policy.mjs';
 import { createCommandPolicyReview } from './src/application/command-policy-review.mjs';
 import { CommandOutputs } from './src/adapters/storage/command-output.mjs';
 import { hash } from './src/domain/validation.mjs';
 import { createModelCatalog } from './src/application/model-catalog.mjs';
 import { createAutomationMetrics } from './src/application/automation-metrics.mjs';
 import { createEnvironmentEditor } from './src/adapters/config/environment-editor.mjs';
+import { preparePythonSource } from './src/adapters/ssh/python-source.mjs';
+import {createAgentCliState} from './src/adapters/storage/agent-cli-state.mjs';
+import {createAgentCliService} from './src/application/agent-cli.mjs';
+import {createAgentReleaseCatalog} from './src/adapters/releases/agent-cli.mjs';
+import {prepareAgentCliPlan,prepareAgentCliStatus} from './src/adapters/ssh/agent-cli.mjs';
+import {agentCliProviders,AGENT_CLI_CONTRACT} from './src/domain/agent-cli.mjs';
 
 // Preserve the original injectable createApplication callback at the composition boundary.
 // Concrete runtime executors already return the neutral outcome accepted by use cases.
@@ -40,7 +46,7 @@ const commandExecutor = execute => async (profile, command) => {
 };
 
 /** Assemble concrete ports. Business policy belongs to application/domain modules. */
-export async function createApplication({ registry, classify, executeCommand, audit, transferRoot, env = process.env, uiHtml, accessKeySet, uploadSource, riskAssessor, policyRiskAssessor, secretResolver, riskEvaluators = {}, environmentTransport }) {
+export async function createApplication({ registry, classify, executeCommand, executePythonSource, executeAgentCli, agentReleaseCatalog, audit, transferRoot, env = process.env, uiHtml, accessKeySet, uploadSource, riskAssessor, policyRiskAssessor, secretResolver, riskEvaluators = {}, environmentTransport }) {
   const settings = parseSettings(env);
   const adminAccess = createAdminAccess(env, accessKeySet);
   const signer = new Tickets(env.BRIDGE_UI_TICKET_KEY);
@@ -48,7 +54,7 @@ export async function createApplication({ registry, classify, executeCommand, au
   const store = new Artifacts(transferRoot, { maxBytes: settings.maxBytes, budget: settings.budget });
   await store.init();
   const outputs = new CommandOutputs(transferRoot);
-  let commandState;
+  let commandState, cliState;
   try {
   let risk = riskAssessor, apiKey;
   if (settings.jevEnabled) {
@@ -70,8 +76,11 @@ export async function createApplication({ registry, classify, executeCommand, au
     risk ??= createJevAssessor({ apiKey });
   }
   commandState = settings.commandAutomation ? createCommandState(transferRoot) : undefined;
+  cliState = executeAgentCli ? createAgentCliState(transferRoot) : undefined;
+  const cliCatalog = cliState && (agentReleaseCatalog ?? createAgentReleaseCatalog());
   const evaluators = { ...riskEvaluators };
   const automationBudget = { used: 0 };
+  const sourceBudget = { bytes: 0, count: 0 };
   if (settings.jevEnabled && !evaluators.jev) evaluators.jev = createJevAssessor({ apiKey, question: AUTOMATION_QUESTION, questionVersion: AUTOMATION_QUESTION_VERSION, inputKind: 'execution' });
   const modelCatalog = createModelCatalog({ jev: policyRiskAssessor ?? (settings.jevEnabled ? createJevAssessor({ apiKey }) : undefined), providers: evaluators, configured: Boolean(policyRiskAssessor || (settings.jevEnabled && apiKey)) });
   const source = uploadSource ?? createFileSource({ hosts: settings.uploadHosts, maxBytes: settings.maxBytes });
@@ -93,14 +102,48 @@ export async function createApplication({ registry, classify, executeCommand, au
       catch (error) { outputs.abandon(reservation); throw error; }
     };
     const targetAudit = event => audit({ ...event, ...identity });
-    let commands, files;
+    let commands, files, automation, cli;
+    const cliProbes = new Set();
+    const checkedSourceExecute = async (operation, id) => {
+      definition.verify();
+      const plan = automation.sourcePlan(id);
+      const reservation = outputs.reserve({ executionId: id, targetId: definition.id, targetRevision: definition.revision, profile: writeProfile, operationDigest: plan.planDigest });
+      try { return outputs.finish(reservation, await executePythonSource(plan, () => {
+        definition.verify(); automation.sourcePlan(id); queue.beforeCommandStart(queue.get(id));
+        return { targetId: definition.id, targetRevision: definition.revision, profile: writeProfile };
+      })); } catch (error) { outputs.abandon(reservation); throw error; }
+    };
     const queue = new ApprovalQueue({ classify, target, profile: writeProfile, audit: targetAudit, identity, claimExecution,
-      externalBusy: () => (commands?.reading() ?? false) || claimExecution.busy(),
-      executeOperation: (operation, id) => operation.kind === 'command' ? checkedExecute(writeProfile, operation.command, id)
+      externalBusy: () => (commands?.reading() ?? false) || cliProbes.size > 0 || claimExecution.busy(),
+      executeOperation: (operation, id) => operation.agentCliContract === AGENT_CLI_CONTRACT ? cli.execute(id) : operation.kind === 'command' ? operation.sourceContract ? checkedSourceExecute(operation, id) : checkedExecute(writeProfile, operation.command, id)
         : operation.kind === 'upload' ? transfers.upload(operation) : transfers.download(operation),
-      onTerminal: job => files?.onTerminal(job),
+      onTerminal: job => { try { cli?.onTerminal(job); automation?.onTerminal(job); } finally { files?.onTerminal(job); } },
     });
-    const automation = commandState && createCommandAutomation({ queue, state: commandState, definition, classify, evaluators, audit: targetAudit, maxCalls: settings.jevMaxCalls, budget: automationBudget });
+    automation = commandState && createCommandAutomation({ queue, state: commandState, definition, classify, evaluators, audit: targetAudit,
+      ...(executePythonSource ? { prepareSource: preparePythonSource } : {}), sourceBudget, maxCalls: settings.jevMaxCalls, budget: automationBudget });
+    const cliBinding = () => ({targetId:definition.id,targetRevision:definition.revision,profile:writeProfile});
+    const checkCliPolicy = plan => {
+      definition.verify();
+      const rule = commandState?.policy().targets.find(rule => rule.targetId === definition.id && rule.targetRevision === definition.revision && rule.profile === writeProfile);
+      if (deniedCommand(plan.command+'\n'+plan.stdin+'\n'+plan.manifest.argvJson,rule)) throw Error('CLI operation denied by current policy');
+    };
+    const checkedCliProbe = plan => {
+      definition.verify();checkCliPolicy(plan);
+      if(queue.maintenance || queue.busy())throw Error('CLI target busy');
+      const release=claimExecution(),id=randomBytes(24).toString('hex');
+      try{targetAudit({action:'cli-probe-started',id,profile:writeProfile,targetId:definition.id});}catch(error){release();throw error;}
+      const task=Promise.resolve().then(()=>executeAgentCli(plan,()=>{definition.verify();checkCliPolicy(plan);if(queue.maintenance)throw Error('CLI maintenance in progress');return cliBinding();})).finally(()=>{
+        cliProbes.delete(task);try{targetAudit({action:'cli-probe-finished',id,profile:writeProfile,targetId:definition.id});}finally{release();}
+      });
+      cliProbes.add(task);return task;
+    };
+    if(cliState){
+      cli=createAgentCliService({queue,journal:cliState,resolveTarget:id=>id===definition.id?definition:null,
+        readInstallation:async(provider,binding)=>(await checkedCliProbe(prepareAgentCliPlan({action:'inspect',provider,binding}))).data?.agentCli,
+        catalog:cliCatalog,preparePlan:prepareAgentCliPlan,executePlan:executeAgentCli,outputs,checkPolicy:checkCliPolicy,nonce:()=>randomBytes(24).toString('hex')});
+      const originalGuard=queue.beforeCommandStart;
+      queue.beforeCommandStart=job=>cli.isJob(job)?cli.beforeStart(job):originalGuard?.(job);
+    }
     queue.beforeUploadStart = () => {
       definition.verify();
       const policy = commandState?.policy(), rule = policy?.targets.find(rule => rule.targetId === definition.id && rule.targetRevision === definition.revision && rule.profile === writeProfile);
@@ -115,7 +158,8 @@ export async function createApplication({ registry, classify, executeCommand, au
     };
     commands = createCommandService({ queue, classify, executeCommand: checkedExecute, audit: targetAudit, target, readProfile, claimExecution, automation });
     files = createFileService({ store: targetStore, queue, transfers, claimImport });
-    return { ...definition, queue, commands, files, transfers, store: targetStore };
+    return { ...definition, queue, commands, files, transfers, store: targetStore,cli,
+      cliProbe:checkedCliProbe,cliDrain:()=>Promise.allSettled([...cliProbes]) };
   });
   const targets = createTargetRouter(runtimes, { defaultTarget: settings.targets === null ? 'default' : settings.defaultTarget, legacy: settings.targets === null, store, audit });
   const { queue, commands, files } = targets;
@@ -133,6 +177,35 @@ export async function createApplication({ registry, classify, executeCommand, au
     }
     runtime?.queue.restore(job, value => commandState.save(value));
   }
+  for(const job of cliState?.list() ?? []){
+    const runtime=runtimes.find(runtime=>runtime.id===job.operation.agentCliTargetId);
+    if(runtime){if(runtime.queue.jobs.has(job.id))throw Error('Duplicate persisted CLI request ID');runtime.queue.restore(job,value=>cliState.save(value));}
+  }
+  const cliRequest=id=>{
+    const saved=cliState?.get(id);if(!saved)throw Error('Unknown CLI request');
+    const runtime=targets.select(saved.job.operation.agentCliTargetId);runtime.verify();
+    if(saved.job.operation.agentCliTargetRevision!==runtime.revision||saved.job.operation.agentCliProfile!==runtime.writeProfile)throw Error('CLI target changed');
+    return {runtime,job:runtime.queue.get(id)??saved.job,remoteStatus:saved.remoteStatus};
+  };
+  const oneId=body=>{if(!body||Object.keys(body).length!==1||typeof body.requestId!=='string'||!/^[a-f0-9]{48}$/.test(body.requestId))throw Error('Invalid CLI request fields');return body.requestId;};
+  const agentCli={
+    get:()=>({available:Boolean(cliState),providers:agentCliProviders(),bindings:runtimes.map(runtime=>({targetId:runtime.id,targetRevision:runtime.revision,profile:runtime.writeProfile,displayName:runtime.displayName,sshTarget:runtime.target,enabled:runtime.enabled}))}),
+    lookup:({key,targetId,provider})=>{
+      if(typeof key!=='string'||!/^[A-Za-z0-9_.:-]{16,128}$/.test(key)||!['codex','claude'].includes(provider)||typeof targetId!=='string')throw Error('Invalid CLI lookup');
+      const runtime=targets.select(targetId);runtime.verify();
+      const saved=cliState?.find('agent-cli:'+key);if(!saved)return {found:false};
+      if(saved.job.operation.agentCliTargetId!==targetId||saved.job.operation.agentCliProvider!==provider)throw Error('CLI lookup binding mismatch');
+      return {found:true,...agentCli.request(saved.job.id)};
+    },
+    preview:body=>{const runtime=targets.select(body?.targetId);if(!runtime.cli)throw Error('CLI unavailable');return runtime.cli.preview(body);},
+    submit:body=>{const runtime=targets.select(body?.request?.targetId);if(!runtime.cli)throw Error('CLI unavailable');return runtime.cli.submit(body);},
+    request:id=>{const {job,remoteStatus}=cliRequest(id);return {job,remoteStatus};},
+    start:body=>{const {runtime,job}=cliRequest(oneId(body));return job.state==='pending'?runtime.queue.start(job.id):job;},
+    reconcile:async body=>{const {runtime,job}=cliRequest(oneId(body));const binding={targetId:runtime.id,targetRevision:runtime.revision,profile:runtime.writeProfile};
+      const result=await runtime.cliProbe(prepareAgentCliStatus(job.operation,binding));return {requestId:job.id,remoteStatus:cliState.recordRemote(job.id,result.data?.agentCli)};},
+  };
+  const ordinarySource=commands.source;
+  commands.source=id=>{const job=queue.get(id);return job?.operation?.agentCliContract===AGENT_CLI_CONTRACT?targets.select(job.operation.agentCliTargetId).cli.source(id):ordinarySource(id);};
   const commandOutputs = {
     read(args) { return outputs.read(args, binding => {
       const runtime = targets.select(args.target ?? binding.targetId); runtime.verify();
@@ -166,7 +239,7 @@ export async function createApplication({ registry, classify, executeCommand, au
     readFile(new URL('./web/dist/app.js', import.meta.url), 'utf8'),
   ]);
   protocols = createProtocolAdapters({ queue, commands, files, store, lifecycle, settings, signer, adminAccess, targets, requestSafety,
-    authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal: shutdown.signal, commandPolicy, commandOutputs, environmentEditor, automationMetrics: createAutomationMetrics({state:commandState}) });
+    authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal: shutdown.signal, commandPolicy, commandOutputs, environmentEditor,agentCli, automationMetrics: createAutomationMetrics({state:commandState}) });
   const timer = setInterval(() => { lifecycle.reap().catch(() => {}); try { outputs.reap(); } catch { /* Failed deletions stay charged. */ } }, 30_000); timer.unref();
   let closing;
   return { ...protocols, queue, store, targets, transfers: runtimes[0].transfers, enabled: settings.uiEnabled,
@@ -176,8 +249,8 @@ export async function createApplication({ registry, classify, executeCommand, au
         // Drain normal responses, then close unfinished HTTP bodies before systemd times out.
         const deadline = setTimeout(() => server.closeAllConnections(), 5000); deadline.unref();
         server.close(() => { clearTimeout(deadline); resolve(); });
-      })))).finally(() => { commandState?.close(); outputs.close(); });
+      })))).finally(() => { for (const runtime of runtimes) {runtime.commands.close();runtime.cli?.close();} commandState?.close();cliState?.close(); outputs.close(); });
     },
   };
-  } catch (error) { commandState?.close(); outputs.close(); throw error; }
+  } catch (error) { commandState?.close();cliState?.close(); outputs.close(); throw error; }
 }

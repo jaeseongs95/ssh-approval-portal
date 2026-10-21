@@ -1,13 +1,15 @@
+import { COMMAND_MAX_BYTES, utf8WithinLimit } from '../contracts/ports.mjs';
+
 /** Name-policy grammar, never a shell evaluator or an argument risk classifier.
  * Unsupported/dynamic syntax is incomplete and takes the whole-line Jev path.
- * Bounded to the API's 2000-character command limit and 16 nested substitutions.
+ * Bounded to the API's 32KiB UTF-8 command limit and 16 nested wrappers/substitutions.
  */
 export function commandLineNames(source, nesting = 0) {
   const names = new Set(); let i = 0, usesSudo = false, complete = true;
   const unknown = () => { complete = false; throw Error('Unknown command structure'); };
   const reserved = new Set(['if','then','else','elif','fi','for','while','until','do','done','case','esac','function','select','time','!','{','}']);
   function invocation(words, depth) {
-    if (!words.length) unknown();
+    if (!words.length || nesting + depth > 16) unknown();
     const head = words[0];
     usesSudo ||= head.text.split('/').at(-1) === 'sudo';
     if (head.dynamic || !/^[A-Za-z0-9_][A-Za-z0-9_.+-]*$/.test(head.text) || reserved.has(head.text)) unknown();
@@ -25,7 +27,7 @@ export function commandLineNames(source, nesting = 0) {
         unknown();
       }
       if (n === words.length) unknown();
-      invocation(words.slice(n), depth); return;
+      invocation(words.slice(n), depth + 1); return;
     }
     if (['sh','bash','dash','zsh'].includes(head.text)) {
       let code = -1;
@@ -112,7 +114,7 @@ export function commandLineNames(source, nesting = 0) {
     if (nested) unknown();
     if (words.length) flush(); if (needCommand) unknown();
   }
-  try { if (typeof source !== 'string' || !source.length || source.length > 2000 || nesting > 16 || /[\r\n\0]/.test(source)) unknown(); line(0); }
+  try { if (!utf8WithinLimit(source, COMMAND_MAX_BYTES) || !source.length || nesting > 16 || /[\r\n\0]/.test(source)) unknown(); line(0); }
   catch { complete = false; }
   return { names: [...names], complete: complete && names.size > 0, usesSudo };
 }

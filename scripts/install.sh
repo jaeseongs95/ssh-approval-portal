@@ -42,8 +42,8 @@ install -d -m 0755 "$app" /opt/ssh-approval
 exec 9>"$base/.portal-install.lock"
 flock -n 9 || { echo 'An installation is already in progress' >&2; exit 1; }
 maintenance_reserved=0
+source "$source_dir/scripts/ensure-node-runtime.sh"
 maintenance_node=$runtime/bin/node
-[[ -x "$maintenance_node" ]] || maintenance_node=$(command -v node || true)
 release_maintenance() {
   if [[ "$maintenance_reserved" == 1 ]]; then "$maintenance_node" "$source_dir/scripts/maintenance.mjs" release || true; fi
 }
@@ -53,7 +53,6 @@ if systemctl is-active --quiet ssh-approval-bridge.service; then
   "$maintenance_node" "$source_dir/scripts/maintenance.mjs" reserve
   maintenance_reserved=1
 fi
-source "$source_dir/scripts/ensure-node-runtime.sh"
 node "$source_dir/scripts/verify.mjs" "$source_dir"
 stamp=$(date -u +%Y%m%dT%H%M%SZ)-$$
 backup=$app/backups/$stamp

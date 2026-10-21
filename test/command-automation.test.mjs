@@ -436,3 +436,92 @@ test('localized owner prose stays out of the real Jev wire body and remains boun
   await assert.rejects(f.app.targets.commands.run(command, undefined, key, context, '다른 목적이라고 설명'), /conflict/);
   assert.equal(f.executions.length, 0);
 });
+
+
+test('adopted prompt revision is journaled while saved v4 threshold policy stays byte-identical in meaning', async t => {
+  const { AUTOMATION_PROMPT_REVISION, AUTOMATION_PROMPT_SHA256 } = await import('../src/domain/command-policy.mjs');
+  const f=await fixture(t); await f.policy({commands:[],modelExecution:true,thresholds:{jev:threshold('jev-1.14.0')}});
+  const current=await f.api('/api/command-policy'),before={revision:current.body.revision,targets:current.body.targets};
+  const job=await f.run('id');assert.equal(job.state,'completed');
+  assert.equal(job.decision.questionVersion,'ssh-command-risk-v4');
+  assert.equal(job.decision.evaluation.promptRevision,AUTOMATION_PROMPT_REVISION);
+  assert.equal(job.decision.evaluation.promptSha256,AUTOMATION_PROMPT_SHA256);
+  assert.equal(job.decision.threshold.minLowRisk,0.9);
+  assert.ok(f.events.some(e=>e.action==='command-decision'&&e.decision.evaluation?.promptSha256===AUTOMATION_PROMPT_SHA256));
+  await f.restart();const after=await f.api('/api/command-policy');
+  assert.deepEqual({revision:after.body.revision,targets:after.body.targets},before);
+  const saved=f.app.queue.get(job.id);assert.equal(saved.decision.evaluation.promptRevision,AUTOMATION_PROMPT_REVISION);assert.equal(saved.decision.evaluation.promptSha256,AUTOMATION_PROMPT_SHA256);
+});
+
+
+test('failed model attempts retain prompt provenance without granting execution or relabeling no-call paths', async t => {
+  const { AUTOMATION_PROMPT_REVISION, AUTOMATION_PROMPT_SHA256 } = await import('../src/domain/command-policy.mjs');
+  let calls=0,mode='throw';
+  const f=await fixture(t,{riskEvaluators:{jev:{model:'jev-1.14.0',assess:async()=>{calls++;if(mode==='throw')throw Error('synthetic failure');return mode==='null'?null:{...low,label:'not-a-risk-label'};}}}});
+  await f.policy({commands:[],modelExecution:true,thresholds:{jev:threshold('jev-1.14.0')}});
+  const before=(await f.api('/api/command-policy')).body;
+  const ids=[];
+  for(mode of ['throw','null','invalid']){
+    const job=await f.run('id');ids.push(job.id);
+    assert.equal(job.state,'pending');assert.equal(job.decision.reasonCode,'evaluation_unavailable');
+    assert.equal(job.decision.evaluation.modelCalled,true);
+    assert.equal(job.decision.evaluation.promptRevision,AUTOMATION_PROMPT_REVISION);
+    assert.equal(job.decision.evaluation.promptSha256,AUTOMATION_PROMPT_SHA256);
+    assert.equal(job.decision.assessment,undefined);
+    assert.ok(f.events.some(e=>e.id===job.id&&e.decision?.evaluation?.promptSha256===AUTOMATION_PROMPT_SHA256));
+  }
+  const noCall=await f.run('id',undefined,'');
+  assert.equal(noCall.decision.evaluation.modelCalled,false);assert.equal(noCall.decision.evaluation.promptRevision,undefined);
+  assert.equal(calls,3);assert.equal(f.executions.length,0);
+  await f.restart();
+  for(const id of ids)assert.equal(f.app.queue.get(id).decision.evaluation.promptSha256,AUTOMATION_PROMPT_SHA256);
+  const after=(await f.api('/api/command-policy')).body;
+  assert.deepEqual({revision:after.revision,targets:after.targets},{revision:before.revision,targets:before.targets});
+});
+
+test('D-PERSIST failed model diagnostics survive audit, database and restart without authority or provider text', async t => {
+  let calls=0, answer={status:'unavailable',reason:'invalid_response',diagnostic:'PROBABILITY_SUM',raw:'synthetic-private-provider-body',probabilitySum:0.99999};
+  const f=await fixture(t,{riskEvaluators:{jev:{model:'jev-1.14.0',async assess(){calls++;return answer;}}}});
+  await f.policy({commands:[],modelExecution:true,thresholds:{jev:threshold('jev-1.14.0')}});
+  const job=await f.run('id -u','diagnostic-key-0001');
+  const expected={provider:'jev',status:'unavailable',reason:'evaluation_failed',failureReason:'invalid_response',diagnostic:'PROBABILITY_SUM'};
+  assert.deepEqual(job.decision.attempts,[expected]);assert.equal(job.state,'pending');assert.equal(f.executions.length,0);assert.equal(calls,1);
+  const event=f.events.find(e=>e.action==='command-decision'&&e.id===job.id);
+  assert.deepEqual(event.decision.attempts,[expected]);
+  await f.restart();
+  const restored=f.app.queue.get(job.id);assert.deepEqual(restored.decision.attempts,[expected]);assert.equal(restored.state,'expired');assert.equal(calls,1);
+  assert.doesNotMatch(JSON.stringify([restored,event]),/synthetic-private-provider-body|probabilitySum/);
+  answer={...answer,diagnostic:'synthetic-private-provider-body'};
+  const unknown=await f.run('id -u','diagnostic-key-0002');
+  assert.deepEqual(unknown.decision.attempts,[{provider:'jev',status:'unavailable',reason:'evaluation_failed',failureReason:'invalid_response'}]);
+  assert.equal(f.executions.length,0);
+});
+
+test('D-COMPOSITION actual Jev adapter failure reaches command DB, observation cache and evaluation without raw data', async t => {
+  const { AUTOMATION_QUESTION }=await import('../src/domain/command-policy.mjs');
+  const { createRequestSafety }=await import('../src/application/request-safety.mjs');
+  const { evaluateSafety }=await import('../src/application/safety-evaluation.mjs');
+  let calls=0;
+  const fetchImpl=async(url,options)=>{calls++;assert.equal(url,'https://api.typesafe.ai/v1/systemone');assert.equal(JSON.parse(options.body).state.command,'id -u');
+    return new Response(JSON.stringify({model:'jev-1.14.0',answers:{risk:{type:'choice',choice:'low_risk',confidence:0.9,probabilities:{low_risk:0.33333,high_risk:0.33333,uncertain:0.33333}}},usage:{input_tokens:1,output_tokens:1},raw:'private-composition-body'}),{headers:{'content-type':'application/json'}});};
+  const evaluator=createJevAssessor({apiKey:'fixture-composition-key',fetchImpl,inputKind:'execution',question:AUTOMATION_QUESTION,questionVersion:'ssh-command-risk-v4'});
+  const f=await fixture(t,{riskEvaluators:{jev:evaluator}});
+  await f.policy({commands:[],modelExecution:true,thresholds:{jev:threshold('jev-1.14.0')}});
+  const job=await f.run('id -u','composition-test-0001');
+  assert.deepEqual(job.decision.attempts,[{provider:'jev',status:'unavailable',reason:'evaluation_failed',failureReason:'invalid_response',diagnostic:'PROBABILITY_SUM'}]);
+  assert.equal(job.state,'pending');assert.equal(f.executions.length,0);assert.equal(calls,1);
+  const observation=createRequestSafety({queue:f.app.queue,assessor:createJevAssessor({apiKey:'fixture-composition-key',fetchImpl})});
+  const a=await observation.assess(job.id),b=await observation.assess(job.id);assert.deepEqual(a.assessment,{status:'unavailable',reason:'invalid_response',diagnostic:'PROBABILITY_SUM'});assert.deepEqual(a.assessment,b.assessment);assert.equal(calls,2);
+  const report=await evaluateSafety({cases:[{id:'S001',expected:'low_risk',input:{command:'id -u',target:'synthetic',environment:'fixture Linux',context:'numeric uid'}}],source:'simulated',assessor:createJevAssessor({apiKey:'fixture-composition-key',fetchImpl})});
+  assert.equal(report.records[0].diagnostic,'PROBABILITY_SUM');assert.equal(report.unavailable,1);assert.equal(calls,3);
+  await f.restart();const restored=f.app.queue.get(job.id);assert.deepEqual(restored.decision.attempts,job.decision.attempts);assert.equal(restored.state,'expired');assert.equal(calls,3);
+  assert.doesNotMatch(JSON.stringify([restored,f.events,a,b,report]),/private-composition-body|fixture-composition-key/);
+});
+
+test('LIMIT-AUTOMATION long approved prefix cannot bypass unmatched or denied final command',async t=>{
+ const f=await fixture(t);await f.policy({commands:['ls'],deniedCommands:['rm']});
+ const command='ls '+' '.repeat(32000)+'; id';const job=await f.run(command);
+ assert.equal(job.state,'pending');assert.equal(f.inputs.length,1);assert.equal(f.inputs[0].command,command);assert.equal(f.inputs[0].userApproval.explicit,false);assert.equal(f.executions.length,0);
+ const denied=await f.run(command.replace(/id$/,'rm /tmp/synthetic'));
+ assert.equal(denied.state,'denied');assert.equal(f.inputs.length,1);assert.equal(f.executions.length,0);
+});

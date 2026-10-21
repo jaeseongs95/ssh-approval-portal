@@ -1,0 +1,8 @@
+# Set two distinct public DNS hostnames before starting Caddy. No access log.
+{$PORTAL_ADMIN_HOST} {
+    reverse_proxy 127.0.0.1:4180
+}
+
+{$PORTAL_MCP_HOST} {
+    reverse_proxy 127.0.0.1:39124
+}

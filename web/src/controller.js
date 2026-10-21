@@ -65,13 +65,20 @@ export function createWebController({ state, view, api, document, location, time
     if (state.signedOut || !current(context)) throw Error('Output view replaced');
     return result;
   }
+  async function source(id) {
+    if (state.signedOut) throw Error('Signed out');
+    const context = capture(), revision = pageRevision, originPage = document.body?.dataset.page;
+    const result = await api('/api/' + id + '/source');
+    if (state.signedOut || !current(context) || originPage !== document.body?.dataset.page || revision !== pageRevision) throw Error('Source view replaced');
+    return result;
+  }
   function logout() {
     state.signedOut = true; generation++; activeRead?.abort(); stopPolling(); view.signedOut();
-    location.replace(state.accessMode ? '/cdn-cgi/access/logout' : '/');
+    location.replace(state.accessMode ? state.logoutPath : '/');
   }
   function start() {
-    view.initialize({ accessMode: state.accessMode, load: () => load(true), decide, download, output, logout });
+    view.initialize({ accessMode: state.accessMode, load: () => load(true), decide, download, output, source, logout });
     if (state.accessMode) return load();
   }
-  return { start, load, decide, download, output, logout, reloadState: () => ({ blocked: state.deciding || !!uncertainDecision || activeDownloads > 0 }) };
+  return { start, load, decide, download, output, source, logout, reloadState: () => ({ blocked: state.deciding || !!uncertainDecision || activeDownloads > 0 }) };
 }

@@ -1,4 +1,5 @@
 import { uiText as tr } from './ui-text.js';
+import { createCommandLineImport } from './command-line-import.js';
 import definitions from '../../src/domain/command-risks.json' with { type: 'json' };
 const names = value => value.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
 const unique = values => [...new Set(values)];
@@ -13,6 +14,8 @@ export function createCommandWorkspace({ document, container, commands, denied, 
   container.append(el('p', tr('왼쪽 목록에서 명령을 고르면 오른쪽에서 내용을 확인하고 수정할 수 있습니다. 변경은 검토·저장 후 적용됩니다.'), 'policy-help'));
   const stats = el('p', '', 'command-stats'); container.append(stats);
   const layout = el('div', '', 'command-workspace'); container.append(layout);
+  const lineImport = createCommandLineImport({ document, commands, denied, onChange: () => { onChange(); refresh(); }, onError });
+  container.insertBefore(lineImport.panel, layout);
   const master = el('section', '', 'command-master'); master.setAttribute('aria-label', tr('명령 등록 목록')); layout.append(master);
   master.append(el('h4', tr('명령 등록 목록')));
   const tools = el('div', '', 'command-tools'); master.append(tools);
@@ -22,6 +25,7 @@ export function createCommandWorkspace({ document, container, commands, denied, 
   for (const [value, text] of [['rules', tr('이 서버의 규칙')], ['all', tr('명령 찾아 추가 · 내장 목록 포함')], ['allowed', tr('자동승인 목록')], ['denied', tr('항상 차단 목록')], ['changed', tr('변경된 명령만')], ['unknown', tr('내장 안내 없는 규칙')]]) { const o = el('option', text); o.value = value; filter.append(o); }
   const filterLabel = el('label', '', 'policy-field'); filterLabel.append(el('span', tr('명령 보기')), filter); tools.append(filterLabel);
   const discover = button(tr('명령 찾아 추가'), () => { filter.value = 'all'; limit = 12; refresh(); search.focus(); }); master.append(discover);
+  master.append(button(tr('명령줄 붙여넣기'), () => lineImport.open()));
   const status = el('p', '', 'policy-help'); status.setAttribute('role', 'status'); master.append(status);
   const table = el('table', '', 'command-grid'), caption = el('caption', tr('명령을 선택해 상세 내용과 설정을 확인하세요.')); caption.id = 'command-grid-help'; table.append(caption);
   const head = el('thead'), headings = el('tr'); for (const text of [tr('명령'), tr('기본 위험'), tr('초안 상태')]) { const th = el('th', text); th.scope = 'col'; headings.append(th); } head.append(headings); table.append(head);
@@ -89,6 +93,7 @@ export function createCommandWorkspace({ document, container, commands, denied, 
       else if (priorAllowed.includes(name) && !allowed.includes(name)) detail.append(el('p', tr('제외 예정 · 차단한 것이 아닙니다. 모델 설정에 따라 평가 후 자동 실행될 수 있습니다.'), 'command-consequence'));
       detail.append(el('p', tr('수정은 초안에만 반영됩니다. 위의 변경 확인·저장에서 위험도를 확인하고 OK 후 저장하세요.'), 'policy-help'));
     } else detail.append(el('h4', tr('선택할 명령이 없습니다')), el('p', tr('검색어나 필터를 바꾸거나 명령 찾아 추가를 눌러주세요.'), 'policy-help'));
+    lineImport.refresh();
     more.hidden = matches.length <= limit;
     if ((activeName || activeAction) && !active.isConnected) {
       const row = [...list.children].find(row => row.dataset.commandName === activeName);
@@ -97,5 +102,5 @@ export function createCommandWorkspace({ document, container, commands, denied, 
   }
   search.oninput = filter.onchange = () => { limit = 12; refresh(); };
   for (const input of [search, entry]) input.onkeydown = event => { if (event.key === 'Enter' && !event.isComposing) event.preventDefault(); };
-  return { search, filter, entry, refresh, controls: [search, filter, entry], container };
+  return { search, filter, entry, refresh, get controls() { return [search, filter, entry, ...lineImport.controls]; }, resetImport: lineImport.reset, importLine: value => lineImport.open(value), container };
 }

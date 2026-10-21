@@ -12,11 +12,11 @@ export async function authorizeAdminRequest(req, { adminAccess, adminToken, admi
   const deny = status => ({ allowed: false, status, routeKind });
   if (routeKind === 'maintenance') {
     if (!authenticated(req, adminToken)) return deny(401);
-  } else if (adminAccess.mode === 'access') {
+  } else if (['access', 'oidc'].includes(adminAccess.mode)) {
     if (!await adminAccess.authenticated(req)) return deny(401);
   } else if (routeKind === 'api' && !authenticated(req, adminToken)) return deny(401);
   if (['api', 'maintenance'].includes(routeKind) &&
-      !(method === 'GET' && (['/api/pending', '/api/requests', '/api/targets', '/api/command-policy', '/api/automation-metrics', '/api/environment'].includes(pathname) || /^\/api\/[a-f0-9]{48}$/.test(pathname) || /^\/api\/outputs\/[a-f0-9]{48}$/.test(pathname))) &&
+      !(method === 'GET' && (['/api/pending', '/api/requests', '/api/targets', '/api/command-policy', '/api/automation-metrics', '/api/environment','/api/agent-cli','/api/agent-cli/lookup'].includes(pathname) || /^\/api\/[a-f0-9]{48}$/.test(pathname) || /^\/api\/outputs\/[a-f0-9]{48}$/.test(pathname) || /^\/api\/[a-f0-9]{48}\/source$/.test(pathname) || /^\/api\/agent-cli\/requests\/[a-f0-9]{48}$/.test(pathname))) &&
       (method !== 'POST' || req.headers.origin !== adminOrigin)) return deny(403);
   return { allowed: true, routeKind };
 }
