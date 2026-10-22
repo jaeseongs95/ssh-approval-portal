@@ -1,4 +1,5 @@
 import metadata from '../../../package.json' with { type: 'json' };
+import { routeFileApi } from './file-api.mjs';
 import { createServer } from 'node:http';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { authenticated } from '../security/tickets.mjs';
@@ -35,7 +36,8 @@ export function createProtocolAdapters({ queue, commands, files, store, lifecycl
   });
   const adminHttp = createServer(async (req, res) => {
     try {
-      const authorization = await authorizeAdminRequest(req, { adminAccess, adminToken: settings.adminToken, adminOrigin: settings.adminOrigin, browserSessions });
+      const authorize = () => authorizeAdminRequest(req, { adminAccess, adminToken: settings.adminToken, adminOrigin: settings.adminOrigin, browserSessions });
+      const authorization = await authorize();
       if (!authorization.allowed) return json(res, authorization.status ?? 403, { error: authorization.status === 401 ? 'Unauthorized' : authorization.status === 409 ? 'Request refused, expired, busy or unavailable' : 'Forbidden' });
       const url = new URL(req.url, settings.adminOrigin);
       if(req.method==='GET'&&url.pathname==='/signed-out'){
@@ -52,6 +54,7 @@ export function createProtocolAdapters({ queue, commands, files, store, lifecycl
         if(url.pathname.endsWith('/start'))browserSessions.start(req,res,authorization.principal);else browserSessions.end(req,res,authorization.principal);
         return json(res,200,{connected:url.pathname.endsWith('/start')});
       }
+      if (await routeFileApi(req, res, url, { files, store, queue, targets, json, authorize })) return;
       const filter = url.searchParams.getAll('target');
       if (filter.length && (!['/api/requests', '/api/pending', '/api/automation-metrics'].includes(url.pathname) || filter.length !== 1 || !targets)) throw Error('Conflicting target selector');
       if (filter.length) targets.select(filter[0]);
