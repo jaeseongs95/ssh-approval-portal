@@ -16,6 +16,8 @@ import time
 PROVIDERS = {'codex': ['login', 'status'], 'claude': ['auth', 'status']}
 LIMIT = 8192
 TIMEOUT = 15
+# Claude 2.1.307 is 291974512 bytes; keep a finite ceiling and streaming hash.
+MAX_EXECUTABLE_BYTES = 512 * 1024 * 1024
 
 
 def require(ok):
@@ -61,10 +63,13 @@ def executable(home, provider):
                 hashlib.sha256(metadata['integrity'].encode()).hexdigest()[:16])
         binary = trusted(prefix / 'bin' / provider, home)
         resolved = binary.resolve(strict=True)
-        require(resolved.is_relative_to(prefix.resolve()) and resolved.stat().st_size <= 256 * 1024 * 1024)
+        require(resolved.is_relative_to(prefix.resolve()) and resolved.stat().st_size <= MAX_EXECUTABLE_BYTES)
         digest = hashlib.sha256()
+        total = 0
         with resolved.open('rb') as stream:
             for block in iter(lambda: stream.read(65536), b''):
+                total += len(block)
+                require(total <= MAX_EXECUTABLE_BYTES)
                 digest.update(block)
         require(digest.hexdigest() == metadata['executableSha256'])
         return binary

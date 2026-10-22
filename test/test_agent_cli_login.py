@@ -15,6 +15,8 @@ SPEC.loader.exec_module(login)
 @unittest.skipIf(os.geteuid() == 0, 'SSH helper requires a non-root account')
 class LoginStatusTests(unittest.TestCase):
     def setUp(self):
+        previous_umask = os.umask(0o077)
+        self.addCleanup(os.umask, previous_umask)
         self.temp = tempfile.TemporaryDirectory(prefix='cli-login-test-')
         self.addCleanup(self.temp.cleanup)
         self.home = Path(self.temp.name)
@@ -75,6 +77,68 @@ class LoginStatusTests(unittest.TestCase):
         binary.write_text('#!/usr/bin/python3\nprint("modified")\n', encoding='utf-8')
         with self.assertRaises(ValueError):
             login.check(self.home, 'codex')
+
+    def managed(self, provider, size=None):
+        root = self.home / '.local/share/ssh-approval-cli' / provider
+        integrity = 'sha512-synthetic-large-cli'
+        target = 'versions/2.1.307-' + hashlib.sha256(integrity.encode()).hexdigest()[:16]
+        prefix = root / target
+        (prefix / 'bin').mkdir(parents=True)
+        for directory in (root, root / 'versions', prefix):
+            directory.chmod(0o700)
+        binary = prefix / 'bin' / provider
+        binary.write_bytes(b'#!/bin/sh\nexit 0\n')
+        if size is not None:
+            with binary.open('r+b') as stream:
+                stream.truncate(size)
+        binary.chmod(0o700)
+        digest = hashlib.sha256()
+        with binary.open('rb') as stream:
+            for block in iter(lambda: stream.read(65536), b''):
+                digest.update(block)
+        metadata = prefix / '.installed.json'
+        metadata.write_text(json.dumps({'provider': provider, 'version': '2.1.307', 'integrity': integrity,
+                                        'executableSha256': digest.hexdigest()}), encoding='utf-8')
+        metadata.chmod(0o600)
+        (root / 'current').symlink_to(target)
+        return binary
+
+    def test_observed_large_claude_is_verified_before_auth_status(self):
+        # Actual TEST Claude 2.1.307 size; sparse bytes are synthetic, never vendor credentials.
+        binary = self.managed('claude', 291974512)
+        with patch.object(login, 'capture', return_value=(0, b'{"loggedIn":true}', b'')) as capture:
+            self.assertEqual(login.check(self.home, 'claude'), 'signed_in', 'large managed Claude must reach auth status')
+            capture.assert_called_once_with(binary, 'claude', self.home)
+        with binary.open('r+b') as stream:
+            stream.seek(-1, 2)
+            stream.write(b'X')
+        with patch.object(login, 'capture') as capture, self.assertRaises(ValueError):
+            login.check(self.home, 'claude')
+        capture.assert_not_called()
+
+    def test_managed_executable_limit_is_finite_and_inclusive(self):
+        self.assertEqual(login.MAX_EXECUTABLE_BYTES, 512 * 1024 * 1024)
+        binary = self.managed('claude', 512 * 1024 * 1024)
+        self.assertEqual(login.executable(self.home, 'claude'), binary)
+        with binary.open('r+b') as stream:
+            stream.truncate(512 * 1024 * 1024 + 1)
+        with self.assertRaises(ValueError):
+            login.executable(self.home, 'claude')
+
+    def test_hash_read_rejects_growth_after_stat(self):
+        from io import BytesIO
+        binary = self.managed('claude')
+        size = binary.stat().st_size
+        grown = binary.read_bytes() + b'X'
+        metadata = binary.parent.parent / '.installed.json'
+        value = json.loads(metadata.read_text(encoding='utf-8'))
+        value['executableSha256'] = hashlib.sha256(grown).hexdigest()
+        metadata.write_text(json.dumps(value), encoding='utf-8')
+        # Matching metadata cannot admit a stream that grows beyond the bound after stat.
+        with patch.object(login, 'MAX_EXECUTABLE_BYTES', size), \
+                patch.object(login.Path, 'open', return_value=BytesIO(grown)), \
+                self.assertRaises(ValueError):
+            login.executable(self.home, 'claude')
 
     def test_output_limit_and_timeout_are_bounded_and_reaped(self):
         self.binary('codex', "print('x'*9000)\n")

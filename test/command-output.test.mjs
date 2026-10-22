@@ -33,6 +33,9 @@ test('output snapshots preserve text blocks/data exactly across UTF8 pages and r
   assert.deepEqual(result.texts, []); assert.equal(result.failed, true); assert.equal(result.output.sshCompleteness, 'unknown');
   assert.deepEqual(JSON.parse(restore(store, id)), original);
   assert.equal(restore(store, id, 'text', 4093), original.texts.join('\n') + '\n' + JSON.stringify(original.data, null, 2));
+  const empty = store.finish(store.reserve(binding), { failed: false, texts: [] });
+  assert.equal(restore(store, empty.output.id, 'text'), '');
+  assert.deepEqual(JSON.parse(restore(store, empty.output.id)), { failed: false, texts: [] });
   const small = store.finish(store.reserve(binding), { failed: false, texts: ['a한🙂z'] });
   assert.equal(restore(store, small.output.id, 'text', 7), 'a한🙂z');
   assert.throws(() => store.read({ outputId: id, offsetBytes: -1 }, allow));
@@ -102,7 +105,29 @@ test('actual MCP/HTTP defaults omit sentinel and arbitrary command data; explici
     const immediate = await call('read-command', { command: 'id' });
     assert.equal(JSON.stringify(immediate).includes(marker), false); assert.ok(Buffer.byteLength(JSON.stringify(immediate)) < 2048);
     const page = await call('read-command-output', { outputId: immediate.structuredContent.output.id, maxBytes: 128 });
-    assert.ok(page.content[0].text.includes(marker)); assert.equal(JSON.stringify(page.structuredContent).includes(marker), false); assert.ok(page.structuredContent.bytes <= 128);
+    assert.ok(page.content[0].text.includes(marker));
+    assert.equal(page.structuredContent.text, page.content[0].text, 'structured-only consumers must receive the explicit output body');
+    assert.ok(page.structuredContent.bytes <= 128);
+    const advertised = (await client.listTools()).tools;
+    assert.ok(advertised.find(tool => tool.name === 'read-command-output').outputSchema.required.includes('text'));
+    assert.ok(!advertised.find(tool => tool.name === 'ui-read-command-output').outputSchema.required.includes('text'));
+    for (const format of ['text', 'json']) {
+      const pages = []; let offsetBytes = 0;
+      for (;;) {
+        const read = await call('read-command-output', { outputId: immediate.structuredContent.output.id, format, offsetBytes, maxBytes: OUTPUT_PAGE_BYTES - 1 });
+        assert.equal(read.isError, undefined);
+        const value = read.structuredContent;
+        assert.equal(value.text, read.content[0].text);
+        assert.equal(Buffer.byteLength(value.text), value.bytes); assert.ok(value.bytes <= OUTPUT_PAGE_BYTES - 1);
+        assert.ok(!value.text.includes('\ufffd')); pages.push(value.text);
+        if (value.eof) break;
+        assert.ok(value.nextOffset > offsetBytes); offsetBytes = value.nextOffset;
+      }
+      const complete = pages.join('');
+      if (format === 'json') assert.deepEqual(JSON.parse(complete), { failed: false, texts: [body], data: { private: marker } });
+      else assert.equal(complete, body + '\n' + JSON.stringify({ private: marker }, null, 2));
+    }
+    assert.equal((await call('read-command-output', { outputId: immediate.structuredContent.output.id, maxBytes: OUTPUT_PAGE_BYTES + 1 })).isError, true);
     assert.equal((await call('read-command-output', { outputId: immediate.structuredContent.output.id, target: 'wrong' })).isError, true);
     const requested = await call('run-command', { command: 'sudo id' }); const id = requested.structuredContent.id;
     await app.queue.approve(id);
