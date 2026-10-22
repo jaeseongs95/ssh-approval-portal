@@ -6,8 +6,8 @@ import {launchBrowser,browserName} from './browser.mjs';
 
 const root=fileURLToPath(new URL('../../',import.meta.url)),id='a'.repeat(48),revision='b'.repeat(64);
 const gate=()=>{let resolve;return {promise:new Promise(done=>resolve=done),resolve:()=>resolve()};};
-async function fixture(run,{width=390,locale='ko-KR'}={}){
- const f=await fixtureServer(root);let browser,context,page;
+async function fixture(run,{width=390,locale='ko-KR',compiled=false}={}){
+ const f=await fixtureServer(root);f.state.compiled=compiled;let browser,context,page;
  const posts=[],gets=[],holds=new Map(),allHolds=[],jobs=new Map();let lostSubmit=false,lostStart=false,installed={},loginResult={state:'signed_in'};
  const binding=targetId=>({targetId,targetRevision:revision,profile:targetId+'-write',displayName:targetId+' <server>',sshTarget:'mcpops@'+targetId+'.example',enabled:true});
  const p=provider=>({planId:'c'.repeat(48),binding:binding('alpha'),installation:{provider,installed:false,managed:false,version:null,installationRevision:'d'.repeat(64),login:'not_checked'},release:{provider,packageName:provider==='codex'?'@openai/codex':'@anthropic-ai/claude-code',version:'1.2.3',releaseDigest:'e'.repeat(64)},expiresAt:Date.now()+300000});
@@ -46,7 +46,7 @@ for(const locale of ['ko-KR','en-US'])for(const width of [320,390,768,1024,1440]
 
 test('CLI UI both providers, lost submit/start responses recover with GET only',()=>fixture(async f=>{
  await f.prepare('claude');assert.match(await f.page.locator('#cli-summary').textContent(),/@anthropic-ai\/claude-code/);f.setLostSubmit();await f.page.locator('#cli-ack').check();await f.page.locator('#cli-submit').click();await f.page.waitForFunction(()=>!document.querySelector('#cli-recover').disabled);assert.equal(await f.page.evaluate(()=>fixtureFetchCalls.filter(p=>p.path.endsWith('/submit')).length),1);assert.equal(f.jobs.size,1);await f.page.locator('#cli-recover').click();await f.page.locator('#cli-start').waitFor({state:'visible'});
- f.setLostStart();await f.page.locator('#cli-ack').check();await f.page.locator('#cli-start').click();await f.page.waitForFunction(()=>!document.querySelector('#cli-recover').disabled);await f.page.locator('#cli-recover').click();await f.page.waitForFunction(()=>document.querySelector('#cli-summary').textContent.includes('설치 실행 중'));assert.equal(await f.page.evaluate(()=>fixtureFetchCalls.filter(p=>p.path.endsWith('/start')).length),1);assert.equal(await f.page.evaluate(()=>fixtureFetchCalls.filter(p=>p.path.endsWith('/submit')).length),1);assert.equal(new Set(f.posts.filter(p=>p.path.endsWith('/submit')).map(p=>JSON.stringify(p.body))).size,1);
+ f.setLostStart();await f.page.locator('#cli-ack').check();await f.page.locator('#cli-start').click();await f.page.waitForFunction(()=>!document.querySelector('#cli-recover').disabled);await f.page.locator('#cli-recover').click();await f.page.waitForFunction(()=>document.querySelector('#cli-summary').textContent.includes('설치 실행 중'));assert.equal(await f.page.evaluate(()=>fixtureFetchCalls.filter(p=>p.path==='/api/agent-cli/start').length),1);assert.equal(await f.page.evaluate(()=>fixtureFetchCalls.filter(p=>p.path.endsWith('/submit')).length),1);assert.equal(new Set(f.posts.filter(p=>p.path.endsWith('/submit')).map(p=>JSON.stringify(p.body))).size,1);
 }));
 test('CLI UI stale preview response cannot cross provider or page scopes',()=>fixture(async f=>{
  const h=f.hold('/preview');await f.page.locator('#cli-inspect').click();await h.entered.promise;await f.page.locator('#cli-provider').selectOption('claude');h.release.resolve();await f.page.waitForFunction(()=>document.querySelector('#agent-cli-settings').getAttribute('aria-busy')==='false');assert.equal(await f.page.locator('#cli-summary').isVisible(),false);assert.equal(await f.page.locator('#cli-submit').isVisible(),false);
@@ -89,10 +89,35 @@ for(const locale of ['ko-KR','en-US'])test('CLI-LOGIN UI explicit status and acc
  f.setLoginResult({state:'signed_in',binding:{targetId:'wrong'}});await page.locator('#cli-login-check').click();await page.waitForFunction(()=>document.querySelector('#agent-cli-settings').getAttribute('aria-busy')==='false');assert.match(await page.locator('#cli-login-state').textContent(),locale.startsWith('ko')?/확인 불가/:/Unavailable/);
 },{locale}));
 test('CLI-LOGIN UI late results cannot cross target/provider/page/logout scopes',()=>fixture(async f=>{
- const {page}=f;await page.route('**/cdn-cgi/access/logout',route=>route.fulfill({status:204}));
+ const {page}=f;await page.route('**/signed-out',route=>route.fulfill({status:204}));
  for(const change of [()=>page.locator('#cli-provider').selectOption('claude'),()=>page.locator('#cli-target').selectOption('beta'),()=>page.locator('[data-page-link][href="/history"]').click(),()=>page.locator('#logout').click()]){
   const h=f.hold('/login-status');await page.locator('#cli-login-check').click();await h.entered.promise;await change();h.release.resolve();await page.waitForFunction(()=>document.querySelector('#agent-cli-settings').getAttribute('aria-busy')==='false');assert.doesNotMatch(await page.locator('#cli-login-state').textContent(),/로그인됨|Signed in/);
   if(await page.locator('body').getAttribute('data-page')==='history')await page.locator('[data-page-link][href="/settings"]').click();
  }
  assert.equal(f.posts.length,4);
 }));
+
+test('LOGOUT compiled administrator UI revokes locally and reconnects without global logout',()=>fixture(async f=>{
+ const {page}=f,calls=[];page.on('request',r=>calls.push({path:new URL(r.url()).pathname,method:r.method()}));
+ await page.locator('#cli-login-check').click();await page.waitForFunction(()=>document.querySelector('#cli-login-state').textContent.includes('로그인됨'));
+ await page.locator('#logout').click();await page.waitForURL('**/signed-out');assert.match(await page.locator('body').textContent(),/Administrator signed out/);
+ assert.equal(calls.filter(c=>c.path==='/api/session/logout'&&c.method==='POST').length,1);assert.equal(calls.some(c=>['/cdn-cgi/access/logout','/oauth2/sign_out'].includes(c.path)),false);
+ await page.getByRole('link',{name:'Reconnect administrator'}).click();await page.locator('#agent-cli-settings').waitFor({state:'attached'});await page.waitForFunction(()=>fixtureFetchCalls.some(c=>c.path==='/api/session/start'&&c.method==='POST'));
+ assert.equal(calls.some(c=>['/cdn-cgi/access/logout','/oauth2/sign_out'].includes(c.path)),false);
+},{compiled:true}));
+
+for(const locale of ['ko-KR','en-US'])test('LOGOUT response loss remains local and explicit retry finishes '+locale,()=>fixture(async f=>{
+ const {page}=f;let attempts=0;const global=[];page.on('request',r=>{const path=new URL(r.url()).pathname;if(['/cdn-cgi/access/logout','/oauth2/sign_out'].includes(path))global.push(path);});
+ await page.route('**/api/session/logout',route=>{attempts++;return route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error:'SYNTHETIC_PRIVATE'})});});
+ await page.locator('#logout').click();await page.waitForFunction(()=>document.querySelector('#logout').disabled===false);
+ assert.ok(page.url().endsWith('/settings'));assert.match(await page.locator('#error').textContent(),locale.startsWith('ko')?/로그아웃을 확인하지 못/:/could not be confirmed/);assert.equal(await page.locator('#load').isDisabled(),true);assert.doesNotMatch(await page.locator('body').textContent(),/SYNTHETIC_PRIVATE/);assert.equal(attempts,1);assert.deepEqual(global,[]);
+ await page.unroute('**/api/session/logout');await page.locator('#logout').click();await page.waitForURL('**/signed-out');assert.deepEqual(global,[]);
+},{locale}));
+
+for(const locale of ['ko-KR','en-US'])for(const failure of ['503','401','network','json'])test('BOOTSTRAP compiled UI explicit recovery '+locale+' '+failure,()=>fixture(async f=>{
+ const {page}=f;let starts=0,ends=0;const paths=[];page.on('request',r=>paths.push(new URL(r.url()).pathname));
+ await page.route('**/api/session/start',route=>{starts++;if(starts>1)return route.fallback();if(failure==='network')return route.abort();return route.fulfill({status:failure==='json'?200:Number(failure),contentType:'application/json',body:failure==='json'?'SYNTHETIC_PRIVATE':JSON.stringify({error:'SYNTHETIC_PRIVATE'})});});
+ await page.route('**/api/session/logout',route=>{ends++;return route.fallback();});
+ await page.reload();await page.locator('#sign-in').waitFor({state:'visible'});assert.equal(starts,1);assert.doesNotMatch(await page.locator('#error').textContent(),/SYNTHETIC_PRIVATE/);
+ await page.locator('#sign-in').click();await page.waitForFunction(()=>document.querySelector('#connection').classList.contains('connected'));assert.equal(starts,2);assert.equal(ends,1);assert.equal(await page.locator('#sign-in').isVisible(),false);assert.equal(paths.some(p=>['/cdn-cgi/access/logout','/oauth2/sign_out'].includes(p)),false);
+},{locale,compiled:true}));

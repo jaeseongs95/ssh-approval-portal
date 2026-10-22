@@ -11,6 +11,7 @@ import { Artifacts } from './src/adapters/storage/artifacts.mjs';
 import { createFileSource } from './src/adapters/sources/file-source.mjs';
 import { createTransferExecutor } from './src/adapters/ssh/transfers.mjs';
 import { parseSettings } from './src/adapters/config/settings.mjs';
+import {createBrowserSessionAdapter} from './src/adapters/security/admin-browser-sessions.mjs';
 import { createAdminAccess } from './src/adapters/security/admin-access.mjs';
 import { authorizeAdminRequest } from './src/adapters/security/admin-policy.mjs';
 import { Tickets } from './src/adapters/security/tickets.mjs';
@@ -49,6 +50,7 @@ const commandExecutor = execute => async (profile, command) => {
 export async function createApplication({ registry, classify, executeCommand, executePythonSource, executeAgentCli, agentReleaseCatalog, audit, transferRoot, env = process.env, uiHtml, accessKeySet, uploadSource, riskAssessor, policyRiskAssessor, secretResolver, riskEvaluators = {}, environmentTransport }) {
   const settings = parseSettings(env);
   const adminAccess = createAdminAccess(env, accessKeySet);
+  const browserSessions=['access','oidc'].includes(adminAccess.mode)?createBrowserSessionAdapter():undefined;
   const signer = new Tickets(env.BRIDGE_UI_TICKET_KEY);
   const definitions = resolveTargets(settings, registry);
   const store = new Artifacts(transferRoot, { maxBytes: settings.maxBytes, budget: settings.budget });
@@ -240,7 +242,7 @@ export async function createApplication({ registry, classify, executeCommand, ex
     readFile(new URL('./web/index.html', import.meta.url), 'utf8'),
     readFile(new URL('./web/dist/app.js', import.meta.url), 'utf8'),
   ]);
-  protocols = createProtocolAdapters({ queue, commands, files, store, lifecycle, settings, signer, adminAccess, targets, requestSafety,
+  protocols = createProtocolAdapters({ queue, commands, files, store, lifecycle, settings, signer, adminAccess, browserSessions, targets, requestSafety,
     authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal: shutdown.signal, commandPolicy, commandOutputs, environmentEditor,agentCli, automationMetrics: createAutomationMetrics({state:commandState}) });
   const timer = setInterval(() => { lifecycle.reap().catch(() => {}); try { outputs.reap(); } catch { /* Failed deletions stay charged. */ } }, 30_000); timer.unref();
   let closing;
@@ -251,8 +253,8 @@ export async function createApplication({ registry, classify, executeCommand, ex
         // Drain normal responses, then close unfinished HTTP bodies before systemd times out.
         const deadline = setTimeout(() => server.closeAllConnections(), 5000); deadline.unref();
         server.close(() => { clearTimeout(deadline); resolve(); });
-      })))).finally(() => { for (const runtime of runtimes) {runtime.commands.close();runtime.cli?.close();} commandState?.close();cliState?.close(); outputs.close(); });
+      })))).finally(() => { browserSessions?.close(); for (const runtime of runtimes) {runtime.commands.close();runtime.cli?.close();} commandState?.close();cliState?.close(); outputs.close(); });
     },
   };
-  } catch (error) { commandState?.close();cliState?.close(); outputs.close(); throw error; }
+  } catch (error) { browserSessions?.close(); commandState?.close();cliState?.close(); outputs.close(); throw error; }
 }

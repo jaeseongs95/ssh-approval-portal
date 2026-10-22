@@ -261,6 +261,8 @@ export function createWebView({ document, i18n }) {
     el('history').replaceChildren(empty(t('처리 이력을 한눈에'), t('실행 중인 요청부터 완료된 결과까지 확인할 수 있습니다.')));
     if (actions.accessMode) {
       el('token').hidden = true; el('logout').hidden = false;
+      el('sign-in').textContent=korean?'관리자 다시 연결':'Reconnect administrator';
+      el('sign-in').onclick=event=>{event.preventDefault();return actions.reconnect();};
       el('auth-label').textContent = t('본인 계정으로 연결됨'); el('auth-label').removeAttribute('for');
       el('auth-note').textContent = t(document.body.dataset.authMode === 'oidc' ? 'SSO에서 확인한 본인 계정으로 요청을 처리합니다.' : 'Cloudflare Access에서 확인한 본인 계정으로 요청을 처리합니다.');
     }
@@ -296,6 +298,8 @@ export function createWebView({ document, i18n }) {
       el('updated').textContent = `${t('마지막 갱신')} ${new Date().toLocaleTimeString(locale)} · ${t('10초마다 갱신')}`;
     },
     disconnected: () => { el('connection').classList.remove('connected'); el('connection-text').textContent = t('연결 확인 필요'); },
+    logoutErrorMessage:()=>korean?'관리자 로그아웃을 확인하지 못했습니다. 다시 시도해 주세요.':'Administrator sign-out could not be confirmed. Please retry.',
+    logoutRetry:()=>{el('logout').disabled=false;el('logout').textContent=korean?'로그아웃 다시 시도':'Retry sign out';},
     signedOut: () => {
       el('token').value = ''; el('jobs').replaceChildren(); el('history').replaceChildren(); records.clear();
       el('running')?.replaceChildren(); el('server-overview')?.replaceChildren(); serverRecords.clear(); targetList = [];

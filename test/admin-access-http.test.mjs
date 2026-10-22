@@ -22,6 +22,8 @@ for(const mode of ['access','oidc'])test(mode+' web requires signed owner, cooki
     for(const path of ['/','/settings','/history','/app.js','/api/session','/api/requests','/downloads/'+'1'.repeat(48)+'/'+'2'.repeat(32)])assert.equal((await fetch(url+path,{headers:{Authorization:'Bearer fixture-admin','cf-access-authenticated-user-email':'owner@example.test'}})).status,401,path);
     const html=await(await fetch(url,{headers:owner})).text();assert.ok(html.includes('data-auth-mode="'+mode+'"'));assert.ok(!html.includes(token));
     const session=await(await fetch(url+'/api/session',{headers:owner})).json();assert.deepEqual(session,{mode});
+    assert.equal((await fetch(url+'/api/requests',{headers:owner})).status,401,'upstream SSO alone does not create a browser session');
+    const opened=await fetch(url+'/api/session/start',{method:'POST',headers:{...owner,'Content-Type':'application/json'},body:'{}'});assert.equal(opened.status,200);owner.Cookie=opened.headers.get('set-cookie').split(';')[0];
     const job=app.queue.submit('sudo fixture');assert.equal(calls,0);
     const action=url+`/api/${job.id}/approve`;
     assert.equal((await fetch(action,{method:'POST',headers:{...owner,Origin:'https://evil.test'}})).status,403);

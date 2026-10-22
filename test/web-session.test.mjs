@@ -40,7 +40,7 @@ function harness(language, access = false, jobs) {
   const payload=jobs??[{id:'1'.repeat(48),kind:'command',state:'pending',target:'fixture@localhost',command:'echo 한글 원문',expiresAt:1800000000000}];
   const i18n=createWebI18n(language),state=createWebState(access),view=createWebView({document,i18n});
   const api=createWebApi({accessMode:access,getToken:view.token,isSignedOut:()=>state.signedOut,unauthorized:view.unauthorized,t:i18n.t,fetch:async(path,opts)=>{
-    requests.push({path,method:opts.method,headers:opts.headers,credentials:opts.credentials});if(opts.method==='POST')payload[0].state=path.endsWith('/deny')?'denied':'completed';
+    requests.push({path,method:opts.method,headers:opts.headers,credentials:opts.credentials});if(path.startsWith('/api/session/'))return {ok:true,json:async()=>({connected:path.endsWith('/start')})};if(opts.method==='POST')payload[0].state=path.endsWith('/deny')?'denied':'completed';
     const value=path==='/api/requests'?JSON.parse(JSON.stringify(payload)):path.endsWith('/download')?{downloadUrl:'/downloads/fixture'}:{state:payload[0].state};
     if(opts.method==='GET' && deferredGet){const next=deferredGet;deferredGet=null;await next.promise;}
     if(opts.method==='POST' && deferredPost){const next=deferredPost;deferredPost=null;await next.promise;}
@@ -130,10 +130,10 @@ test('Access logout is localized, clears requests, stops polling and navigates w
     const h=harness(lang,true);await settle();
     assert.equal(h.roots.logout.hidden,false);assert.equal(h.roots.logout.textContent,label);
     const release=h.deferNextGet();h.timers[0].fn();await settle();
-    const before=h.requests.length;h.roots.logout.onclick();
-    assert.deepEqual(h.navigations,['/cdn-cgi/access/logout']);assert.ok(h.cleared.includes(1));
+    const before=h.requests.length;await h.roots.logout.onclick();
+    assert.deepEqual(h.navigations,['/signed-out']);assert.ok(h.cleared.includes(1));
     release();await settle();await h.roots.load.onclick();h.timers[0].fn();await settle();
-    assert.equal(h.requests.length,before,'No post-logout polling or refresh');
+    assert.equal(h.requests.length,before+1,'Only the explicit local session logout request is sent; no polling or refresh');
     assert.equal(h.roots.jobs.children.length,0,'Delayed GET cannot restore sensitive requests');
     assert.equal(h.roots.history.children.length,0);assert.equal(h.roots['pending-count'].textContent,'0');
     assert.equal(h.roots.load.disabled,true);
@@ -155,8 +155,8 @@ test('late download POST cannot navigate away from logout or restore requests',a
     const button=body.children.find(x=>x.className==='actions').children[0];
     const release=h.deferNextPost();const saving=button.onclick();await settle();
     const before=h.requests.length;h.roots.logout.onclick();release();await saving;await settle();
-    assert.deepEqual(h.navigations,[access?'/cdn-cgi/access/logout':'/']);
-    h.timers[0].fn();await settle();assert.equal(h.requests.length,before);
+    assert.deepEqual(h.navigations,[access?'/signed-out':'/']);
+    h.timers[0].fn();await settle();assert.equal(h.requests.length,before+(access?1:0));
     assert.equal(h.roots.history.children.length,0);assert.equal(h.roots.jobs.children.length,0);
   }
 });
@@ -177,4 +177,29 @@ test('unrelated request changes preserve existing nodes, expanded history and ou
   assert.equal(h.roots.history.children[0],history,'running arrivals do not detach existing terminal history');
   assert.match(h.allText(h.roots.running),/unrelated change/);
   assert.equal(history.open,true);assert.equal(output.scrollTop,42);
+});
+
+test('administrator logout waits for bootstrap and never sends a global logout request',async()=>{
+ let release;const gate=new Promise(resolve=>release=resolve),calls=[];
+ const api=createWebApi({accessMode:true,getToken:()=>'',isSignedOut:()=>false,unauthorized(){},t:v=>v,fetch:async(path)=>{calls.push(path);if(path.endsWith('/start'))await gate;return{ok:true,json:async()=>({connected:path.endsWith('/start')})};}});
+ const begin=api.beginAdminSession(),end=api.endAdminSession();assert.deepEqual(calls,['/api/session/start']);release();await begin;await end;assert.deepEqual(calls,['/api/session/start','/api/session/logout']);
+});
+test('administrator logout response loss stays unconfirmed until explicit idempotent retry',async()=>{
+ const state=createWebState(true),navigations=[],errors=[];let attempts=0,retries=0;
+ const api=async()=>[];api.endAdminSession=async()=>{if(++attempts===1)throw Error('SYNTHETIC_PRIVATE');};
+ const view={initialize(){},signedOut(){},error:s=>errors.push(s),logoutRetry(){retries++;}};
+ const controller=createWebController({state,view,api,document:{body:{dataset:{}}},location:{replace:p=>navigations.push(p)},timers:{clearInterval(){}}});
+ await controller.logout();assert.equal(state.signedOut,true);assert.deepEqual(navigations,[]);assert.equal(retries,1);assert.ok(!errors.join('').includes('SYNTHETIC_PRIVATE'));
+ await controller.logout();assert.deepEqual(navigations,['/signed-out']);assert.equal(attempts,2);
+});
+
+for(const failure of ['http','network','json'])test('bootstrap '+failure+' failure exposes explicit administrator reconnect',async()=>{
+ let shown=0;const calls=[];
+ const api=createWebApi({accessMode:true,isSignedOut:()=>false,unauthorized:()=>shown++,t:v=>v,fetch:async path=>{calls.push(path);if(path.endsWith('/logout'))return{ok:true,json:async()=>({connected:false})};if(failure==='network')throw Error('SYNTHETIC_PRIVATE');return{ok:failure!=='http',status:503,json:async()=>{throw Error('SYNTHETIC_PRIVATE');}};}});
+ await assert.rejects(api.beginAdminSession(),error=>!error.message.includes('SYNTHETIC_PRIVATE'));assert.equal(shown,1);
+ await assert.rejects(api('/api/requests'));assert.deepEqual(calls,['/api/session/start'],'failed bootstrap never silently retries');
+ const state=createWebState(true),navigations=[];let actions;
+ const controller=createWebController({state,api,view:{initialize:a=>actions=a},document:{body:{dataset:{}}},location:{replace:p=>navigations.push(p)},timers:{}});
+ // The reconnect action is available without issuing an ordinary protected read.
+ await controller.reconnect();assert.deepEqual(calls,['/api/session/start','/api/session/logout']);assert.deepEqual(navigations,['/']);
 });

@@ -80,7 +80,7 @@ test('admin authorization preserves mode, maintenance, Origin and capability exc
   const bearer = { authorization: 'Bearer fixture-admin' }, post = { ...bearer, origin };
   const configs = {
     token: { adminAccess: { mode: 'token' }, adminToken: env.BRIDGE_ADMIN_TOKEN, adminOrigin: origin },
-    access: { adminAccess: { mode: 'access', authenticated: async r => r.headers.owner === 'signed-owner' }, adminToken: env.BRIDGE_ADMIN_TOKEN, adminOrigin: origin },
+    access: { adminAccess: { mode: 'access', identity: async r => r.headers.owner === 'signed-owner'?{subject:'verified-fixture',expiresAt:Date.now()+60000}:null }, browserSessions:{authenticated:r=>r.headers.browser==='fixture-session'}, adminToken: env.BRIDGE_ADMIN_TOKEN, adminOrigin: origin },
   };
   const cases = [
     ['token', req('/'), true, 'static'], ['token', req('/app.js'), true, 'static'],
@@ -93,9 +93,11 @@ test('admin authorization preserves mode, maintenance, Origin and capability exc
     ['access', req(download, 'GET', bearer), false, 'download', 401],
     ['access', req('/', 'GET', { owner: 'signed-owner' }), true, 'static'],
     ['access', req('/api/session', 'GET', { owner: 'signed-owner' }), true, 'session'],
-    ['access', req(download, 'HEAD', { owner: 'signed-owner' }), true, 'download'],
-    ['access', req('/api/' + 'a'.repeat(48) + '/approve', 'POST', { owner: 'signed-owner', origin }), true, 'api'],
-    ['access', req('/api/' + 'a'.repeat(48) + '/approve', 'POST', { owner: 'signed-owner', origin: 'https://other.example.test' }), false, 'api', 403],
+    ['access', req(download, 'HEAD', { owner: 'signed-owner', browser:'fixture-session' }), true, 'download'],
+    ['access', req('/api/' + 'a'.repeat(48) + '/approve', 'POST', { owner: 'signed-owner', browser:'fixture-session', origin }), true, 'api'],
+    ['access', req('/api/' + 'a'.repeat(48) + '/approve', 'POST', { owner: 'signed-owner', browser:'fixture-session', origin: 'https://other.example.test' }), false, 'api', 403],
+    ['access', req('/api/requests','GET',{owner:'signed-owner'}),false,'api',401],
+    ['access', req(download,'HEAD',{owner:'signed-owner'}),false,'download',401],
     ['access', req('/api/maintenance/reserve', 'POST', { owner: 'signed-owner', origin }), false, 'maintenance', 401],
     ['access', req('/api/maintenance/reserve', 'POST', post), true, 'maintenance'],
     ['access', req('/api/maintenance/release', 'GET', bearer), false, 'maintenance', 403],

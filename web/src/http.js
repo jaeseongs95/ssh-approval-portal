@@ -1,5 +1,16 @@
 export function createWebApi({ fetch, accessMode, getToken, isSignedOut, unauthorized, t }) {
-  return async function api(path, method = 'GET', body, { signal, timeoutMs = 15000 } = {}) {
+  let sessionReady;
+  const sessionRequest=async action=>{
+   let status;
+   try{
+    const response=await fetch('/api/session/'+action,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:'{}'});
+    status=response.status;
+    if(!response.ok)throw Error('Administrator session unavailable');
+    const value=await response.json();if(value?.connected!==(action==='start'))throw Error('Administrator session unavailable');
+   }catch{if(action==='start')unauthorized();throw Object.assign(Error(t('로그인이 만료되었거나 접근할 수 없습니다. 다시 로그인해 주세요.')),{status});}
+  };
+  const api=async function api(path, method = 'GET', body, { signal, timeoutMs = 15000 } = {}) {
+    if(sessionReady)await sessionReady;
     if (isSignedOut()) throw Error(t('로그아웃되었습니다.'));
     // Read cancellation never cancels, times out or replays a mutation.
     const read = method === 'GET' ? new AbortController() : null;
@@ -30,4 +41,7 @@ export function createWebApi({ fetch, accessMode, getToken, isSignedOut, unautho
       })]) : request());
     } finally { clearTimeout(timer); signal?.removeEventListener('abort', cancel); if (onAbort) read.signal.removeEventListener('abort', onAbort); }
   };
+  api.beginAdminSession=()=>sessionReady=accessMode?sessionRequest('start'):undefined;
+  api.endAdminSession=async()=>{try{await sessionReady;}catch{}await sessionRequest('logout');};
+  return api;
 }

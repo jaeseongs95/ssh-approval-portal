@@ -14,10 +14,11 @@ let storage;
 try { storage = globalThis.localStorage; } catch { /* disabled browser storage */ }
 const preference = displayLanguage(storage, navigator.language ?? 'en');
 const i18n = createWebI18n(preference.language);
-const state = createWebState(['access', 'oidc'].includes(document.body?.dataset.authMode), document.body?.dataset.authMode === 'oidc' ? '/oauth2/sign_out' : '/cdn-cgi/access/logout');
+const state = createWebState(['access', 'oidc'].includes(document.body?.dataset.authMode));
 const view = createWebView({ document, i18n });
 const api = createWebApi({ fetch: globalThis.fetch.bind(globalThis), accessMode: state.accessMode, getToken: view.token,
   isSignedOut: () => state.signedOut, unauthorized: view.unauthorized, t: i18n.t });
+api.beginAdminSession();
 const controller = createWebController({ state, view, api, document, location });
 controller.start();
 const pages = createAdminPages({ document, location, history });

@@ -27,17 +27,20 @@ export function oidcConfiguration(env) {
 export function createOidcAccess(env, keySet) {
   const config = oidcConfiguration(env);
   const keys = keySet ?? createRemoteJWKSet(new URL(config.jwksUrl), { timeoutDuration: 5000, cooldownDuration: 30000, cacheMaxAge: 600000 });
-  return { mode: 'oidc', async authenticated(req) {
+  const identity=async req=>{
     const header = req.headers.authorization;
     if (typeof header !== 'string' || !header.startsWith('Bearer ') || header.length > 16391) return false;
     try {
       const { payload } = await jwtVerify(header.slice(7), keys, { algorithms: ['RS256', 'ES256'], issuer: config.issuer, audience: config.audience,
         requiredClaims: ['exp', 'iat', 'sub', 'email', 'email_verified'], clockTolerance: 5 });
-      return typeof payload.sub === 'string' && payload.sub.length > 0 && payload.sub.length <= 255 &&
+      const valid=typeof payload.sub === 'string' && payload.sub.length > 0 && payload.sub.length <= 255 &&
         payload.iat <= Math.floor(Date.now() / 1000) + 5 && payload.email_verified === true &&
         (!Array.isArray(payload.aud) || payload.aud.length === 1 || payload.azp === config.audience) &&
         (payload.azp === undefined || payload.azp === config.audience) &&
         typeof payload.email === 'string' && config.owners.includes(payload.email.toLowerCase());
+      if(!valid||!Number.isSafeInteger(payload.exp)||!Number.isSafeInteger(payload.exp*1000))return null;
+      return Object.freeze({subject:JSON.stringify([config.issuer,config.audience,payload.sub]),expiresAt:payload.exp*1000});
     } catch { return false; }
-  } };
+  };
+  return {mode:'oidc',identity,authenticated:async req=>Boolean(await identity(req))};
 }

@@ -72,13 +72,21 @@ export function createWebController({ state, view, api, document, location, time
     if (state.signedOut || !current(context) || originPage !== document.body?.dataset.page || revision !== pageRevision) throw Error('Source view replaced');
     return result;
   }
-  function logout() {
+  async function logout() {
     state.signedOut = true; generation++; activeRead?.abort(); stopPolling(); view.signedOut();
-    location.replace(state.accessMode ? state.logoutPath : '/');
+    if(!state.accessMode){location.replace('/');return;}
+    try{await api.endAdminSession();location.replace('/signed-out');}
+    catch{view.error(view.logoutErrorMessage?.()??'Administrator sign-out could not be confirmed. Please retry.');view.logoutRetry?.();}
+  }
+  async function reconnect() {
+    if(state.signedOut||!state.accessMode)return;
+    // A user click clears only this application's cookie before a fresh page bootstrap.
+    try{await api.endAdminSession();}catch{}
+    if(!state.signedOut)location.replace('/');
   }
   function start() {
-    view.initialize({ accessMode: state.accessMode, load: () => load(true), decide, download, output, source, logout });
+    view.initialize({ accessMode: state.accessMode, load: () => load(true), decide, download, output, source, logout, reconnect });
     if (state.accessMode) return load();
   }
-  return { start, load, decide, download, output, source, logout, reloadState: () => ({ blocked: state.deciding || !!uncertainDecision || activeDownloads > 0 }) };
+  return { start, load, decide, download, output, source, logout, reconnect, reloadState: () => ({ blocked: state.deciding || !!uncertainDecision || activeDownloads > 0 }) };
 }

@@ -33,9 +33,13 @@ BRIDGE_ACCESS_OWNER_EMAILS=owner@example.com
 
 Keep the existing Tunnel route to loopback port39125 and Access protection. The origin pins team JWKS, issuer, application audience and RS256, checks time and human `sub/email/type` claims, and requires an exact owner email. It never trusts an unsigned email header. The UI does not store JWTs or tokens. Download links also require owner login in Access mode; use browser saving when a host download API cannot forward that session. Actual host saving requires a separate test.
 
+## Administrator browser sessions
+
+Access/OIDC administrator APIs, output and downloads require an application browser session in addition to the existing signed owner identity. Opening the administrator page connects through an exact-Origin `POST /api/session/start`; `POST /api/session/logout` revokes that session only. The server uses an opaque host-only `HttpOnly; Secure; SameSite=Strict` cookie. JavaScript never reads or stores its ID. Expiry cannot exceed the upstream JWT expiry verified at issuance, and a server restart requires a new connection. No configuration, database or authentication key is added. **Reconnect administrator** on the signed-out page starts a new application session using the existing SSO identity.
+
 ## Acceptance and recovery
 
-- **Sign out** in the top right stops polling, clears displayed requests and navigates to the [Cloudflare Access logout endpoint](https://developers.cloudflare.com/cloudflare-one/faq/authentication-faq/#how-do-end-users-log-out-of-an-application-protected-by-access). In token mode it only clears this tab's entered token and returns to the initial page. It does not revoke the server token or cancel running work.
+- **Sign out** stops polling, clears displayed requests, revokes only this administrator browser session on the server and opens a local signed-out page. It does not call the global Cloudflare Access or OIDC logout endpoint, so this action preserves Claude/Codex MCP authentication and other administrator browser sessions. An unconfirmed response offers explicit sign-out retry. Token mode clears only the entered token. Previously approved work is neither cancelled nor replayed.
 - Test Cloudflare, Google and GitHub in separate fresh browser sessions. Pending requests, history and results must appear without a token field.
 - Reject unapproved accounts, unauthenticated requests and wrong-application assertions. Approval/denial POSTs require the exact same Origin.
 - Decision/manual refreshes are immediate, periodic refresh is10seconds, and browser `ko*` selects Korean; all other locales select English.
@@ -47,3 +51,5 @@ Synthetic JWT tests do not prove real provider login. Installation, provider log
 Open **Approval history** or `/history` to search retained results and filter by status. Tab navigation keeps the target, search, status filter, page, expanded records and loaded output. Reloading reopens the history route but resets temporary view state. This is not an all-time archive; output is read only after **View output** is clicked.
 
 Under Settings, **Display language** offers automatic detection, Korean and English. **Apply language and reload** stores only this browser preference and reloads the page. Unsaved drafts are cleared; token authentication requires re-entering the administrator token. If storage is unavailable, automatic detection remains active and an error is shown. Commands, raw output, server policies and English Jev evaluation context remain unchanged.
+
+If initial administrator connection fails, select **Reconnect administrator**. This clears only the application cookie and reopens the administrator page. Start requests carrying a revoked or expired cookie cannot automatically create a replacement session.

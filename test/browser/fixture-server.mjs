@@ -13,6 +13,8 @@ export async function fixtureServer(root) {
         if(state.agentCli){await state.agentCli(request,response,url);return;}
         response.setHeader('Content-Type','application/json');response.end(JSON.stringify({available:false,providers:[],bindings:[]}));return;
       }
+      if(['/api/session/start','/api/session/logout'].includes(url.pathname)&&request.method==='POST'){response.setHeader('Content-Type','application/json');response.end(JSON.stringify({connected:url.pathname.endsWith('/start')}));return;}
+      if(url.pathname==='/signed-out'){response.setHeader('Content-Type','text/html');response.end('<html><body>Administrator signed out. <a href="/">Reconnect administrator</a></body></html>');return;}
       if (url.pathname.startsWith('/api/outputs/')) {
         state.outputReads = (state.outputReads ?? 0) + 1; await state.beforeOutput?.();
         response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify({ text: 'EXPLICIT_WEB_SENTINEL', offsetBytes: 0, nextOffset: 21, totalBytes: 21, eof: true })); return;
@@ -45,6 +47,7 @@ export async function fixtureServer(root) {
       }
       if (['/cdn-cgi/access/logout','/oauth2/sign_out'].includes(url.pathname)) { response.end('Synthetic signed out'); return; }
       let text, type = 'text/javascript';
+      if(url.pathname==='/app.js'&&state.compiled){response.setHeader('Content-Type','text/javascript');response.end(await readFile(resolve(root,'web/dist/app.js'),'utf8'));return;}
       if (url.pathname === '/fixture/card') {
         text = (await readFile(resolve(root, 'ui/card.html'), 'utf8')).replace('<!-- SCRIPT -->', '<script type="module" src="/fixture/card-bootstrap.js"></script>'); type = 'text/html';
       } else if (url.pathname === '/fixture/card-bootstrap.js') text = await readFile(new URL('./card-bootstrap.js', import.meta.url), 'utf8');
@@ -58,7 +61,7 @@ export async function fixtureServer(root) {
       } else if (url.pathname === '/src/domain/command-risks.json') {
         text = await readFile(resolve(root, 'src/domain/command-risks.json'), 'utf8'); type = 'application/json';
       } else if (['/', '/settings', '/history', '/fixture/web'].includes(url.pathname)) {
-        text = (await readFile(resolve(root, 'web/index.html'), 'utf8')).replace('data-auth-mode="token"', () => `data-auth-mode="${state.oidc===true?'oidc':'access'}" data-command-automation="${state.commandAutomation === true}" data-multi-target="${state.multiTarget}" data-bridge-display-name="${escape(state.bridgeDisplayName)}" data-target-display-name="${escape(state.targetDisplayName)}"`).replace('data-command-automation="false"', () => `data-command-automation="${state.commandAutomation === true}"`).replace('<script src="/app.js" defer></script>', '<script type="module" src="/web/app.js"></script>'); type = 'text/html';
+        text = (await readFile(resolve(root, 'web/index.html'), 'utf8')).replace('data-auth-mode="token"', () => `data-auth-mode="${state.oidc===true?'oidc':'access'}" data-command-automation="${state.commandAutomation === true}" data-multi-target="${state.multiTarget}" data-bridge-display-name="${escape(state.bridgeDisplayName)}" data-target-display-name="${escape(state.targetDisplayName)}"`).replace('data-command-automation="false"', () => `data-command-automation="${state.commandAutomation === true}"`).replace('<script src="/app.js" defer></script>', state.compiled?'<script src="/app.js" defer></script>':'<script type="module" src="/web/app.js"></script>'); type = 'text/html';
       } else {
         const path = resolve(root, '.' + url.pathname);
         if (!path.startsWith(resolve(root) + sep) || !/^\/(?:ui|web)\/(?:src\/[^/]+\.js|app\.js)$/.test(url.pathname)) { response.writeHead(404); response.end(); return; }

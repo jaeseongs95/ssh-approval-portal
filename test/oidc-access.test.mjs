@@ -1,3 +1,4 @@
+import {createBrowserSessionAdapter} from '../src/adapters/security/admin-browser-sessions.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPair, SignJWT, createLocalJWKSet, exportJWK } from 'jose';
@@ -36,7 +37,8 @@ test('OIDC requires exp, iat, sub, verified email and rejects symmetric token su
 test('OIDC route guard rejects administrator bearer fallback and protects static/download routes',async()=>{
   const adminAccess=createAdminAccess(env,keys),options={adminAccess,adminToken:'fixture-admin',adminOrigin:'https://admin.example.test'};
   for(const url of ['/','/api/session','/api/requests','/downloads/'+'a'.repeat(48)+'/'+'b'.repeat(32)])assert.equal((await authorizeAdminRequest({url,method:'GET',headers:{authorization:'Bearer fixture-admin'}},options)).allowed,false,url);
-  const token=await sign();assert.equal((await authorizeAdminRequest({url:'/api/requests',method:'GET',headers:{authorization:'Bearer '+token}},options)).allowed,true);
+  const token=await sign(),req={url:'/api/requests',method:'GET',headers:{authorization:'Bearer '+token}};assert.equal((await authorizeAdminRequest(req,options)).allowed,false);
+  options.browserSessions=createBrowserSessionAdapter();let cookie;options.browserSessions.start(req,{setHeader(_name,value){cookie=value.split(';')[0];}},await adminAccess.identity(req));req.headers.cookie=cookie;assert.equal((await authorizeAdminRequest(req,options)).allowed,true);
 });
 
 test('OIDC ES256 tokens are verified using the configured key set',async()=>{

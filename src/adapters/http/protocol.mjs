@@ -10,7 +10,7 @@ const json = (res, status, value) => { res.writeHead(status, { 'Content-Type': '
 
 const escapeHtml = value => value.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
 
-export function createProtocolAdapters({ queue, commands, files, store, lifecycle, settings, signer, adminAccess, authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal, targets, requestSafety, commandPolicy, commandOutputs, automationMetrics, environmentEditor,agentCli }) {
+export function createProtocolAdapters({ queue, commands, files, store, lifecycle, settings, signer, adminAccess, browserSessions, authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal, targets, requestSafety, commandPolicy, commandOutputs, automationMetrics, environmentEditor,agentCli }) {
   const capabilities = createCapabilities({ queue, store, signer, settings, targets, adminAuthMode: adminAccess.mode });
   const mcpServer = createMcpAdapter({ queue, commands, files, settings, capabilities, uiHtml, bindFileSource, shutdownSignal, targets, requestSafety, commandOutputs });
   const mcpHttp = createServer(async (req, res) => {
@@ -35,9 +35,23 @@ export function createProtocolAdapters({ queue, commands, files, store, lifecycl
   });
   const adminHttp = createServer(async (req, res) => {
     try {
-      const authorization = await authorizeAdminRequest(req, { adminAccess, adminToken: settings.adminToken, adminOrigin: settings.adminOrigin });
+      const authorization = await authorizeAdminRequest(req, { adminAccess, adminToken: settings.adminToken, adminOrigin: settings.adminOrigin, browserSessions });
       if (!authorization.allowed) return json(res, authorization.status ?? 403, { error: authorization.status === 401 ? 'Unauthorized' : authorization.status === 409 ? 'Request refused, expired, busy or unavailable' : 'Forbidden' });
       const url = new URL(req.url, settings.adminOrigin);
+      if(req.method==='GET'&&url.pathname==='/signed-out'){
+        res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"});
+        return res.end('<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>관리자 로그아웃 · Signed out</title><style>body{font:16px system-ui;background:#f3f5fa;color:#182946;margin:0;padding:10vh 24px}main{max-width:560px;margin:auto;background:white;border:1px solid #dbe2ef;border-radius:16px;padding:32px}a{display:inline-block;margin-top:16px;color:#174db4}</style><main><h1>관리자 로그아웃 완료</h1><p>Administrator signed out.</p><p>MCP 인증은 유지됩니다. · MCP authentication is preserved.</p><a href="/">관리자 다시 연결 · Reconnect administrator</a></main></html>');
+      }
+      if(['/api/session/start','/api/session/logout'].includes(url.pathname)){
+        if(req.method!=='POST')return json(res,405,{error:'Method not allowed'});
+        if(!browserSessions||!authorization.principal||url.search)throw Error('Administrator session unavailable');
+        if(req.headers['content-type']!=='application/json')return json(res,415,{error:'Content type required'});
+        const chunks=[];let bytes=0;for await(const part of req){const chunk=Buffer.from(part);bytes+=chunk.length;if(bytes>256)return json(res,413,{error:'Request too large'});chunks.push(chunk);}
+        let body;try{body=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(Buffer.concat(chunks)));}catch{return json(res,400,{error:'Invalid request'});}
+        if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).length)throw Error('Invalid session fields');
+        if(url.pathname.endsWith('/start'))browserSessions.start(req,res,authorization.principal);else browserSessions.end(req,res,authorization.principal);
+        return json(res,200,{connected:url.pathname.endsWith('/start')});
+      }
       const filter = url.searchParams.getAll('target');
       if (filter.length && (!['/api/requests', '/api/pending', '/api/automation-metrics'].includes(url.pathname) || filter.length !== 1 || !targets)) throw Error('Conflicting target selector');
       if (filter.length) targets.select(filter[0]);
