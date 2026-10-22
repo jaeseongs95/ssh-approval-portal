@@ -15,6 +15,8 @@ export function createAgentCliPanel({document,api,isSignedOut,canLoad,storage,ra
  const checkLogin=button('cli-login-check','로그인 상태 확인','Check login status');
  const loginState=el('p','','cli-login-status');loginState.id='cli-login-state';loginState.setAttribute('role','status');root.append(loginState);
  const recover=button('cli-recover','기존 요청 상태 조회','Read existing request');
+ const history=el('div'),historyLabel=el('label',t('기존 서버 요청 선택','Choose an existing server request'),'policy-field'),historySelect=el('select');historySelect.id='cli-history-select';historyLabel.append(historySelect);history.append(historyLabel);history.hidden=true;root.append(history);
+ const historyNext=el('button',t('더 오래된 요청 보기','Read older requests'),'secondary');historyNext.id='cli-history-next';historyNext.type='button';historyNext.hidden=true;history.append(historyNext);
  const summary=el('pre','','command');summary.id='cli-summary';summary.hidden=true;root.append(summary);
  const confirmation=el('label','','policy-check'),ack=el('input');ack.type='checkbox';ack.id='cli-ack';confirmation.append(ack,el('span',t('위 서버·CLI·버전과 계정 권한을 확인했습니다.','I reviewed this server, CLI, version and account permissions.')));root.append(confirmation);
  const actions=el('div','','cli-actions');root.append(actions);
@@ -29,7 +31,7 @@ export function createAgentCliPanel({document,api,isSignedOut,canLoad,storage,ra
  const storageKey='ssh-approval-cli-requests-v1',validId=v=>typeof v==='string'&&/^[a-f0-9]{48}$/.test(v),validTarget=v=>typeof v==='string'&&/^[a-z][a-z0-9_-]{0,31}$/.test(v);
  const validHint=h=>h&&Object.keys(h).every(k=>['requestKey','requestId','targetId','provider'].includes(k))&&typeof h.requestKey==='string'&&/^[A-Za-z0-9_.:-]{16,128}$/.test(h.requestKey)&&validTarget(h.targetId)&&['codex','claude'].includes(h.provider)&&(!Object.hasOwn(h,'requestId')||validId(h.requestId));
  let hints=[];try{const raw=storage?.getItem(storageKey);if(raw&&raw.length<=24576){const v=JSON.parse(raw);if(Array.isArray(v)&&v.length<=64&&v.every(validHint))hints=v;}}catch{/* disabled or invalid storage never grants execution */}
- let capabilities,preview,job,remoteStatus,busy=false,uncertain=false,generation=0,timer,closed=false;
+ let capabilities,preview,job,remoteStatus,historyCursor,busy=false,uncertain=false,generation=0,timer,closed=false;
  const active=()=>!closed&&!isSignedOut()&&document.body.dataset.page==='settings';
  const binding=()=>capabilities?.bindings?.find(b=>b.targetId===target.value&&b.enabled===true);
  const hint=()=>hints.find(h=>h.targetId===target.value&&h.provider===provider.value);
@@ -40,13 +42,14 @@ export function createAgentCliPanel({document,api,isSignedOut,canLoad,storage,ra
   const ready=Boolean(binding())&&capabilities?.available&&active();
   checkLogin.disabled=busy||!ready;
   inspect.disabled=busy||!ready||uncertain||Boolean(job&&['pending','running','evaluating','unknown'].includes(job.state));
-  recover.disabled=busy||!ready||!hint();submit.hidden=!preview||Boolean(job);submit.disabled=busy||uncertain||!ack.checked||!preview||Date.now()>=preview.expiresAt;
+  recover.disabled=busy||!ready;historySelect.disabled=busy||!ready;historyNext.disabled=busy||!ready;submit.hidden=!preview||Boolean(job);submit.disabled=busy||uncertain||!ack.checked||!preview||Date.now()>=preview.expiresAt;
   start.hidden=job?.state!=='pending';start.disabled=busy||uncertain||!ack.checked;
   reconcile.hidden=!job||!['unknown','failed'].includes(job.state);reconcile.disabled=busy||!ready;
   readOutput.hidden=!validId(job?.result?.structuredContent?.output?.id);readOutput.disabled=busy||!ready;
   ack.disabled=busy||(!preview&&job?.state!=='pending');root.setAttribute('aria-busy',String(busy));
  }
- function scope(){generation++;clearTimer();preview=job=remoteStatus=undefined;ack.checked=false;uncertain=Boolean(hint());summary.hidden=true;summary.textContent='';output.hidden=true;output.textContent='';failure.textContent='';message.textContent='';
+ function clearHistory(){history.hidden=true;historySelect.replaceChildren();historyCursor=undefined;historyNext.hidden=true;}
+ function scope(){generation++;clearTimer();clearHistory();preview=job=remoteStatus=undefined;ack.checked=false;uncertain=Boolean(hint());summary.hidden=true;summary.textContent='';output.hidden=true;output.textContent='';failure.textContent='';message.textContent='';
   loginState.textContent=t('로그인 상태: 미조회','Login status: Not checked');
   const b=binding();identity.textContent=b?[b.displayName,b.targetId,b.sshTarget,b.profile].filter(Boolean).join(' · '):'';
   const user=/^([A-Za-z_][A-Za-z0-9_.-]{0,63})@/.exec(b?.sshTarget??'')?.[1];
@@ -60,9 +63,26 @@ export function createAgentCliPanel({document,api,isSignedOut,canLoad,storage,ra
  }
  async function run(fn){if(busy||!active())return;const token=generation;busy=true;failure.textContent='';lock();try{await fn(()=>token===generation&&active());}catch(error){if(token===generation&&active())failure.textContent=String(error.message);}finally{busy=false;lock();}}
  function poll(){clearTimer();if(!active()||document.hidden||!['pending','running','evaluating'].includes(job?.state))return;timer=schedule(()=>{if(busy){poll();return;}run(async current=>{try{const value=await api('/api/agent-cli/requests/'+job.id);if(current())displayJob(value.job,value.remoteStatus);}finally{if(current())poll();}});},2000);}
- async function restore(){return run(async current=>{const h=hint();if(!h)return;uncertain=true;const value=await api('/api/agent-cli/lookup?'+new URLSearchParams({key:h.requestKey,targetId:h.targetId,provider:h.provider}));if(!current())return;
+ async function loadHistory(current,cursor=null){
+  const b=binding(),p=provider.value;clearTimer();clearHistory();preview=job=remoteStatus=undefined;ack.checked=false;summary.hidden=true;summary.textContent='';output.hidden=true;output.textContent='';lock();
+  const value=await api('/api/agent-cli/history?'+new URLSearchParams({targetId:b.targetId,provider:p,...(cursor??{})}));if(!current())return;
+  const states=['pending','running','completed','failed','unknown','expired','denied','evaluating'],rows=value?.requests;
+  if(value?.binding?.targetId!==b.targetId||value.binding.targetRevision!==b.targetRevision||value.binding.profile!==b.profile||value.provider!==p||!Array.isArray(rows)||rows.length>20||rows.some(row=>!validId(row?.id)||!states.includes(row.state)||!Number.isSafeInteger(row.createdAt)||row.createdAt<=0)||new Set(rows.map(row=>row.id)).size!==rows.length)throw Error('Invalid CLI history response');
+  if(rows.some((row,i)=>i>0&&(row.createdAt>rows[i-1].createdAt||(row.createdAt===rows[i-1].createdAt&&row.id>=rows[i-1].id)))||cursor&&rows.some(row=>row.createdAt>cursor.before||(row.createdAt===cursor.before&&row.id>=cursor.beforeId)))throw Error('Invalid CLI history order');
+  const last=rows.at(-1),next=value.next;
+  if(next!==null&&(!next||Object.keys(next).length!==2||rows.length!==20||next.before!==last.createdAt||next.beforeId!==last.id))throw Error('Invalid CLI history page');
+  const empty=el('option',t('요청 선택','Choose a request'));empty.value='';historySelect.append(empty);
+  for(const row of rows){const option=el('option',new Date(row.createdAt).toLocaleString()+' · '+stateName(row.state)+' · '+row.id);option.value=row.id;historySelect.append(option);}
+  historyCursor=next;historyNext.hidden=next===null;history.hidden=false;message.textContent=rows.length?t('기존 요청을 선택해 상태를 확인하세요. 설치는 다시 실행되지 않습니다.','Choose an existing request to read its status. Installation is not repeated.'):t('현재 서버·CLI의 요청 기록이 없습니다.','No request records for this server and CLI.');
+ }
+ async function restore(){return run(async current=>{const h=hint();if(!h)return loadHistory(current);uncertain=true;const value=await api('/api/agent-cli/lookup?'+new URLSearchParams({key:h.requestKey,targetId:h.targetId,provider:h.provider}));if(!current())return;
   if(value.found===true){const restored=validateJob(value.job);persist({...h,requestId:restored.id});displayJob(restored,value.remoteStatus);}else if(value.found===false){uncertain=true;message.textContent=t('요청 기록을 찾지 못했습니다. 자동으로 다시 설치하지 않습니다. 서버 기록을 확인한 뒤 새 작업을 준비하세요.','No request record found. Installation is not retried automatically. Check server records before preparing a new operation.');}else throw Error('Invalid CLI lookup response');
  });}
+ historyNext.onclick=()=>{const cursor=historyCursor;if(cursor)return run(current=>loadHistory(current,cursor));};
+ historySelect.onchange=()=>{const requestId=historySelect.value;if(!validId(requestId))return;return run(async current=>{
+  clearTimer();preview=job=remoteStatus=undefined;ack.checked=false;summary.hidden=true;summary.textContent='';output.hidden=true;output.textContent='';lock();
+  const value=await api('/api/agent-cli/requests/'+requestId);if(!current())return;if(value?.job?.id!==requestId)throw Error('CLI request identity changed');displayJob(value.job,value.remoteStatus);
+ });};
  checkLogin.onclick=()=>run(async current=>{const b=binding(),p=provider.value;loginState.textContent=t('로그인 상태: 조회 중…','Login status: Checking…');
   let value;try{value=await api('/api/agent-cli/login-status','POST',{targetId:b.targetId,provider:p});}catch{if(current())loginState.textContent=t('로그인 상태: 확인 불가. 다시 확인해 주세요.','Login status: Unavailable. Check again.');return;}
   if(!current())return;

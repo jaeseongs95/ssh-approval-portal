@@ -193,6 +193,12 @@ export async function createApplication({ registry, classify, executeCommand, ex
   const oneId=body=>{if(!body||Object.keys(body).length!==1||typeof body.requestId!=='string'||!/^[a-f0-9]{48}$/.test(body.requestId))throw Error('Invalid CLI request fields');return body.requestId;};
   const agentCli={
     get:()=>({available:Boolean(cliState),providers:agentCliProviders(),bindings:runtimes.map(runtime=>({targetId:runtime.id,targetRevision:runtime.revision,profile:runtime.writeProfile,displayName:runtime.displayName,sshTarget:runtime.target,enabled:runtime.enabled}))}),
+    history:({targetId,provider,before,beforeId})=>{
+      if(typeof targetId!=='string'||!['codex','claude'].includes(provider)||!cliState)throw Error('Invalid CLI history');
+      const runtime=targets.select(targetId);runtime.verify();
+      const binding={targetId:runtime.id,targetRevision:runtime.revision,profile:runtime.writeProfile};
+      return {binding,provider,...cliState.history({...binding,provider},before===undefined?null:{before,beforeId})};
+    },
     lookup:({key,targetId,provider})=>{
       if(typeof key!=='string'||!/^[A-Za-z0-9_.:-]{16,128}$/.test(key)||!['codex','claude'].includes(provider)||typeof targetId!=='string')throw Error('Invalid CLI lookup');
       const runtime=targets.select(targetId);runtime.verify();

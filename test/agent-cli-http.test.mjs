@@ -64,6 +64,30 @@ test('CLI-HTTP lookup restores only a scoped owner record with GET and never pro
  assert.equal(f.calls.length,before);await f.restart();assert.equal((await f.api(query)).body.job.state,'expired');assert.equal(f.calls.length,before);
  f.profiles.get('aws-local').user='changed';assert.equal((await f.api(query)).status,409);assert.equal(f.calls.length,before);
 });
+test('CLI-HISTORY owner can find existing scoped requests without a browser key and no probe or journal write',async t=>{
+ const f=await fixture(t),codex=await f.submit(await f.preview(),'history-codex-request-001'),claude=await f.submit(await f.preview('claude'),'history-claude-request-001');
+ const beforeCalls=f.calls.length,beforeDb=await readFile(join(f.root,'agent-cli.sqlite')),beforeJobs=JSON.stringify(f.app.targets.queue.listAll());
+ const query='/api/agent-cli/history?targetId=default&provider=codex',value=await f.api(query,{originHeader:null});
+ assert.equal(value.status,200,'owner history lookup must not require a browser request key');
+ assert.deepEqual(value.body.requests,[{id:codex.id,state:'pending',createdAt:codex.createdAt}]);assert.equal(value.body.next,null);assert.equal(value.body.provider,'codex');assert.equal(value.body.binding.targetId,'default');assert.equal(value.body.binding.profile,'aws-local');
+ assert.equal((await f.api(query.replace('provider=codex','provider=claude'))).body.requests[0].id,claude.id);
+ assert.doesNotMatch(JSON.stringify(value.body),/SYNTHETIC_PRIVATE|sourceSha256|sourceArgvJson|request_key|command/);
+ assert.equal(f.calls.length,beforeCalls);assert.equal(JSON.stringify(f.app.targets.queue.listAll()),beforeJobs);assert.deepEqual(await readFile(join(f.root,'agent-cli.sqlite')),beforeDb);
+});
+test('CLI-HISTORY preserves owner/current-binding and exact query boundaries',async t=>{
+ const f=await fixture(t);await f.submit(await f.preview(),'history-owner-request-001');const before=f.calls.length,query='/api/agent-cli/history?targetId=default&provider=codex';
+ assert.equal((await f.api(query)).status,200);
+ for(const token of [null,'fixture-mcp','wrong'])assert.equal((await f.api(query,{token})).status,401);
+ assert.equal((await f.api(query,{originHeader:'https://attacker.test'})).status,403);
+ for(const suffix of ['&unexpected=1','&provider=claude','&before=1000','&beforeId='+ 'a'.repeat(48),'&before=NaN&beforeId='+'a'.repeat(48),'&before=1000&beforeId=bad'])assert.equal((await f.api(query+suffix)).status,409);
+ for(const bad of [query.replace('provider=codex','provider=other'),query.replace('targetId=default','targetId=unknown')])assert.equal((await f.api(bad)).status,409);
+ f.profiles.get('aws-local').user='changed';assert.equal((await f.api(query)).status,409);assert.equal(f.calls.length,before);
+});
+test('CLI-HISTORY survived restart exposes the same expired request without recreating execution authority',async t=>{
+ const f=await fixture(t),job=await f.submit(await f.preview(),'history-restart-request-001'),before=f.calls.length;await f.restart();
+ const value=await f.api('/api/agent-cli/history?targetId=default&provider=codex');assert.equal(value.status,200);assert.deepEqual(value.body.requests,[{id:job.id,state:'expired',createdAt:job.createdAt}]);
+ const found=await f.api('/api/agent-cli/requests/'+job.id);assert.equal(found.body.job.id,job.id);assert.equal(found.body.job.state,'expired');assert.equal((await f.start(found.body.job)).body.state,'expired');assert.equal(f.calls.length,before);
+});
 test('CLI-HTTP every mutation requires owner, exact Origin and bounded JSON before probe',async t=>{
  const f=await fixture(t),body={targetId:'default',provider:'codex'};
  for(const path of ['preview','submit','start','reconcile','login-status']){

@@ -59,6 +59,13 @@ export function createProtocolAdapters({ queue, commands, files, store, lifecycl
       if (req.method === 'GET' && url.pathname === '/api/targets') return json(res, 200, targets?.list() ?? { targets: [{ id: 'default', displayName: settings.targetDisplayName ?? 'SSH', enabled: true, isDefault: true }], defaultTarget: 'default' });
       if (req.method === 'GET' && url.pathname === '/api/session') return json(res, 200, { mode: adminAccess.mode });
       if(agentCli && req.method==='GET' && url.pathname==='/api/agent-cli')return json(res,200,agentCli.get());
+      if(agentCli && req.method==='GET' && url.pathname==='/api/agent-cli/history'){
+        const keys=url.searchParams.has('before')||url.searchParams.has('beforeId')?['targetId','provider','before','beforeId']:['targetId','provider'];
+        if([...url.searchParams].length!==keys.length||keys.some(key=>url.searchParams.getAll(key).length!==1))throw Error('Invalid CLI history fields');
+        const fields=Object.fromEntries(url.searchParams);
+        if(keys.length===4){if(!/^[1-9][0-9]{0,15}$/.test(fields.before))throw Error('Invalid CLI history cursor');fields.before=Number(fields.before);}
+        return json(res,200,agentCli.history(fields));
+      }
       if(agentCli && req.method==='GET' && url.pathname==='/api/agent-cli/lookup'){
         const keys=['key','targetId','provider'];
         if([...url.searchParams].length!==3||keys.some(key=>url.searchParams.getAll(key).length!==1))throw Error('Invalid CLI lookup fields');

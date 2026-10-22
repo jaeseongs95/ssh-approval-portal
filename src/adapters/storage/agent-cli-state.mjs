@@ -27,6 +27,17 @@ export function createAgentCliState(root){
  return {
   find(key){const row=db.prepare('SELECT digest,body FROM requests WHERE request_key=?').get(key);return row&&{digest:row.digest,job:JSON.parse(row.body)};},
   list(){return db.prepare('SELECT body FROM requests').all().map(row=>JSON.parse(row.body));},
+  history(binding,cursor=null){
+   const {targetId,targetRevision,profile,provider}=binding??{};
+   if(typeof targetId!=='string'||typeof targetRevision!=='string'||typeof profile!=='string'||!['codex','claude'].includes(provider))throw Error('Invalid CLI history binding');
+   if(cursor!==null&&(!cursor||Object.keys(cursor).length!==2||!Number.isSafeInteger(cursor.before)||cursor.before<=0||!idValid(cursor.beforeId)))throw Error('Invalid CLI history cursor');
+   const created="json_extract(body,'$.createdAt')",args=[AGENT_CLI_CONTRACT,targetId,targetRevision,profile,provider,profile];
+   let older='';if(cursor){older=` AND (${created}<? OR (${created}=? AND id<?))`;args.push(cursor.before,cursor.before,cursor.beforeId);}
+   const rows=db.prepare(`SELECT id,json_extract(body,'$.state') AS state,${created} AS createdAt FROM requests WHERE json_extract(body,'$.operation.agentCliContract')=? AND json_extract(body,'$.operation.agentCliTargetId')=? AND json_extract(body,'$.operation.agentCliTargetRevision')=? AND json_extract(body,'$.operation.agentCliProfile')=? AND json_extract(body,'$.operation.agentCliProvider')=? AND json_extract(body,'$.profile')=?${older} ORDER BY ${created} DESC,id DESC LIMIT 21`).all(...args);
+   if(rows.some(row=>!idValid(row.id)||!['pending','running','completed','failed','unknown','expired','denied','evaluating'].includes(row.state)||!Number.isSafeInteger(row.createdAt)||row.createdAt<=0))throw Error('Invalid CLI history metadata');
+   const requests=rows.slice(0,20).map(row=>({id:row.id,state:row.state,createdAt:row.createdAt})),last=requests.at(-1);
+   return {requests,next:rows.length>20?{before:last.createdAt,beforeId:last.id}:null};
+  },
   insert(job,key,digest){
    if(typeof key!=='string'||!/^agent-cli:[A-Za-z0-9_.:-]{16,128}$/.test(key)||typeof digest!=='string'||!/^[a-f0-9]{64}$/.test(digest))throw Error('Invalid CLI journal identity');
    if(db.prepare('SELECT count(*) AS n FROM requests').get().n>=10000)throw Error('CLI journal full');

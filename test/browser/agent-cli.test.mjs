@@ -5,10 +5,11 @@ import {fixtureServer} from './fixture-server.mjs';
 import {launchBrowser,browserName} from './browser.mjs';
 
 const root=fileURLToPath(new URL('../../',import.meta.url)),id='a'.repeat(48),revision='b'.repeat(64);
+const savedJob=(requestId=id)=>({id:requestId,state:'completed',createdAt:1000,operation:{agentCliContract:'agent-cli-install-v1',agentCliProvider:'codex',agentCliTargetId:'alpha',agentCliTargetRevision:revision,agentCliProfile:'alpha-write'},result:{structuredContent:{output:{id:'d'.repeat(48)}}}});
 const gate=()=>{let resolve;return {promise:new Promise(done=>resolve=done),resolve:()=>resolve()};};
 async function fixture(run,{width=390,locale='ko-KR',compiled=false}={}){
  const f=await fixtureServer(root);f.state.compiled=compiled;let browser,context,page;
- const posts=[],gets=[],holds=new Map(),allHolds=[],jobs=new Map();let lostSubmit=false,lostStart=false,installed={},loginResult={state:'signed_in'};
+ const posts=[],gets=[],holds=new Map(),allHolds=[],jobs=new Map();let lostSubmit=false,lostStart=false,installed={},loginResult={state:'signed_in'},historyResult;
  const binding=targetId=>({targetId,targetRevision:revision,profile:targetId+'-write',displayName:targetId+' <server>',sshTarget:'mcpops@'+targetId+'.example',enabled:true});
  const p=provider=>({planId:'c'.repeat(48),binding:binding('alpha'),installation:{provider,installed:false,managed:false,version:null,installationRevision:'d'.repeat(64),login:'not_checked'},release:{provider,packageName:provider==='codex'?'@openai/codex':'@anthropic-ai/claude-code',version:'1.2.3',releaseDigest:'e'.repeat(64)},expiresAt:Date.now()+300000});
  f.state.agentCli=async(req,res,url)=>{
@@ -20,8 +21,9 @@ async function fixture(run,{width=390,locale='ko-KR',compiled=false}={}){
   if(route==='/preview'){const value=p(body.provider);value.binding=binding(body.targetId);Object.assign(value.installation,installed);return send(value);}
   if(route==='/submit'){const r=body.request,job={id,state:'pending',operation:{agentCliContract:'agent-cli-install-v1',agentCliProvider:r.provider,agentCliTargetId:r.targetId,agentCliTargetRevision:r.targetRevision,agentCliProfile:r.profile},result:null};jobs.set(r.requestKey,job);if(lostSubmit){lostSubmit=false;return res.destroy();}return send(job);}
   if(route==='/lookup'){const job=jobs.get(url.searchParams.get('key'));return send(job?{found:true,job,remoteStatus:null}:{found:false});}
+  if(route==='/history')return send(typeof historyResult==='function'?historyResult(url):historyResult??{binding:binding(url.searchParams.get('targetId')),provider:url.searchParams.get('provider'),requests:[...jobs.values()].filter(job=>job.operation.agentCliTargetId===url.searchParams.get('targetId')&&job.operation.agentCliProvider===url.searchParams.get('provider')).map(({id,state,createdAt})=>({id,state,createdAt})),next:null});
   if(route==='/start'){const job=[...jobs.values()].find(v=>v.id===body.requestId);job.state='running';if(lostStart){lostStart=false;return res.destroy();}return send(job);}
-  if(route==='/requests/'+id)return send({job:[...jobs.values()][0],remoteStatus:null});
+  const existing=/^\/requests\/([a-f0-9]{48})$/.exec(route);if(existing)return send({job:[...jobs.values()].find(job=>job.id===existing[1]),remoteStatus:null});
   if(route==='/reconcile')return send({requestId:id,remoteStatus:{provider:[...jobs.values()][0].operation.agentCliProvider,state:'not_found'}});
   res.writeHead(404);res.end('{}');
  };
@@ -30,7 +32,7 @@ async function fixture(run,{width=390,locale='ko-KR',compiled=false}={}){
   await page.addInitScript(()=>{const original=window.fetch;window.fixtureFetchCalls=[];window.fetch=(url,options)=>{window.fixtureFetchCalls.push({path:String(url).split('?')[0],method:options?.method??'GET'});return original(url,options);};});
   page.on('pageerror',error=>console.error('FIXTURE_PAGE_ERROR '+error.message));
   await page.goto(f.origin+'/settings');const panel=page.locator('#agent-cli-settings');await panel.waitFor();await page.locator('#cli-target option[value=alpha]').waitFor({state:'attached'});await page.locator('#cli-target').selectOption('alpha');
-  await run({page,panel,posts,gets,jobs,context,origin:f.origin,setLoginResult(value){loginResult=value;},setInstallation(value){installed=value;},setLostSubmit(){lostSubmit=true;},setLostStart(){lostStart=true;},hold(route){const h={entered:gate(),release:gate()};holds.set(route,h);allHolds.push(h);return h;},prepare:async provider=>{if(provider)await page.locator('#cli-provider').selectOption(provider);await page.locator('#cli-inspect').click();await page.locator('#cli-summary').waitFor({state:'visible'});},create:async()=>{await page.locator('#cli-ack').check();await page.locator('#cli-submit').click();await page.locator('#cli-start').waitFor({state:'visible'});}});
+  await run({page,panel,posts,gets,jobs,context,origin:f.origin,setHistoryResult(value){historyResult=value;},setLoginResult(value){loginResult=value;},setInstallation(value){installed=value;},setLostSubmit(){lostSubmit=true;},setLostStart(){lostStart=true;},hold(route){const h={entered:gate(),release:gate()};holds.set(route,h);allHolds.push(h);return h;},prepare:async provider=>{if(provider)await page.locator('#cli-provider').selectOption(provider);await page.locator('#cli-inspect').click();await page.locator('#cli-summary').waitFor({state:'visible'});},create:async()=>{await page.locator('#cli-ack').check();await page.locator('#cli-submit').click();await page.locator('#cli-start').waitFor({state:'visible'});}});
  }finally{for(const h of allHolds)h.release.resolve();await context?.close();await browser?.close();await f.close();}
 }
 
@@ -65,7 +67,39 @@ test('CLI UI late submit/start/output responses never replace the new target; ou
  const outputGate=gate(),entered=gate();await page.route('**/api/outputs/*',async route=>{entered.resolve();await outputGate.promise;try{await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({text:'LATE_PREVIOUS_TARGET_OUTPUT'})});}catch{}});await page.locator('#cli-output-read').click();await entered.promise;await page.locator('#cli-target').selectOption('beta');outputGate.resolve();await page.waitForFunction(()=>document.querySelector('#agent-cli-settings').getAttribute('aria-busy')==='false');assert.equal(await page.locator('#cli-output').textContent(),'');assert.equal(await page.locator('#cli-output').isVisible(),false);
 }));
 test('CLI UI invalid public hints are ignored and never become execution authority',()=>fixture(async f=>{
- await f.page.evaluate(()=>sessionStorage.setItem('ssh-approval-cli-requests-v1',JSON.stringify([{targetId:'alpha',provider:'codex',requestKey:'valid-key-0000000001',requestId:'a'.repeat(48),command:'MALICIOUS'}])));await f.page.reload();await f.page.locator('#cli-target option[value=alpha]').waitFor({state:'attached'});await f.page.locator('#cli-target').selectOption('alpha');assert.equal(await f.page.locator('#cli-recover').isDisabled(),true);assert.equal(f.posts.length,0);assert.equal(f.gets.some(p=>p.startsWith('/api/agent-cli/lookup')),false);
+ await f.page.evaluate(()=>sessionStorage.setItem('ssh-approval-cli-requests-v1',JSON.stringify([{targetId:'alpha',provider:'codex',requestKey:'valid-key-0000000001',requestId:'a'.repeat(48),command:'MALICIOUS'}])));await f.page.reload();await f.page.locator('#cli-target option[value=alpha]').waitFor({state:'attached'});await f.page.locator('#cli-target').selectOption('alpha');assert.equal(await f.page.locator('#cli-recover').isEnabled(),true);assert.equal(f.posts.length,0);assert.equal(f.gets.some(p=>p.startsWith('/api/agent-cli/lookup')),false);
+}));
+for(const compiled of [false,true])for(const locale of ['ko-KR','en-US'])test('CLI-HISTORY cold browser reads an explicitly selected saved request and output without POST '+locale+' compiled='+compiled,()=>fixture(async f=>{
+ const {page}=f;f.jobs.set('server-only-key-not-in-browser',savedJob());
+ assert.equal(await page.evaluate(()=>sessionStorage.getItem('ssh-approval-cli-requests-v1')),null);
+ assert.equal(await page.locator('#cli-recover').isEnabled(),true,'existing server requests remain discoverable without local browser hints');
+ assert.equal(f.gets.some(path=>path.startsWith('/api/agent-cli/history')),false);
+ await page.locator('#cli-recover').click();await page.locator('#cli-history-select').waitFor({state:'visible'});
+ assert.equal(await page.locator('#cli-history-select').inputValue(),'');assert.equal(await page.locator('#cli-output-read').isVisible(),false);
+ await page.locator('#cli-history-select').selectOption(id);await page.locator('#cli-summary').waitFor({state:'visible'});assert.match(await page.locator('#cli-summary').textContent(),new RegExp(id));
+ assert.equal(f.posts.length,0);assert.equal(await page.evaluate(()=>fixtureFetchCalls.some(c=>c.path.startsWith('/api/outputs/'))),false);
+ await page.locator('#cli-output-read').click();await page.locator('#cli-output').waitFor({state:'visible'});assert.equal(await page.locator('#cli-output').textContent(),'EXPLICIT_WEB_SENTINEL');
+ assert.equal(f.gets.filter(path=>path==='/api/agent-cli/requests/'+id).length,1);assert.equal(f.posts.length,0);assert.equal(await page.evaluate(()=>sessionStorage.getItem('ssh-approval-cli-requests-v1')),null);
+},{locale,compiled}));
+test('CLI-HISTORY older pages are explicit GET reads and retain the selected request ID',()=>fixture(async f=>{
+ const {page}=f,ids=Array.from({length:21},(_,i)=>(100-i).toString(16).padStart(48,'0')),binding={targetId:'alpha',targetRevision:revision,profile:'alpha-write',enabled:true};f.jobs.set('older-server-only-record',savedJob(ids[20]));
+ f.setHistoryResult(url=>({binding,provider:'codex',requests:(url.searchParams.has('before')?ids.slice(20):ids.slice(0,20)).map(id=>({id,state:'completed',createdAt:1000})),next:url.searchParams.has('before')?null:{before:1000,beforeId:ids[19]}}));
+ assert.equal(await page.locator('#cli-recover').isEnabled(),true);await page.locator('#cli-recover').click();await page.locator('#cli-history-select').waitFor({state:'visible'});
+ assert.equal(await page.locator('#cli-history-select option').count(),21);assert.equal(f.gets.filter(path=>path.startsWith('/api/agent-cli/history')).length,1);
+ await page.locator('#cli-history-next').click();await page.locator('#cli-history-select option[value="'+ids[20]+'"]').waitFor({state:'attached'});
+ assert.equal(await page.locator('#cli-history-select option').count(),2);assert.equal(f.gets.filter(path=>path.includes('before=1000')&&path.includes('beforeId='+ids[19])).length,1);
+ await page.locator('#cli-history-select').selectOption(ids[20]);await page.locator('#cli-summary').waitFor({state:'visible'});assert.match(await page.locator('#cli-summary').textContent(),new RegExp(ids[20]));assert.equal(f.posts.length,0);
+}));
+for(const change of ['target','provider','page','logout'])test('CLI-HISTORY late history reply cannot cross '+change+' scope',()=>fixture(async f=>{
+ const {page}=f;f.jobs.set('server-only-record',savedJob());assert.equal(await page.locator('#cli-recover').isEnabled(),true);const h=f.hold('/history');await page.locator('#cli-recover').click();await h.entered.promise;
+ if(change==='target')await page.locator('#cli-target').selectOption('beta');else if(change==='provider')await page.locator('#cli-provider').selectOption('claude');else if(change==='page')await page.locator('[data-page-link][href="/history"]').click();else await page.locator('#logout').click();
+ h.release.resolve();await page.waitForFunction(()=>!document.querySelector('#agent-cli-settings')||document.querySelector('#agent-cli-settings').getAttribute('aria-busy')==='false');
+ assert.equal(await page.locator('#cli-history-select:visible').count(),0);assert.equal(await page.locator('#cli-output:visible').count(),0);assert.equal(f.posts.length,0);
+}));
+test('CLI-HISTORY wrong-binding metadata is refused before a saved request can be selected',()=>fixture(async f=>{
+ const {page}=f;f.setHistoryResult({binding:{targetId:'beta',targetRevision:revision,profile:'beta-write'},provider:'codex',requests:[{id,state:'completed',createdAt:1000}],next:null});
+ assert.equal(await page.locator('#cli-recover').isEnabled(),true);await page.locator('#cli-recover').click();await page.waitForFunction(()=>document.querySelector('#agent-cli-settings').getAttribute('aria-busy')==='false');
+ assert.equal(await page.locator('#cli-history-select:visible').count(),0);assert.equal(f.gets.some(path=>path.startsWith('/api/agent-cli/requests/')),false);assert.equal(f.posts.length,0);
 }));
 for(const locale of ['ko-KR','en-US'])test('CLI UI external coexistence and managed update are explicit '+locale,()=>fixture(async f=>{
  const {page}=f;f.setInstallation({installed:true,managed:false,version:'1.2.2'});await f.prepare();assert.match(await f.panel.locator('.policy-message').textContent(),locale.startsWith('ko')?/별도 관리 경로/:/separate managed path/);assert.match(await page.locator('#cli-summary').textContent(),/1\.2\.2/);assert.match(await page.locator('#cli-summary').textContent(),/1\.2\.3/);await f.create();assert.equal(f.posts.at(-1).body.request.action,'install');
