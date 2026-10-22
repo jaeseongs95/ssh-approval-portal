@@ -12,11 +12,15 @@ const adminOrigin='https://owner.test';
 const defer=()=>{let resolve;return {promise:new Promise(done=>{resolve=done;}),resolve:(...args)=>resolve(...args)};};
 function release(provider){const name=provider==='codex'?'@openai/codex':'@anthropic-ai/claude-code';return validateAgentRelease(provider,{name,version:'1.2.3',dist:{tarball:'https://registry.npmjs.org/'+name+'/-/'+name.split('/')[1]+'-1.2.3.tgz',integrity:'sha512-'+Buffer.alloc(64,7).toString('base64')}});}
 async function fixture(t,options={}){
- const root=await mkdtemp(join(tmpdir(),'cli-app-')),events=[],calls=[],profiles=new Map(),flags={probe:null,install:null,status:null,auditFail:false};
+ const root=await mkdtemp(join(tmpdir(),'cli-app-')),events=[],calls=[],profiles=new Map(),flags={probe:null,install:null,status:null,login:null,auditFail:false};
  let app,origin;const cleanup=[];t.after(async()=>{for(const release of cleanup)release();await app?.close();assert.ok(root.startsWith(join(tmpdir(),'cli-app-')));await rm(root,{recursive:true,force:true});});
  const env={BRIDGE_MCP_TOKEN:'fixture-mcp',BRIDGE_ADMIN_TOKEN:'fixture-owner',BRIDGE_UI_TICKET_KEY:'a'.repeat(64),BRIDGE_ADMIN_ORIGIN:adminOrigin,BRIDGE_JEV_ENABLED:'false',BRIDGE_COMMAND_AUTOMATION:'false',...options.env};
  const execute=async(plan,verify)=>{
   const checked=verify();assert.equal(checked.targetId,plan.manifest.targetId);assert.equal(checked.targetRevision,plan.manifest.targetRevision);assert.equal(checked.profile,plan.manifest.profile);calls.push(plan);
+  if(plan.agentCli.action==='login-status'){
+   if(flags.probe)await flags.probe(plan,verify);
+   return {failed:false,texts:[],data:{agentCli:{provider:plan.agentCli.provider,state:flags.login??'signed_in',private:'SYNTHETIC_PRIVATE'}}};
+  }
   if(plan.agentCli.action==='inspect'){
    if(flags.probe)await flags.probe(plan,verify);
    return {failed:false,texts:[],data:{agentCli:{provider:plan.agentCli.provider,installed:false,managed:false,version:null,active:null,installationRevision:'b'.repeat(64),login:'not_checked',private:'SYNTHETIC_PRIVATE'}}};
@@ -62,7 +66,7 @@ test('CLI-HTTP lookup restores only a scoped owner record with GET and never pro
 });
 test('CLI-HTTP every mutation requires owner, exact Origin and bounded JSON before probe',async t=>{
  const f=await fixture(t),body={targetId:'default',provider:'codex'};
- for(const path of ['preview','submit','start','reconcile']){
+ for(const path of ['preview','submit','start','reconcile','login-status']){
   for(const token of [null,'fixture-mcp'])assert.equal((await f.api('/api/agent-cli/'+path,{method:'POST',body,token})).status,401);
   for(const originHeader of [null,'https://attacker.test'])assert.equal((await f.api('/api/agent-cli/'+path,{method:'POST',body,originHeader})).status,403);
  }
@@ -159,4 +163,32 @@ test('CLI-ACK reconciliation observes remote records without completing or repla
   assert.equal(f.calls.filter(p=>p.agentCli.action==='install').length,1);
  }
  assert.equal(JSON.stringify(f.env),before);
+});
+
+// Status checks share the real owner HTTP and target-execution composition.
+test('CLI-LOGIN owner projection covers both providers and four honest states',async t=>{
+ const f=await fixture(t),path='/api/agent-cli/login-status';
+ for(const provider of ['codex','claude'])for(const state of ['signed_in','signed_out','not_installed','unavailable']){
+  f.flags.login=state;const r=await f.api(path,{method:'POST',body:{targetId:'default',provider}});
+  assert.equal(r.status,200);assert.equal(r.body.provider,provider);assert.equal(r.body.state,state);assert.ok(Number.isSafeInteger(r.body.checkedAt));
+  assert.deepEqual(Object.keys(r.body).sort(),['binding','checkedAt','provider','state']);assert.ok(!JSON.stringify(r).includes('SYNTHETIC_PRIVATE'));
+ }
+ const before=f.calls.length;
+ for(const body of [{targetId:'default',provider:'other'},{targetId:'missing',provider:'codex'},{targetId:'default',provider:'codex',command:'id'}])assert.equal((await f.api(path,{method:'POST',body})).status,409);
+ assert.equal(f.calls.length,before);assert.equal((await f.api(path,{method:'GET'})).status,403);
+ assert.equal((await f.api(path,{method:'POST',body:{},contentType:'text/plain'})).status,415);
+ assert.equal((await f.api(path+'?extra=1',{method:'POST',body:{}})).status,409);
+ assert.equal(f.app.queue.listAll().length,0);
+});
+test('CLI-LOGIN probe claim rejects concurrent work, hides errors and rejects binding drift',async t=>{
+ const f=await fixture(t),body={targetId:'default',provider:'codex'},path='/api/agent-cli/login-status';
+ const entered=defer(),gate=defer();f.beforeClose(gate.resolve);f.flags.probe=async()=>{entered.resolve();await gate.promise;};
+ const pending=f.api(path,{method:'POST',body});await Promise.race([entered.promise,pending.then(r=>{assert.equal(r.status,200);})]);
+ assert.equal((await f.api(path,{method:'POST',body})).status,409);
+ assert.equal((await f.api('/api/maintenance/reserve',{method:'POST',body:{}})).status,409);
+ f.profiles.get('aws-local').user='changed';gate.resolve();assert.equal((await pending).status,409);
+ f.profiles.get('aws-local').user='fixture';f.flags.probe=async()=>{throw Error('SYNTHETIC_PRIVATE');};
+ const r=await f.api(path,{method:'POST',body});assert.equal(r.body.state,'unavailable');assert.ok(!JSON.stringify(r).includes('SYNTHETIC_PRIVATE'));
+ f.flags.probe=null;assert.equal((await f.api(path,{method:'POST',body})).body.state,'signed_in');
+ assert.equal(f.events.filter(e=>e.action==='cli-probe-started').length,f.events.filter(e=>e.action==='cli-probe-finished').length);
 });

@@ -10,8 +10,8 @@
     },
     {
       "path": "app.mjs",
-      "size": 20485,
-      "sha256": "4306a5df46e938f066d22ddd8bbf323b4d145e7cea810d19c58579fb86a0dbcd"
+      "size": 20794,
+      "sha256": "6e6621fe22f5d6a4ab787dfe3da78a631ebd9a14841a53b5be97bdfb20a28f25"
     },
     {
       "path": "bridge.mjs",
@@ -85,8 +85,8 @@
     },
     {
       "path": "docs/agent-cli.ko.md",
-      "size": 4132,
-      "sha256": "08e04c165baf501d31ae64cce6ed516eae77a14784600e7b81b461236445040f"
+      "size": 5090,
+      "sha256": "f23b4337e2777ec2b9de57adb2576ab6501c206e2f43902324c546da2bf140a9"
     },
     {
       "path": "docs/agent-upload.en.md",
@@ -227,6 +227,11 @@
       "path": "scripts/audit-gate.mjs",
       "size": 865,
       "sha256": "01fbe5b366fa353fc5191f7e3ca0e4da301bac44d0b31965a9e48f239ab6bdd0"
+    },
+    {
+      "path": "scripts/check-agent-cli-login.py",
+      "size": 6240,
+      "sha256": "c6efc03c9095fe41d2f037c67ee0df9db200a381061d63786dc227ce83231616"
     },
     {
       "path": "scripts/check-package-imports.mjs",
@@ -475,8 +480,8 @@
     },
     {
       "path": "src/adapters/http/protocol.mjs",
-      "size": 11795,
-      "sha256": "d23416b8c51e2b956060119716cde06b3e9e89b214f43c59a023120ff2b50b8f"
+      "size": 11808,
+      "sha256": "e7278c4872e193867b2360f2b9f7bd2989fada12823cbcdef21f71b3e3effff2"
     },
     {
       "path": "src/adapters/mcp/server.mjs",
@@ -545,8 +550,8 @@
     },
     {
       "path": "src/adapters/ssh/agent-cli.mjs",
-      "size": 8294,
-      "sha256": "91b8d87abcb0ee73e9decde68fd6c9a11d25a9a29e0cf6e086b1893cf21d9aa2"
+      "size": 9365,
+      "sha256": "5c299d0eed360bf984a6aca8da374cc648a120998436011b5eeee69482c1bc1a"
     },
     {
       "path": "src/adapters/ssh/python-source.mjs",
@@ -590,8 +595,8 @@
     },
     {
       "path": "src/application/agent-cli.mjs",
-      "size": 8489,
-      "sha256": "2409358ed8c2d18deeb90239e0bd11d941fb7f8029aa42efaeb0ce051472a6d7"
+      "size": 9354,
+      "sha256": "af641613ba40ca0f0194d14638c4990dc5f1e8db8a35307c978110a10546b174"
     },
     {
       "path": "src/application/automation-metrics.mjs",
@@ -710,13 +715,13 @@
     },
     {
       "path": "test/agent-cli-delivery.test.mjs",
-      "size": 19140,
-      "sha256": "5504b6928082d9b229a651f66d61a08ee5e7c71430c9968a9db54e0a3bc27e67"
+      "size": 20728,
+      "sha256": "a37db80cda0157174f99dd8c51a93cfa5f41cbd924977f5d77a0b2d5b5327d90"
     },
     {
       "path": "test/agent-cli-http.test.mjs",
-      "size": 21586,
-      "sha256": "2e3eaf74839ac9d95538e5e6aa2b18768355559f15070286c5501f32f24bba2c"
+      "size": 24406,
+      "sha256": "d568c6ba8bdffebdc8c3506e85d205421c30def613e4ed5b8bf4291f850b2468"
     },
     {
       "path": "test/agent-cli-releases.test.mjs",
@@ -795,8 +800,8 @@
     },
     {
       "path": "test/browser/agent-cli.test.mjs",
-      "size": 14350,
-      "sha256": "d8600d98036572f8f233c5a55e7fde4531675ab5ef780ebcc7677006354e1914"
+      "size": 17628,
+      "sha256": "fb2a448a54d0c55c6a20b0d42c3df754813cbc2bffd2176bc0111512607a951d"
     },
     {
       "path": "test/browser/browser.mjs",
@@ -830,8 +835,8 @@
     },
     {
       "path": "test/browser/fixture-server.mjs",
-      "size": 5869,
-      "sha256": "a5b37137c8ba3e68c8c6339b077bb466689d723765dd14c5d9cf72997bf6a648"
+      "size": 6014,
+      "sha256": "8e2fd294ee4fb6b17884299b435cc3755277f06024119a5a054b42b9b0ce1d4a"
     },
     {
       "path": "test/browser/history-language.test.mjs",
@@ -1249,6 +1254,11 @@
       "sha256": "0946f06a80445bb4e5ca7e1fac3be94b921ab23d99c7153872dbde8a46d4e981"
     },
     {
+      "path": "test/test_agent_cli_login.py",
+      "size": 5092,
+      "sha256": "75d3d078ea7917e271e59a1b2dc95e4bb38bc40afadc8ab44343278f493e367a"
+    },
+    {
       "path": "test/test_cloudflare_api_lifecycle.py",
       "size": 19619,
       "sha256": "d23d7ca9deb740f639fedd907e7635d79d53cd3bf7b0d0e3af09b0cc74be2f85"
@@ -1470,8 +1480,8 @@
     },
     {
       "path": "web/dist/app.js",
-      "size": 231154,
-      "sha256": "31fdc16b21e1969f15dd17b92cecd4c57040ab709b7c969c0c1e084f51b9dc1e"
+      "size": 233250,
+      "sha256": "4b79e647ba48b2d7b78a071a8a4668b3c656c08883b9f1d98957d2dc8e9027ff"
     },
     {
       "path": "web/index.html",
@@ -1480,8 +1490,8 @@
     },
     {
       "path": "web/src/agent-cli.js",
-      "size": 15818,
-      "sha256": "06932a5de2ac87e760d3365acfccc6f177e79807fec4b04e78758f690735bc41"
+      "size": 17889,
+      "sha256": "6cf1addd37cde134d380fe8b9c2b6f74f78a80764f2fdf26181b6ca5cd2e4dbd"
     },
     {
       "path": "web/src/appearance.js",

@@ -119,7 +119,7 @@ test('CLI-LOOPBACK exact helper executes inspection/status over pinned SSH and p
     const p=current;if(info.command!==p.command){fixtureError='Wrong fixed receiver command';reject();return;}
     const stream=accept(),chunks=[];stream.on('error',()=>{});stream.on('data',chunk=>chunks.push(Buffer.from(chunk)));
     stream.once('end',()=>{
-     const bytes=Buffer.concat(chunks);received.push({bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')});
+     const bytes=Buffer.concat(chunks);received.push({bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex'),expectedBytes:p.manifest.sourceBytes,expectedSha256:p.manifest.sourceSha256});
      let delivered=bytes;if(fault==='short')delivered=bytes.subarray(0,bytes.length-1);if(fault==='wrong'){delivered=Buffer.from(bytes);delivered[0]^=1;}
      const child=spawn(p.manifest.interpreter,p.args,{stdio:['pipe','pipe','pipe'],env:{...process.env,JEV_SYNTHETIC_PARENT_SECRET:'SYNTHETIC_PARENT_SECRET'}});children.add(child);child.stdin.on('error',()=>{});
      child.stdout.on('data',chunk=>stream.write(chunk));child.stderr.on('data',chunk=>stream.stderr.write(chunk));
@@ -138,8 +138,9 @@ test('CLI-LOOPBACK exact helper executes inspection/status over pinned SSH and p
  const install=plan('install'),work=join(home,'.local/share/ssh-approval-cli/codex/operations',operationId);await mkdir(work,{recursive:true,mode:0o700});
  await writeFile(join(work,'receipt.json'),JSON.stringify({provider:'codex',operationId,intentDigest:install.agentCli.intentDigest,state:'failed',version:'1.2.3',login:'not_checked',error:'INSTALL_FAILED'}),{mode:0o600,flag:'wx'});
  current=prepareAgentCliPlan({action:'status',provider:'codex',binding,operationId,expectedIntentDigest:install.agentCli.intentDigest});const status=await executeAgentCli(registry,current,verify);assert.equal(status.data.agentCli.state,'failed');assert.equal(status.data.agentCli.error,'INSTALL_FAILED');
+ for(const provider of ['codex','claude']){current=plan('login-status',provider);const login=await executeAgentCli(registry,current,verify);assert.deepEqual(login.data.agentCli,{contract:'agent-cli-login-status-v1',provider,state:'not_installed'});}
  for(const mode of ['short','wrong']){fault=mode;current=plan();await assert.rejects(()=>executeAgentCli(registry,current,verify),unknown);}
- assert.equal(received.length,4);assert.ok(received.every(item=>item.bytes===current.manifest.sourceBytes&&item.sha256===current.manifest.sourceSha256));assert.deepEqual(await readFile(auth),authBytes);assert.equal(fixtureError,undefined);
+ assert.equal(received.length,6);assert.ok(received.every(item=>item.bytes===item.expectedBytes&&item.sha256===item.expectedSha256));assert.deepEqual(await readFile(auth),authBytes);assert.equal(fixtureError,undefined);
 });
 
 async function retryWire(t){
@@ -165,4 +166,16 @@ test('CLI-LOOPBACK real channel retry rechecks policy/target/profile and never r
   if(mode==='unchanged'){assert.equal(outcome.result.failed,false);assert.equal(wire.attempts,2);assert.equal(wire.received.length,1);assert.equal(wire.received[0].source,p.stdin);assert.equal(wire.received[0].command,p.command);}
   else{assert.ok(outcome.error);assert.equal(wire.attempts,1);assert.equal(wire.received.length,0);}
  });
+});
+
+test('CLI-LOGIN delivery accepts only the fixed helper and discards vendor private fields',async()=>{
+ for(const provider of ['codex','claude']){
+  const p=plan('login-status',provider),f=fake(p);assert.deepEqual(JSON.parse(p.manifest.argvJson),[provider]);assert.ok(p.manifest.sourceBytes<=16384);
+  for(const state of ['signed_in','signed_out','not_installed','unavailable']){
+   f.connection.exec=async()=>({exitCode:0,stdout:JSON.stringify({provider,state,token:'SYNTHETIC_PRIVATE',email:'SYNTHETIC_PRIVATE'}),stderr:''});
+   const r=await executeAgentCli(f.registry,p,verify);assert.deepEqual(r.data.agentCli,{contract:'agent-cli-login-status-v1',provider,state});assert.ok(!JSON.stringify(r).includes('SYNTHETIC_PRIVATE'));
+  }
+  for(const change of [{provider:'other',state:'signed_in'},{provider,state:'completed'}]){f.connection.exec=async()=>({exitCode:0,stdout:JSON.stringify(change),stderr:''});await assert.rejects(()=>executeAgentCli(f.registry,p,verify));}
+  for(const changed of [{...p,stdin:p.stdin+'# changed'},{...p,agentCli:{...p.agentCli,provider:'other'}},{...p,manifest:{...p.manifest,argvJson:JSON.stringify([provider,'login'])}}]){const g=fake(p);await assert.rejects(()=>executeAgentCli(g.registry,changed,verify));assert.equal(g.acquisitions,0);}
+ }
 });

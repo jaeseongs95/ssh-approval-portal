@@ -53,7 +53,7 @@ export function createProtocolAdapters({ queue, commands, files, store, lifecycl
       }
       const cliRequest=/^\/api\/agent-cli\/requests\/([a-f0-9]{48})$/.exec(url.pathname);
       if(agentCli && req.method==='GET' && cliRequest){const value=agentCli.request(cliRequest[1]);return json(res,200,{...value,job:presentJob(value.job)});}
-      const cliAction=/^\/api\/agent-cli\/(preview|submit|start|reconcile)$/.exec(url.pathname);
+      const cliAction=/^\/api\/agent-cli\/(preview|submit|start|reconcile|login-status)$/.exec(url.pathname);
       if(agentCli && cliAction){
         if(req.method!=='POST')return json(res,405,{error:'Method not allowed'});
         if(req.headers['content-type']!=='application/json')return json(res,415,{error:'JSON required'});

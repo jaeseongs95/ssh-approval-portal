@@ -8,7 +8,7 @@ const root=fileURLToPath(new URL('../../',import.meta.url)),id='a'.repeat(48),re
 const gate=()=>{let resolve;return {promise:new Promise(done=>resolve=done),resolve:()=>resolve()};};
 async function fixture(run,{width=390,locale='ko-KR'}={}){
  const f=await fixtureServer(root);let browser,context,page;
- const posts=[],gets=[],holds=new Map(),allHolds=[],jobs=new Map();let lostSubmit=false,lostStart=false,installed={};
+ const posts=[],gets=[],holds=new Map(),allHolds=[],jobs=new Map();let lostSubmit=false,lostStart=false,installed={},loginResult={state:'signed_in'};
  const binding=targetId=>({targetId,targetRevision:revision,profile:targetId+'-write',displayName:targetId+' <server>',sshTarget:'mcpops@'+targetId+'.example',enabled:true});
  const p=provider=>({planId:'c'.repeat(48),binding:binding('alpha'),installation:{provider,installed:false,managed:false,version:null,installationRevision:'d'.repeat(64),login:'not_checked'},release:{provider,packageName:provider==='codex'?'@openai/codex':'@anthropic-ai/claude-code',version:'1.2.3',releaseDigest:'e'.repeat(64)},expiresAt:Date.now()+300000});
  f.state.agentCli=async(req,res,url)=>{
@@ -16,6 +16,7 @@ async function fixture(run,{width=390,locale='ko-KR'}={}){
   const body=posts.at(-1)?.body,route=url.pathname.slice('/api/agent-cli'.length),hold=holds.get(route);if(hold){holds.delete(route);hold.entered.resolve();await hold.release.promise;}
   res.setHeader('Content-Type','application/json');const send=value=>res.end(JSON.stringify(value));
   if(route==='')return send({available:true,providers:[{id:'codex'},{id:'claude'}],bindings:['alpha','beta'].map(binding)});
+  if(route==='/login-status')return send({binding:binding(body.targetId),provider:body.provider,checkedAt:Date.now(),...loginResult});
   if(route==='/preview'){const value=p(body.provider);value.binding=binding(body.targetId);Object.assign(value.installation,installed);return send(value);}
   if(route==='/submit'){const r=body.request,job={id,state:'pending',operation:{agentCliContract:'agent-cli-install-v1',agentCliProvider:r.provider,agentCliTargetId:r.targetId,agentCliTargetRevision:r.targetRevision,agentCliProfile:r.profile},result:null};jobs.set(r.requestKey,job);if(lostSubmit){lostSubmit=false;return res.destroy();}return send(job);}
   if(route==='/lookup'){const job=jobs.get(url.searchParams.get('key'));return send(job?{found:true,job,remoteStatus:null}:{found:false});}
@@ -29,7 +30,7 @@ async function fixture(run,{width=390,locale='ko-KR'}={}){
   await page.addInitScript(()=>{const original=window.fetch;window.fixtureFetchCalls=[];window.fetch=(url,options)=>{window.fixtureFetchCalls.push({path:String(url).split('?')[0],method:options?.method??'GET'});return original(url,options);};});
   page.on('pageerror',error=>console.error('FIXTURE_PAGE_ERROR '+error.message));
   await page.goto(f.origin+'/settings');const panel=page.locator('#agent-cli-settings');await panel.waitFor();await page.locator('#cli-target option[value=alpha]').waitFor({state:'attached'});await page.locator('#cli-target').selectOption('alpha');
-  await run({page,panel,posts,gets,jobs,context,origin:f.origin,setInstallation(value){installed=value;},setLostSubmit(){lostSubmit=true;},setLostStart(){lostStart=true;},hold(route){const h={entered:gate(),release:gate()};holds.set(route,h);allHolds.push(h);return h;},prepare:async provider=>{if(provider)await page.locator('#cli-provider').selectOption(provider);await page.locator('#cli-inspect').click();await page.locator('#cli-summary').waitFor({state:'visible'});},create:async()=>{await page.locator('#cli-ack').check();await page.locator('#cli-submit').click();await page.locator('#cli-start').waitFor({state:'visible'});}});
+  await run({page,panel,posts,gets,jobs,context,origin:f.origin,setLoginResult(value){loginResult=value;},setInstallation(value){installed=value;},setLostSubmit(){lostSubmit=true;},setLostStart(){lostStart=true;},hold(route){const h={entered:gate(),release:gate()};holds.set(route,h);allHolds.push(h);return h;},prepare:async provider=>{if(provider)await page.locator('#cli-provider').selectOption(provider);await page.locator('#cli-inspect').click();await page.locator('#cli-summary').waitFor({state:'visible'});},create:async()=>{await page.locator('#cli-ack').check();await page.locator('#cli-submit').click();await page.locator('#cli-start').waitFor({state:'visible'});}});
  }finally{for(const h of allHolds)h.release.resolve();await context?.close();await browser?.close();await f.close();}
 }
 
@@ -70,3 +71,28 @@ for(const locale of ['ko-KR','en-US'])test('CLI UI external coexistence and mana
  const {page}=f;f.setInstallation({installed:true,managed:false,version:'1.2.2'});await f.prepare();assert.match(await f.panel.locator('.policy-message').textContent(),locale.startsWith('ko')?/별도 관리 경로/:/separate managed path/);assert.match(await page.locator('#cli-summary').textContent(),/1\.2\.2/);assert.match(await page.locator('#cli-summary').textContent(),/1\.2\.3/);await f.create();assert.equal(f.posts.at(-1).body.request.action,'install');
  await page.locator('#cli-target').selectOption('beta');f.setInstallation({installed:true,managed:true,version:'1.2.2'});await f.prepare();assert.match(await page.locator('#cli-submit').textContent(),locale.startsWith('ko')?/업데이트/:/update/);await f.create();assert.equal(f.posts.at(-1).body.request.action,'update');
 },{locale}));
+
+for(const locale of ['ko-KR','en-US'])test('CLI-LOGIN UI explicit status and account/Node guidance '+locale,()=>fixture(async f=>{
+ const {page}=f;assert.equal(f.posts.length,0);assert.match(await page.locator('#cli-login-state').textContent(),locale.startsWith('ko')?/미조회/:/Not checked/);
+ for(const provider of ['codex','claude']){
+  await page.locator('#cli-provider').selectOption(provider);
+  for(const state of ['signed_in','signed_out','not_installed','unavailable']){
+   f.setLoginResult({state,email:'SYNTHETIC_PRIVATE'});await page.locator('#cli-login-check').click();await page.waitForFunction(()=>document.querySelector('#agent-cli-settings').getAttribute('aria-busy')==='false');
+   assert.match(await page.locator('#cli-login-state').textContent(),locale.startsWith('ko')?/확인 시각/:/Checked/);const labels={signed_in:['로그인됨','Signed in'],signed_out:['로그인 안 됨','Signed out'],not_installed:['미설치','Not installed'],unavailable:['확인 불가','Unavailable']};assert.ok((await page.locator('#cli-login-state').textContent()).includes(labels[state][locale.startsWith('ko')?0:1]));assert.doesNotMatch(await f.panel.textContent(),/SYNTHETIC_PRIVATE/);
+   assert.deepEqual(f.posts.at(-1).body,{targetId:'alpha',provider});
+  }
+  await page.locator('#cli-login').evaluate(n=>n.open=true);assert.match(await page.locator('#cli-login pre').textContent(),/PATH="\/opt\/ssh-approval\/node\/bin:\$PATH"/);
+  assert.match(await page.locator('#cli-login-account').textContent(),/sudo -iu mcpops/);
+ }
+ assert.equal(f.posts.length,8);assert.equal(f.posts.every(p=>p.path.endsWith('/login-status')),true);
+ assert.equal(await page.evaluate(()=>sessionStorage.getItem('ssh-approval-cli-requests-v1')),null);
+ f.setLoginResult({state:'signed_in',binding:{targetId:'wrong'}});await page.locator('#cli-login-check').click();await page.waitForFunction(()=>document.querySelector('#agent-cli-settings').getAttribute('aria-busy')==='false');assert.match(await page.locator('#cli-login-state').textContent(),locale.startsWith('ko')?/확인 불가/:/Unavailable/);
+},{locale}));
+test('CLI-LOGIN UI late results cannot cross target/provider/page/logout scopes',()=>fixture(async f=>{
+ const {page}=f;await page.route('**/cdn-cgi/access/logout',route=>route.fulfill({status:204}));
+ for(const change of [()=>page.locator('#cli-provider').selectOption('claude'),()=>page.locator('#cli-target').selectOption('beta'),()=>page.locator('[data-page-link][href="/history"]').click(),()=>page.locator('#logout').click()]){
+  const h=f.hold('/login-status');await page.locator('#cli-login-check').click();await h.entered.promise;await change();h.release.resolve();await page.waitForFunction(()=>document.querySelector('#agent-cli-settings').getAttribute('aria-busy')==='false');assert.doesNotMatch(await page.locator('#cli-login-state').textContent(),/로그인됨|Signed in/);
+  if(await page.locator('body').getAttribute('data-page')==='history')await page.locator('[data-page-link][href="/settings"]').click();
+ }
+ assert.equal(f.posts.length,4);
+}));

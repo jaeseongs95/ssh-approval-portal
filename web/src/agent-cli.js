@@ -12,6 +12,8 @@ export function createAgentCliPanel({document,api,isSignedOut,canLoad,storage,ra
  const buttons=el('div','','cli-actions');root.append(buttons);
  const button=(id,a,b,cls='secondary')=>{const n=el('button',t(a,b),cls);n.id=id;n.type='button';buttons.append(n);return n;};
  const inspect=button('cli-inspect','버전 확인·설치 준비','Check versions and prepare');
+ const checkLogin=button('cli-login-check','로그인 상태 확인','Check login status');
+ const loginState=el('p','','cli-login-status');loginState.id='cli-login-state';loginState.setAttribute('role','status');root.append(loginState);
  const recover=button('cli-recover','기존 요청 상태 조회','Read existing request');
  const summary=el('pre','','command');summary.id='cli-summary';summary.hidden=true;root.append(summary);
  const confirmation=el('label','','policy-check'),ack=el('input');ack.type='checkbox';ack.id='cli-ack';confirmation.append(ack,el('span',t('위 서버·CLI·버전과 계정 권한을 확인했습니다.','I reviewed this server, CLI, version and account permissions.')));root.append(confirmation);
@@ -21,7 +23,8 @@ export function createAgentCliPanel({document,api,isSignedOut,canLoad,storage,ra
  const reconcile=button('cli-reconcile','서버의 설치 기록 확인','Check server installation receipt');
  const readOutput=button('cli-output-read','저장 출력 읽기','Read stored output'),output=el('pre','','output');output.id='cli-output';output.tabIndex=0;output.hidden=true;root.append(output);
  const login=el('details');login.id='cli-login';login.append(el('summary',t('로그인 안내','Login guidance')));
- login.append(el('p',t('로그인 상태는 조회하지 않습니다. 설치 대상의 SSH 계정으로 터미널을 열어 로그인하세요. 인증코드·키는 이 화면에 입력하지 마세요. 설치만으로 Jev나 대체 심사가 활성화되지는 않습니다.','Login status is not checked. Open a terminal as the target SSH account to log in. Do not enter login codes or keys here. Installation does not activate Jev or fallback review.'),'policy-help'));
+ login.append(el('p',t('로그인 상태 확인 버튼으로 선택한 CLI의 저장된 로그인 상태를 조회할 수 있습니다. 설치 대상의 SSH 계정으로 터미널을 열어 로그인하세요. 인증코드·키는 이 화면에 입력하지 마세요. 설치만으로 Jev나 대체 심사가 활성화되지는 않습니다.','Use Check login status to read the selected CLI’s saved login state. Open a terminal as the target SSH account to log in. Do not enter login codes or keys here. Installation does not activate Jev or fallback review.'),'policy-help'));
+ const loginAccount=el('p','','policy-help');loginAccount.id='cli-login-account';login.append(loginAccount);
  const loginCommand=el('pre');login.append(loginCommand);root.append(login);document.querySelector('.grid')?.before(root);
  const storageKey='ssh-approval-cli-requests-v1',validId=v=>typeof v==='string'&&/^[a-f0-9]{48}$/.test(v),validTarget=v=>typeof v==='string'&&/^[a-z][a-z0-9_-]{0,31}$/.test(v);
  const validHint=h=>h&&Object.keys(h).every(k=>['requestKey','requestId','targetId','provider'].includes(k))&&typeof h.requestKey==='string'&&/^[A-Za-z0-9_.:-]{16,128}$/.test(h.requestKey)&&validTarget(h.targetId)&&['codex','claude'].includes(h.provider)&&(!Object.hasOwn(h,'requestId')||validId(h.requestId));
@@ -35,6 +38,7 @@ export function createAgentCliPanel({document,api,isSignedOut,canLoad,storage,ra
  const stateName=state=>({pending:t('승인 대기','Awaiting approval'),running:t('설치 실행 중','Installing'),completed:t('완료','Completed'),failed:t('실패','Failed'),unknown:t('결과 불명','Outcome unknown'),expired:t('만료','Expired'),denied:t('거부','Denied'),evaluating:t('평가 중','Assessing'),not_found:t('기록 없음','Not found'),preparing:t('준비 중','Preparing'),installing:t('설치 중','Installing'),reused:t('기존 버전 사용','Reused')})[state]??t('확인 필요','Check required');
  function lock(){
   const ready=Boolean(binding())&&capabilities?.available&&active();
+  checkLogin.disabled=busy||!ready;
   inspect.disabled=busy||!ready||uncertain||Boolean(job&&['pending','running','evaluating','unknown'].includes(job.state));
   recover.disabled=busy||!ready||!hint();submit.hidden=!preview||Boolean(job);submit.disabled=busy||uncertain||!ack.checked||!preview||Date.now()>=preview.expiresAt;
   start.hidden=job?.state!=='pending';start.disabled=busy||uncertain||!ack.checked;
@@ -43,8 +47,11 @@ export function createAgentCliPanel({document,api,isSignedOut,canLoad,storage,ra
   ack.disabled=busy||(!preview&&job?.state!=='pending');root.setAttribute('aria-busy',String(busy));
  }
  function scope(){generation++;clearTimer();preview=job=remoteStatus=undefined;ack.checked=false;uncertain=Boolean(hint());summary.hidden=true;summary.textContent='';output.hidden=true;output.textContent='';failure.textContent='';message.textContent='';
+  loginState.textContent=t('로그인 상태: 미조회','Login status: Not checked');
   const b=binding();identity.textContent=b?[b.displayName,b.targetId,b.sshTarget,b.profile].filter(Boolean).join(' · '):'';
-  loginCommand.textContent=`"$HOME/.local/share/ssh-approval-cli/${provider.value}/current/bin/${provider.value}"`+(provider.value==='codex'?' login --device-auth':'')+'\n'+t('기존 외부 설치를 사용하는 경우에는 그 설치의 실행 경로를 사용하세요.','For an existing external installation, use that installation’s executable path.');lock();
+  const user=/^([A-Za-z_][A-Za-z0-9_.-]{0,63})@/.exec(b?.sshTarget??'')?.[1];
+  loginAccount.textContent=b?t('로그인할 SSH 계정: ','SSH account for login: ')+b.sshTarget+(user?t(' · 다른 계정이면 먼저 실행: ',' · From another account run first: ')+'sudo -iu '+user:''):'';
+  loginCommand.textContent=`PATH="/opt/ssh-approval/node/bin:$PATH" "$HOME/.local/share/ssh-approval-cli/${provider.value}/current/bin/${provider.value}"`+(provider.value==='codex'?' login --device-auth':'')+'\n'+t('기존 외부 설치를 사용하는 경우에는 그 설치의 실행 경로를 사용하세요.','For an existing external installation, use that installation’s executable path.');lock();
  }
  function validateJob(value){const b=binding(),op=value?.operation;if(!validId(value?.id)||!b||op?.agentCliContract!=='agent-cli-install-v1'||op.agentCliProvider!==provider.value||op.agentCliTargetId!==b.targetId||op.agentCliTargetRevision!==b.targetRevision||op.agentCliProfile!==b.profile||!['pending','running','completed','failed','unknown','expired','denied','evaluating'].includes(value.state))throw Error(t('요청의 대상 정보가 현재 선택과 다릅니다.','The request does not match the current target binding.'));return value;}
  function displayJob(value,status){job=validateJob(value);remoteStatus=status;preview=undefined;ack.checked=false;uncertain=false;
@@ -56,6 +63,13 @@ export function createAgentCliPanel({document,api,isSignedOut,canLoad,storage,ra
  async function restore(){return run(async current=>{const h=hint();if(!h)return;uncertain=true;const value=await api('/api/agent-cli/lookup?'+new URLSearchParams({key:h.requestKey,targetId:h.targetId,provider:h.provider}));if(!current())return;
   if(value.found===true){const restored=validateJob(value.job);persist({...h,requestId:restored.id});displayJob(restored,value.remoteStatus);}else if(value.found===false){uncertain=true;message.textContent=t('요청 기록을 찾지 못했습니다. 자동으로 다시 설치하지 않습니다. 서버 기록을 확인한 뒤 새 작업을 준비하세요.','No request record found. Installation is not retried automatically. Check server records before preparing a new operation.');}else throw Error('Invalid CLI lookup response');
  });}
+ checkLogin.onclick=()=>run(async current=>{const b=binding(),p=provider.value;loginState.textContent=t('로그인 상태: 조회 중…','Login status: Checking…');
+  let value;try{value=await api('/api/agent-cli/login-status','POST',{targetId:b.targetId,provider:p});}catch{if(current())loginState.textContent=t('로그인 상태: 확인 불가. 다시 확인해 주세요.','Login status: Unavailable. Check again.');return;}
+  if(!current())return;
+  const states={signed_in:t('로그인됨','Signed in'),signed_out:t('로그인 안 됨','Signed out'),not_installed:t('미설치','Not installed'),unavailable:t('확인 불가','Unavailable')};
+  if(value?.provider!==p||value.binding?.targetId!==b.targetId||value.binding.targetRevision!==b.targetRevision||value.binding.profile!==b.profile||!Object.hasOwn(states,value.state)||!Number.isSafeInteger(value.checkedAt)||value.checkedAt<=0){loginState.textContent=t('로그인 상태: 확인 불가','Login status: Unavailable');return;}
+  loginState.textContent=(p==='codex'?'Codex':'Claude')+' · '+states[value.state]+' · '+t('확인 시각: ','Checked: ')+new Date(value.checkedAt).toLocaleString();
+ });
  inspect.onclick=()=>run(async current=>{const b=binding(),p=provider.value;const value=await api('/api/agent-cli/preview','POST',{targetId:b.targetId,provider:p});if(!current())return;
   if(value?.binding?.targetId!==b.targetId||value.binding.targetRevision!==b.targetRevision||value.binding.profile!==b.profile||value.release?.provider!==p||!validId(value.planId)||!Number.isSafeInteger(value.expiresAt)||Date.now()>=value.expiresAt||!['@openai/codex','@anthropic-ai/claude-code'].includes(value.release.packageName))throw Error('Invalid CLI preview');
   preview=value;job=remoteStatus=undefined;ack.checked=false;summary.hidden=false;summary.textContent=[identity.textContent,value.release.packageName,t('현재: ','Current: ')+(value.installation.installed?value.installation.version??t('버전 확인 불가','Version unavailable'):t('미설치','Not installed')),t('후보: ','Candidate: ')+value.release.version,t('관리 설치: ','Managed installation: ')+String(value.installation.managed),t('계획 만료: ','Plan expires: ')+new Date(value.expiresAt).toLocaleString()].join('\n');

@@ -139,6 +139,7 @@ export async function createApplication({ registry, classify, executeCommand, ex
     };
     if(cliState){
       cli=createAgentCliService({queue,journal:cliState,resolveTarget:id=>id===definition.id?definition:null,
+        readLoginState:async(provider,binding)=>(await checkedCliProbe(prepareAgentCliPlan({action:'login-status',provider,binding}))).data?.agentCli,
         readInstallation:async(provider,binding)=>(await checkedCliProbe(prepareAgentCliPlan({action:'inspect',provider,binding}))).data?.agentCli,
         catalog:cliCatalog,preparePlan:prepareAgentCliPlan,executePlan:executeAgentCli,outputs,checkPolicy:checkCliPolicy,nonce:()=>randomBytes(24).toString('hex')});
       const originalGuard=queue.beforeCommandStart;
@@ -197,6 +198,7 @@ export async function createApplication({ registry, classify, executeCommand, ex
       if(saved.job.operation.agentCliTargetId!==targetId||saved.job.operation.agentCliProvider!==provider)throw Error('CLI lookup binding mismatch');
       return {found:true,...agentCli.request(saved.job.id)};
     },
+    'login-status':body=>{const runtime=targets.select(body?.targetId);if(!runtime.cli)throw Error('CLI unavailable');return runtime.cli.loginStatus(body);},
     preview:body=>{const runtime=targets.select(body?.targetId);if(!runtime.cli)throw Error('CLI unavailable');return runtime.cli.preview(body);},
     submit:body=>{const runtime=targets.select(body?.request?.targetId);if(!runtime.cli)throw Error('CLI unavailable');return runtime.cli.submit(body);},
     request:id=>{const {job,remoteStatus}=cliRequest(id);return {job,remoteStatus};},

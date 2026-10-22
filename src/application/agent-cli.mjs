@@ -10,7 +10,7 @@ const hash=value=>sha256(JSON.stringify(value));
 const snapshot=definition=>Object.freeze({targetId:definition.id,targetRevision:definition.revision,profile:definition.writeProfile,enabled:definition.enabled});
 
 /** Internal use case. HTTP authentication and trusted inspection/SSH ports are mandatory at composition. */
-export function createAgentCliService({queue,journal,resolveTarget,readInstallation,catalog,preparePlan,executePlan,outputs,checkPolicy,now=Date.now,nonce}) {
+export function createAgentCliService({queue,journal,resolveTarget,readInstallation,readLoginState,catalog,preparePlan,executePlan,outputs,checkPolicy,now=Date.now,nonce}) {
  if(![resolveTarget,readInstallation,preparePlan,executePlan,checkPolicy,nonce].every(fn=>typeof fn==='function'))throw Error('CLI service ports required');
  const previews=new Map(),executions=new Map();
  let closed=false;
@@ -38,6 +38,19 @@ export function createAgentCliService({queue,journal,resolveTarget,readInstallat
  };
  return {
   isJob,beforeStart,
+  async loginStatus(body){
+   open();
+   if(!exact(body,['targetId','provider']))throw Error('Invalid CLI login status fields');
+   agentCliProvider(body.provider);
+   const binding=snapshot(definitionFor(body.targetId));
+   if(queue.maintenance||queue.busy())throw Error('CLI target is busy');
+   if(typeof readLoginState!=='function')throw Error('CLI login status unavailable');
+   let value;
+   try{value=await readLoginState(body.provider,binding);}catch{value={provider:body.provider,state:'unavailable'};}
+   open();verifyBinding(binding);if(queue.maintenance)throw Error('CLI maintenance in progress');
+   const state=value?.provider===body.provider&&['signed_in','signed_out','not_installed','unavailable'].includes(value.state)?value.state:'unavailable';
+   return Object.freeze({binding,provider:body.provider,state,checkedAt:now()});
+  },
   async preview(body){
    open();
    if(!exact(body,['targetId','provider']))throw Error('Invalid CLI preview fields');

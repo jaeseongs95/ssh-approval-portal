@@ -4,6 +4,7 @@ import {preparePythonSource} from './python-source.mjs';
 import {agentCliProvider,validateAgentRelease,AGENT_CLI_CONTRACT} from '../../domain/agent-cli.mjs';
 
 const source=readFileSync(new URL('../../../scripts/manage-agent-cli.py',import.meta.url),'utf8');
+const loginSource=readFileSync(new URL('../../../scripts/check-agent-cli-login.py',import.meta.url),'utf8');
 const id=value=>typeof value==='string'&&/^[a-f0-9]{48}$/.test(value);
 const hex=value=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
 const stable=value=>typeof value==='string'&&/^(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$/.test(value);
@@ -18,7 +19,7 @@ function receiptDigest(args){
 /** Fixed server-owned helper only. This port prepares bytes and grants no authority. */
 export function prepareAgentCliPlan({action,provider,binding,release,expectedInstallationRevision,expiresAt,operationId,expectedIntentDigest}) {
  agentCliProvider(provider);
- if(!['inspect','status','install','update'].includes(action))throw Error('Invalid CLI helper action');
+ if(!['inspect','status','install','update','login-status'].includes(action))throw Error('Invalid CLI helper action');
  if(expectedIntentDigest!==undefined&&action!=='status')throw Error('Invalid CLI helper fields');
  let args,intentDigest;
  if(['install','update'].includes(action)){
@@ -27,11 +28,11 @@ export function prepareAgentCliPlan({action,provider,binding,release,expectedIns
   args=[action,provider,checked.version,checked.integrity,expectedInstallationRevision,String(expiresAt),operationId];
   intentDigest=receiptDigest(args);
  }else{
-  if(release!==undefined||expectedInstallationRevision!==undefined||expiresAt!==undefined||(action==='inspect'?operationId!==undefined:!id(operationId)||!hex(expectedIntentDigest)))throw Error('Invalid CLI helper fields');
-  args=[action,provider,'','','','',operationId??''];
+  if(release!==undefined||expectedInstallationRevision!==undefined||expiresAt!==undefined||(['inspect','login-status'].includes(action)?operationId!==undefined:!id(operationId)||!hex(expectedIntentDigest)))throw Error('Invalid CLI helper fields');
+  args=action==='login-status'?[action,provider]:[action,provider,'','','','',operationId??''];
   if(action==='status')intentDigest=expectedIntentDigest;
  }
- const plan=preparePythonSource({source,argv:args,cwd:'/',elevate:false,targetId:binding?.targetId,targetRevision:binding?.targetRevision,profile:binding?.profile});
+ const plan=preparePythonSource({source:action==='login-status'?loginSource:source,argv:action==='login-status'?[provider]:args,cwd:'/',elevate:false,targetId:binding?.targetId,targetRevision:binding?.targetRevision,profile:binding?.profile});
  return Object.freeze({...plan,agentCli:Object.freeze({contract:AGENT_CLI_CONTRACT,action,provider,...(operationId===undefined?{}:{operationId}),...(intentDigest===undefined?{}:{intentDigest})})});
 }
 
@@ -39,6 +40,12 @@ export function prepareAgentCliPlan({action,provider,binding,release,expectedIns
 export function validateAgentCliPlan(plan){
  if(!record(plan?.manifest)||!record(plan.agentCli))throw Error('Invalid CLI delivery plan');
  let args;try{args=JSON.parse(plan.manifest.argvJson);}catch{throw Error('Invalid CLI delivery plan');}
+ if(plan.agentCli.action==='login-status'){
+  if(!Array.isArray(args)||args.length!==1)throw Error('Invalid CLI delivery plan');
+  const exact=prepareAgentCliPlan({action:'login-status',provider:args[0],binding:{targetId:plan.manifest.targetId,targetRevision:plan.manifest.targetRevision,profile:plan.manifest.profile}});
+  if(['stdin','command','planDigest','manifest','args','agentCli'].some(key=>JSON.stringify(plan[key])!==JSON.stringify(exact[key])))throw Error('CLI delivery plan changed');
+  return exact;
+ }
  if(!Array.isArray(args)||args.length!==7||args.some(arg=>typeof arg!=='string'))throw Error('Invalid CLI delivery plan');
  const [action,provider,version,integrity,expected,expires,operationId]=args;
  const entry=agentCliProvider(provider),binding={targetId:plan.manifest.targetId,targetRevision:plan.manifest.targetRevision,profile:plan.manifest.profile};
@@ -69,6 +76,10 @@ export function projectAgentCliResult(result,plan){
  let value;try{value=JSON.parse(result.stdout);}catch{refuse();}
  if(!record(value))refuse();
  const {action,provider,operationId,intentDigest}=plan.agentCli;
+ if(action==='login-status'){
+  if(value.provider!==provider||!['signed_in','signed_out','not_installed','unavailable'].includes(value.state))refuse();
+  return {failed:false,texts:[],data:{agentCli:Object.freeze({contract:'agent-cli-login-status-v1',provider,state:value.state})}};
+ }
  let data={contract:AGENT_CLI_CONTRACT,action,provider,login:'not_checked'};
  if(action==='inspect'){
   if(value.provider!==provider||typeof value.installed!=='boolean'||typeof value.managed!=='boolean'||value.login!=='not_checked'||!hex(value.installationRevision)||!(value.version===null||stable(value.version)))refuse();
