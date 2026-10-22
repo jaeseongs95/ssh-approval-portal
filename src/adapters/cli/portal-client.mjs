@@ -4,6 +4,7 @@ import { validateOrigin } from '../config/settings.mjs';
 
 const fail = (code, details = {}) => Object.assign(new Error(code), { code, ...details });
 const identifier = value => { if (typeof value !== 'string' || !/^[a-f0-9]{48}$/.test(value)) throw fail('INVALID_REQUEST_ID'); return value; };
+const jobStates = new Set(['pending', 'evaluating', 'running', 'completed', 'failed', 'denied', 'expired', 'unknown']);
 async function readJson(response) {
   if (!/^application\/json(?:;|$)/i.test(response.headers.get('content-type') ?? '')) throw fail('INVALID_PORTAL_RESPONSE');
   const parts = []; let size = 0;
@@ -45,7 +46,23 @@ export function createPortalClient({ origin, accessToken, signal, timeoutMs = 12
   async function knownJob(id) {
     ready(); identifier(id);
     const job = await json('/api/' + id);
-    if (job.id !== id || !['pending', 'evaluating', 'running', 'completed', 'failed', 'denied', 'expired', 'unknown'].includes(job.state)) throw fail('REQUEST_UNAVAILABLE', { requestId: id });
+    if (job.id !== id || !jobStates.has(job.state)) throw fail('REQUEST_UNAVAILABLE', { requestId: id });
+    return job;
+  }
+  async function sendUpload(snapshot, transferId, received = 0, sequence = 0) {
+    const start = received; let position = 0;
+    for await (const bytes of snapshot.chunks()) {
+      const skip = Math.min(bytes.length, Math.max(0, start - position));
+      position += bytes.length;
+      const remaining = bytes.subarray(skip);
+      if (!remaining.length) continue;
+      const ack = await json('/api/files/uploads/' + transferId + '/chunks', { sequence, data: remaining.toString('base64') });
+      received += remaining.length;
+      if (ack.sequence !== ++sequence || ack.received !== received) throw fail('INVALID_TRANSFER_ACK');
+    }
+    if (received !== snapshot.size) throw fail('INVALID_TRANSFER_ACK');
+    const job = await json('/api/files/uploads/' + transferId + '/finish', {});
+    if (job.kind !== 'upload' || job.operation?.artifactId !== transferId || job.operation.sha256 !== snapshot.sha256 || job.operation.size !== snapshot.size) throw fail('INVALID_TRANSFER_ACK');
     return job;
   }
   return {
@@ -81,18 +98,44 @@ export function createPortalClient({ origin, accessToken, signal, timeoutMs = 12
         return await withUploadSnapshot(source, async snapshot => {
           const begin = await json('/api/files/uploads', { ...args, fileName: snapshot.fileName, size: snapshot.size, sha256: snapshot.sha256 });
           transferId = identifier(begin.transferId); await onTransfer({ transferId });
-          let sequence = 0, received = 0;
-          for await (const bytes of snapshot.chunks()) {
-            const ack = await json('/api/files/uploads/' + transferId + '/chunks', { sequence, data: bytes.toString('base64') });
-            received += bytes.length;
-            if (ack.sequence !== ++sequence || ack.received !== received) throw fail('INVALID_TRANSFER_ACK');
-          }
-          const job = await json('/api/files/uploads/' + transferId + '/finish', {});
-          if (job.kind !== 'upload' || job.operation?.artifactId !== transferId || job.operation.sha256 !== snapshot.sha256 || job.operation.size !== snapshot.size) throw fail('INVALID_TRANSFER_ACK');
-          return job;
+          return sendUpload(snapshot, transferId);
         }, { signal: deadline });
       } catch (error) {
         throw fail(['INVALID_TRANSFER_ACK', 'OWNER_REAUTH_REQUIRED', 'PORTAL_REQUEST_REFUSED'].includes(error.code) ? error.code : 'UPLOAD_RESULT_UNKNOWN', { ...(transferId ? { transferId } : {}), phase: 'upload' });
+      }
+    },
+    async resumeUpload(id, source, intent) {
+      ready(); identifier(id);
+      try {
+        if (!intent || typeof intent !== 'object' || Array.isArray(intent) ||
+            Object.keys(intent).some(key => !['remotePath', 'target', 'overwrite', 'elevate'].includes(key)) ||
+            typeof intent.remotePath !== 'string' || !intent.remotePath ||
+            (intent.target !== undefined && (typeof intent.target !== 'string' || !/^[a-z][a-z0-9_-]{0,31}$/.test(intent.target))) ||
+            ['overwrite', 'elevate'].some(key => intent[key] !== undefined && typeof intent[key] !== 'boolean')) throw fail('INVALID_RESUME_INTENT');
+        const listed = await json('/api/targets'), target = intent.target ?? listed.defaultTarget;
+        const selectedTarget = Array.isArray(listed.targets) ? listed.targets.find(item => item?.id === target) : null;
+        if (typeof target !== 'string' || !/^[a-z][a-z0-9_-]{0,31}$/.test(target) ||
+            !selectedTarget || typeof selectedTarget.enabled !== 'boolean') throw fail('INVALID_RESUME_INTENT');
+        return await withUploadSnapshot(source, async snapshot => {
+          const record = await json('/api/files/uploads/' + id);
+          if (!record || typeof record !== 'object' || Array.isArray(record) || Object.hasOwn(record, 'job') === Object.hasOwn(record, 'transfer')) throw fail('UPLOAD_NOT_RESUMABLE');
+          const isJob = Object.hasOwn(record, 'job'), item = isJob ? record.job?.operation : record.transfer, binding = isJob ? record.job : item;
+          if (isJob ? record.job?.kind !== 'upload' || item?.kind !== 'upload' || item.artifactId !== id || !jobStates.has(record.job.state) : item?.id !== id) throw fail('UPLOAD_NOT_RESUMABLE');
+          if (item.size !== snapshot.size || item.sha256 !== snapshot.sha256) throw fail('RESUME_SOURCE_MISMATCH');
+          if (item.remotePath !== intent.remotePath || item.overwrite !== (intent.overwrite ?? false) || item.elevate !== (intent.elevate ?? false) ||
+              (binding.targetId === undefined ? 'default' : binding.targetId) !== target) throw fail('RESUME_INTENT_MISMATCH');
+          if (isJob) { identifier(record.job.id); return record.job; } // Same job, every state: observe only.
+          if (selectedTarget.enabled !== true || item.state !== 'staging' || !Number.isSafeInteger(item.expiresAt) || item.expiresAt <= Date.now() ||
+              !Number.isSafeInteger(item.received) || item.received < 0 || item.received > item.size ||
+              !Number.isSafeInteger(item.sequence) || item.sequence < Math.ceil(item.received / CHUNK_BYTES) || item.sequence > item.received) throw fail('UPLOAD_NOT_RESUMABLE');
+          const job = await sendUpload(snapshot, id, item.received, item.sequence);
+          if (job.operation.remotePath !== intent.remotePath || job.operation.overwrite !== (intent.overwrite ?? false) ||
+              job.operation.elevate !== (intent.elevate ?? false) || (job.targetId === undefined ? 'default' : job.targetId) !== target) throw fail('INVALID_TRANSFER_ACK');
+          return job;
+        }, { signal: deadline });
+      } catch (error) {
+        const known = ['INVALID_RESUME_INTENT', 'RESUME_SOURCE_MISMATCH', 'RESUME_INTENT_MISMATCH', 'UPLOAD_NOT_RESUMABLE', 'INVALID_TRANSFER_ACK', 'OWNER_REAUTH_REQUIRED', 'PORTAL_REQUEST_REFUSED'];
+        throw fail(known.includes(error.code) ? error.code : 'UPLOAD_RESULT_UNKNOWN', { transferId: id, phase: 'resume-upload' });
       }
     },
     async save(id, destination) {

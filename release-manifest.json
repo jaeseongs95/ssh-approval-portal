@@ -380,8 +380,8 @@
     },
     {
       "path": "scripts/portal-client.mjs",
-      "size": 3744,
-      "sha256": "4d78f5f4d812987a44a01dec2d8ae3029d88ab236dd842151be8063049038b8c"
+      "size": 4246,
+      "sha256": "a691e37749489233a709cf7859d3642b1225fb91907c4e9ff1218276251f8807"
     },
     {
       "path": "scripts/portal.py",
@@ -465,8 +465,8 @@
     },
     {
       "path": "src/adapters/cli/portal-client.mjs",
-      "size": 7889,
-      "sha256": "1ce6962ba214ac2365fb4f7d920d4d9b8301d5376fb1497da51150f3da3e87f6"
+      "size": 11743,
+      "sha256": "b3dac85bf8d9f29f505599f9adea770fde6e8e82bdc4ac871247e60800604aad"
     },
     {
       "path": "src/adapters/config/environment-editor.mjs",
@@ -1175,13 +1175,13 @@
     },
     {
       "path": "test/portal-client-process.test.mjs",
-      "size": 13042,
-      "sha256": "0a17ef04da73677a5317846efc30b2d00ee24b2a1a9e6ee67373982329c9d9c5"
+      "size": 15449,
+      "sha256": "8b4d88171e13972a3cf6f7213a9a692f59a3103486cfd132387c7c766d2f9953"
     },
     {
       "path": "test/portal-client.test.mjs",
-      "size": 21270,
-      "sha256": "491319b96a77dd54ef7cf321d10050a18396fe9b13cc7fa66ce6f8c815bacdd4"
+      "size": 33300,
+      "sha256": "0044cc1dd1d1c35f247cf7635910b9d196a5b9a6e2a82079db4f7616ab87bae3"
     },
     {
       "path": "test/portal-container-test.sh",

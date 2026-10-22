@@ -262,3 +262,171 @@ test('owner file admission rechecks the same session after a delayed body crosse
     assert.equal(f.app.queue.listAll().length, beforeJobs); assert.equal(f.effects.length, beforeEffects);
   }
 });
+
+const fileMutations = f => f.calls.filter(call => call.method === 'POST' && (call.path.startsWith('/api/files/') || call.path.endsWith('/approve'))).length;
+async function interruptedUpload(t, { offset = 3, finish = false, tinyChunks = false } = {}) {
+  const f = await fixture(t), bytes = Buffer.alloc(CHUNK_BYTES + 7);
+  for (let i = 0; i < bytes.length; i++) bytes[i] = i % 251;
+  const source = join(f.root, 'original.bin'); await writeFile(source, bytes);
+  let dropped = false, id;
+  const c = f.client({ fetch: async (url, options) => {
+    const path = new URL(url).pathname;
+    if (!finish && !dropped && path.endsWith('/chunks')) {
+      const body = JSON.parse(options.body); body.data = Buffer.from(body.data, 'base64').subarray(0, offset).toString('base64');
+      if (tinyChunks) {
+        const prefix = Buffer.from(body.data, 'base64');
+        for (let i = 0; i < prefix.length; i++) {
+          const accepted = await f.send(url, { ...options, body: JSON.stringify({ sequence: i, data: prefix.subarray(i, i + 1).toString('base64') }) });
+          assert.equal(accepted.status, 200); await accepted.body.cancel();
+        }
+        dropped = true; throw Error('fixture reply lost after several accepted tiny chunks');
+      }
+      options = { ...options, body: JSON.stringify(body) };
+    }
+    const response = await f.send(url, options);
+    if (!dropped && path.endsWith(finish ? '/finish' : '/chunks')) { dropped = true; await response.body.cancel(); throw Error('fixture reply lost after admission'); }
+    return response;
+  } });
+  await c.connect();
+  const error = await c.upload(source, { remotePath: '/tmp/resume.bin' }, record => { id = record.transferId; }).catch(error => error);
+  assert.equal(error.code, 'UPLOAD_RESULT_UNKNOWN'); assert.equal(error.transferId, id);
+  await c.close();
+  return { ...f, bytes, source, id, intent: { remotePath: '/tmp/resume.bin' } };
+}
+
+test('resume sends only remaining bytes of the same transfer after lost chunk ACK, including an unaligned prefix', async t => {
+  for (const [offset, tinyChunks] of [[3, false], [3, true], [CHUNK_BYTES, false]]) {
+    const f = await interruptedUpload(t, { offset, tinyChunks }), writes = [], sequence = tinyChunks ? 3 : 1;
+    assert.equal(f.app.store.get(f.id).received, offset); assert.equal(f.app.store.get(f.id).sequence, sequence);
+    const c = f.client({ fetch: async (url, options) => {
+      if (new URL(url).pathname.endsWith('/chunks')) { const body = JSON.parse(options.body); writes.push({ sequence: body.sequence, bytes: Buffer.from(body.data, 'base64').length }); }
+      return f.send(url, options);
+    } });
+    await c.connect();
+    const alias = join(f.root, 'same-bytes-renamed.bin'); await writeFile(alias, f.bytes);
+    const job = await c.resumeUpload(f.id, alias, f.intent).catch(() => null);
+    assert.ok(job?.state === 'pending', 'cursor resume must queue the exact remaining snapshot');
+    assert.equal(job.operation.artifactId, f.id); assert.equal(job.operation.fileName, 'original.bin');
+    assert.equal(writes[0].sequence, sequence); assert.equal(writes.reduce((sum, item) => sum + item.bytes, 0), f.bytes.length - offset);
+    assert.equal(f.calls.filter(x => x.path === '/api/files/uploads' && x.method === 'POST').length, 1);
+    assert.deepEqual(f.effects, []); await c.decide(job.id, 'approve', true);
+    assert.deepEqual(f.remote.get('/tmp/resume.bin'), f.bytes); assert.equal(f.effects.length, 1);
+  }
+});
+
+test('resume reconciles a lost finish ACK and observes every known job state without another mutation', async t => {
+  const f = await interruptedUpload(t, { finish: true }), c = f.client(); await c.connect();
+  const original = (await c.transfer(f.id)).job, before = fileMutations(f);
+  const observed = await c.resumeUpload(f.id, f.source, f.intent).catch(() => null);
+  assert.equal(fileMutations(f), before, 'existing upload job must not trigger any new mutation');
+  assert.equal(observed?.id, original.id); assert.equal(observed.state, 'pending');
+  await c.decide(original.id, 'approve', true); assert.equal(f.effects.length, 1);
+  for (const state of ['pending', 'evaluating', 'running', 'completed', 'failed', 'denied', 'expired', 'unknown']) {
+    const observer = f.client({ fetch: async (url, options) => {
+      const response = await f.send(url, options);
+      if (options.method === 'GET' && new URL(url).pathname === '/api/files/uploads/' + f.id) {
+        const value = await response.json(); return Response.json({ job: { ...value.job, state } });
+      }
+      return response;
+    } });
+    await observer.connect(); const count = fileMutations(f);
+    const result = await observer.resumeUpload(f.id, f.source, f.intent).catch(() => null);
+    assert.equal(fileMutations(f), count, 'existing upload job must not trigger any new mutation');
+    assert.equal(result?.id, original.id); assert.equal(result.state, state); assert.equal(f.effects.length, 1);
+  }
+  const target = f.app.targets.select('default'); target.enabled = false;
+  try {
+    const count = fileMutations(f), historical = await c.resumeUpload(f.id, f.source, f.intent).catch(() => null);
+    assert.equal(fileMutations(f), count, 'disabled target history must remain read-only');
+    assert.equal(historical?.id, original.id, 'an existing job on a disabled target must remain observable');
+    assert.equal(historical.state, 'completed'); assert.equal(f.effects.length, 1);
+  } finally { target.enabled = true; }
+});
+
+test('resume rejects changed source bytes, size and original destination flags before any mutation', async t => {
+  const f = await interruptedUpload(t), c = f.client(); await c.connect();
+  const changed = Buffer.from(f.bytes); changed[5] ^= 1;
+  const different = join(f.root, 'different.bin'), longer = join(f.root, 'longer.bin');
+  await writeFile(different, changed); await writeFile(longer, Buffer.concat([f.bytes, Buffer.from('x')]));
+  for (const [source, intent, code] of [[different, f.intent, 'RESUME_SOURCE_MISMATCH'], [longer, f.intent, 'RESUME_SOURCE_MISMATCH'],
+    [f.source, { remotePath: '/tmp/elsewhere' }, 'RESUME_INTENT_MISMATCH'], [f.source, { ...f.intent, overwrite: true }, 'RESUME_INTENT_MISMATCH'],
+    [f.source, { ...f.intent, elevate: true }, 'RESUME_INTENT_MISMATCH'], [f.source, { ...f.intent, target: 'other' }, 'INVALID_RESUME_INTENT'],
+    [f.source, { ...f.intent, target: null }, 'INVALID_RESUME_INTENT'], [f.source, { ...f.intent, overwrite: 1 }, 'INVALID_RESUME_INTENT'],
+    [f.source, { ...f.intent, extra: true }, 'INVALID_RESUME_INTENT']]) {
+    const before = fileMutations(f), error = await c.resumeUpload(f.id, source, intent).catch(error => error);
+    assert.equal(fileMutations(f), before, 'resume must reject mismatched source or intent before mutation');
+    assert.equal(error.code, code); assert.equal(error.transferId, f.id);
+  }
+  assert.deepEqual(f.effects, []); assert.equal(f.app.queue.listAll().length, 0);
+});
+
+test('resume refuses malformed, ready, expired or missing staging without replacement work', async t => {
+  const f = await interruptedUpload(t);
+  for (const patch of [{ received: -1 }, { received: f.bytes.length + 1 }, { sequence: 0 }, { sequence: 4 }, { sequence: 1.5 },
+    { expiresAt: 0 }, { state: 'ready' }, { id: 'f'.repeat(48) }, { targetId: null }]) {
+    const c = f.client({ fetch: async (url, options) => {
+      const response = await f.send(url, options);
+      if (options.method === 'GET' && new URL(url).pathname === '/api/files/uploads/' + f.id) {
+        const value = await response.json(); return Response.json({ transfer: { ...value.transfer, ...patch } });
+      }
+      return response;
+    } });
+    await c.connect(); const before = fileMutations(f), error = await c.resumeUpload(f.id, f.source, f.intent).catch(error => error);
+    assert.equal(fileMutations(f), before); assert.ok(['UPLOAD_NOT_RESUMABLE', 'RESUME_INTENT_MISMATCH'].includes(error.code));
+  }
+  await f.app.store.remove(f.id); const c = f.client(); await c.connect(); const before = fileMutations(f);
+  await assert.rejects(c.resumeUpload(f.id, f.source, f.intent), { code: 'PORTAL_REQUEST_REFUSED', transferId: f.id });
+  assert.equal(fileMutations(f), before); assert.equal(f.app.queue.listAll().length, 0); assert.deepEqual(f.effects, []);
+});
+
+test('concurrent owner clients resuming one staging cursor produce at most one upload job', { timeout: 10_000 }, async t => {
+  const f = await interruptedUpload(t, { offset: CHUNK_BYTES }); let reads = 0, release;
+  const gate = new Promise(resolve => { release = resolve; }), timer = setTimeout(() => release(), 2000);
+  const send = async (url, options) => {
+    const response = await f.send(url, options);
+    if (options.method === 'GET' && new URL(url).pathname === '/api/files/uploads/' + f.id) {
+      const value = await response.json(); if (++reads === 2) release(); await gate; return Response.json(value);
+    }
+    return response;
+  };
+  const clients = [f.client({ fetch: send, timeoutMs: 5000 }), f.client({ fetch: send, timeoutMs: 5000 })];
+  await Promise.all(clients.map(c => c.connect()));
+  let outcomes; try { outcomes = await Promise.allSettled(clients.map(c => c.resumeUpload(f.id, f.source, f.intent))); } finally { clearTimeout(timer); release(); }
+  assert.equal(reads, 2);
+  const jobs = f.app.queue.listAll().filter(job => job.kind === 'upload' && job.operation.artifactId === f.id);
+  assert.equal(jobs.length, 1); assert.ok(outcomes.some(x => x.status === 'fulfilled'));
+  for (const outcome of outcomes.filter(x => x.status === 'fulfilled')) assert.equal(outcome.value.id, jobs[0].id);
+  assert.equal(f.calls.filter(x => x.path === '/api/files/uploads' && x.method === 'POST').length, 1);
+  assert.deepEqual(f.effects, []); await clients[0].decide(jobs[0].id, 'approve', true);
+  assert.deepEqual(f.remote.get('/tmp/resume.bin'), f.bytes); assert.equal(f.effects.length, 1);
+});
+
+test('resume handles an allocated empty file without chunks or a replacement allocation', async t => {
+  const f = await fixture(t), source = join(f.root, 'empty.bin'); await writeFile(source, Buffer.alloc(0));
+  const first = f.client(); await first.connect(); let id;
+  await assert.rejects(first.upload(source, { remotePath: '/tmp/empty-resume' }, record => { id = record.transferId; throw Error('fixture interrupt after allocation'); }), { code: 'UPLOAD_RESULT_UNKNOWN' });
+  await first.close(); const c = f.client(); await c.connect();
+  const before = f.calls.filter(x => x.path.endsWith('/chunks')).length;
+  const job = await c.resumeUpload(id, source, { remotePath: '/tmp/empty-resume' });
+  assert.equal(job.operation.artifactId, id); assert.equal(job.operation.size, 0); assert.equal(job.operation.sha256, hash(Buffer.alloc(0)));
+  assert.equal(f.calls.filter(x => x.path.endsWith('/chunks')).length, before);
+  assert.equal(f.calls.filter(x => x.method === 'POST' && x.path === '/api/files/uploads').length, 1);
+  assert.deepEqual(f.effects, []); await c.decide(job.id, 'approve', true);
+  assert.equal(f.remote.get('/tmp/empty-resume').length, 0); assert.equal(f.effects.length, 1);
+});
+
+test('revoking the same resume session after cursor read prevents any new chunk admission', async t => {
+  const f = await interruptedUpload(t); let revoked = false;
+  const c = f.client({ fetch: async (url, options) => {
+    const response = await f.send(url, options);
+    if (!revoked && options.method === 'GET' && new URL(url).pathname === '/api/files/uploads/' + f.id) {
+      revoked = true; const logout = await f.raw('/api/session/logout', {}, { Cookie: options.headers.Cookie });
+      assert.equal(logout.status, 200); await logout.body.cancel();
+    }
+    return response;
+  } });
+  await c.connect(); const before = f.app.store.get(f.id);
+  await assert.rejects(c.resumeUpload(f.id, f.source, f.intent), { code: 'OWNER_REAUTH_REQUIRED', transferId: f.id });
+  assert.equal(revoked, true); assert.deepEqual(f.app.store.get(f.id), before);
+  assert.equal(f.app.queue.listAll().length, 0); assert.deepEqual(f.effects, []);
+});

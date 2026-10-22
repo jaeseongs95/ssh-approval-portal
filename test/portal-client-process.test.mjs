@@ -25,7 +25,7 @@ async function fixture(t) {
   try { await runFile(openssl, ['version'], { timeout: 10_000, windowsHide: true }); }
   catch (error) { if (error.code === 'ENOENT') { t.skip('OpenSSL fixture prerequisite unavailable; no installation attempted'); return; } throw error; }
   const root = await mkdtemp(join(tmpdir(), 'owner-cli-native-'));
-  let app, edge;
+  let app, edge, loseChunkReply = false;
   const children = new Set(), calls = [], effects = [], remote = new Map(), staged = new Map(), invocations = [];
   t.after(async () => {
     for (const child of children) child.kill();
@@ -46,6 +46,9 @@ async function fixture(t) {
     delete headers['cf-access-token'];
     calls.push({ method: req.method, path: new URL(req.url, 'https://fixture.test').pathname });
     const upstream = request({ host: '127.0.0.1', port: app.adminHttp.address().port, path: req.url, method: req.method, headers }, reply => {
+      if (loseChunkReply && req.method === 'POST' && req.url.endsWith('/chunks') && reply.statusCode === 200) {
+        loseChunkReply = false; reply.resume(); reply.once('end', () => res.destroy()); return;
+      }
       res.writeHead(reply.statusCode, reply.headers); reply.pipe(res);
     });
     upstream.on('error', () => { if (!res.headersSent) res.writeHead(502); res.end(); });
@@ -107,7 +110,7 @@ async function fixture(t) {
     invocations.push({ command: args[0], code: result.code, signal: result.signal });
     return { ...result, stdout, stderr, value: stdout ? JSON.parse(stdout) : null };
   }
-  return { root, app, token, jwt, raw, cli, calls, effects, remote, invocations };
+  return { root, app, token, jwt, raw, cli, calls, effects, remote, invocations, loseNextChunkReply: () => { loseChunkReply = true; } };
 }
 
 test('native CLI process uses verified TLS and private stdin through approval and exact local file roundtrip', { timeout: 60_000 }, async t => {
@@ -153,4 +156,22 @@ test('native CLI process refuses untrusted TLS and non-owner identity without ne
   assert.equal(owner.code, 1); assert.equal(owner.stdout, ''); assert.ok(owner.stderr.includes('OWNER_REAUTH_REQUIRED'));
   assert.equal(f.app.queue.listAll().length, count); assert.deepEqual(f.effects, []);
   t.diagnostic(JSON.stringify({ nativeChildInvocations: f.invocations.length, untrustedTlsRefused: true, nonOwnerRefused: true, fileJobsCreated: 0, remoteEffects: 0 }));
+});
+
+test('a fresh native CLI process explicitly resumes the same transfer after an accepted chunk reply is lost', { timeout: 30_000 }, async t => {
+  const f = await fixture(t); if (!f) return;
+  const bytes = Buffer.alloc(CHUNK_BYTES + 7); for (let i = 0; i < bytes.length; i++) bytes[i] = i % 251;
+  const source = join(f.root, 'resume.bin'); await writeFile(source, bytes); f.loseNextChunkReply();
+  const lost = await f.cli(['upload', source, '/tmp/resumed.bin']); assert.equal(lost.code, 1); assert.equal(lost.stdout, '');
+  const records = lost.stderr.split(/\r?\n/).filter(line => line.startsWith('{')).map(line => JSON.parse(line));
+  const id = records.at(-1).transferId; assert.match(id, /^[a-f0-9]{48}$/); assert.equal(f.app.store.get(id).received, CHUNK_BYTES);
+  const beginCount = f.calls.filter(x => x.method === 'POST' && x.path === '/api/files/uploads').length;
+  const resumed = await f.cli(['resume-upload', id, source, '/tmp/resumed.bin']); assert.equal(resumed.code, 0, resumed.stderr);
+  assert.equal(resumed.value.state, 'pending'); assert.equal(resumed.value.operation.artifactId, id);
+  assert.equal(f.calls.filter(x => x.method === 'POST' && x.path === '/api/files/uploads').length, beginCount); assert.deepEqual(f.effects, []);
+  const approved = await f.cli(['approve', resumed.value.id, '--confirm']); assert.equal(approved.code, 0); assert.deepEqual(f.remote.get('/tmp/resumed.bin'), bytes); assert.deepEqual(f.effects, ['upload']);
+  const before = f.calls.filter(x => x.method === 'POST' && x.path.startsWith('/api/files/')).length;
+  const observed = await f.cli(['resume-upload', id, source, '/tmp/resumed.bin']); assert.equal(observed.code, 0); assert.equal(observed.value.id, resumed.value.id); assert.equal(observed.value.state, 'completed');
+  assert.equal(f.calls.filter(x => x.method === 'POST' && x.path.startsWith('/api/files/')).length, before); assert.deepEqual(f.effects, ['upload']);
+  t.diagnostic(JSON.stringify({ nativeChildInvocations: f.invocations.length, transferIdRetained: true, beginRequests: beginCount, remoteEffects: 1, completedResumeMutations: 0 }));
 });
