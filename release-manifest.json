@@ -454,6 +454,11 @@
       "sha256": "f554981d303dcbe83fa20122a6034596e49bbb399ed8228bf02af3d63dbcb7c1"
     },
     {
+      "path": "src/adapters/cli/local-files.mjs",
+      "size": 6847,
+      "sha256": "33b44419fbad40cfdef3c0282b7c2aaa93878de8ca3676cd050f51c4797d0c3d"
+    },
+    {
       "path": "src/adapters/config/environment-editor.mjs",
       "size": 4656,
       "sha256": "c27eff451a4a26e02429c584b27edfe4b1cf93f34aab1d987ab3d8237e511062"
@@ -892,6 +897,11 @@
       "path": "test/cli-import.fixture.mjs",
       "size": 195,
       "sha256": "c16a15fcfc2b1a0dcfa6df37f5527c5113b3bd07e167964a8e32b2c88bb43b4c"
+    },
+    {
+      "path": "test/cli-local-files.test.mjs",
+      "size": 11045,
+      "sha256": "be4e87bc08d6ecb1e916f79bba90d3593b351e0e5f99f8f98e6496fcae57800e"
     },
     {
       "path": "test/command-automation.test.mjs",
