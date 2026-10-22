@@ -1174,6 +1174,11 @@
       "sha256": "066861a69bf8e9e5f88c3ff2b3c1b9eb8b0a58d95a569502fb6847b84d008b32"
     },
     {
+      "path": "test/portal-client-process.test.mjs",
+      "size": 13042,
+      "sha256": "0a17ef04da73677a5317846efc30b2d00ee24b2a1a9e6ee67373982329c9d9c5"
+    },
+    {
       "path": "test/portal-client.test.mjs",
       "size": 21270,
       "sha256": "491319b96a77dd54ef7cf321d10050a18396fe9b13cc7fa66ce6f8c815bacdd4"
