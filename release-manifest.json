@@ -95,8 +95,8 @@
     },
     {
       "path": "docs/agent-upload.ko.md",
-      "size": 14643,
-      "sha256": "4c7d22953c4d54824457d39dd3afc4be4bf966d2e783ea516a07c72dd973ec35"
+      "size": 19599,
+      "sha256": "1fcfbbd19ed28ce7a9e4816c634883c880f42bb46ddf5aa71c8d47eb5ac00b05"
     },
     {
       "path": "docs/aik-ags-provisional.ko.md",
@@ -384,6 +384,11 @@
       "sha256": "4ee9aef542e8ce3b0d4e8641287f525e7b5d298ce5846f5c54faeb0f8348c0c4"
     },
     {
+      "path": "scripts/portal-file-mcp.mjs",
+      "size": 5059,
+      "sha256": "264f8c2305ce0106c9c7dc4b922a04af190c28e82191bbaa82d28f912c96fa6f"
+    },
+    {
       "path": "scripts/portal.py",
       "size": 9791,
       "sha256": "5c76c70d3140ab2453585625aaaeb5461da685fd10da92b6282c873965c5528c"
@@ -459,14 +464,19 @@
       "sha256": "f554981d303dcbe83fa20122a6034596e49bbb399ed8228bf02af3d63dbcb7c1"
     },
     {
+      "path": "src/adapters/cli/file-forwarder.mjs",
+      "size": 15045,
+      "sha256": "f6b59cbe0f14c48992bdedd4f160759e711e91e99d524d55abd23bdbf457b436"
+    },
+    {
       "path": "src/adapters/cli/local-files.mjs",
       "size": 6890,
       "sha256": "f7e9e6590e4792794b5df9ea68ddae329db7c2730c9f146513eab5acfda699d4"
     },
     {
       "path": "src/adapters/cli/portal-client.mjs",
-      "size": 15895,
-      "sha256": "67caa7f61f95ab7d278e325f0a63c7d3d71f72c279028dcc9c57b7cbabdc3469"
+      "size": 18425,
+      "sha256": "1e6d0b83f30029c6715c1d6aae2f3181e5cbbcf227622975038a0c163574ff20"
     },
     {
       "path": "src/adapters/config/environment-editor.mjs",
@@ -1184,6 +1194,11 @@
       "sha256": "066861a69bf8e9e5f88c3ff2b3c1b9eb8b0a58d95a569502fb6847b84d008b32"
     },
     {
+      "path": "test/portal-client-bound-files.test.mjs",
+      "size": 7046,
+      "sha256": "29f50c6e42c6f628611cd81e2dd68a74986def0caa08117ad505b8bce122bfb1"
+    },
+    {
       "path": "test/portal-client-cloudflared.test.mjs",
       "size": 10299,
       "sha256": "1e9f8e65514e7d6ec550aa81103f0c03c94691a2acbf7d02029a976dc98738ba"
@@ -1217,6 +1232,21 @@
       "path": "test/portal-container-test.sh",
       "size": 5143,
       "sha256": "c138b9d40e7571eadea1afb37198c6ecbc4592fcc5e54cdcfa8ee11ba07f0631"
+    },
+    {
+      "path": "test/portal-file-forwarder.test.mjs",
+      "size": 9534,
+      "sha256": "62724bac294424c484b49bb75c136a6d48d70ebc0cd56d557838c7336214b8ea"
+    },
+    {
+      "path": "test/portal-file-mcp-process.test.mjs",
+      "size": 13345,
+      "sha256": "f228a884db547b3866608793804cf40324b8bf5de2f79228032d586cf602aa66"
+    },
+    {
+      "path": "test/portal-file-mcp.fixture.mjs",
+      "size": 1679,
+      "sha256": "36a663dc3fae0c92f38b9bee580802defb49dca439b78c3576b39a1e454c8263"
     },
     {
       "path": "test/python-source-ssh.test.mjs",

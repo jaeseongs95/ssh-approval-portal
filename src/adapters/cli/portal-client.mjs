@@ -2,6 +2,7 @@ import { withUploadSnapshot, saveDownload } from './local-files.mjs';
 import { CHUNK_BYTES, OUTPUT_PAGE_BYTES, MAX_BYTES } from '../../contracts/ports.mjs';
 import { createHash } from 'node:crypto';
 import { validateOrigin } from '../config/settings.mjs';
+import { remotePath as validateRemotePath } from '../../domain/validation.mjs';
 
 const fail = (code, details = {}) => Object.assign(new Error(code), { code, ...details });
 const identifier = value => { if (typeof value !== 'string' || !/^[a-f0-9]{48}$/.test(value)) throw fail('INVALID_REQUEST_ID'); return value; };
@@ -13,6 +14,19 @@ export function validateUploadExpectation(value) {
   const { size, sha256 } = value;
   if (!Number.isSafeInteger(size) || size < 0 || size > MAX_BYTES || typeof sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(sha256)) throw fail('INVALID_UPLOAD_EXPECTATION');
   return Object.freeze({ size, sha256 });
+}
+export function validateDownloadExpectation(value) {
+  if (value === undefined) return undefined;
+  try {
+    if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length !== 6 ||
+        !['size', 'sha256', 'target', 'targetRevision', 'remotePath', 'elevate'].every(key => Object.hasOwn(value, key))) throw Error();
+    const { size, sha256 } = validateUploadExpectation({ size: value.size, sha256: value.sha256 });
+    const { target, targetRevision, remotePath, elevate } = value;
+    if (typeof target !== 'string' || !/^[a-z][a-z0-9_-]{0,31}$/.test(target) ||
+        typeof targetRevision !== 'string' || !/^[a-f0-9]{64}$/.test(targetRevision) || typeof elevate !== 'boolean') throw Error();
+    validateRemotePath(remotePath);
+    return Object.freeze({ size, sha256, target, targetRevision, remotePath, elevate });
+  } catch { throw fail('INVALID_DOWNLOAD_EXPECTATION'); }
 }
 export function validateOutputOptions(options = {}) {
   if (!options || typeof options !== 'object' || Array.isArray(options) || Object.keys(options).some(key => !['offsetBytes', 'maxBytes', 'format'].includes(key))) throw fail('INVALID_OUTPUT_OPTIONS');
@@ -147,24 +161,31 @@ export function createPortalClient({ origin, accessToken, signal, timeoutMs = 12
         throw fail(['UPLOAD_SOURCE_MISMATCH', 'INVALID_TRANSFER_ACK', 'OWNER_REAUTH_REQUIRED', 'PORTAL_REQUEST_REFUSED'].includes(error.code) ? error.code : 'UPLOAD_RESULT_UNKNOWN', { ...(transferId ? { transferId } : {}), phase: 'upload' });
       }
     },
-    async resumeUpload(id, source, intent) {
+    async resumeUpload(id, source, intent, expectedSource) {
       ready(); identifier(id);
       try {
+        const expected = validateUploadExpectation(expectedSource);
         if (!intent || typeof intent !== 'object' || Array.isArray(intent) ||
-            Object.keys(intent).some(key => !['remotePath', 'target', 'overwrite', 'elevate'].includes(key)) ||
+            Object.keys(intent).some(key => !['remotePath', 'target', 'expectedTargetRevision', 'overwrite', 'elevate'].includes(key)) ||
             typeof intent.remotePath !== 'string' || !intent.remotePath ||
             (intent.target !== undefined && (typeof intent.target !== 'string' || !/^[a-z][a-z0-9_-]{0,31}$/.test(intent.target))) ||
+            (intent.expectedTargetRevision !== undefined && (intent.target === undefined || typeof intent.expectedTargetRevision !== 'string' || !/^[a-f0-9]{64}$/.test(intent.expectedTargetRevision))) ||
             ['overwrite', 'elevate'].some(key => intent[key] !== undefined && typeof intent[key] !== 'boolean')) throw fail('INVALID_RESUME_INTENT');
         const listed = await json('/api/targets'), target = intent.target ?? listed.defaultTarget;
         const selectedTarget = Array.isArray(listed.targets) ? listed.targets.find(item => item?.id === target) : null;
         if (typeof target !== 'string' || !/^[a-z][a-z0-9_-]{0,31}$/.test(target) ||
             !selectedTarget || typeof selectedTarget.enabled !== 'boolean') throw fail('INVALID_RESUME_INTENT');
+        const revision = intent.expectedTargetRevision;
+        if (revision !== undefined && selectedTarget.revision !== revision) throw fail('RESUME_INTENT_MISMATCH');
         return await withUploadSnapshot(source, async snapshot => {
+          if (expected && (snapshot.size !== expected.size || snapshot.sha256 !== expected.sha256)) throw fail('RESUME_SOURCE_MISMATCH');
           const record = await json('/api/files/uploads/' + id);
           if (!record || typeof record !== 'object' || Array.isArray(record) || Object.hasOwn(record, 'job') === Object.hasOwn(record, 'transfer')) throw fail('UPLOAD_NOT_RESUMABLE');
           const isJob = Object.hasOwn(record, 'job'), item = isJob ? record.job?.operation : record.transfer, binding = isJob ? record.job : item;
           if (isJob ? record.job?.kind !== 'upload' || item?.kind !== 'upload' || item.artifactId !== id || !jobStates.has(record.job.state) : item?.id !== id) throw fail('UPLOAD_NOT_RESUMABLE');
           if (item.size !== snapshot.size || item.sha256 !== snapshot.sha256) throw fail('RESUME_SOURCE_MISMATCH');
+          if (revision !== undefined && (isJob ? item.fileTargetId !== target || item.fileTargetRevision !== revision :
+              item.fileTargetBound !== true || item.targetId !== target || item.targetRevision !== revision)) throw fail('RESUME_INTENT_MISMATCH');
           if (item.remotePath !== intent.remotePath || item.overwrite !== (intent.overwrite ?? false) || item.elevate !== (intent.elevate ?? false) ||
               (binding.targetId === undefined ? 'default' : binding.targetId) !== target) throw fail('RESUME_INTENT_MISMATCH');
           if (isJob) { identifier(record.job.id); return record.job; } // Same job, every state: observe only.
@@ -173,19 +194,24 @@ export function createPortalClient({ origin, accessToken, signal, timeoutMs = 12
               !Number.isSafeInteger(item.sequence) || item.sequence < Math.ceil(item.received / CHUNK_BYTES) || item.sequence > item.received) throw fail('UPLOAD_NOT_RESUMABLE');
           const job = await sendUpload(snapshot, id, item.received, item.sequence);
           if (job.operation.remotePath !== intent.remotePath || job.operation.overwrite !== (intent.overwrite ?? false) ||
-              job.operation.elevate !== (intent.elevate ?? false) || (job.targetId === undefined ? 'default' : job.targetId) !== target) throw fail('INVALID_TRANSFER_ACK');
+              job.operation.elevate !== (intent.elevate ?? false) || (job.targetId === undefined ? 'default' : job.targetId) !== target ||
+              (revision !== undefined && (job.operation.fileTargetId !== target || job.operation.fileTargetRevision !== revision))) throw fail('INVALID_TRANSFER_ACK');
           return job;
         }, { signal: deadline });
       } catch (error) {
-        const known = ['INVALID_RESUME_INTENT', 'RESUME_SOURCE_MISMATCH', 'RESUME_INTENT_MISMATCH', 'UPLOAD_NOT_RESUMABLE', 'INVALID_TRANSFER_ACK', 'OWNER_REAUTH_REQUIRED', 'PORTAL_REQUEST_REFUSED'];
+        const known = ['INVALID_UPLOAD_EXPECTATION', 'INVALID_RESUME_INTENT', 'RESUME_SOURCE_MISMATCH', 'RESUME_INTENT_MISMATCH', 'UPLOAD_NOT_RESUMABLE', 'INVALID_TRANSFER_ACK', 'OWNER_REAUTH_REQUIRED', 'PORTAL_REQUEST_REFUSED'];
         throw fail(known.includes(error.code) ? error.code : 'UPLOAD_RESULT_UNKNOWN', { transferId: id, phase: 'resume-upload' });
       }
     },
-    async save(id, destination) {
+    async save(id, destination, expectedDownload) {
+      const expected = validateDownloadExpectation(expectedDownload);
       const job = await knownJob(id);
       const metadata = job.result?.structuredContent;
       if (job.kind !== 'download' || job.state !== 'completed' || job.result?.isError || !metadata) throw fail('DOWNLOAD_NOT_READY', { requestId: id });
       identifier(metadata.artifactId);
+      if (expected && (metadata.size !== expected.size || metadata.sha256 !== expected.sha256 ||
+          job.operation?.fileTargetId !== expected.target || job.operation.fileTargetRevision !== expected.targetRevision ||
+          job.operation.remotePath !== expected.remotePath || job.operation.elevate !== expected.elevate)) throw fail('DOWNLOAD_EXPECTATION_MISMATCH', { requestId: id });
       const { downloadUrl } = await json('/api/' + id + '/download', {});
       let url;
       try { url = new URL(downloadUrl); } catch { throw fail('UNTRUSTED_DOWNLOAD_URL'); }
