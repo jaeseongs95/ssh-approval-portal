@@ -1,10 +1,26 @@
 import { withUploadSnapshot, saveDownload } from './local-files.mjs';
-import { CHUNK_BYTES } from '../../contracts/ports.mjs';
+import { CHUNK_BYTES, OUTPUT_PAGE_BYTES, MAX_BYTES } from '../../contracts/ports.mjs';
+import { createHash } from 'node:crypto';
 import { validateOrigin } from '../config/settings.mjs';
 
 const fail = (code, details = {}) => Object.assign(new Error(code), { code, ...details });
 const identifier = value => { if (typeof value !== 'string' || !/^[a-f0-9]{48}$/.test(value)) throw fail('INVALID_REQUEST_ID'); return value; };
 const jobStates = new Set(['pending', 'evaluating', 'running', 'completed', 'failed', 'denied', 'expired', 'unknown']);
+export function validateUploadExpectation(value) {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length !== 2 ||
+      !Object.hasOwn(value, 'size') || !Object.hasOwn(value, 'sha256')) throw fail('INVALID_UPLOAD_EXPECTATION');
+  const { size, sha256 } = value;
+  if (!Number.isSafeInteger(size) || size < 0 || size > MAX_BYTES || typeof sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(sha256)) throw fail('INVALID_UPLOAD_EXPECTATION');
+  return Object.freeze({ size, sha256 });
+}
+export function validateOutputOptions(options = {}) {
+  if (!options || typeof options !== 'object' || Array.isArray(options) || Object.keys(options).some(key => !['offsetBytes', 'maxBytes', 'format'].includes(key))) throw fail('INVALID_OUTPUT_OPTIONS');
+  const { offsetBytes = 0, maxBytes = 4096, format = 'text' } = options;
+  if (!Number.isSafeInteger(offsetBytes) || offsetBytes < 0 || !Number.isSafeInteger(maxBytes) || maxBytes < 4 || maxBytes > OUTPUT_PAGE_BYTES || !['text', 'json'].includes(format)) throw fail('INVALID_OUTPUT_OPTIONS');
+  return { offsetBytes, maxBytes, format };
+}
+const captured = value => value?.version === 1 && value.captureSource === 'redacted-adapter-outcome' && value.sshCompleteness === 'unknown';
 async function readJson(response) {
   if (!/^application\/json(?:;|$)/i.test(response.headers.get('content-type') ?? '')) throw fail('INVALID_PORTAL_RESPONSE');
   const parts = []; let size = 0;
@@ -83,6 +99,32 @@ export function createPortalClient({ origin, accessToken, signal, timeoutMs = 12
     targets() { ready(); return json('/api/targets'); },
     pending() { ready(); return json('/api/pending'); },
     status: knownJob,
+    async output(id, options) {
+      identifier(id);
+      const { offsetBytes, maxBytes, format } = validateOutputOptions(options);
+      let outputId;
+      try {
+        const job = await knownJob(id), ref = job.result?.structuredContent?.output;
+        if (job.kind !== 'command' || !['completed', 'failed'].includes(job.state) || !captured(ref) || ref.executionId !== id ||
+            !Number.isSafeInteger(ref.bytes) || ref.bytes < 0 || !Number.isSafeInteger(ref.snapshotBytes) || ref.snapshotBytes < 0 ||
+            typeof ref.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(ref.sha256)) throw fail('OUTPUT_NOT_READY');
+        outputId = identifier(ref.id);
+        if (ref.state !== 'ready' || !Number.isSafeInteger(ref.expiresAt) || ref.expiresAt <= Date.now()) throw fail('OUTPUT_NOT_READY');
+        const total = format === 'text' ? ref.bytes : ref.snapshotBytes;
+        if (offsetBytes > total) throw fail('INVALID_OUTPUT_OPTIONS');
+        const query = new URLSearchParams({ offset: String(offsetBytes), limit: String(maxBytes), format });
+        const page = await json('/api/outputs/' + outputId + '?' + query);
+        if (!captured(page) || page.outputId !== outputId || page.executionId !== id || page.format !== format ||
+            page.offsetBytes !== offsetBytes || page.totalBytes !== total || typeof page.text !== 'string' || !page.text.isWellFormed() ||
+            page.bytes !== Buffer.byteLength(page.text) || page.bytes > maxBytes || page.nextOffset !== offsetBytes + page.bytes ||
+            page.nextOffset > total || typeof page.eof !== 'boolean' || page.eof !== (page.nextOffset === total) || (!page.eof && page.bytes === 0) ||
+            page.expiresAt !== ref.expiresAt || page.expiresAt <= Date.now() || typeof page.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(page.sha256) ||
+            (format === 'json' && page.sha256 !== ref.sha256)) throw fail('INVALID_OUTPUT_RESPONSE');
+        const wholeSha256Verified = offsetBytes === 0 && page.eof;
+        if (wholeSha256Verified && createHash('sha256').update(page.text).digest('hex') !== page.sha256) throw fail('INVALID_OUTPUT_RESPONSE');
+        return { ...Object.fromEntries(['text', 'version', 'captureSource', 'sshCompleteness', 'outputId', 'executionId', 'format', 'offsetBytes', 'bytes', 'nextOffset', 'eof', 'totalBytes', 'sha256', 'expiresAt'].map(key => [key, page[key]])), wholeSha256Verified };
+      } catch (error) { throw fail(error.code ?? 'OUTPUT_READ_FAILED', { requestId: id, ...(outputId ? { outputId } : {}) }); }
+    },
     transfer(id) { ready(); identifier(id); return json('/api/files/uploads/' + id); },
     async decide(id, action, confirm) {
       if (confirm !== true || !['approve', 'deny'].includes(action)) throw fail('EXPLICIT_OWNER_DECISION_REQUIRED');
@@ -92,16 +134,17 @@ export function createPortalClient({ origin, accessToken, signal, timeoutMs = 12
       catch (error) { throw fail(error.code ?? 'PORTAL_RESULT_UNKNOWN', { requestId: id, phase: action }); }
     },
     async requestDownload(args) { ready(); return json('/api/files/downloads', args); },
-    async upload(source, args, onTransfer = () => {}) {
-      ready(); let transferId;
+    async upload(source, args, onTransfer = () => {}, expectedSource) {
+      ready(); const expected = validateUploadExpectation(expectedSource); let transferId;
       try {
         return await withUploadSnapshot(source, async snapshot => {
+          if (expected && (snapshot.size !== expected.size || snapshot.sha256 !== expected.sha256)) throw fail('UPLOAD_SOURCE_MISMATCH');
           const begin = await json('/api/files/uploads', { ...args, fileName: snapshot.fileName, size: snapshot.size, sha256: snapshot.sha256 });
           transferId = identifier(begin.transferId); await onTransfer({ transferId });
           return sendUpload(snapshot, transferId);
         }, { signal: deadline });
       } catch (error) {
-        throw fail(['INVALID_TRANSFER_ACK', 'OWNER_REAUTH_REQUIRED', 'PORTAL_REQUEST_REFUSED'].includes(error.code) ? error.code : 'UPLOAD_RESULT_UNKNOWN', { ...(transferId ? { transferId } : {}), phase: 'upload' });
+        throw fail(['UPLOAD_SOURCE_MISMATCH', 'INVALID_TRANSFER_ACK', 'OWNER_REAUTH_REQUIRED', 'PORTAL_REQUEST_REFUSED'].includes(error.code) ? error.code : 'UPLOAD_RESULT_UNKNOWN', { ...(transferId ? { transferId } : {}), phase: 'upload' });
       }
     },
     async resumeUpload(id, source, intent) {

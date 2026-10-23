@@ -95,8 +95,8 @@
     },
     {
       "path": "docs/agent-upload.ko.md",
-      "size": 11041,
-      "sha256": "f52a71d912ba8d0e9b137fedf5ced85a8a4412aafbc88509897de7fb3e266639"
+      "size": 13581,
+      "sha256": "c7e8f6e0f0b8aa892f7ef764be23711ea28a64de5332721da7cfa78555d6960f"
     },
     {
       "path": "docs/aik-ags-provisional.ko.md",
@@ -380,8 +380,8 @@
     },
     {
       "path": "scripts/portal-client.mjs",
-      "size": 6228,
-      "sha256": "ec2a7d8d4bff9c1923112b861146e65671b12b130ee931e7044cdeb027624508"
+      "size": 8374,
+      "sha256": "4ee9aef542e8ce3b0d4e8641287f525e7b5d298ce5846f5c54faeb0f8348c0c4"
     },
     {
       "path": "scripts/portal.py",
@@ -465,8 +465,8 @@
     },
     {
       "path": "src/adapters/cli/portal-client.mjs",
-      "size": 11743,
-      "sha256": "b3dac85bf8d9f29f505599f9adea770fde6e8e82bdc4ac871247e60800604aad"
+      "size": 15895,
+      "sha256": "67caa7f61f95ab7d278e325f0a63c7d3d71f72c279028dcc9c57b7cbabdc3469"
     },
     {
       "path": "src/adapters/config/environment-editor.mjs",
@@ -1179,9 +1179,24 @@
       "sha256": "1e9f8e65514e7d6ec550aa81103f0c03c94691a2acbf7d02029a976dc98738ba"
     },
     {
+      "path": "test/portal-client-combined.test.mjs",
+      "size": 2000,
+      "sha256": "2898dba6d5482e6501733a44fa758feef4402679667a1196f35fd91479f6cf2b"
+    },
+    {
+      "path": "test/portal-client-output.test.mjs",
+      "size": 10052,
+      "sha256": "654cb67a79d251dbc0bc0865ffc6fbaf1f914b27a1d1684cff942598ee96ad55"
+    },
+    {
       "path": "test/portal-client-process.test.mjs",
-      "size": 15449,
-      "sha256": "8b4d88171e13972a3cf6f7213a9a692f59a3103486cfd132387c7c766d2f9953"
+      "size": 22148,
+      "sha256": "fb73a6704d41d219ad4f62860fba8153c1a9596ea718cec7978ad4d753fada21"
+    },
+    {
+      "path": "test/portal-client-source-binding.test.mjs",
+      "size": 9666,
+      "sha256": "96f03273c449132402666de8953b50b5892e39ebb787ccdf5aba84cdf97ef937"
     },
     {
       "path": "test/portal-client.test.mjs",

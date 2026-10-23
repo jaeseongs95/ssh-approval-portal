@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { access, mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
+import { access, mkdtemp, readFile, writeFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,12 +11,12 @@ import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { generateKeyPair, SignJWT, createLocalJWKSet, exportJWK } from 'jose';
 import { createApplication } from '../app.mjs';
-import { CHUNK_BYTES } from '../src/contracts/ports.mjs';
+import { CHUNK_BYTES, OUTPUT_PAGE_BYTES } from '../src/contracts/ports.mjs';
 
 const runFile = promisify(execFile);
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
-async function fixture(t) {
+async function fixture(t, { commandOutcome } = {}) {
   let openssl = process.env.OWNER_CLI_TEST_OPENSSL;
   if (!openssl) {
     const gitOpenSSL = 'C:/Program Files/Git/usr/bin/openssl.exe';
@@ -25,8 +25,8 @@ async function fixture(t) {
   try { await runFile(openssl, ['version'], { timeout: 10_000, windowsHide: true }); }
   catch (error) { if (error.code === 'ENOENT') { t.skip('OpenSSL fixture prerequisite unavailable; no installation attempted'); return; } throw error; }
   const root = await mkdtemp(join(tmpdir(), 'owner-cli-native-'));
-  let app, edge, loseChunkReply = false;
-  const children = new Set(), calls = [], effects = [], remote = new Map(), staged = new Map(), invocations = [];
+  let app, edge, loseChunkReply = false, revokeOutputCookie = false;
+  const children = new Set(), calls = [], effects = [], remote = new Map(), staged = new Map(), invocations = [], commandExecutions = [];
   t.after(async () => {
     for (const child of children) child.kill();
     if (edge) { edge.closeAllConnections(); await new Promise(resolve => edge.close(resolve)); }
@@ -45,15 +45,25 @@ async function fixture(t) {
     const headers = { ...req.headers, 'cf-access-jwt-assertion': req.headers['cf-access-token'] ?? '' };
     delete headers['cf-access-token'];
     calls.push({ method: req.method, path: new URL(req.url, 'https://fixture.test').pathname });
-    const upstream = request({ host: '127.0.0.1', port: app.adminHttp.address().port, path: req.url, method: req.method, headers }, reply => {
-      if (loseChunkReply && req.method === 'POST' && req.url.endsWith('/chunks') && reply.statusCode === 200) {
-        loseChunkReply = false; reply.resume(); reply.once('end', () => res.destroy()); return;
-      }
-      res.writeHead(reply.statusCode, reply.headers); reply.pipe(res);
-    });
-    upstream.on('error', () => { if (!res.headersSent) res.writeHead(502); res.end(); });
-    req.on('aborted', () => upstream.destroy());
-    req.pipe(upstream);
+    const forward = () => {
+      const upstream = request({ host: '127.0.0.1', port: app.adminHttp.address().port, path: req.url, method: req.method, headers }, reply => {
+        if (loseChunkReply && req.method === 'POST' && req.url.endsWith('/chunks') && reply.statusCode === 200) {
+          loseChunkReply = false; reply.resume(); reply.once('end', () => res.destroy()); return;
+        }
+        res.writeHead(reply.statusCode, reply.headers); reply.pipe(res);
+      });
+      upstream.on('error', () => { if (!res.headersSent) res.writeHead(502); res.end(); });
+      req.on('aborted', () => upstream.destroy());
+      req.pipe(upstream);
+    };
+    if (revokeOutputCookie && req.url.startsWith('/api/outputs/')) {
+      revokeOutputCookie = false;
+      const logout = request({ host: '127.0.0.1', port: app.adminHttp.address().port, path: '/api/session/logout', method: 'POST',
+        headers: { ...headers, 'content-type': 'application/json', 'content-length': '2' } }, reply => {
+        reply.resume(); reply.once('end', () => { if (reply.statusCode === 200) forward(); else res.destroy(); });
+      });
+      logout.on('error', () => res.destroy()); logout.end('{}');
+    } else forward();
   });
   edge.on('tlsClientError', () => {});
   await new Promise(resolve => edge.listen(0, '127.0.0.1', resolve));
@@ -61,7 +71,9 @@ async function fixture(t) {
   const issuer = 'https://fixture.cloudflareaccess.com', aud = 'a'.repeat(64);
   const { privateKey, publicKey } = await generateKeyPair('RS256');
   app = await createApplication({ registry: { getProfile: name => ({ host: '127.0.0.1', port: 22, user: 'fixture', readOnly: name === 'aws-readonly' }), closeAll: async () => {} },
-    classify: () => ({ class: 'privileged' }), executeCommand: async () => assert.fail('No command execution'),
+    classify: () => ({ class: 'privileged' }), executeCommand: async (_profile, command) => {
+      assert.ok(commandOutcome, 'No command execution in file-only cases'); commandExecutions.push(command); return commandOutcome;
+    },
     audit: () => {}, transferRoot: join(root, 'store'), uiHtml: '<html></html>',
     env: { BRIDGE_MCP_TOKEN: 'fixture-mcp', BRIDGE_ADMIN_TOKEN: 'fixture-maintenance', BRIDGE_UI_TICKET_KEY: 'b'.repeat(64),
       BRIDGE_ADMIN_ORIGIN: origin, BRIDGE_ADMIN_AUTH_MODE: 'access', BRIDGE_ACCESS_TEAM_DOMAIN: issuer,
@@ -92,10 +104,11 @@ async function fixture(t) {
   const token = await jwt('owner@example.test');
   const raw = (path, body, extra = {}) => fetch('http://127.0.0.1:' + app.adminHttp.address().port + path,
     { method: body === undefined ? 'GET' : 'POST', headers: { 'cf-access-jwt-assertion': token, Origin: origin, 'Content-Type': 'application/json', ...extra }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
-  async function cli(args, { credential = token, trust = true } = {}) {
+  async function cli(args, { credential = token, trust = true, stagingRoot } = {}) {
     const argv = [join(repository, 'scripts/portal-client.mjs'), '--origin', origin, '--access-token-stdin', ...args];
     assert.equal(argv.includes(credential), false);
     const env = Object.fromEntries(['PATH', 'SystemRoot', 'SYSTEMROOT', 'TEMP', 'TMP', 'HOME', 'USERPROFILE'].filter(key => process.env[key] !== undefined).map(key => [key, process.env[key]]));
+    if (stagingRoot) { assert.equal(stagingRoot, root); env.TEMP = root; env.TMP = root; }
     if (trust) env.NODE_EXTRA_CA_CERTS = cert; // Child-local CA; no global trust or TLS bypass.
     const child = spawn(process.execPath, argv, { env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, signal: AbortSignal.timeout(15_000) });
     children.add(child);
@@ -110,7 +123,8 @@ async function fixture(t) {
     invocations.push({ command: args[0], code: result.code, signal: result.signal });
     return { ...result, stdout, stderr, value: stdout ? JSON.parse(stdout) : null };
   }
-  return { root, app, token, jwt, raw, cli, calls, effects, remote, invocations, loseNextChunkReply: () => { loseChunkReply = true; } };
+  return { root, app, token, jwt, raw, cli, calls, effects, remote, invocations, commandExecutions,
+    loseNextChunkReply: () => { loseChunkReply = true; }, revokeOutputSessionOnce: () => { revokeOutputCookie = true; } };
 }
 
 test('native CLI process uses verified TLS and private stdin through approval and exact local file roundtrip', { timeout: 60_000 }, async t => {
@@ -174,4 +188,68 @@ test('a fresh native CLI process explicitly resumes the same transfer after an a
   const observed = await f.cli(['resume-upload', id, source, '/tmp/resumed.bin']); assert.equal(observed.code, 0); assert.equal(observed.value.id, resumed.value.id); assert.equal(observed.value.state, 'completed');
   assert.equal(f.calls.filter(x => x.method === 'POST' && x.path.startsWith('/api/files/')).length, before); assert.deepEqual(f.effects, ['upload']);
   t.diagnostic(JSON.stringify({ nativeChildInvocations: f.invocations.length, transferIdRetained: true, beginRequests: beginCount, remoteEffects: 1, completedResumeMutations: 0 }));
+});
+
+test('native owner CLI explicitly reads stored UTF8 text and JSON pages and stops on session revocation without reexecution', { timeout: 60_000 }, async t => {
+  const text = 'OUTPUT_BODY_SENTINEL\n' + '한글🙂'.repeat(3300), outcome = { failed: false, texts: [text] };
+  const f = await fixture(t, { commandOutcome: outcome }); if (!f) return;
+  const submitted = await f.app.targets.select('default').commands.run('hostname');
+  const id = submitted.job.id;
+  const ok = async args => { const r = await f.cli(args); assert.equal(r.code, 0, r.stderr); return r.value; };
+  assert.equal((await ok(['status', id])).state, 'pending');
+  const notReady = await f.cli(['output', id]); assert.equal(notReady.code, 1); assert.equal(notReady.stdout, '');
+  assert.deepEqual(f.commandExecutions, []);
+  const approved = await ok(['approve', id, '--confirm']); assert.equal(approved.state, 'completed');
+  assert.deepEqual(f.commandExecutions, ['hostname']);
+  assert.equal(JSON.stringify(await ok(['status', id])).includes('OUTPUT_BODY_SENTINEL'), false);
+  for (const format of ['text', 'json']) {
+    const parts = []; let offset = 0, totalHash;
+    for (let n = 0; n < 8; n++) {
+      const page = await ok(['output', id, '--offset', String(offset), '--limit', String(OUTPUT_PAGE_BYTES - 1), '--format', format]);
+      assert.equal(page.executionId, id); assert.equal(page.outputId, approved.result.structuredContent.output.id);
+      assert.equal(page.offsetBytes, offset); assert.equal(page.bytes, Buffer.byteLength(page.text));
+      assert.ok(page.bytes <= OUTPUT_PAGE_BYTES - 1); assert.equal(page.text.includes('\ufffd'), false);
+      assert.equal(page.wholeSha256Verified, false); assert.equal(page.sshCompleteness, 'unknown');
+      if (totalHash !== undefined) assert.equal(page.sha256, totalHash); totalHash = page.sha256;
+      parts.push(page.text); offset = page.nextOffset; if (page.eof) break;
+      assert.ok(n < 7, 'explicit page budget must finish');
+    }
+    const complete = parts.join('');
+    assert.equal(complete, format === 'text' ? text : JSON.stringify(outcome)); assert.equal(hash(complete), totalHash);
+  }
+  assert.equal((await f.cli(['output', id], { credential: await f.jwt('other@example.test') })).code, 1);
+  const pageReads = f.calls.filter(c => c.path.startsWith('/api/outputs/')).length;
+  f.revokeOutputSessionOnce();
+  const revoked = await f.cli(['output', id]); assert.equal(revoked.code, 1); assert.equal(revoked.stdout, '');
+  const refusal = JSON.parse(revoked.stderr); assert.equal(refusal.error, 'OWNER_REAUTH_REQUIRED'); assert.equal(refusal.requestId, id);
+  assert.equal(refusal.outputId, approved.result.structuredContent.output.id);
+  assert.equal(f.calls.filter(c => c.path.startsWith('/api/outputs/')).length, pageReads + 1);
+  assert.deepEqual(f.commandExecutions, ['hostname']); assert.deepEqual(f.effects, []);
+  t.diagnostic(JSON.stringify({ nativeChildInvocations: f.invocations.length, commandExecutions: 1, utf8TextBytes: Buffer.byteLength(text), formatPagesVerified: 2, revokedOutputReads: 1, commandReplay: 0, sshSynthetic: true }));
+});
+
+test('native CLI binds declared source bytes before begin while preserving valid binary and empty owner uploads', { timeout: 45_000 }, async t => {
+  const f = await fixture(t); if (!f) return;
+  const bytes = Buffer.alloc(CHUNK_BYTES + 9); for (let i = 0; i < bytes.length; i++) bytes[i] = i % 251;
+  const source = join(f.root, 'declared.bin'); await writeFile(source, bytes);
+  const invocation = (size, sha, path = '/tmp/declared.bin') => f.cli(['upload', source, path, '--expect-size', String(size), '--expect-sha256', sha], { stagingRoot: f.root });
+  for (const [size, sha] of [[bytes.length, hash('wrong-source')], [bytes.length + 1, hash(bytes)]]) {
+    const result = await invocation(size, sha); assert.equal(result.code, 1); assert.equal(result.stdout, '');
+    assert.match(result.stderr, /UPLOAD_SOURCE_MISMATCH/); assert.equal(f.app.queue.listAll().length, 0);
+    assert.deepEqual((await readdir(f.root)).filter(name => name.startsWith('ssh-approval-upload-')), [], 'mismatch must release owned snapshot staging');
+    assert.equal(f.calls.filter(row => row.method === 'POST' && row.path.startsWith('/api/files/')).length, 0);
+  }
+  const upload = await invocation(bytes.length, hash(bytes)); assert.equal(upload.code, 0, upload.stderr);
+  assert.equal(upload.value.state, 'pending'); assert.equal(upload.value.operation.size, bytes.length); assert.equal(upload.value.operation.sha256, hash(bytes));
+  const approved = await f.cli(['approve', upload.value.id, '--confirm']); assert.equal(approved.code, 0);
+  assert.deepEqual(f.remote.get('/tmp/declared.bin'), bytes);
+  await writeFile(source, Buffer.alloc(0));
+  const empty = await invocation(0, hash(Buffer.alloc(0)), '/tmp/declared-empty.bin'); assert.equal(empty.code, 0, empty.stderr);
+  assert.equal((await f.cli(['approve', empty.value.id, '--confirm'])).code, 0); assert.equal(f.remote.get('/tmp/declared-empty.bin').length, 0);
+  const before = f.calls.length;
+  const help = await f.cli(['upload', source, '/tmp/unused', '--expect-size', '0', '--expect-sha256', hash(Buffer.alloc(0)), '--help']);
+  assert.equal(help.code, 1); assert.equal(f.calls.length, before, 'combined help must not connect');
+  assert.equal(f.calls.filter(row => row.method === 'POST' && row.path === '/api/files/uploads').length, 2);
+  assert.deepEqual(f.effects, ['upload', 'upload']);
+  t.diagnostic(JSON.stringify({ nativeChildInvocations: f.invocations.length, sourceMismatchBegins: 0, binaryBytes: bytes.length, emptyBytes: 0, validBegins: 2, remoteEffects: 2, mismatchStagingLeftovers: 0, sshSynthetic: true }));
 });

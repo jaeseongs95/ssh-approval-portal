@@ -47,7 +47,25 @@ node @portalArgs save DOWNLOAD_REQUEST_ID 'C:\work\saved-new.bin'
 
 업로드 결과가 불명확하면 출력된 같은 전송 ID를 조회하고, 원본 파일·대상·원격 경로·플래그가 동일할 때만 `resume-upload TRANSFER_ID 절대로컬경로 원격경로`를 명시적으로 사용합니다. 새 업로드나 승인을 반복해 결과를 알아내지 않습니다. 로그인 캐시가 만료되면 본인이 다시 인증한 뒤 같은 ID부터 조회합니다.
 
+전송할 파일의 바이트를 미리 지정하려면 `upload`에 `--expect-size 바이트 --expect-sha256 소문자SHA256`을 함께 사용합니다. 예를 들어 크기와 해시를 확인한 파일에 두 옵션을 지정하면, CLI가 캡처한 불변 스냅샷과 일치할 때만 원격 업로드를 시작합니다. 불일치는 `UPLOAD_SOURCE_MISMATCH`로 중지하며 새 전송을 만들지 않습니다. `resume-upload`는 기존 전송의 크기·해시와 원래 대상을 대조하므로 이 옵션을 받지 않습니다.
+
 Claude Code에서는 허용된 로컬 명령 실행 도구로 이 CLI를 호출하고 PC 파일의 절대경로를 전달할 수 있습니다. 파일 바이트는 CLI가 직접 전송합니다. 실제 Claude Code 클라이언트의 업로드·PC 저장 실증은 별도 수용 검증이 필요하며, 이 옵션의 로컬 테스트만으로 플랫폼 전체 지원을 확정하지 않습니다.
+
+## CLI 명령 실행 결과 읽기
+
+`status 실행요청ID`는 상태와 출력 참조만 반환합니다. 저장된 본문이 필요할 때 같은 **실행 요청 ID**로 `output`을 명시적으로 호출합니다. CLI가 해당 요청의 출력 ID를 확인해 기존 owner API로 읽으므로 출력 ID를 별도로 입력하지 않습니다.
+
+```powershell
+node @portalArgs output REQUEST_ID
+node @portalArgs output REQUEST_ID --offset 0 --limit 4096 --format text
+node @portalArgs output REQUEST_ID --offset NEXT_OFFSET --limit 16384 --format json
+```
+
+한 호출은 JSON으로 감싼 한 페이지를 반환합니다. 실제 본문은 `text`에 있고 `bytes`, `nextOffset`, `eof`, `totalBytes`, `sha256`이 함께 있습니다. 기본 offset은 0, limit은 4096이며 limit은 4~16384바이트입니다. UTF-8 문자 경계 때문에 실제 페이지가 limit보다 짧을 수 있으므로 다음 조회에는 반환된 `nextOffset`을 사용합니다. 페이지를 자동으로 반복 조회하지 않습니다.
+
+`sha256`은 선택한 **전체 포맷**의 해시입니다. 실행 결과의 출력 참조에 있는 해시는 JSON snapshot의 해시이므로 text 포맷 해시와 다를 수 있습니다. `wholeSha256Verified`는 offset 0부터 EOF까지 한 페이지로 읽어 실제 전체 해시를 확인한 경우에만 true입니다. 여러 페이지로 읽으면 합친 본문의 크기·해시를 별도로 확인해야 합니다. `sshCompleteness: unknown`은 그대로 유지하며 저장된 본문의 EOF가 SSH 원본 전체 수신을 증명하지는 않습니다.
+
+완료되거나 실패한 명령에 준비된 출력이 있으면 읽을 수 있습니다. 대기·거절·만료·결과 불명, 잘못된 출력 결속이나 세션 철회에서는 본문을 반환하지 않습니다. 만료된 출력을 되찾으려고 명령이나 승인을 다시 실행하지 않습니다. 출력 읽기가 실패하면 반환된 같은 실행·출력 ID와 상태부터 확인합니다.
 
 ## 한도와 취소
 
