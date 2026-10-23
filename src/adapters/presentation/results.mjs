@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { fileTargetBinding } from '../../domain/file-target-binding.mjs';
 
 const identifier = z.string().regex(/^[a-f0-9]{48}$/);
 const state = z.enum(['pending', 'evaluating', 'running', 'completed', 'failed', 'denied', 'expired', 'unknown']);
@@ -41,7 +42,7 @@ export const outputSchemas = {
   begin: z.object({ transferId: identifier, received: z.literal(0) }),
   chunk: z.object({ sequence: z.number().int().nonnegative(), received: z.number().int().nonnegative() }),
   ready: z.object({ ready: z.literal(true), fileName: z.string() }),
-  targets: z.object({ targets: z.array(z.object({ id: targetId, displayName: z.string(), enabled: z.boolean(), isDefault: z.boolean() })), defaultTarget: targetId.nullable() }),
+  targets: z.object({ targets: z.array(z.object({ id: targetId, displayName: z.string(), enabled: z.boolean(), isDefault: z.boolean(), revision: z.string().regex(/^[a-f0-9]{64}$/).optional() })), defaultTarget: targetId.nullable() }),
   probe: z.object({ probe: z.literal('SSH_UI_PUBLIC_PROBE'), uiEnabled: z.boolean() }),
   safety: z.object({ id: identifier, subject: z.string().regex(/^[a-f0-9]{64}$/), targetId,
     targetRevision: z.string().optional(), advisory: z.literal(true), automaticExecutionEnabled: z.literal(false),
@@ -66,6 +67,7 @@ export function presentCommandOutcome(value) {
 }
 
 export function presentJob(job) {
+  if (job.kind !== 'command') fileTargetBinding(job.operation);
   const value = { id: job.id, kind: job.kind, operation: { ...job.operation }, command: job.command,
     ...(job.targetId === undefined ? {} : { targetId: job.targetId, targetRevision: job.targetRevision, targetDisplayName: job.targetDisplayName, hostKey: job.hostKey }),
     ...(job.decision ? { decision: structuredClone(job.decision) } : {}), profile: job.profile, commandClass: job.commandClass, target: job.target, state: job.state,

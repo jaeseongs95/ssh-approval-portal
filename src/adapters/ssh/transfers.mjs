@@ -1,5 +1,6 @@
 import { posix } from 'node:path';
 import { remotePath } from '../../domain/validation.mjs';
+import { fileTargetBinding } from '../../domain/file-target-binding.mjs';
 import { createSshTransport } from './vendor.mjs';
 
 export class Transfers {
@@ -17,6 +18,8 @@ export class Transfers {
   }
   async upload(op) {
     const item = this.store.get(op.artifactId);
+    const binding = fileTargetBinding(op);
+    if (binding ? item.fileTargetBound !== true || item.targetId !== binding.targetId || item.targetRevision !== binding.targetRevision : item.fileTargetBound === true) throw Error('Upload target does not match frozen operation');
     if (item.sha256 !== op.sha256 || item.size !== op.size || item.remotePath !== op.remotePath || item.overwrite !== op.overwrite || item.elevate !== op.elevate) throw Error('Upload does not match frozen operation');
     const session = await this.transport.connect(this.writeProfile);
     const fd = await this.store.verified(item.id);
@@ -33,7 +36,9 @@ export class Transfers {
   }
   async download(op) {
     remotePath(op.remotePath);
-    const item = this.store.reserveDownload({ fileName: posix.basename(op.remotePath), remotePath: op.remotePath, elevate: op.elevate });
+    const binding = fileTargetBinding(op);
+    const item = this.store.reserveDownload({ fileName: posix.basename(op.remotePath), remotePath: op.remotePath, elevate: op.elevate,
+      ...(binding ? { ...binding, fileTargetBound: true } : {}) });
     let session;
     const staged = { ...op, artifactId: item.id };
     try {

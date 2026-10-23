@@ -10,8 +10,9 @@ function fields(body, required, optional = []) {
 }
 function destination(body, upload) {
   fields(body, upload ? ['fileName', 'size', 'sha256', 'remotePath'] : ['remotePath'],
-    upload ? ['target', 'overwrite', 'elevate'] : ['target', 'elevate']);
+    upload ? ['target', 'overwrite', 'elevate', 'expectedTargetRevision'] : ['target', 'elevate', 'expectedTargetRevision']);
   if (body.target !== undefined && (typeof body.target !== 'string' || !/^[a-z][a-z0-9_-]{0,31}$/.test(body.target))) throw Error('Invalid target');
+  if (body.expectedTargetRevision !== undefined && (body.target === undefined || typeof body.expectedTargetRevision !== 'string' || !/^[a-f0-9]{64}$/.test(body.expectedTargetRevision))) throw Error('Invalid expected target revision');
   for (const flag of ['overwrite', 'elevate']) if (body[flag] !== undefined && typeof body[flag] !== 'boolean') throw Error('Invalid file flag');
   return { ...body, elevate: body.elevate ?? false, ...(upload ? { overwrite: body.overwrite ?? false } : {}) };
 }
@@ -27,7 +28,7 @@ export async function routeFileApi(req, res, url, { files, store, queue, targets
     targets?.artifactOwner(upload[1]);
     const item = store.get(upload[1]);
     // Explicit metadata only: never reveal backing paths, bytes or capabilities.
-    json(res, 200, { transfer: Object.fromEntries(['id', 'state', 'received', 'sequence', 'expiresAt', 'fileName', 'size', 'sha256', 'remotePath', 'overwrite', 'elevate', 'targetId', 'targetRevision'].filter(key => item[key] !== undefined).map(key => [key, item[key]])) });
+    json(res, 200, { transfer: Object.fromEntries(['id', 'state', 'received', 'sequence', 'expiresAt', 'fileName', 'size', 'sha256', 'remotePath', 'overwrite', 'elevate', 'targetId', 'targetRevision', 'fileTargetBound'].filter(key => item[key] !== undefined).map(key => [key, item[key]])) });
     return true;
   }
   if (req.method !== 'POST' || (upload && !upload[2])) { json(res, 405, { error: 'Method not allowed' }); return true; }
@@ -52,7 +53,8 @@ export async function routeFileApi(req, res, url, { files, store, queue, targets
   let value;
   if (url.pathname === '/api/files/uploads') {
     const item = await files.beginUpload(destination(body, true));
-    value = { transferId: item.id, received: 0, sequence: 0 };
+    value = { transferId: item.id, received: 0, sequence: 0,
+      ...(item.fileTargetBound === true ? { targetId: item.targetId, targetRevision: item.targetRevision } : {}) };
   } else if (url.pathname === '/api/files/downloads') value = presentJob(files.requestDownload(destination(body, false)));
   else if (upload[2] === 'chunks') {
     fields(body, ['sequence', 'data']);
