@@ -4,7 +4,7 @@
 
 현재 구현은 ChatGPT의 공식 `openai/fileParams` 계약을 사용합니다. 필수 필드는 `download_url`·`file_id`, 선택 필드는 `mime_type`·`file_name`입니다. 실제 ChatGPT 파일 입력은 `upload-source-not-configured`와 공급자 hostname 반환까지 도달했지만 공급자 파일 가져오기·승인·SSH 왕복은 아직 확인되지 않았습니다. [공식 파일 입력 계약](https://developers.openai.com/plugins/reference#file-apis)
 
-실제 Claude 시험에서는 `file_uuid`와 빈 `download_url`을 보내 입력 검증에 실패했습니다. `file_uuid`를 다운로드 주소로 바꾸거나 Anthropic Files API의 `file_id`로 간주하지 않습니다. 같은 Claude 샌드박스의 대상 HTTPS 연결은 proxy CONNECT 403으로 차단됐습니다. 현재 Claude 자동 업로드 경로는 제공하지 않으며 기존 카드의 PC 파일 선택을 사용합니다.
+실제 Claude 시험에서는 `file_uuid`와 빈 `download_url`을 보내 입력 검증에 실패했습니다. `file_uuid`를 다운로드 주소로 바꾸거나 Anthropic Files API의 `file_id`로 간주하지 않습니다. 같은 Claude 샌드박스의 대상 HTTPS 연결은 proxy CONNECT 403으로 차단됐습니다. 이 원격 파일 입력을 통한 Claude 자동 업로드 경로는 제공하지 않으며 기존 카드의 PC 파일 선택을 사용합니다.
 
 Claude Team·Enterprise의 조직 소유자는 `Organization settings > Capabilities`에서 코드 실행의 특정 도메인 접근을 설정할 수 있습니다. 개인 Free·Pro·Max에서 임의 도메인 추가가 가능하다고 보장하지 않습니다. MCP 연결 성공은 샌드박스 egress 허용을 뜻하지 않습니다. 도메인 접근과 실제 원본 바이트 전송이 별도로 입증되기 전에는 샌드박스 push 경로를 지원으로 표시하지 않습니다. [Claude 파일 생성과 네트워크 설정](https://support.claude.com/en/articles/12111783-create-and-edit-files-with-claude)
 
@@ -26,6 +26,28 @@ sudo bash /var/lib/ssh-mcp/app/approval-bridge/scripts/configure-upload-sources.
 5. 같은 파일을 새 파일 입력으로 다시 전달합니다. 성공 응답의 상태는 `pending`입니다. 카드에서 파일명·크기·SHA-256·목적지·덮어쓰기·sudo 설정을 확인한 뒤 승인합니다. 내려받은 파일과 원본의 해시까지 비교해야 왕복 시험이 완료됩니다.
 
 `chatgpt.com/api/library/.../download` 같은 로그인용 원본 링크만으로는 이 기능을 대신할 수 없습니다. 클라이언트가 인증된 임시 파일 입력을 전달하지 못하거나 Library 다운로드 자체가 실패하면 업로드 완료로 보고하지 않습니다. 쿠키 전달, 임의 주소 허용, 파일 바이트를 대화에 붙이는 방법으로 우회하지 않습니다.
+
+## 로컬 CLI에서 PC 파일 전송
+
+설치된 Node CLI에 `--cloudflared 절대실행경로`를 지정하면 해당 앱의 기존 Cloudflare 사용자 로그인 캐시를 읽어 owner 인증에 사용합니다. 토큰은 자식 프로세스의 비공개 출력으로만 받고 인수·환경변수·화면에 출력하지 않습니다. 기존 `--access-token-stdin`과 함께 지정할 수 없습니다. 캐시 조회는 30초와 16,386바이트로 제한하며, 실패하면 `ACCESS_CREDENTIAL_UNAVAILABLE`로 종료합니다. 자동 로그인이나 요청 재시도는 하지 않습니다. [cloudflared 2026.10.3의 캐시 조회 구현](https://github.com/cloudflare/cloudflared/blob/2026.10.3/cmd/cloudflared/access/cmd.go#L379-L409)
+
+아래는 PowerShell 예시입니다. 관리자 origin, cloudflared 경로, 로컬·서버 경로와 요청 ID를 실제 값으로 바꾸고 패키지 루트에서 실행합니다. 로그인이 필요하면 사용자가 먼저 `cloudflared access login 관리자origin | Out-Null`을 실행합니다. 토큰·비밀번호·인증코드를 대화에 붙이지 않습니다.
+
+```powershell
+$portalArgs = @('scripts/portal-client.mjs', '--origin', 'https://approve.example.test', '--cloudflared', 'C:\tools\cloudflared.exe')
+node @portalArgs targets
+node @portalArgs upload 'C:\work\original.bin' '/home/mcpops/new-file.bin' --target default
+node @portalArgs status REQUEST_ID
+node @portalArgs approve REQUEST_ID --confirm
+node @portalArgs request-download '/home/mcpops/new-file.bin' --target default
+node @portalArgs save DOWNLOAD_REQUEST_ID 'C:\work\saved-new.bin'
+```
+
+`pending`이면 대상·경로·파일 크기·SHA-256을 확인한 뒤 해당 요청만 승인하거나 `deny REQUEST_ID --confirm`으로 거절합니다. 자동 정책으로 완료됐거나 이미 결정된 요청은 상태를 확인합니다. 서버의 `completed`는 다운로드 준비 상태이며, PC 파일이 크기·해시 검사를 통과해 `saved`로 반환돼야 저장 완료입니다. 기존 PC 파일은 덮어쓰지 않습니다.
+
+업로드 결과가 불명확하면 출력된 같은 전송 ID를 조회하고, 원본 파일·대상·원격 경로·플래그가 동일할 때만 `resume-upload TRANSFER_ID 절대로컬경로 원격경로`를 명시적으로 사용합니다. 새 업로드나 승인을 반복해 결과를 알아내지 않습니다. 로그인 캐시가 만료되면 본인이 다시 인증한 뒤 같은 ID부터 조회합니다.
+
+Claude Code에서는 허용된 로컬 명령 실행 도구로 이 CLI를 호출하고 PC 파일의 절대경로를 전달할 수 있습니다. 파일 바이트는 CLI가 직접 전송합니다. 실제 Claude Code 클라이언트의 업로드·PC 저장 실증은 별도 수용 검증이 필요하며, 이 옵션의 로컬 테스트만으로 플랫폼 전체 지원을 확정하지 않습니다.
 
 ## 한도와 취소
 

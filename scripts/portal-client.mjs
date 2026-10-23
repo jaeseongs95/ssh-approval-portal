@@ -1,24 +1,46 @@
 import { parseArgs } from 'node:util';
 import { pathToFileURL } from 'node:url';
 import { realpath } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
 import { createPortalClient } from '../src/adapters/cli/portal-client.mjs';
+import { validateOrigin } from '../src/adapters/config/settings.mjs';
+import { validateLocalPath } from '../src/adapters/cli/local-files.mjs';
+import { idValid, remotePath as validateRemotePath } from '../src/domain/validation.mjs';
 
-export async function main(argv = process.argv.slice(2), input = process.stdin, output = process.stdout, errorOutput = process.stderr) {
+export async function main(argv = process.argv.slice(2), input = process.stdin, output = process.stdout, errorOutput = process.stderr, runCredential = execFileSync) {
   let client;
   try {
-    const { values, positionals: args } = parseArgs({ args: argv, allowPositionals: true, options: { help: { type: 'boolean' }, origin: { type: 'string' }, 'access-token-stdin': { type: 'boolean' }, target: { type: 'string' }, sudo: { type: 'boolean' }, overwrite: { type: 'boolean' }, confirm: { type: 'boolean' } } });
+    const { values, positionals: args } = parseArgs({ args: argv, allowPositionals: true, options: { help: { type: 'boolean' }, origin: { type: 'string' }, 'access-token-stdin': { type: 'boolean' }, cloudflared: { type: 'string' }, target: { type: 'string' }, sudo: { type: 'boolean' }, overwrite: { type: 'boolean' }, confirm: { type: 'boolean' } } });
     if (values.help === true && argv.length === 1) {
-      output.write('사용법: node scripts/portal-client.mjs --origin https://관리자호스트 --access-token-stdin <명령>\n명령: targets | pending | status ID | transfer ID | approve ID --confirm | deny ID --confirm | upload 절대로컬경로 원격경로 [--target ID] [--sudo] [--overwrite] | resume-upload ID 절대로컬경로 원격경로 [--target ID] [--sudo] [--overwrite] | request-download 원격경로 [--target ID] [--sudo] | save ID 절대로컬경로\nAccess 사용자 토큰 한 줄을 stdin으로 전달하세요. 토큰을 인수·로그·채팅에 넣지 마세요. 승인 전 pending과 서버 준비 completed는 PC 저장 saved와 다릅니다. 결과가 불명확하면 같은 ID를 조회하세요. 재개는 같은 파일 바이트·원래 대상/경로/플래그가 일치하는 같은 전송 ID에만 명시적으로 수행합니다. 새 업로드나 승인을 자동 반복하지 않습니다.\n');
+      output.write('사용법: node scripts/portal-client.mjs --origin https://관리자호스트 (--access-token-stdin | --cloudflared 절대실행경로) <명령>\n명령: targets | pending | status ID | transfer ID | approve ID --confirm | deny ID --confirm | upload 절대로컬경로 원격경로 [--target ID] [--sudo] [--overwrite] | resume-upload ID 절대로컬경로 원격경로 [--target ID] [--sudo] [--overwrite] | request-download 원격경로 [--target ID] [--sudo] | save ID 절대로컬경로\nstdin 모드는 Access 사용자 토큰 한 줄을 전달합니다. cloudflared 모드는 기존 로그인 캐시만 읽으며 로그인이 필요하면 별도로 진행하세요. 토큰을 인수·로그·채팅에 넣지 마세요. 승인 전 pending과 서버 준비 completed는 PC 저장 saved와 다릅니다. 결과가 불명확하면 같은 ID를 조회하세요. 재개는 같은 파일 바이트·원래 대상/경로/플래그가 일치하는 같은 전송 ID에만 명시적으로 수행합니다. 새 업로드나 승인을 자동 반복하지 않습니다.\n');
       return 0;
     }
     const count = { targets: 1, pending: 1, status: 2, transfer: 2, approve: 2, deny: 2, 'request-download': 2, upload: 3, 'resume-upload': 4, save: 3 };
-    if (!values.origin || values['access-token-stdin'] !== true || args.length !== count[args[0]] ||
+    const cached = values.cloudflared !== undefined;
+    if (!values.origin || cached === (values['access-token-stdin'] === true) || args.length !== count[args[0]] ||
         (values.confirm && !['approve', 'deny'].includes(args[0])) ||
         (values.overwrite && !['upload', 'resume-upload'].includes(args[0])) ||
         ((values.target || values.sudo) && !['upload', 'resume-upload', 'request-download'].includes(args[0]))) throw Error('INVALID_ARGUMENTS');
-    const parts = []; let length = 0;
-    for await (const part of input) { length += Buffer.byteLength(part); if (length > 16386) throw Error('INVALID_ACCESS_CREDENTIAL'); parts.push(Buffer.from(part)); }
-    const token = Buffer.concat(parts).toString('utf8').replace(/\r?\n$/, '');
+    validateOrigin(values.origin);
+    if (['status', 'transfer', 'approve', 'deny', 'save', 'resume-upload'].includes(args[0]) && !idValid(args[1])) throw Object.assign(Error(), { code: 'INVALID_REQUEST_ID' });
+    if (['approve', 'deny'].includes(args[0]) && values.confirm !== true) throw Object.assign(Error(), { code: 'EXPLICIT_OWNER_DECISION_REQUIRED' });
+    if (values.target !== undefined && !/^[a-z][a-z0-9_-]{0,31}$/.test(values.target)) throw Object.assign(Error(), { code: 'INVALID_TARGET' });
+    if (cached) validateLocalPath(values.cloudflared);
+    const localIndex = { upload: 1, 'resume-upload': 2, save: 2 }[args[0]];
+    const remoteIndex = { upload: 2, 'resume-upload': 3, 'request-download': 1 }[args[0]];
+    if (localIndex !== undefined) validateLocalPath(args[localIndex]);
+    if (remoteIndex !== undefined) validateRemotePath(args[remoteIndex]);
+    let token;
+    if (cached) {
+      try { token = runCredential(values.cloudflared, ['access', 'token', '--app=' + values.origin], { encoding: 'utf8', timeout: 30_000, maxBuffer: 16386, killSignal: 'SIGKILL', windowsHide: true, shell: false, stdio: ['ignore', 'pipe', 'pipe'] }); }
+      catch { throw Object.assign(Error(), { code: 'ACCESS_CREDENTIAL_UNAVAILABLE' }); }
+      if (typeof token !== 'string') throw Object.assign(Error(), { code: 'INVALID_ACCESS_CREDENTIAL' });
+      token = token.replace(/\r?\n$/, '');
+    } else {
+      const parts = []; let length = 0;
+      for await (const part of input) { length += Buffer.byteLength(part); if (length > 16386) throw Error('INVALID_ACCESS_CREDENTIAL'); parts.push(Buffer.from(part)); }
+      token = Buffer.concat(parts).toString('utf8').replace(/\r?\n$/, '');
+    }
     client = createPortalClient({ origin: values.origin, accessToken: token });
     await client.connect();
     const destination = { ...(values.target ? { target: values.target } : {}), elevate: values.sudo === true };

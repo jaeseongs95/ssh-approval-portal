@@ -95,8 +95,8 @@
     },
     {
       "path": "docs/agent-upload.ko.md",
-      "size": 8141,
-      "sha256": "d175d1ae35e6ab070cafac5f0ad3120dc166d36a1144cb067ccb82932a2f881a"
+      "size": 11041,
+      "sha256": "f52a71d912ba8d0e9b137fedf5ced85a8a4412aafbc88509897de7fb3e266639"
     },
     {
       "path": "docs/aik-ags-provisional.ko.md",
@@ -380,8 +380,8 @@
     },
     {
       "path": "scripts/portal-client.mjs",
-      "size": 4246,
-      "sha256": "a691e37749489233a709cf7859d3642b1225fb91907c4e9ff1218276251f8807"
+      "size": 6228,
+      "sha256": "ec2a7d8d4bff9c1923112b861146e65671b12b130ee931e7044cdeb027624508"
     },
     {
       "path": "scripts/portal.py",
@@ -460,8 +460,8 @@
     },
     {
       "path": "src/adapters/cli/local-files.mjs",
-      "size": 6847,
-      "sha256": "33b44419fbad40cfdef3c0282b7c2aaa93878de8ca3676cd050f51c4797d0c3d"
+      "size": 6890,
+      "sha256": "f7e9e6590e4792794b5df9ea68ddae329db7c2730c9f146513eab5acfda699d4"
     },
     {
       "path": "src/adapters/cli/portal-client.mjs",
@@ -1172,6 +1172,11 @@
       "path": "test/PLAN.md",
       "size": 10156,
       "sha256": "066861a69bf8e9e5f88c3ff2b3c1b9eb8b0a58d95a569502fb6847b84d008b32"
+    },
+    {
+      "path": "test/portal-client-cloudflared.test.mjs",
+      "size": 10299,
+      "sha256": "1e9f8e65514e7d6ec550aa81103f0c03c94691a2acbf7d02029a976dc98738ba"
     },
     {
       "path": "test/portal-client-process.test.mjs",

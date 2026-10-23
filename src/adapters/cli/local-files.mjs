@@ -12,6 +12,7 @@ function localPath(value) {
       value.slice(3).split(/[\\/]/).some(part => /[. ]$/.test(part) || /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(part)))) throw fail('INVALID_LOCAL_PATH');
   return value;
 }
+export { localPath as validateLocalPath };
 function limit(value) {
   if (!Number.isSafeInteger(value) || value <= 0 || value > MAX_BYTES) throw fail('INVALID_LOCAL_LIMIT');
 }
