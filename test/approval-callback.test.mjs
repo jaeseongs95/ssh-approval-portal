@@ -87,6 +87,10 @@ test('expiry wakes without a queue reaper, while timeout leaves the original req
   const result = await f.wait(expired.id, { timeoutMs: 1000 });
   assert.equal(result.event, 'expired'); assert.equal(result.job.state, 'expired'); assert.equal(f.effects, 0);
   assert.equal((await f.wait(expired.id)).event, 'expired');
+  let now = 1000;
+  const late = queueFixture(t, { now: () => now }), unseen = late.queue.submit('fixture-command');
+  late.queue.beginEvaluation(unseen.id); now = unseen.expiresAt;
+  assert.equal((await late.wait(unseen.id)).event, 'expired'); assert.equal(late.queue.requestWaiters.size, 0); assert.equal(late.effects, 0);
 });
 
 test('abort, saturation and invalid deadlines release subscriptions without cancelling the operation', async t => {
@@ -205,7 +209,11 @@ test('approval and completion race with abort exactly once, including duplicate 
   f.queue.start(job.id); f.queue.notifyRequest(f.queue.jobs.get(job.id)); controller.abort();
   assert.equal((await waited).event, 'approved'); await f.queue.wait(job.id);
   f.queue.notifyRequest(f.queue.jobs.get(job.id)); assert.equal(deliveries, 1);
-  assert.equal(f.queue.requestWaiters.size, 0); assert.equal(getEventListeners(controller.signal, 'abort').length, 0); assert.equal(f.effects, 1);
+  const before = new AbortController(), beforeJob = f.queue.submit('fixture-command');
+  const beforeWait = f.wait(beforeJob.id, { signal: before.signal }); const beforeRejected = assert.rejects(beforeWait);
+  before.abort(); f.queue.start(beforeJob.id); await beforeRejected; await f.queue.wait(beforeJob.id);
+  assert.equal(f.queue.requestWaiters.size, 0); assert.equal(getEventListeners(controller.signal, 'abort').length, 0); assert.equal(f.effects, 2);
+  assert.equal(getEventListeners(before.signal, 'abort').length, 0);
   for (const order of ['completion-first', 'abort-first', 'same-tick']) {
     let finish, effects = 0;
     const g = queueFixture(t, { executeOperation: () => { effects++; return new Promise(resolve => { finish = resolve; }); } });
@@ -224,12 +232,32 @@ test('approval and completion race with abort exactly once, including duplicate 
 });
 
 test('MCP terminal audit error explicitly refuses execution-success signalling', { timeout: 15000 }, async t => {
-  let effects = 0;
-  const f = await httpFixture(t, async () => { effects++; return { failed: false, texts: [] }; }, event => { if (event.action === 'completed') throw Error('private audit failure'); });
-  const job = (await f.call('run-command', { command: 'fixture-command' })).structuredContent;
-  const completed = f.call('wait-for-request', { id: job.id, until: 'completion', timeoutMs: 5000 });
-  await eventually(() => f.queue.requestWaiters.size === 1); assert.equal((await f.owner(job.id, 'approve')).status, 200);
-  const result = (await completed).structuredContent;
-  assert.equal(result.callback.approved, true); assert.equal(result.callback.executionSucceeded, false);
-  assert.match(result.auditError, /must not be retried/); assert.equal(effects, 1);
+  for (const phase of ['audit', 'persist']) {
+    let effects = 0;
+    const f = await httpFixture(t, async () => { effects++; return { failed: false, texts: [] }; }, event => { if (phase === 'audit' && event.action === 'completed') throw Error('private audit failure'); });
+    const job = (await f.call('run-command', { command: 'fixture-command' })).structuredContent;
+    if (phase === 'persist') f.queue.track(job.id, value => { if (value.state === 'completed') throw Error('private persistence failure'); });
+    const completed = f.call('wait-for-request', { id: job.id, until: 'completion', timeoutMs: 5000 });
+    await eventually(() => f.queue.requestWaiters.size === 1); assert.equal((await f.owner(job.id, 'approve')).status, 200);
+    const result = (await completed).structuredContent;
+    assert.equal(result.callback.approved, true); assert.equal(result.callback.executionSucceeded, false);
+    assert.match(result.auditError, /must not be retried/); assert.equal(effects, 1); assert.equal(f.queue.requestWaiters.size, 0);
+  }
+});
+
+test('timeout and completion ordering settle once under the same clock tick', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  for (const order of ['timeout-first', 'completion-first']) {
+    let finish, effects = 0, deliveries = 0;
+    const f = queueFixture(t, { executeOperation: () => { effects++; return new Promise(resolve => { finish = resolve; }); } });
+    const job = f.queue.submit('fixture-command');
+    const result = f.wait(job.id, { until: 'completion', timeoutMs: 10 }).then(value => { deliveries++; return value; });
+    f.queue.start(job.id); await Promise.resolve();
+    if (order === 'timeout-first') t.mock.timers.tick(10);
+    finish({ failed: false, texts: [] }); await f.queue.wait(job.id);
+    if (order === 'completion-first') t.mock.timers.tick(10);
+    assert.equal((await result).event, order === 'timeout-first' ? 'timeout' : 'completed');
+    assert.equal(deliveries, 1); assert.equal(f.queue.requestWaiters.size, 0);
+    assert.equal(getEventListeners(f.controller.signal, 'abort').length, 0); assert.equal(effects, 1);
+  }
 });
