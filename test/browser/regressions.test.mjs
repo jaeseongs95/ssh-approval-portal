@@ -383,7 +383,7 @@ for (const locale of ['ko-KR', 'en-US']) test('JEV failure details distinguish u
   const korean = locale === 'ko-KR';
   const value = { id: 'evaluation-unavailable-fixture', kind: 'command', state: 'pending', command: 'id', target: 'fixture', expiresAt: 2000000000000,
     decision: { decision: 'review', reasonCode: 'evaluation_unavailable', attempts: [
-      { provider: 'untrusted-provider-sentinel', status: 'unavailable', reason: 'evaluation_failed', failureReason: 'invalid_response', diagnostic: 'PROBABILITY_SUM', raw: '<img src=x onerror=alert(1)>private-sentinel' },
+      { provider: 'untrusted-provider-sentinel', status: 'unavailable', reason: 'evaluation_failed', failureReason: 'invalid_response', diagnostic: 'PROBABILITY_SUM', raw: '<img src=x onerror=alert(1)>private-sentinel', error: 'private-error-sentinel', context: 'private-context-sentinel', model: 'private-model-sentinel', response: 'private-response-sentinel' },
       { provider: 'untrusted-provider-sentinel', status: 'unavailable', reason: 'not_configured', diagnostic: 'private-diagnostic-sentinel' },
       { status: 'unavailable', failureReason: 'timeout' }, { status: 'unavailable', failureReason: 'busy' },
       { status: 'unavailable', reason: { toString: 'private-sentinel' }, diagnostic: 'private-diagnostic-sentinel' },
@@ -402,7 +402,7 @@ for (const locale of ['ko-KR', 'en-US']) test('JEV failure details distinguish u
     assert.match(text, korean ? /설정/ : /configured/);
     assert.match(text, korean ? /대기 시간/ : /timed out/);
     assert.match(text, korean ? /진행 중/ : /in progress/);
-    assert.doesNotMatch(text, /private-sentinel|untrusted-provider|private-diagnostic|onerror/);
+    assert.doesNotMatch(text, /private-|untrusted-provider|onerror/);
     assert.equal(await page.locator('.assessment-scores').count(), 0);
     assert.equal(await page.locator('.assessment-failure-details img').count(), 0);
   }
