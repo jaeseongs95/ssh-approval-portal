@@ -23,7 +23,8 @@ export function createMcpAdapter({ queue, commands, files, settings, capabilitie
   const identity = target => targets && !targets.legacy ? { ...targets.select(target).identity, target: targets.select(target).target } : undefined;
   const URI = `ui://ssh-approval/card-${hash(uiHtml)}.html`;
   return function mcpServer(requestSignal) {
-    const server = new McpServer({ name: 'SSH Approval Portal', version: metadata.version });
+    // Largest valid input: nine run-python-source fields plus sixteen argv entries (25 elements).
+    const server = new McpServer({ name: 'SSH Approval Portal', version: metadata.version }, { maxToolInputElements: 64 });
     server.registerResource('SSH approval card', URI, { mimeType: 'text/html;profile=mcp-app' }, async () => ({ contents: [{ uri: URI, mimeType: 'text/html;profile=mcp-app', text: uiHtml, _meta: { ui: { csp: { connectDomains: [], resourceDomains: [] }, prefersBorder: true } } }] }));
     const tool = (name, schema, outputSchema, handler, { ui = false, appOnly = false, description = name, readOnly = false, meta, openWorld = false } = {}) => server.registerTool(name, {
       description, inputSchema: schema, outputSchema, annotations: { readOnlyHint: readOnly, destructiveHint: !readOnly, ...(openWorld ? { openWorldHint: true } : {}) },

@@ -20,7 +20,7 @@ export function createProtocolAdapters({ queue, commands, files, store, lifecycl
       if (req.url === '/health' && req.method === 'GET') return json(res, 200, { healthy: true, version: metadata.version, uiEnabled: settings.uiEnabled, adminAuthMode: adminAccess.mode, ...lifecycle.snapshot() });
       if (req.url !== '/mcp' || !authenticated(req, settings.mcpToken)) return json(res, 401, { error: 'Unauthorized' });
       if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
-      const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true, maxMessageSize: 1024 * 1024 });
+      const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true, maxRequestBodySize: 1024 * 1024 });
       disconnect = new AbortController();
       aborted = () => disconnect.abort(); closed = () => { if (!res.writableEnded) aborted(); };
       req.once('aborted', aborted); res.once('close', closed);
