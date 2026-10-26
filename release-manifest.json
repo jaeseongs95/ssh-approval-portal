@@ -916,7 +916,7 @@
     {
       "path": "test/browser/regressions.test.mjs",
       "size": 40201,
-      "sha256": "1f226d4095b8e0dee72be5e512a01a19fb91bbc6bcaa84fe908b54d54012733a"
+      "sha256": "f447a20753dfe91d0957799c0cbbc780b50b7312a017b9dc00638fc90286afcb"
     },
     {
       "path": "test/browser/run.mjs",

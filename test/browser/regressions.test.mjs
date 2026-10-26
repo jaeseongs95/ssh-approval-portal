@@ -339,8 +339,7 @@ for (const [locale, korean] of [['ko-KR', true], ['en-US', false]]) test(`record
     const value = { kind: 'download', target: 'fixture', command: 'fixture command', expiresAt: 2000000000000, createdAt: 1900000000000,
       operation: { remotePath: '/tmp/fixture.bin', elevate: false }, ...fields,
       decision: { decision: item.decision ?? 'execute', reasonCode: item.reasonCode, ...(item.assessment ? { assessment: item.assessment } : {}) } };
-    for (const surface of ['card', 'web', 'compiled-web']) {
-    server.state.compiled = surface === 'compiled-web';
+    for (const surface of ['card', 'web']) {
       if (surface === 'card') {
         await page.goto(server.origin + '/fixture/card'); await page.waitForFunction(() => window.fixture);
         await page.evaluate(value => window.fixture.receive({ structuredContent: value, _meta: { sshApproval: { uiEnabled: true } } }), value);
@@ -389,7 +388,8 @@ for (const locale of ['ko-KR', 'en-US']) test('JEV failure details distinguish u
       { status: 'unavailable', failureReason: 'timeout' }, { status: 'unavailable', failureReason: 'busy' },
       { status: 'unavailable', reason: { toString: 'private-sentinel' }, diagnostic: 'private-diagnostic-sentinel' },
     ] } };
-  for (const surface of ['card', 'web']) {
+  for (const surface of ['card', 'web', 'compiled-web']) {
+    server.state.compiled = surface === 'compiled-web';
     if (surface === 'card') { await page.goto(server.origin + '/fixture/card'); await page.waitForFunction(() => window.fixture); await page.evaluate(value => window.fixture.receive({ structuredContent: value, _meta: { sshApproval: { uiEnabled: true } } }), value); }
     else { server.state.jobs = [value]; await page.goto(server.origin + '/fixture/web'); await page.locator('.assessment-summary').waitFor(); }
     const detail = page.locator('.assessment-failure-details');
