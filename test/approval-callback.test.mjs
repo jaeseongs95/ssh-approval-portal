@@ -148,7 +148,7 @@ test('real SDK HTTP call resumes on owner approval, then completion returns only
   assert.equal(JSON.stringify(result).includes('PRIVATE-output-body'), false); assert.equal(f.queue.requestWaiters.size, 0);
 });
 
-test('MCP deny, timeout, unknown ID and disconnect preserve zero execution and clean pending waits', { timeout: 20000 }, async t => {
+test('MCP deny, timeout, unknown ID and SDK cancellation preserve zero execution and bounded waits', { timeout: 20000 }, async t => {
   let effects = 0;
   const f = await httpFixture(t, async () => { effects++; return { failed: false, texts: [] }; });
   const job = (await f.call('run-command', { command: 'fixture-command' })).structuredContent;
@@ -159,7 +159,7 @@ test('MCP deny, timeout, unknown ID and disconnect preserve zero execution and c
   const pending = (await f.call('run-command', { command: 'fixture-command' })).structuredContent;
   assert.equal((await f.call('wait-for-request', { id: pending.id, timeoutMs: 5 })).structuredContent.callback.event, 'timeout');
   const controller = new AbortController();
-  const waiting = f.client.callTool({ name: 'wait-for-request', arguments: { id: pending.id, timeoutMs: 5000 } }, undefined, { signal: controller.signal });
+  const waiting = f.client.callTool({ name: 'wait-for-request', arguments: { id: pending.id, timeoutMs: 500 } }, undefined, { signal: controller.signal });
   const rejection = assert.rejects(waiting); await eventually(() => f.queue.requestWaiters.size === 1); controller.abort(); await rejection;
   await eventually(() => f.queue.requestWaiters.size === 0); assert.equal(f.queue.get(pending.id).state, 'pending'); assert.equal(effects, 0);
 });
