@@ -135,3 +135,5 @@ sudo bash scripts/status.sh
 UI는 별도 `ui` 의존성으로 빌드하며 서버 SDK를 업그레이드하지 않습니다. UI와 웹의 모듈을 바꾸면 `npm run build:ui`로 배포 자산을 다시 만듭니다. 계층 경계·호환성·향후 시험 기준은 [구조 안내](docs/architecture.ko.md)와 [검증 계획](test/PLAN.md)에 정리했습니다. `test/docker-tests.ps1`은 합성 데이터로 격리된 Ubuntu 컨테이너를 생성·정리합니다. 실제 클라이언트의 카드·파일 저장, 플랫폼 파일 입력과 실제 ARM 하드웨어 시험은 각각 수행한 근거가 있을 때만 완료로 기록합니다.
 
 릴리스의 `release-manifest.json`과 `SHA256SUMS`를 검증하세요. 패키지에는 node_modules, 실제 설정, 토큰, 개인키와 사용자 세션을 넣지 않습니다. 현재 후보의 시험 기록과 위 검증 범위를 함께 확인하세요. 공개 게시와 Cloudflare 설정 변경은 자동으로 수행하지 않습니다.
+
+승인 완료 agent 알림: [승인 대기 도구 안내](docs/approval-callback.ko.md). `wait-for-request`는 실제 승인·실행 종료를 대기 중인 MCP 호출에 전달합니다.

@@ -21,6 +21,7 @@ export class ApprovalQueue {
     Object.assign(this, { classify, executeOperation, profile, target, audit, now, idFactory, onTerminal, externalBusy });
     this.identity = identity && Object.freeze({ ...identity }); this.claimExecution = claimExecution;
     this.jobs = new Map(); this.active = null; this.maintenance = false;
+    this.requestWaiters = new Set();
   }
   submit(command, safeOnly = false, context = '', displayContext = '') {
     const { class: commandClass } = validateCommand(command, this.classify, safeOnly);
@@ -58,7 +59,7 @@ export class ApprovalQueue {
     if (['pending', 'evaluating'].includes(job?.state) && this.now() >= job.expiresAt) {
       // Expiry is irrevocable even if the audit adapter fails. Callers handle that failure.
       job.state = 'expired'; job.finishedAt = this.now();
-      try { job.persist?.(this.public(job)); this.audit({ action: 'expired', id }); } finally { this.onTerminal(job); }
+      try { job.persist?.(this.public(job)); this.audit({ action: 'expired', id }); } finally { try { this.onTerminal(job); } finally { this.notifyRequest(job); } }
     }
     return this.public(job);
   }
@@ -80,19 +81,19 @@ export class ApprovalQueue {
     const job = this.jobs.get(id);
     if (!job || this.get(id).state !== 'pending') throw Error('Request is not pending');
     this.audit({ action: 'denied', id });
-    job.state = 'denied'; job.finishedAt = this.now(); try { job.persist?.(this.public(job)); } finally { this.onTerminal(job); } return this.public(job);
+    job.state = 'denied'; job.finishedAt = this.now(); try { job.persist?.(this.public(job)); } finally { try { this.onTerminal(job); } finally { this.notifyRequest(job); } } return this.public(job);
   }
   restore(job, persist) { this.jobs.set(job.id, { ...job, operation: Object.freeze({ ...job.operation }), persist }); }
   track(id, persist) { this.jobs.get(id).persist = persist; }
   beginEvaluation(id) { this.jobs.get(id).state = 'evaluating'; }
-  abortEvaluation(id) { const job = this.jobs.get(id); job.state = 'unknown'; job.finishedAt = this.now(); this.onTerminal(job); }
+  abortEvaluation(id) { const job = this.jobs.get(id); job.state = 'unknown'; job.finishedAt = this.now(); try { this.onTerminal(job); } finally { this.notifyRequest(job); } }
   setDecision(id, decision) { const job = this.jobs.get(id); job.decision = structuredClone(decision); job.persist?.(this.public(job)); }
   finishEvaluation(id, state = 'pending') {
     const job = this.jobs.get(id);
     if (this.get(id).state !== 'evaluating') throw Error('Request is not evaluating');
     job.state = state;
     if (state !== 'pending') job.finishedAt = this.now();
-    try { job.persist?.(this.public(job)); } finally { if (state !== 'pending') this.onTerminal(job); }
+    try { job.persist?.(this.public(job)); } finally { if (state !== 'pending') { try { this.onTerminal(job); } finally { this.notifyRequest(job); } } }
   }
   startCommand(id) {
     const job = this.jobs.get(id);
@@ -132,11 +133,12 @@ export class ApprovalQueue {
       job.approvalMode = approvalMode; job.state = 'running'; job.persist?.(this.public(job));
     } catch (error) {
       delete job.approvalMode;
-      try { if (job.state === 'running') { job.state = 'unknown'; job.finishedAt = this.now(); this.onTerminal(job); } }
+      try { if (job.state === 'running') { job.state = 'unknown'; job.finishedAt = this.now(); try { this.onTerminal(job); } finally { this.notifyRequest(job); } } }
       finally { release(); }
       throw error;
     }
     this.active = job;
+    this.notifyRequest(job);
     // The claim and audit complete synchronously before any external side effect.
     job.completion = Promise.resolve().then(async () => {
       try {
@@ -148,11 +150,48 @@ export class ApprovalQueue {
       } finally {
         job.finishedAt = this.now();
         try { this.audit({ action: job.state, id }); job.persist?.(this.public(job)); } catch { job.auditError = 'Final audit write failed; operation must not be retried automatically'; }
-        this.active = null; try { this.onTerminal(job); } finally { release(); }
+        this.active = null; try { this.onTerminal(job); } finally { try { release(); } finally { this.notifyRequest(job); } }
       }
       return this.public(job);
     });
     return this.public(job);
+  }
+  // Read-only event subscriptions: no execution claims, network targets or replay.
+  waitForRequest(id, { until = 'approval', timeoutMs = 25000, signal } = {}) {
+    if (!['approval', 'completion'].includes(until) || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60000) throw Error('Invalid request wait');
+    signal?.throwIfAborted();
+    const current = this.get(id);
+    const eventFor = job => !job ? 'missing' : ['pending', 'evaluating'].includes(job.state) ? null
+      : job.state === 'running' ? until === 'approval' && ['owner', 'automatic'].includes(job.approvalMode) ? 'approved' : null : job.state;
+    const event = eventFor(current);
+    if (event) return Promise.resolve({ job: current, event, until });
+    // ponytail: bounded per-target subscriptions; a shared broker is unnecessary for one bridge process.
+    if (this.requestWaiters.size >= 64) throw Error('Request wait limit reached');
+    return new Promise((resolve, reject) => {
+      let timer;
+      const finish = (job, event, error) => {
+        if (!this.requestWaiters.delete(waiter)) return;
+        clearTimeout(timer); signal?.removeEventListener('abort', abort);
+        if (error) reject(error); else resolve({ job, event, until });
+      };
+      const abort = () => finish(null, null, signal.reason ?? Error('Request wait aborted'));
+      const waiter = { id, notify: job => { const event = eventFor(job); if (event) finish(job, event); } };
+      // No await between the initial state read and registration: no transition can be lost.
+      this.requestWaiters.add(waiter);
+      signal?.addEventListener('abort', abort, { once: true });
+      const expireWait = () => {
+        try {
+          const job = this.get(id);
+          finish(job, eventFor(job) ?? 'timeout');
+        } catch (error) { finish(null, null, error); }
+      };
+      const approvalRemaining = ['pending', 'evaluating'].includes(current.state) ? Math.max(1, current.expiresAt - this.now()) : timeoutMs;
+      timer = setTimeout(expireWait, Math.min(timeoutMs, approvalRemaining));
+    });
+  }
+  notifyRequest(job) {
+    const snapshot = this.public(job);
+    for (const waiter of this.requestWaiters) if (waiter.id === job.id) waiter.notify(snapshot);
   }
   async approve(id) { this.start(id); return this.jobs.get(id).completion; }
   async wait(id) { return this.jobs.get(id)?.completion; }

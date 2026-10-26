@@ -83,7 +83,12 @@ export function publicResult(value, schema) {
   return { content: [{ type: 'text', text: JSON.stringify(value) }], structuredContent: value };
 }
 
-export const jobResult = job => publicResult(presentJob(job), jobSchema);
+export const jobResult = job => publicResult({ ...presentJob(job),
+  ...(['pending', 'evaluating'].includes(job.state) ? { approvalCallback: {
+    tool: 'wait-for-request', arguments: { id: job.id, until: 'approval', timeoutMs: 25000 },
+    instruction: 'After presenting owner approval, call wait-for-request to receive the decision without asking the user to confirm in chat. On timeout, wait on the same ID; never resubmit the operation.',
+  } } : {}),
+}, jobSchema);
 export const statusResult = job => job ? jobResult(job) : publicResult({ error: 'Unknown request; server may have restarted' }, unknownSchema);
 export function immediateResult(value, identity) {
   const result = presentCommandOutcome(value);

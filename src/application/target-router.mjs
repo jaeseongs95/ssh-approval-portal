@@ -57,6 +57,10 @@ export function createTargetRouter(runtimes, { defaultTarget, legacy, store, aud
     deny: id => jobOwner(id).queue.deny(id),
     approve: id => jobOwner(id).queue.approve(id),
     wait: id => jobOwner(id).queue.wait(id),
+    waitForRequest: (id, options) => {
+      try { return jobOwner(id).queue.waitForRequest(id, options); }
+      catch (error) { if (!runtimes.some(runtime => runtime.queue.jobs.has(id))) return Promise.resolve({ job: null, event: 'missing', until: options?.until ?? 'approval' }); throw error; }
+    },
     listAll: () => runtimes.flatMap(runtime => runtime.queue.listAll()),
     list: () => runtimes.flatMap(runtime => runtime.queue.list()),
     busy: () => runtimes.some(runtime => runtime.queue.busy()),
