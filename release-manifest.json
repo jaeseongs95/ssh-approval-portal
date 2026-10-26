@@ -1,6 +1,6 @@
 {
   "version": "1.6.0",
-  "status": "candidate-pending-live-host-verification",
+  "status": "release",
   "runtime": "Node.js 24",
   "files": [
     {
@@ -102,6 +102,11 @@
       "path": "docs/aik-ags-provisional.ko.md",
       "size": 4889,
       "sha256": "b8a780c13c37185d55b01c2ab0fd3c9f7c7eb78fcf72fd15521e96c048b74a14"
+    },
+    {
+      "path": "docs/approval-callback.ko.md",
+      "size": 2028,
+      "sha256": "31949bfea3a7522794432325eccf6e518d388b9cde9e87918c803968ebff57e3"
     },
     {
       "path": "docs/architecture.en.md",
@@ -210,13 +215,13 @@
     },
     {
       "path": "README.ko.md",
-      "size": 19997,
-      "sha256": "31131d8a3533119b658a0c8c2516b420dce17e650228350d83eb757fc5e60ebf"
+      "size": 20186,
+      "sha256": "4ec5dc2348af87d7aeab3da8009510bcc6b6165a3165718dda3a6509c7ba30d2"
     },
     {
       "path": "README.md",
-      "size": 18347,
-      "sha256": "8afd11c97827aa34e42ff71355ee7b2ec9410e61d3d884299459cf92127e92b3"
+      "size": 18563,
+      "sha256": "7fb3198b8a853f121020aee3c1b00cf6939cee77b61aa017c7c1a36855bccb0b"
     },
     {
       "path": "scripts/admin-access-config.mjs",
@@ -515,8 +520,8 @@
     },
     {
       "path": "src/adapters/mcp/server.mjs",
-      "size": 19224,
-      "sha256": "682a8ddeb3f89acd56387f9de4ea2c20b9b8996f75c795be4355fd4040a2a599"
+      "size": 21384,
+      "sha256": "8b956a1791a28e3d89ea3625da36accae8785da21cd9e3001d238af878f3a10a"
     },
     {
       "path": "src/adapters/presentation/capabilities.mjs",
@@ -525,8 +530,8 @@
     },
     {
       "path": "src/adapters/presentation/results.mjs",
-      "size": 7813,
-      "sha256": "c6a1f98ab19a6899b586a8d1bb359b9d277726f92fc0193b8863c510b5085d8a"
+      "size": 8210,
+      "sha256": "541c5db06edd5db7604e1a82fde46621b2f3254cb29874b88ff5537496f2048e"
     },
     {
       "path": "src/adapters/releases/agent-cli.mjs",
@@ -690,8 +695,8 @@
     },
     {
       "path": "src/application/target-router.mjs",
-      "size": 6105,
-      "sha256": "8162fc2efecc239fddd60e21044d234a09260a52994712a7b0b0b98e18ac542b"
+      "size": 6410,
+      "sha256": "1dd43686bcbeede8b5d6f21ecfe50924e79161191cc9f5af0b9fb7f2e22767b3"
     },
     {
       "path": "src/contracts/ports.mjs",
@@ -705,8 +710,8 @@
     },
     {
       "path": "src/domain/approval-queue.mjs",
-      "size": 10209,
-      "sha256": "7c8bc1e288268df097e5ddeb541427a2e8bf91069be32c580f090fcbf9ec9e5c"
+      "size": 12790,
+      "sha256": "b8d27aa7135eb3d43a2881fe856a0fb95725ff2e8fafeb69c38a58da9700a3c9"
     },
     {
       "path": "src/domain/automation-risk-question.json",
@@ -807,6 +812,11 @@
       "path": "test/aik-ags.test.mjs",
       "size": 3179,
       "sha256": "861df6f7408d021ef515a0f191b602da44a7c2020f198c8c0c210c210f13c74e"
+    },
+    {
+      "path": "test/approval-callback.test.mjs",
+      "size": 13150,
+      "sha256": "3264b3dbd685355452e6f4c3a0aa8061dcce9a14a83f285e3465df596cf56954"
     },
     {
       "path": "test/approval-expiry.test.mjs",
@@ -1145,8 +1155,8 @@
     },
     {
       "path": "test/mcp-contracts.test.mjs",
-      "size": 16822,
-      "sha256": "74484d3044ed8f14ce03f49514eefa303dc8f75e79a5d48cbf014b11427f96a9"
+      "size": 16842,
+      "sha256": "d8cc7227a8ad2f9774afc8e9dd7be005ec26e91723a70e333342c847d4df81a4"
     },
     {
       "path": "test/model-selection.test.mjs",
