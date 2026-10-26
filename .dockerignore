@@ -2,6 +2,7 @@ node_modules
 .git
 ui/node_modules
 dist/*
-!dist/ssh-approval-portal-1.6.0.tar.gz
+!dist/ssh-approval-portal-1.6.1.tar.gz
 ssh-approval-portal-1.6.0
 **/__pycache__
+ssh-approval-portal-1.6.1

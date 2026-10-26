@@ -23,6 +23,17 @@ async function card(page, server) {
   await page.locator('input[type=file]').setInputFiles({ name: 'fixture.bin', mimeType: 'application/octet-stream', buffer: Buffer.from([1, 2, 3, 4]) });
 }
 
+
+async function localLogout(page) {
+  const calls = [], observe = request => calls.push({ path: new URL(request.url()).pathname, method: request.method() });
+  page.on('request', observe);
+  try {
+    await page.locator('#logout').click(); await page.waitForURL('**/signed-out');
+    assert.equal(calls.filter(call => call.path === '/api/session/logout' && call.method === 'POST').length, 1);
+    assert.equal(calls.some(call => ['/cdn-cgi/access/logout', '/oauth2/sign_out'].includes(call.path)), false);
+  } finally { page.off('request', observe); }
+}
+
 for(const locale of ['ko-KR','en-US'])for(const [width,height]of [[1440,900],[1280,800],[1024,768],[768,1024],[390,844],[320,740],[844,390]])test(`OIDC browser uses cookie login and local logout ${locale} ${width}x${height}`,async()=>browserFixture(async(page,server)=>{
   server.state.oidc=true;server.state.commandAutomation=true;
   const binding={targetId:'default',targetRevision:'a'.repeat(64),profile:'aws-local',displayName:'fixture',enabled:true};
@@ -38,7 +49,7 @@ for(const locale of ['ko-KR','en-US'])for(const [width,height]of [[1440,900],[12
   assert.equal(await page.locator('#auth-note').textContent(),locale==='ko-KR'?'SSO에서 확인한 본인 계정으로 요청을 처리합니다.':'Manage requests with your owner account verified by SSO.');
   assert.ok(server.state.requests.some(r=>r.method==='GET'&&r.authorization===null));
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
-  await page.locator('#logout').click();await page.waitForURL('**/oauth2/sign_out');
+  await localLogout(page);
 },locale));
 
 test('approval card labels actual automatic approval and removes it for owner approval', async () => browserFixture(async (page, server) => {
@@ -131,8 +142,8 @@ for (const [locale, language] of [['ko-KR', 'ko'], ['fr-FR', 'en']]) test(`UI pr
   server.state.jobs = [job('A')]; await page.goto(server.origin + '/fixture/web'); await page.locator('#jobs .request').waitFor();
   assert.equal(await page.locator('html').getAttribute('lang'), language);
   assert.equal(await page.locator('#token').isVisible(), false);
-  await page.locator('#logout').click(); await page.waitForURL('**/cdn-cgi/access/logout');
-  assert.equal(await page.textContent('body'), 'Synthetic signed out');
+  await localLogout(page);
+  assert.match(await page.textContent('body'), /Administrator signed out/);
 }, locale));
 
 test('server names distinguish installations, remain text, and accompany pending and completed jobs', async () => browserFixture(async (page, server) => {
@@ -252,7 +263,7 @@ test('unified console counts all targets, separates running work, sorts across q
   assert.equal(server.state.jobs.find(j=>j.id==='beta-new').state,'running');
   await page.setViewportSize({width:390,height:844});
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Console fits a narrow browser without horizontal overflow');
-  await page.locator('#logout').click();await page.waitForURL('**/cdn-cgi/access/logout');
+  await localLogout(page);
 }));
 
 test('approved history keeps historical scores and threshold while explaining the completed owner action in past tense', async () => browserFixture(async (page, server) => {

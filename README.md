@@ -1,4 +1,4 @@
-# SSH Approval Portal 1.6.0
+# SSH Approval Portal 1.6.1
 
 [한국어](README.ko.md) · [Administrator sign-in](docs/admin-login.en.md) · [Agent file uploads](docs/agent-upload.en.md) · [Architecture and compatibility](docs/architecture.en.md)
 
@@ -8,7 +8,7 @@ Jev assists with commands outside the preapproved list. Owner settings determine
 
 [Secret management (Korean)](docs/secret-management.ko.md) separates secret references from provider adapters. Its first backend is a private POSIX local store managed through a hidden-input operator CLI. Jev resolves a reference at startup; actual values stay out of chat, MCP results, and packages.
 
-Version **1.6.0** adds an approval-history tab with date-range search and browser-local administrator display language selection. The release’s `VALIDATION.json` records the verified server and browser scope. Responsibilities are separated into domain, application, and adapter layers while preserving approval rules. Existing client tests, agent-upload observations, and local validation of the restructuring are recorded separately.
+Version **1.6.1** adds approval/completion waits and assessment failure details, and bounds MCP body size and tool input structure before validation. Approval policies and model thresholds are preserved. The release’s `VALIDATION.json` records the verified server and browser scope. Responsibilities are separated into domain, application, and adapter layers while preserving approval rules. Existing client tests, agent-upload observations, and local validation of the restructuring are recorded separately.
 
 | Area | Verified scope and remaining limits |
 | --- | --- |
@@ -70,8 +70,8 @@ An overwrite is not reported as complete if the existing file's ownership, mode,
 This release is validated for Ubuntu 22.04/24.04 on x86_64. The ARM64 installation path remains available, but validation is deferred to a later enhancement. An internet connection and an administrator terminal on the server are required. The runtime requires Node 24.2 or later within the 24.x series. Node 24 is installed in a dedicated path without replacing the system Node installation.
 
 ```sh
-tar -xzf ssh-approval-portal-1.6.0.tar.gz
-cd ssh-approval-portal-1.6.0
+tar -xzf ssh-approval-portal-1.6.1.tar.gz
+cd ssh-approval-portal-1.6.1
 sudo bash scripts/install.sh --admin-origin https://ssh-approve.example.com --grant-sudo-all
 ```
 

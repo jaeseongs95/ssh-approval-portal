@@ -1,12 +1,12 @@
 {
-  "version": "1.6.0",
-  "status": "candidate-pending-live-host-verification",
+  "version": "1.6.1",
+  "status": "release",
   "runtime": "Node.js 24",
   "files": [
     {
       "path": ".dockerignore",
-      "size": 121,
-      "sha256": "4eba62dbe9e3ce93b40330fc6ab93b2956a53f40e4bb0cbdd7d11a11699ddb72"
+      "size": 147,
+      "sha256": "554e165c3a5c5cee463b424292b575c9f4daa44e9aa90a577d9893e71bf787e6"
     },
     {
       "path": "app.mjs",
@@ -31,7 +31,7 @@
     {
       "path": "config/docker.example.env",
       "size": 73,
-      "sha256": "647a127e4324c3cf41ad97241ef81043d11235645448f4ec6e377ec323e46ab1"
+      "sha256": "44708c2bd75de168ad8eedcc6d68d797be07ed20a50f6b47f7a8323ca7e977f8"
     },
     {
       "path": "config/settings-contract.json",
@@ -66,12 +66,12 @@
     {
       "path": "docker/compose.yaml",
       "size": 1128,
-      "sha256": "f80a7659f68f1552960776197788ac3dc32d2c6c58bc60c0b9579a8cca3ca6ed"
+      "sha256": "175f4d2209cc669333c01678dbabf94165b5c1de90a8d7a4373ea3393f63fc6d"
     },
     {
       "path": "docker/Dockerfile",
       "size": 1594,
-      "sha256": "0ee6b039171eb53b8ea6212d824dc04d815f0302a382fabde416aa6e40c04abc"
+      "sha256": "d96916b2163cde1795eefea7322077817734779325f375e9ea0dd734863d90d2"
     },
     {
       "path": "docs/admin-login.en.md",
@@ -206,22 +206,22 @@
     {
       "path": "package-lock.json",
       "size": 100104,
-      "sha256": "c8e6e1d517cb77cb234215e9e1a2e8453a1e4d2b5ae65cba71b297b76afcc7d1"
+      "sha256": "96a9f1e77429651d60232d6c35a5d476cd0e3721fd1e963d9ca60579921351ac"
     },
     {
       "path": "package.json",
       "size": 740,
-      "sha256": "02485dc0d34a4be7f48717424e9e8c5bfb15f26d5400a8f9778e22c8f02967a1"
+      "sha256": "6d804d385ece87f2e841d8b3459e35705eca04edd076ef452eab9c41bb6f422e"
     },
     {
       "path": "README.ko.md",
-      "size": 20186,
-      "sha256": "4ec5dc2348af87d7aeab3da8009510bcc6b6165a3165718dda3a6509c7ba30d2"
+      "size": 20262,
+      "sha256": "2d35568c2c981dd82ae3629717ec5498d06916f05867712eeff3d21fea8c7e0d"
     },
     {
       "path": "README.md",
-      "size": 18563,
-      "sha256": "7fb3198b8a853f121020aee3c1b00cf6939cee77b61aa017c7c1a36855bccb0b"
+      "size": 18637,
+      "sha256": "260e5ee1320b967d80c268532f15132b1a3b941f4e23f06ddd90e4a6e3d47ec1"
     },
     {
       "path": "scripts/admin-access-config.mjs",
@@ -515,13 +515,13 @@
     },
     {
       "path": "src/adapters/http/protocol.mjs",
-      "size": 14877,
-      "sha256": "817b27517b01b796ad03a6dbcb8a262d8cf26496f435f6aae94689cc6b84dfa6"
+      "size": 14881,
+      "sha256": "1af14dad39ef38b140b8f0e54499a4fd2097210f815ac0d0fc135dd784f37974"
     },
     {
       "path": "src/adapters/mcp/server.mjs",
-      "size": 21384,
-      "sha256": "8b956a1791a28e3d89ea3625da36accae8785da21cd9e3001d238af878f3a10a"
+      "size": 21514,
+      "sha256": "e3bbefbb919a31b0b530b1a2ee96572fa17f13c6c68207559827d6697d205931"
     },
     {
       "path": "src/adapters/presentation/capabilities.mjs",
@@ -915,8 +915,8 @@
     },
     {
       "path": "test/browser/regressions.test.mjs",
-      "size": 39829,
-      "sha256": "dc26ccc2717a60a34cf804f3be47c9244ebb12bb377fe5bc114c523981c9bfbf"
+      "size": 40201,
+      "sha256": "1f226d4095b8e0dee72be5e512a01a19fb91bbc6bcaa84fe908b54d54012733a"
     },
     {
       "path": "test/browser/run.mjs",
@@ -1157,6 +1157,11 @@
       "path": "test/mcp-contracts.test.mjs",
       "size": 16842,
       "sha256": "d8cc7227a8ad2f9774afc8e9dd7be005ec26e91723a70e333342c847d4df81a4"
+    },
+    {
+      "path": "test/mcp-input-limits.test.mjs",
+      "size": 9296,
+      "sha256": "84bfeeb97e9a293a8a87c817daaf52fdbc7b7751994985ae89651b6f6583460b"
     },
     {
       "path": "test/model-selection.test.mjs",
