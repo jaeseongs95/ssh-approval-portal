@@ -815,8 +815,8 @@
     },
     {
       "path": "test/approval-callback.test.mjs",
-      "size": 13150,
-      "sha256": "3264b3dbd685355452e6f4c3a0aa8061dcce9a14a83f285e3465df596cf56954"
+      "size": 19123,
+      "sha256": "3a78163057c954b853594f33d62e43bad6cf1a167b489e0642bc73a51d0831fe"
     },
     {
       "path": "test/approval-expiry.test.mjs",
