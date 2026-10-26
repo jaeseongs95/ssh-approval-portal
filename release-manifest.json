@@ -1,6 +1,6 @@
 {
   "version": "1.6.0",
-  "status": "release",
+  "status": "candidate-pending-live-host-verification",
   "runtime": "Node.js 24",
   "files": [
     {
@@ -150,8 +150,8 @@
     },
     {
       "path": "docs/jev-observation.ko.md",
-      "size": 7745,
-      "sha256": "bf6929f134a692925beabca34ec90235e2a3ca2cb46bae6c553290d0ef3e169d"
+      "size": 9591,
+      "sha256": "f247090db346dfb3a6f766fa5b894ccdba63c7ceb925258cbe4a8352815eb3d0"
     },
     {
       "path": "docs/jev-prompt-revisions.ko.md",
@@ -900,8 +900,8 @@
     },
     {
       "path": "test/browser/fixture-server.mjs",
-      "size": 6694,
-      "sha256": "05b68264a7dc191169506621aed14dbb647e3327a72c52ca4a104776c7f3d1cd"
+      "size": 6875,
+      "sha256": "49fe38e0e96f7ea1cb4b86156bfbaf5e204f99d9462d9d4081a69b3691229c1a"
     },
     {
       "path": "test/browser/history-language.test.mjs",
@@ -915,8 +915,8 @@
     },
     {
       "path": "test/browser/regressions.test.mjs",
-      "size": 36402,
-      "sha256": "b270b0000fffa2d660a9efa761158e2bb279256e2d0b702e00b4ba2fa5f806f9"
+      "size": 39829,
+      "sha256": "dc26ccc2717a60a34cf804f3be47c9244ebb12bb377fe5bc114c523981c9bfbf"
     },
     {
       "path": "test/browser/run.mjs",
@@ -1550,8 +1550,8 @@
     },
     {
       "path": "ui/dist/card.html",
-      "size": 532504,
-      "sha256": "1bdef55f5d8d0bae64e644e1eba3943828729795f39ddc0d2acf65392e3f878a"
+      "size": 536542,
+      "sha256": "e9a4180ed541c99380194006ab2dc02d935e27feb6b3fe0c6056bcbcd1de9d6c"
     },
     {
       "path": "ui/package-lock.json",
@@ -1570,8 +1570,8 @@
     },
     {
       "path": "ui/src/decision.js",
-      "size": 11994,
-      "sha256": "d577f07d13e0eadfad31711b7c94f4bda8b20bf057be31af86776552f0ee8f48"
+      "size": 14424,
+      "sha256": "1ad172431f27925d1157465fa77623fb3e46c5aeb8e4cb676e477be47ce84c69"
     },
     {
       "path": "ui/src/host.js",
@@ -1605,8 +1605,8 @@
     },
     {
       "path": "web/dist/app.js",
-      "size": 237405,
-      "sha256": "c1e1a258b443805090bd8afda1c5d6a0d36b1ec8e9f4616688c65b7c8632da58"
+      "size": 241443,
+      "sha256": "0aeb196216fb562ab7e8b2b1204834773543fddc0fdb5442649a4f70dc2a3f19"
     },
     {
       "path": "web/index.html",

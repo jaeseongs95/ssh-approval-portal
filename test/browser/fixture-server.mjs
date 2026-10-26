@@ -54,6 +54,8 @@ export async function fixtureServer(root) {
       else if (url.pathname === '/fixture/card-source' || url.pathname === '/fixture/legacy-card.js') {
         text = await readFile(resolve(root, 'ui/card.js'), 'utf8');
         if (url.pathname.endsWith('legacy-card.js')) text = text.replace("import { App } from '@modelcontextprotocol/ext-apps';", 'const App = window.FixtureApp;');
+      } else if (['/src/domain/safety.mjs', '/src/domain/execution-context.mjs'].includes(url.pathname)) {
+        text = await readFile(resolve(root, '.' + url.pathname), 'utf8');
       } else if (url.pathname === '/src/contracts/ports.mjs') {
         text = await readFile(resolve(root, 'src/contracts/ports.mjs'), 'utf8');
       } else if (url.pathname === '/src/domain/command-line.mjs') {

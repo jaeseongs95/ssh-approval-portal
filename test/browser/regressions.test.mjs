@@ -328,7 +328,8 @@ for (const [locale, korean] of [['ko-KR', true], ['en-US', false]]) test(`record
     const value = { kind: 'download', target: 'fixture', command: 'fixture command', expiresAt: 2000000000000, createdAt: 1900000000000,
       operation: { remotePath: '/tmp/fixture.bin', elevate: false }, ...fields,
       decision: { decision: item.decision ?? 'execute', reasonCode: item.reasonCode, ...(item.assessment ? { assessment: item.assessment } : {}) } };
-    for (const surface of ['card', 'web']) {
+    for (const surface of ['card', 'web', 'compiled-web']) {
+    server.state.compiled = surface === 'compiled-web';
       if (surface === 'card') {
         await page.goto(server.origin + '/fixture/card'); await page.waitForFunction(() => window.fixture);
         await page.evaluate(value => window.fixture.receive({ structuredContent: value, _meta: { sshApproval: { uiEnabled: true } } }), value);
@@ -366,4 +367,38 @@ for (const locale of ['ko-KR', 'en-US']) test('owner and assessment details sele
   assert.ok((await page.locator('body').textContent()).includes(expected));
   assert.ok(!(await page.locator('body').textContent()).includes(excluded));
   assert.equal(await page.evaluate(() => window.localizedInjected), undefined);
+}, locale));
+
+for (const locale of ['ko-KR', 'en-US']) test('JEV failure details distinguish unavailable from uncertain ' + locale, async () => browserFixture(async (page, server) => {
+  const korean = locale === 'ko-KR';
+  const value = { id: 'evaluation-unavailable-fixture', kind: 'command', state: 'pending', command: 'id', target: 'fixture', expiresAt: 2000000000000,
+    decision: { decision: 'review', reasonCode: 'evaluation_unavailable', attempts: [
+      { provider: 'untrusted-provider-sentinel', status: 'unavailable', reason: 'evaluation_failed', failureReason: 'invalid_response', diagnostic: 'PROBABILITY_SUM', raw: '<img src=x onerror=alert(1)>private-sentinel' },
+      { provider: 'untrusted-provider-sentinel', status: 'unavailable', reason: 'not_configured', diagnostic: 'private-diagnostic-sentinel' },
+      { status: 'unavailable', failureReason: 'timeout' }, { status: 'unavailable', failureReason: 'busy' },
+      { status: 'unavailable', reason: { toString: 'private-sentinel' }, diagnostic: 'private-diagnostic-sentinel' },
+    ] } };
+  for (const surface of ['card', 'web']) {
+    if (surface === 'card') { await page.goto(server.origin + '/fixture/card'); await page.waitForFunction(() => window.fixture); await page.evaluate(value => window.fixture.receive({ structuredContent: value, _meta: { sshApproval: { uiEnabled: true } } }), value); }
+    else { server.state.jobs = [value]; await page.goto(server.origin + '/fixture/web'); await page.locator('.assessment-summary').waitFor(); }
+    const detail = page.locator('.assessment-failure-details');
+    assert.equal(await detail.count(), 1, 'stored evaluator failures must be visible in both surfaces');
+    assert.equal(await detail.getAttribute('open'), null, 'failure details start collapsed');
+    await detail.locator('summary').click();
+    const text = await detail.textContent();
+    assert.match(text, /PROBABILITY_SUM/);
+    assert.match(text, korean ? /응답 형식/ : /response format/);
+    assert.match(text, korean ? /설정/ : /configured/);
+    assert.match(text, korean ? /대기 시간/ : /timed out/);
+    assert.match(text, korean ? /진행 중/ : /in progress/);
+    assert.doesNotMatch(text, /private-sentinel|untrusted-provider|private-diagnostic|onerror/);
+    assert.equal(await page.locator('.assessment-scores').count(), 0);
+    assert.equal(await page.locator('.assessment-failure-details img').count(), 0);
+  }
+  const uncertain = { ...value, decision: { decision: 'review', reasonCode: 'model_review', reviewReason: 'uncertain', decisionRuleVersion: 'command-explanation-v1', assessment: { model: 'fixture-model', label: 'uncertain', probabilities: { low_risk: 0.01, high_risk: 0.23, uncertain: 0.76 } }, attempts: [] } };
+  server.state.jobs = [uncertain]; await page.goto(server.origin + '/fixture/web');
+  await page.getByText(korean ? '안전 여부를 판단하지 못해 사용자 확인이 필요합니다.' : 'The assessment is uncertain; owner review is required.', { exact: true }).waitFor();
+  assert.equal(await page.locator('.assessment-failure-details').count(), 0, 'valid uncertainty must not be called an evaluator failure');
+  assert.equal(await page.locator('.assessment-scores dd').count(), 3);
+  assert.equal(server.state.requests.filter(item => item.method === 'POST').length, 0, 'rendering never approves or retries');
 }, locale));

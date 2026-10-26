@@ -1,3 +1,5 @@
+import { SAFETY_DIAGNOSTICS } from '../../src/domain/safety.mjs';
+
 export function requestContext(job, korean = true) {
   const operation = job.operation;
   return korean ? operation?.displayContext || operation?.context : operation?.context || operation?.displayContext;
@@ -35,6 +37,18 @@ const reviewReasons = {
   uncertain: ['안전 여부를 판단하지 못해 사용자 확인이 필요합니다.', 'The assessment is uncertain; owner review is required.'],
   below_threshold: ['낮은 위험 점수가 자동승인 기준에 못 미쳐 사용자 확인이 필요합니다.', 'The low-risk score is below the execution threshold.'],
 };
+const assessmentFailures = {
+  not_configured: ['평가자가 설정되지 않았습니다.', 'The evaluator is not configured.'],
+  busy: ['다른 평가가 진행 중입니다.', 'Another assessment is in progress.'],
+  invalid_input: ['평가 입력 형식을 검증하지 못했습니다.', 'Assessment input validation failed.'],
+  input_too_large: ['평가 입력 크기 한도를 초과했습니다.', 'The assessment input exceeds the size limit.'],
+  timeout: ['평가 응답 대기 시간을 초과했습니다.', 'The assessment timed out.'],
+  http_error: ['평가 서비스가 오류 응답을 반환했습니다.', 'The assessment service returned an HTTP error.'],
+  invalid_response: ['평가 응답 형식이 검증을 통과하지 못했습니다.', 'The assessment response format failed validation.'],
+  response_too_large: ['평가 응답 크기 한도를 초과했습니다.', 'The assessment response exceeds the size limit.'],
+  request_failed: ['평가 요청 또는 응답 처리에 실패했습니다.', 'The assessment request or response processing failed.'],
+};
+
 const recordedReasons = {
   execution_disabled: ['Jev 자동승인이 꺼져 있었습니다.', 'Model execution was disabled.'],
   threshold_missing: ['자동승인 기준이 등록되지 않았습니다.', 'No execution threshold was configured.'],
@@ -87,6 +101,21 @@ export function renderDecision(document, parent, decision, korean, job = {}) {
   } else if (historical) {
     add(box, 'p', (korean ? '당시 정책 판단: ' : 'Policy decision at the time: ') + decisionText(decision, korean));
   } else add(box, 'p', decisionText(decision, korean));
+  const failures = Array.isArray(decision.attempts) ? decision.attempts.flatMap(attempt => {
+    const reason = attempt?.failureReason ?? attempt?.reason;
+    if (attempt?.status !== 'unavailable' || typeof reason !== 'string' || !Object.hasOwn(assessmentFailures, reason)) return [];
+    return [{ reason, diagnostic: SAFETY_DIAGNOSTICS.includes(attempt.diagnostic) ? attempt.diagnostic : undefined }];
+  }) : [];
+  if (failures.length) {
+    const details = add(parent, 'details', ''); details.className = 'assessment-details assessment-failure-details';
+    add(details, 'summary', korean ? 'AI 평가 실패 상세' : 'AI assessment failure details');
+    const body = add(details, 'div', ''); body.className = 'assessment-body';
+    add(body, 'p', korean ? '평가 요청·응답 처리에서 기록된 실패입니다. 모델의 위험도 분류 사유는 제공하지 않습니다.' : 'These failures were recorded while processing assessment requests or responses. They do not explain a model risk classification.');
+    for (const failure of failures) {
+      add(body, 'p', assessmentFailures[failure.reason][korean ? 0 : 1]);
+      if (failure.diagnostic) add(body, 'small', (korean ? '진단 코드: ' : 'Diagnostic code: ') + failure.diagnostic);
+    }
+  }
   if (!assessment) return;
   const details = add(parent, 'details', ''); details.className = 'assessment-details';
   add(details, 'summary', korean ? 'AI 평가 상세' : 'AI assessment details');
