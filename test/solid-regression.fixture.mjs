@@ -22,7 +22,9 @@ const profile = { host: 'fixture.invalid', port: 22, user: 'fixture-user' };
 const listen = server => new Promise(accept => server.listen(0, '127.0.0.1', accept));
 async function runChild(command, args, options = {}) {
   return new Promise((accept, reject) => {
-    const child = spawn(command, args, { ...options, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    const { input, ...spawnOptions } = options;
+    const child = spawn(command, args, { ...spawnOptions, windowsHide: true, stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'] });
+    if (input !== undefined) child.stdin.end(input);
     let stdout = '', stderr = '';
     child.stdout.on('data', bytes => { stdout += bytes; }); child.stderr.on('data', bytes => { stderr += bytes; });
     const timer = setTimeout(() => { child.kill(); reject(Error('Fixture child exceeded its deadline')); }, 10_000 * deadlineScale);
@@ -101,17 +103,18 @@ async function scenario(name, root, work) {
   if (name === 'DELIVERY-01') {
     let calls = 0;
     const server = createServer((req, res) => {
-      assert.equal(req.url, '/api/maintenance/reserve'); assert.equal(req.method, 'POST');
+      assert.equal(req.url, calls === 0 ? '/api/maintenance/capabilities' : '/api/maintenance/reserve'); assert.equal(req.method, 'POST');
       assert.equal(req.headers.origin, fixtureEnv.BRIDGE_ADMIN_ORIGIN);
-      assert.equal(req.headers.authorization, 'Bearer ' + fixtureEnv.BRIDGE_ADMIN_TOKEN); calls++;
-      res.writeHead(200, { 'Content-Type': 'application/json' }); res.end('{"reserved":true}');
+      assert.equal(req.headers.authorization, 'Bearer ' + fixtureEnv.BRIDGE_ADMIN_TOKEN);
+      assert.equal(req.headers['x-maintenance-owner'], 'a'.repeat(64)); calls++;
+      res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ownership:'durable-v1',...(calls === 2 ? {reserved:true} : {})}));
     });
     await listen(server);
     const envFile = join(work, 'settings.env');
     await writeFile(envFile, Object.entries({ ...fixtureEnv, BRIDGE_ADMIN_PORT: server.address().port }).map(([key, value]) => key + '=' + value).join('\n') + '\n', { mode: 0o600 });
     try {
-      const run = await runChild(process.execPath, ['--import', pathToFileURL(fixtureFile).href, join(root, 'scripts/maintenance.mjs'), 'reserve'], { env: { ...process.env, BRIDGE_SECRET_ENV_FILE: envFile, SOLID_FETCH_ORIGIN: `http://127.0.0.1:${server.address().port}` } });
-      assert.equal(run.code, 0, 'Maintenance CLI did not reach the configured administrator port'); assert.equal(calls, 1);
+      const run = await runChild(process.execPath, ['--import', pathToFileURL(fixtureFile).href, join(root, 'scripts/maintenance.mjs'), 'reserve'], { input: 'a'.repeat(64), env: { ...process.env, BRIDGE_SECRET_ENV_FILE: envFile, SOLID_FETCH_ORIGIN: `http://127.0.0.1:${server.address().port}` } });
+      assert.equal(run.code, 0, 'Maintenance CLI did not reach the configured administrator port'); assert.equal(calls, 2);
       return { configuredPortUsed: true, authenticatedFixtureCalls: calls };
     } finally { await new Promise(accept => server.close(accept)); }
   }
