@@ -53,7 +53,10 @@ def collect_files(root):
         if (not path.is_file() or unsafe_link(path)
                 or any(unsafe_link(root / parent) for parent in path.relative_to(root).parents)):
             raise ValueError('Missing or unsafe package file: ' + path.relative_to(root).as_posix())
-    return sorted(set(files))
+    # pathlib compares Windows paths case-insensitively; manifests must use
+    # the same relative-path ordering on all packaging hosts.
+    unique = {path.relative_to(root).as_posix(): path for path in files}
+    return [unique[name] for name in sorted(unique)]
 
 
 def package(root, output=None, *, release=False):
@@ -84,7 +87,7 @@ def package(root, output=None, *, release=False):
     prefix = 'ssh-approval-portal-' + version
     archives = [output / (prefix + '.tar.gz'), output / (prefix + '.zip')]
     with tarfile.open(archives[0], 'w:gz') as archive:
-        for path in sorted(files):
+        for path in sorted(files, key=lambda item: item.relative_to(root).as_posix()):
             info = archive.gettarinfo(str(path), prefix + '/' + path.relative_to(root).as_posix())
             info.uid = info.gid = 0
             info.uname = info.gname = 'root'
@@ -93,7 +96,7 @@ def package(root, output=None, *, release=False):
             with path.open('rb') as source:
                 archive.addfile(info, source)
     with zipfile.ZipFile(archives[1], 'w', zipfile.ZIP_DEFLATED) as archive:
-        for path in sorted(files):
+        for path in sorted(files, key=lambda item: item.relative_to(root).as_posix()):
             archive.write(path, prefix + '/' + path.relative_to(root).as_posix())
     checksums = ''.join(hashlib.sha256(path.read_bytes()).hexdigest() + '  ' + path.name + '\n' for path in archives)
     (output / 'SHA256SUMS').write_text(checksums, encoding='utf-8', newline='\n')

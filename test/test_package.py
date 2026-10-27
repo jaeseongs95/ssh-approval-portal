@@ -63,6 +63,22 @@ class PackageContract(unittest.TestCase):
         self.assertIsNotNone(node, 'Package import contract requires the configured Node runtime')
         return subprocess.run([node, str(script), *map(str, arguments)], capture_output=True, text=True, timeout=20)
 
+    def test_manifest_and_archive_paths_use_case_sensitive_portable_order(self):
+        self.write('scripts/Z-capital.sh', '#!/bin/sh\n')
+        self.write('scripts/a-lower.sh', '#!/bin/sh\n')
+        archives, _ = packager.package(self.root)
+        entries = json.loads((self.root / 'release-manifest.json').read_text(encoding='utf-8'))['files']
+        paths = [entry['path'] for entry in entries]
+        self.assertEqual(paths, sorted(paths))
+        self.assertLess(paths.index('LICENSE'), paths.index('app.mjs'))
+        self.assertLess(paths.index('scripts/Z-capital.sh'), paths.index('scripts/a-lower.sh'))
+        expected = sorted([*paths, 'release-manifest.json'])
+        prefix = 'ssh-approval-portal-0.3.0/'
+        with tarfile.open(archives[0], 'r:gz') as archive:
+            self.assertEqual([name.removeprefix(prefix) for name in archive.getnames()], expected)
+        with zipfile.ZipFile(archives[1]) as archive:
+            self.assertEqual([name.removeprefix(prefix) for name in archive.namelist()], expected)
+
     def test_layered_sources_and_bundles_resolve_from_extracted_package(self):
         self.write('src/.env', 'not-for-package=synthetic')
         self.write('web/operator.key', 'not-for-package')
