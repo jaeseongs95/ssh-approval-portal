@@ -32,8 +32,8 @@ test('maintenance atomically excludes pending/running jobs and blocks new execut
     assert.equal((await post('release', loser)).status, 409);
     assert.equal((await post('release', winner)).status, 200);
     const staged = await app.store.begin({ fileName: 'x', remotePath: '/tmp/x', size: 0, sha256: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855' });
-    assert.equal((await post('reserve')).status, 409, 'An incomplete upload must survive until completed/expired');
+    assert.equal((await post('reserve', 'c'.repeat(64))).status, 409, 'An incomplete upload must survive until completed/expired');
     await app.store.remove(staged.id);
-    assert.equal((await post('reserve')).status, 200);
+    assert.equal((await post('reserve', 'c'.repeat(64))).status, 200);
   } finally { complete({}); await app.close(); await rm(root, { recursive: true }); }
 });
