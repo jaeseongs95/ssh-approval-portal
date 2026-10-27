@@ -47,6 +47,9 @@ test('real journals compare old rows and payload after restart, allowing expiry 
   const pending = outputs.reserve({executionId:id});
   assert.throws(() => capture(), /Pending or invalid output/);
   outputs.abandon(pending);
+  const unavailable = capture();
+  const partial = comparePreservationSnapshots(unavailable, capture());
+  assert.equal(partial.status, 'PARTIAL'); assert.equal(partial.outputsUnavailable, 1);
   commandState.close(); cliState.close(); outputs.close();
 });
 
