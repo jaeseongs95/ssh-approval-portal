@@ -135,19 +135,66 @@ new=$(sudo "${compose[@]}" ps -q bridge)
 [[ -n "$new" && "$old" != "$new" ]]
 [[ $(docker inspect "$new" --format '{{.Image}}') == "$(docker image inspect "$candidate" --format '{{.Id}}')" ]]
 docker exec "$new" node test/delivery-runtime.mjs
-echo 'Check detected concurrent Compose configuration change and retained reservation'
-sudo env BRIDGE_IMAGE="$baseline" "${compose[@]}" up -d --no-build --force-recreate --wait --wait-timeout 90
 mkdir "$RUNNER_TEMP/docker-wrapper"
 cat > "$RUNNER_TEMP/docker-wrapper/docker" <<'SH'
 #!/bin/bash
-if [[ "$*" == *' up -d --no-build --wait '* ]]; then printf '\n# concurrent fixture change\n' >> "$BRIDGE_COMPOSE_ENV_FILE"; fi
-exec /usr/bin/docker "$@"
+set -euo pipefail
+args=("$@")
+if [[ "$*" == *' up -d --no-build --wait '* ]]; then
+  case "$FIXTURE_FAILURE" in
+    start-before) exit 73 ;;
+    start-after) /usr/bin/docker "$@"; exit 73 ;;
+    env-change) printf '\n# concurrent fixture change\n' >> "$BRIDGE_COMPOSE_ENV_FILE" ;;
+  esac
+fi
+for ((i=0; i+2<${#args[@]}; i++)); do
+  if [[ "${args[i]}" == node && "${args[i+1]}" == scripts/maintenance.mjs && "${args[i+2]}" == "$FIXTURE_FAILURE" ]]; then
+    id=$(/usr/bin/docker ps -q --filter "label=com.docker.compose.project=$BRIDGE_COMPOSE_PROJECT" --filter 'label=com.docker.compose.service=bridge')
+    [[ -n "$id" ]]
+    /usr/bin/docker cp "$RESPONSE_LOSS_FILE" "$id:/tmp/compose-response-loss.mjs"
+    args=("${args[@]:0:i+1}" --import /tmp/compose-response-loss.mjs "${args[@]:i+1}")
+    break
+  fi
+done
+exec /usr/bin/docker "${args[@]}"
 SH
 chmod 0755 "$RUNNER_TEMP/docker-wrapper/docker"
-if sudo env PATH="$RUNNER_TEMP/docker-wrapper:$PATH" BRIDGE_COMPOSE_PROJECT="$project" BRIDGE_COMPOSE_ENV_FILE="$BRIDGE_COMPOSE_ENV_FILE" bash scripts/compose-update.sh "$candidate" > "$RUNNER_TEMP/compose-conflict-out.txt" 2> "$RUNNER_TEMP/compose-conflict-err.txt"; then
+health() {
+  docker exec "$1" node --input-type=module -e 'import assert from "node:assert/strict"; const r=await fetch("http://127.0.0.1:39124/health"); assert.equal((await r.json()).maintenance,process.argv[1]==="true")' "$2"
+}
+for failure in capture start-before start-after release; do
+  sudo env BRIDGE_IMAGE="$baseline" "${compose[@]}" up -d --no-build --force-recreate --wait --wait-timeout 90
+  old=$(sudo "${compose[@]}" ps -q bridge)
+  err="$RUNNER_TEMP/compose-${failure}-err.txt"
+  if sudo env PATH="$RUNNER_TEMP/docker-wrapper:$PATH" BRIDGE_COMPOSE_PROJECT="$project" BRIDGE_COMPOSE_ENV_FILE="$BRIDGE_COMPOSE_ENV_FILE" FIXTURE_FAILURE="$failure" RESPONSE_LOSS_FILE="$source_dir/test/compose-response-loss.mjs" bash scripts/compose-update.sh "$candidate" > "$RUNNER_TEMP/compose-${failure}-out.txt" 2> "$err"; then
+    echo "Synthetic $failure failure was unexpectedly accepted" >&2; exit 1
+  fi
+  owner=$(sed -n 's/^Maintenance recovery file: //p' "$err" | tail -1)
+  [[ "$owner" =~ ^/var/lib/ssh-mcp/\.maintenance-owners/job\.[A-Za-z0-9]+/owner$ ]]
+  sudo test -f "$owner"
+  new=$(sudo "${compose[@]}" ps -q bridge)
+  case "$failure" in
+    capture|start-before) [[ "$new" == "$old" ]]; health "$new" true ;;
+    start-after) [[ "$new" != "$old" ]]; health "$new" true ;;
+    release) [[ "$new" != "$old" ]]; health "$new" false ;;
+  esac
+  if [[ "$failure" == capture || "$failure" == start-before ]]; then
+    sudo env BRIDGE_IMAGE="$baseline" "${compose[@]}" up -d --no-build --force-recreate --wait --wait-timeout 90
+    new=$(sudo "${compose[@]}" ps -q bridge)
+  fi
+  if [[ "$failure" != release ]]; then
+    sudo bash -c 'set -e; docker exec -i "$1" node scripts/maintenance.mjs compare < "$2"; docker exec -i "$1" node scripts/maintenance.mjs release < "$2"' _ "$new" "$owner"
+    health "$new" false
+  fi
+  sudo rm -- "$owner"
+  sudo rmdir -- "$(dirname "$owner")"
+done
+echo 'Check detected concurrent Compose configuration change and retained reservation'
+sudo env BRIDGE_IMAGE="$baseline" "${compose[@]}" up -d --no-build --force-recreate --wait --wait-timeout 90
+if sudo env PATH="$RUNNER_TEMP/docker-wrapper:$PATH" BRIDGE_COMPOSE_PROJECT="$project" BRIDGE_COMPOSE_ENV_FILE="$BRIDGE_COMPOSE_ENV_FILE" FIXTURE_FAILURE=env-change RESPONSE_LOSS_FILE="$source_dir/test/compose-response-loss.mjs" bash scripts/compose-update.sh "$candidate" > "$RUNNER_TEMP/compose-conflict-out.txt" 2> "$RUNNER_TEMP/compose-conflict-err.txt"; then
   echo 'Concurrent configuration change was unexpectedly accepted' >&2; exit 1
 fi
 grep -F 'Compose configuration changed; maintenance retained.' "$RUNNER_TEMP/compose-conflict-err.txt"
 new=$(sudo "${compose[@]}" ps -q bridge)
-docker exec "$new" node --input-type=module -e 'import assert from "node:assert/strict"; const r=await fetch("http://127.0.0.1:39124/health"); assert.equal((await r.json()).maintenance,true)'
+health "$new" true
 echo 'Actual Compose durable image replacement, restart comparison and release PASS'
