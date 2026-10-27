@@ -98,6 +98,7 @@ jobs:
           git fetch --no-tags --depth=1 origin 9644117aa904bcf6a6fd861b741942db3d42035c
           git archive 9644117aa904bcf6a6fd861b741942db3d42035c | tar -x -C "$old"
           cp -a node_modules "$old/node_modules"
+          git fetch --no-tags --depth=1 origin fc6aa226c315f4c91da6a6574023811109810f0b
           git archive fc6aa226c315f4c91da6a6574023811109810f0b | tar -x -C "$candidate"
           (cd "$candidate" && python3 scripts/package.py)
           echo 'd0e235277f213e747f35f7dc0a0f11f4f545c13a50d3be3421c7a9371352ed7b  '"$candidate"'/release-manifest.json' | sha256sum -c -
