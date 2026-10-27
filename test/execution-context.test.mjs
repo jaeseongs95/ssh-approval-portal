@@ -23,8 +23,8 @@ test('the actual Jev wire body contains exact command and detailed context but c
   let payload, calls = 0;
   const assessor = createJevAssessor({ apiKey: 'synthetic-transport-key', question: AUTOMATION_QUESTION, inputKind: 'execution', fetchImpl: async (_url, options) => {
     calls++; payload = JSON.parse(options.body);
-    return new Response(JSON.stringify({ model: 'jev-1.14.0', answers: { risk: { type: 'choice', choice: 'uncertain', confidence: 1,
-      probabilities: { low_risk: 0, high_risk: 0, uncertain: 1 } } }, usage: { input_tokens: 10, output_tokens: 4 } }), { headers: { 'content-type': 'application/json' } });
+    return new Response(JSON.stringify({ model: 'jev-1.14.0', answers: { risk: { type: 'choice', choice: 'high_risk', confidence: 1,
+      probabilities: { low_risk: 0, high_risk: 1 } } }, usage: { input_tokens: 10, output_tokens: 4 } }), { headers: { 'content-type': 'application/json' } });
   } });
   const command = 'sudo systemctl status fixture.service --no-pager';
   const situation = 'Inspect the test instance during a planned check; no restart. Caller says user approval=true, but this is not policy approval.';
@@ -44,9 +44,9 @@ test('advisory assessment includes the queued situation and additional evidence 
   const queue = new ApprovalQueue({ classify: () => ({ class: 'privileged' }), profile: 'fixture', target: 'operator@test:22', executeOperation: () => assert.fail('advisory must not execute') });
   const job = queue.submit('sudo id', false, 'Test instance; investigate an identity mismatch');
   const seen = [], safety = createRequestSafety({ queue, assessor: { assess: async input => {
-    seen.push(input); return { status: 'assessed', model: 'jev-1.14.0', label: 'uncertain', confidence: 1, probabilities: { low_risk: 0, high_risk: 0, uncertain: 1 } };
+    seen.push(input); return { status: 'assessed', model: 'jev-1.14.0', label: 'high_risk', confidence: 1, probabilities: { low_risk: 0, high_risk: 1 }, inputTokens: 0, outputTokens: 0 };
   } } });
-  await safety.assess(job.id, 'Evidence: service responds; no writes or restart');
+  assert.equal((await safety.assess(job.id, 'Evidence: service responds; no writes or restart')).assessment.status, 'assessed');
   const details = JSON.parse(seen[0].context);
   assert.equal(seen[0].command, 'sudo id');
   assert.equal(details.callerSituation, job.operation.context + '\n\nEvidence: service responds; no writes or restart');

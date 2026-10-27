@@ -94,6 +94,24 @@ test('card and web show classification and actual review condition before diagno
   await page.getByText('사용자가 승인한 요청입니다', { exact: true }).waitFor();
   await page.getByText(/사용자 승인 전 AI 검토/).waitFor();
 }, 'ko-KR'));
+for (const locale of ['ko-KR', 'en-US']) for (const label of ['low_risk', 'high_risk']) test(`binary assessment shows exactly its two recorded scores ${locale} ${label}`, async () => browserFixture(async (page, server) => {
+  const korean = locale === 'ko-KR';
+  const value = { id: 'binary-assessment', kind: 'command', state: 'pending', command: 'id', target: 'fixture', expiresAt: 2e12,
+    decision: { decision: 'review', reasonCode: 'model_review', provider: 'jev', assessment: { model: 'fixture-model', label, probabilities: { low_risk: 0.23, high_risk: 0.77 } } } };
+  for (const surface of ['card', 'web', 'compiled-web']) {
+    server.state.compiled = surface === 'compiled-web';
+    if (surface === 'card') {
+      await page.goto(server.origin + '/fixture/card'); await page.waitForFunction(() => window.fixture);
+      await page.evaluate(value => window.fixture.receive({ structuredContent: value, _meta: { sshApproval: {} } }), value);
+    } else { server.state.jobs = [value]; await page.goto(server.origin + '/fixture/web'); }
+    const summary = page.locator('.assessment-summary');
+    assert.ok((await summary.textContent()).includes(korean ? (label === 'low_risk' ? '안전' : '위험') : (label === 'low_risk' ? 'Safe' : 'Risk')));
+    await page.getByText(korean ? 'AI 평가 상세' : 'AI assessment details', { exact: true }).click();
+    assert.deepEqual(await page.locator('.assessment-scores dt').allTextContents(), korean ? ['안전', '위험'] : ['Safe', 'Risk']);
+    assert.deepEqual(await page.locator('.assessment-scores dd').allTextContents(), ['23.0%', '77.0%']);
+  }
+  assert.equal(server.state.requests.filter(item => item.method === 'POST').length, 0);
+}, locale));
 test('UI-S-01 selected file cannot cross a card replacement', async () => browserFixture(async (page, server) => {
   await card(page, server); await page.evaluate(() => window.fixture.transfer('/tmp/B'));
   assert.equal(await page.locator('input[type=file]').evaluate(node => node.files.length), 0);
@@ -270,7 +288,7 @@ test('approved history keeps historical scores and threshold while explaining th
   const context = '테스트 서버 조회. 변경·재시작 없음. <script>window.contextInjected=true</script>';
   const value = { id: 'approved-context-fixture', kind: 'command', state: 'completed', approvalMode: 'owner', command: 'sudo id', operation: { kind: 'command', command: 'sudo id', context }, target: 'fixture', expiresAt: 2000000000000,
     decision: { decision: 'review', reasonCode: 'model_review', reviewReason: 'uncertain', decisionRuleVersion: 'command-explanation-v1', provider: 'jev', evaluation: { callerContextProvided: true },
-      assessment: { model: 'jev-1.14.0', label: 'uncertain', confidence: 0.505, probabilities: { low_risk: 0.01, high_risk: 0.32, uncertain: 0.67 } }, threshold: { minLowRisk: 0.51 } } };
+      assessment: { model: 'jev-1.14.0', questionVersion: 'ssh-command-risk-v4', label: 'uncertain', confidence: 0.505, probabilities: { low_risk: 0.01, high_risk: 0.32, uncertain: 0.67 } }, threshold: { minLowRisk: 0.51 } } };
   server.state.jobs = [value];
   await page.goto(server.origin + '/history');
   await page.locator('#history > details').evaluate(node => node.open = true);
@@ -280,6 +298,7 @@ test('approved history keeps historical scores and threshold while explaining th
   await page.getByText('당시 보류 사유: AI가 위험도를 판단하지 못했습니다.', { exact: true }).waitFor();
   assert.doesNotMatch(await page.locator('#history').textContent(), /사용자 확인이 필요합니다/);
   assert.match(await page.locator('.assessment-details').textContent(), /51.0% 이상/);
+  assert.deepEqual(await page.locator('.assessment-scores dt').allTextContents(), ['낮은 위험', '높은 위험', '판단 불가']);
   assert.deepEqual(await page.locator('.assessment-scores dd').allTextContents(), ['1.0%', '32.0%', '67.0%']);
   assert.ok((await page.locator('.assessment-details').textContent()).includes(context));
   assert.equal(await page.evaluate(() => window.contextInjected), undefined);
@@ -288,6 +307,13 @@ test('approved history keeps historical scores and threshold while explaining th
   await page.getByText('당시 자동승인을 보류했고, 사용자가 직접 승인해 진행한 요청입니다.', { exact: true }).waitFor();
   await page.getByText('AI 평가 상세', { exact: true }).click();
   await page.getByText('당시 보류 사유: AI가 위험도를 판단하지 못했습니다.', { exact: true }).waitFor();
+  assert.deepEqual(await page.locator('.assessment-scores dt').allTextContents(), ['낮은 위험', '높은 위험', '판단 불가']);
+  assert.deepEqual(await page.locator('.assessment-scores dd').allTextContents(), ['1.0%', '32.0%', '67.0%']);
+  server.state.compiled = true; await page.goto(server.origin + '/history');
+  await page.locator('#history > details').evaluate(node => node.open = true);
+  await page.getByText('AI 평가 상세', { exact: true }).click();
+  assert.deepEqual(await page.locator('.assessment-scores dt').allTextContents(), ['낮은 위험', '높은 위험', '판단 불가']);
+  assert.deepEqual(await page.locator('.assessment-scores dd').allTextContents(), ['1.0%', '32.0%', '67.0%']);
 }, 'ko-KR'));
 
 test('long history uses a full-width page of 20 and preserves expanded records across pages and polling',async()=>browserFixture(async(page,server)=>{

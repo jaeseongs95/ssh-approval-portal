@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 const exact = (value, keys) => value !== null && typeof value === 'object' && !Array.isArray(value)
   && Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
 export const fixtureChoice = () => ({ model: 'jev-1.14.0', answers: { risk: {
-  type: 'choice', choice: 'low_risk', confidence: 1, probabilities: { low_risk: 1, high_risk: 0, uncertain: 0 },
+  type: 'choice', choice: 'low_risk', confidence: 1, probabilities: { low_risk: 1, high_risk: 0 },
 } }, usage: { input_tokens: 20, output_tokens: 4 } });
 
 /** Test-owned loopback server, scenario replies only; it never executes commands. */
@@ -35,7 +35,7 @@ export async function createJevFixture(replies = []) {
         || !Object.values(body.state).every(value => typeof value === 'string' && value.trim() && value.length <= 4096)
         || !exact(body.questions, ['risk']) || !exact(body.questions.risk, ['type', 'instructions', 'criteria'])
         || body.questions.risk.type !== 'choice' || typeof body.questions.risk.instructions !== 'string' || !body.questions.risk.instructions.trim()
-        || !exact(body.questions.risk.criteria, ['low_risk', 'high_risk', 'uncertain'])
+        || !exact(body.questions.risk.criteria, ['low_risk', 'high_risk'])
         || !Object.values(body.questions.risk.criteria).every(value => typeof value === 'string' && value.trim())) return refuse(422);
       record.valid = true;
       record.stateKeys = Object.keys(body.state);

@@ -60,13 +60,15 @@ const recordedReasons = {
   below_threshold: ['낮은 위험 점수가 당시 자동승인 기준에 못 미쳤습니다.', 'The low-risk score was below the threshold at the time.'],
 };
 const labels = { low_risk: ['낮은 위험', 'Low risk'], high_risk: ['높은 위험', 'High risk'], uncertain: ['판단 불가', 'Uncertain'] };
+const binaryLabels = { low_risk: ['안전', 'Safe'], high_risk: ['위험', 'Risk'] };
+const labelsFor = assessment => assessment?.probabilities && !Object.hasOwn(assessment.probabilities, 'uncertain') ? binaryLabels : labels;
 export function decisionText(decision, korean) {
   if (decision.decisionRuleVersion === 'command-explanation-v1' && reviewReasons[decision.reviewReason]) {
-    const label = labels[decision.assessment?.label]?.[korean ? 0 : 1];
+    const label = labelsFor(decision.assessment)[decision.assessment?.label]?.[korean ? 0 : 1];
     return reviewReasons[decision.reviewReason][korean ? 0 : 1] + (label && !['high_risk', 'uncertain'].includes(decision.reviewReason) ? (korean ? ' · AI 분류: ' : ' · AI classification: ') + label : '');
   }
   const reason = reasons[decision.reasonCode]?.[korean ? 0 : 1] ?? (korean ? '사유 설명 미지원' : 'Reason description unavailable');
-  const label = labels[decision.assessment?.label]?.[korean ? 0 : 1];
+  const label = labelsFor(decision.assessment)[decision.assessment?.label]?.[korean ? 0 : 1];
   return `${reason}${label ? (korean ? ' · AI 분류: ' : ' · AI classification: ') + label : ''}`;
 }
 
@@ -123,9 +125,9 @@ export function renderDecision(document, parent, decision, korean, job = {}) {
   if (historical) add(body, 'p', decision.decision === 'review'
     ? (korean ? '당시 보류 사유: ' : 'Reason withheld at the time: ') + (recordedReasons[decision.reviewReason]?.[korean ? 0 : 1] ?? (korean ? '당시 정책은 사용자 검토로 분류했습니다.' : 'The policy required review at the time.'))
     : (korean ? '당시 정책 판단: ' : 'Policy decision at the time: ') + decisionText(decision, korean));
-  add(body, 'p', korean ? '세 점수는 AI가 어느 분류에 무게를 뒀는지 보여줍니다. 실제 사고 확률이 아닙니다.' : 'These scores show the model’s classification weights, not incident probabilities.');
+  add(body, 'p', korean ? '점수는 AI가 어느 분류에 무게를 뒀는지 보여줍니다. 실제 사고 확률이 아닙니다.' : 'These scores show the model’s classification weights, not incident probabilities.');
   const scores = add(body, 'dl', ''); scores.className = 'assessment-scores';
-  for (const [key, label] of Object.entries(labels)) if (Number.isFinite(assessment.probabilities?.[key])) { add(scores, 'dt', label[korean ? 0 : 1]); add(scores, 'dd', `${(assessment.probabilities[key] * 100).toFixed(1)}%`); }
+  for (const [key, label] of Object.entries(labelsFor(assessment))) if (Number.isFinite(assessment.probabilities?.[key])) { add(scores, 'dt', label[korean ? 0 : 1]); add(scores, 'dd', `${(assessment.probabilities[key] * 100).toFixed(1)}%`); }
   if (decision.threshold && Number.isFinite(decision.threshold.minLowRisk)) add(body, 'p', (korean ? '평가 당시 자동승인 기준: 낮은 위험으로 분류되고 점수 ' : 'Threshold at assessment: classified low risk with a score of ') + (decision.threshold.minLowRisk * 100).toFixed(1) + (korean ? '% 이상' : '% or higher'));
   if (historical) add(body, 'small', korean ? '과거 평가 당시의 기준과 점수를 표시합니다. 이후 설정 변경은 이 기록에 반영되지 않습니다.' : 'These are the historical threshold and scores; later policy changes do not rewrite this record.');
   add(body, 'p', korean ? '모델은 분류 점수만 반환했고 구체적인 위험 근거는 제공하지 않았습니다. 이 점수만으로 실제 안전 여부를 확정할 수 없습니다.' : 'The model returned classification scores without a specific risk rationale. Scores alone do not establish actual safety.');

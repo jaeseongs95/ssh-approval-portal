@@ -7,8 +7,9 @@ const RECOMMENDED = Object.fromEntries(commandRisks.defaultCommands.map(name => 
 const nameSummary = names => names.slice(0, 8).join(', ') + (names.length > 8 ? tr(' 외 ') + (names.length - 8) + tr('개') : '');
 const linesOf = value => value.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
 const same = (a, b) => JSON.stringify(a ?? null, (_, value) => value && !Array.isArray(value) && typeof value === 'object' ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b))) : value) === JSON.stringify(b ?? null, (_, value) => value && !Array.isArray(value) && typeof value === 'object' ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b))) : value);
-const CURRENT = 'ssh-command-risk-v4', BASIS = 'safety-probability-v1';
+const CURRENT = 'ssh-command-risk-v5', BASIS = 'safety-probability-v1';
 const legacy = threshold => threshold && (threshold.questionVersion !== CURRENT || threshold.basis !== BASIS);
+const v4ConversionNotice = '위험 평가는 세 분류에서 두 분류(안전·위험)로 바뀌었습니다. 기존 점수 기준은 자동 승계되지 않습니다. 기존 숫자를 재사용하려면 새 기준에 대한 검증이 필요합니다.';
 
 /** Preserve the owner policy; only explicitly edited settings become a proposal. */
 export function createCommandPolicyEditor({ document, api, onNavigate = () => {}, isSignedOut = () => false }) {
@@ -111,8 +112,9 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
     score.min = '50'; score.max = '100'; score.step = 'any';
     const old = provider === 'jev' ? legacyBox : el('div', '', 'policy-warning'); if (provider !== 'jev') box.append(old);
     const convert = el('button', provider + tr(' 기준을 현재 방식으로 바꾸기'), 'secondary'); convert.type = 'button';
-    old.append(el('p', tr('이전 점수 방식이 저장돼 있습니다. 명령만 바꾸면 그대로 보존합니다. 전환하면 기존 confidence 조건을 없애고 낮은 위험 점수 하나를 쓰며, Jev 자동 실행이 켜져 있다면 실행 가능 범위가 달라질 수 있습니다.')), convert);
-    scores[provider] = { box, model, score, old, convert };
+    const conversionNotice = el('p', tr(v4ConversionNotice));
+    old.append(el('p', tr('이전 점수 방식이 저장돼 있습니다. 명령만 바꾸면 그대로 보존합니다. 전환하면 자동 실행 가능 범위가 달라질 수 있습니다.')), conversionNotice, convert);
+    scores[provider] = { box, model, score, old, convert, conversionNotice };
   }
   const three = section(3, tr('위험도 확인 후 저장'));
   const summary = el('div', '', 'policy-change-summary'); three.append(summary);
@@ -212,6 +214,7 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
       const threshold = original?.thresholds[provider], isLegacy = legacy(threshold) && !converted.has(provider);
       inputs.box.hidden = provider !== 'jev' && !threshold && fallback.value !== provider;
       inputs.old.hidden = !isLegacy; inputs.score.disabled = isLegacy; inputs.model.disabled = isLegacy;
+      inputs.conversionNotice.hidden = threshold?.questionVersion !== 'ssh-command-risk-v4';
     }
     const active = Object.keys(original?.thresholds ?? {}).join(', ') || tr('없음');
     advancedHeading.textContent = tr('대체 평가·이전 기준 · 대체 ') + (original?.fallback ?? tr('없음'));
@@ -224,7 +227,9 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
     const threshold = original?.thresholds.jev;
     if (threshold || execution.checked || changed.has('jev')) lines.push(tr('Jev 기준 ') + probability.value + '% · ' + (legacy(threshold) && !converted.has('jev') ? tr('이전 방식 보존') : tr('낮은 위험 점수 방식 · 사용자 선택 기준')));
     if (changed.has('jev') && scores.jev.model.value !== (original?.thresholds.jev?.model ?? 'jev-1.14.0')) lines.push(tr('Jev 모델 변경: ') + scores.jev.model.value);
-    if (converted.size) lines.push(tr('점수 방식 전환: ') + [...converted].join(', ') + tr(' · 기존 confidence 조건 제거'));
+    if (converted.size) lines.push(tr('점수 방식 전환: ') + [...converted].join(', '));
+    if ([...converted].some(provider => original?.thresholds[provider]?.questionVersion === 'ssh-command-risk-v4')) lines.push(tr(v4ConversionNotice));
+    if ([...converted].some(provider => Object.hasOwn(original?.thresholds[provider] ?? {}, 'minConfidence'))) lines.push(tr('기존 confidence 조건이 제거됩니다.'));
     if (fallback.value) lines.push(tr('대체 평가자 ') + fallback.value + tr(' · 연결 상태 미확인'));
     for (const line of lines) summary.append(el('p', line));
     for (const [label, value, before] of [[tr('자동승인 명령'), chosen, original?.commands ?? []], [tr('금지 명령'), linesOf(denied.value), original?.deniedCommands ?? []]]) {
@@ -350,14 +355,14 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
       reviewed = { ...result, candidate };
       feedback.append(el('h4', tr('저장 전 확인해 주세요')), el('p', tr(result.notice)));
       if (!result.feedback.length) feedback.append(el('p', tr('저장된 설정과 같습니다. 새 평가 결과는 없습니다.')));
-      const labels = { low_risk: tr('낮음'), high_risk: tr('높음'), uncertain: tr('판단 불충분') };
+      const labels = { low_risk: tr('안전'), high_risk: tr('위험'), uncertain: tr('평가 없음') };
       for (const item of result.feedback) {
         const card = el('div', '', 'policy-risk'); card.dataset.level = item.level;
         card.append(el('strong', nameOf(item.targetId) + tr(' · 종합 위험도 ') + labels[item.level]), el('p', nameSummary(item.commands) || tr('등록할 명령 없음')));
         card.append(el('p', tr('서버의 등록 규칙과 사용 가능한 Jev 평가를 반영한 안내입니다. 파일 자동업로드나 영향이 큰 명령은 서버 규칙에서 높은 위험으로 안내합니다.')));
         if (item.assessment) {
           card.append(el('p', tr('Jev 분류: ') + labels[item.assessment.label] + tr(' · 구체적인 위험 사유는 제공되지 않았습니다.')));
-          const details = el('details'); details.append(el('summary', tr('평가 상세')), el('p', tr('낮은 위험 점수 ') + (item.assessment.probabilities.low_risk * 100).toFixed(1) + tr('% · 실제 안전을 보증하지 않습니다.'))); card.append(details);
+          const details = el('details'); details.append(el('summary', tr('평가 상세')), el('p', tr('안전 점수 ') + (item.assessment.probabilities.low_risk * 100).toFixed(1) + tr('% · 위험 점수 ') + (item.assessment.probabilities.high_risk * 100).toFixed(1) + tr('% · 실제 안전을 보증하지 않습니다.'))); card.append(details);
         } else card.append(el('p', tr('평가가 없다는 것이 안전하다는 뜻은 아닙니다. 아래 경고를 읽어주세요.')));
         if (item.commandRisks?.length) { const definitions = el('details'); definitions.append(el('summary',tr('명령별 기본 위험도 · 등록 안내'))); for (const risk of item.commandRisks) definitions.append(el('p', risk.name + ' · ' + ({low:tr('낮음'),moderate:tr('보통'),high:tr('높음'),unknown:tr('정보 없음')}[risk.riskLevel] ?? tr('정보 없음')) + ' · ' + tr(risk.reason))); card.append(definitions); }
         card.append(el('p', reviewWarning(item.warning))); feedback.append(card);

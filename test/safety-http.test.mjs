@@ -7,7 +7,7 @@ import { runSafetyEvaluation } from '../scripts/evaluate-safety.mjs';
 const input = { command: 'id -u', target: 'fixture-a', environment: 'synthetic Linux', context: 'bounded uid inspection' };
 // Fixed independent fixture request; no production encoder or question object imported.
 const request = () => ({ model: 'jev-1.14.0', state: { ...input }, questions: { risk: { type: 'choice',
-  instructions: 'Classify this synthetic command risk.', criteria: { low_risk: 'Bounded public read', high_risk: 'Mutation or secret exposure', uncertain: 'Unknown effects' },
+  instructions: 'Classify this synthetic command risk.', criteria: { low_risk: 'Bounded public read', high_risk: 'Mutation, secret exposure or unknown effects' },
 } } });
 const headers = { authorization: 'Bearer fixture-only-token', 'content-type': 'application/json' };
 const make = (fixture, options = {}) => createJevAssessor({ apiKey: 'fixture-only-token', fetchImpl: fixture.fetchImpl, ...options });
@@ -24,6 +24,7 @@ test('WIRE-01 temporary server independently enforces route, method, bearer, mod
       { change: value => { value.questions.risk.type = 'noul'; }, status: 422 },
       { change: value => { value.questions.extra = value.questions.risk; }, status: 422 },
       { change: value => { value.questions.risk.criteria.needed = 'AGS skill label is not SSH risk'; }, status: 422 },
+      { change: value => { value.questions.risk.criteria.uncertain = 'Unknown effects'; }, status: 422 },
     ];
     for (const scenario of malformed) {
       const body = request(); scenario.change?.(body);

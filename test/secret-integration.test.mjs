@@ -17,7 +17,7 @@ test('MCP risk observation resolves injected secrets internally, preserves env c
       if (String(url) !== JEV_ENDPOINT) return originalFetch(url, options);
       calls++; assert.equal(options.headers.Authorization, 'Bearer ' + marker);
       return new Response(JSON.stringify({ model: 'jev-1.14.0', answers: { risk: { type: 'choice', choice: 'low_risk', confidence: 1,
-        probabilities: { low_risk: 1, high_risk: 0, uncertain: 0 } } }, usage: { input_tokens: 10, output_tokens: 1 } }), { headers: { 'content-type': 'application/json' } });
+        probabilities: { low_risk: 1, high_risk: 0 } } }, usage: { input_tokens: 10, output_tokens: 1 } }), { headers: { 'content-type': 'application/json' } });
     };
     try {
       application = await createApplication({
