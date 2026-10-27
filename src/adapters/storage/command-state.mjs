@@ -24,6 +24,13 @@ export function createCommandState(root) {
   const policy = () => { const row = db.prepare('SELECT revision,body FROM policy WHERE id=1').get(); return { revision: row.revision, ...validateCommandPolicy(JSON.parse(row.body)) }; };
   return {
     policy,
+    preservationRows() {
+      const usage = db.prepare('SELECT count(*) AS count, coalesce(sum(length(CAST(body AS BLOB))),0) AS bytes FROM requests').get();
+      if (usage.count > 10000 || usage.bytes > 64 * 1024 * 1024) throw Error('Command preservation budget exceeded');
+      return { schema: db.prepare('SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY name').all(),
+        policy: db.prepare('SELECT * FROM policy ORDER BY id').all(),
+        requests: db.prepare('SELECT * FROM requests ORDER BY id').all() };
+    },
     setPolicy(value, expectedRevision) {
       const body = JSON.stringify(validateCommandPolicy(value));
       if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) throw Error('Policy revision required');

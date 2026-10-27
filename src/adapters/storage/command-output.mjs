@@ -64,6 +64,12 @@ export class CommandOutputs {
     if (item.id !== id || !Number.isSafeInteger(item.expiresAt)) throw Error('Invalid output manifest');
     return item;
   }
+  preservationRows() {
+    const usage = this.db.prepare('SELECT count(*) AS count,coalesce(sum(length(CAST(body AS BLOB))),0) AS bytes FROM outputs').get();
+    if (usage.count > 1000 || usage.bytes > 64 * 1024 * 1024) throw Error('Output preservation budget exceeded');
+    return {schema: this.db.prepare('SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY name').all(),
+      outputs: this.db.prepare('SELECT id,body,digest,charge FROM outputs ORDER BY id').all()};
+  }
   persist(item, charge) {
     const body = JSON.stringify(item);
     if (Buffer.byteLength(body) > 256 * 1024) throw Error('Output manifest too large');

@@ -25,6 +25,7 @@ export function createAgentCliState(root){
   }
  }catch(error){db.close();throw error;}
  return {
+  preservationRows(){const usage=db.prepare('SELECT count(*) AS count,coalesce(sum(length(CAST(body AS BLOB))+coalesce(length(CAST(remote_status AS BLOB)),0)),0) AS bytes FROM requests').get();if(usage.count>10000||usage.bytes>64*1024*1024)throw Error('CLI preservation budget exceeded');return {schema:db.prepare('SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY name').all(),requests:db.prepare('SELECT * FROM requests ORDER BY id').all()};},
   find(key){const row=db.prepare('SELECT digest,body FROM requests WHERE request_key=?').get(key);return row&&{digest:row.digest,job:JSON.parse(row.body)};},
   list(){return db.prepare('SELECT body FROM requests').all().map(row=>JSON.parse(row.body));},
   history(binding,cursor=null){
