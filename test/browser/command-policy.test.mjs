@@ -153,7 +153,7 @@ test('legacy, 80 percent, fallback, denied rules and other targets survive comma
   assert.deepEqual(after, [{ ...policy.targets[0], commands: ['ls', 'pwd'] }, policy.targets[1]]);
   await modelTab(page); await page.getByRole('button', { name: 'jev 기준을 현재 방식으로 바꾸기', exact: true }).click();
   assert.equal(await probability.isDisabled(), false); await modelTab(page); await probability.fill('90');
-  await reviewTab(page); await page.getByText(/기존 confidence 조건 제거/).waitFor();
+  await reviewTab(page); await page.getByText('기존 confidence 조건이 제거됩니다.', { exact: true }).waitFor();
   await f.checked(); await f.commit();
   const migrated = (await f.api('/api/command-policy')).targets;
   assert.equal(migrated[0].thresholds.jev.questionVersion, 'ssh-command-risk-v5'); assert.equal(migrated[0].thresholds.jev.basis, 'safety-probability-v1');
@@ -175,8 +175,33 @@ test('v4 threshold stays unchanged until an explicit v5 conversion is reviewed a
   assert.equal(await save(page).isDisabled(), true);
   assert.equal(f.posts.filter(p => p.path === '/api/command-policy').length, writes);
   assert.deepEqual((await f.api('/api/command-policy')).targets[0].thresholds.jev, old);
-  await f.checked(); assert.equal(await save(page).isDisabled(), true); await f.commit();
-  assert.equal((await f.api('/api/command-policy')).targets[0].thresholds.jev.questionVersion, 'ssh-command-risk-v5');
+  await f.checked(); assert.equal(await save(page).isDisabled(), true);
+  const reviewed = f.posts.filter(p => p.path.endsWith('/review')).at(-1).body;
+  const threshold = reviewed.policy.targets[0].thresholds.jev;
+  assert.equal(threshold.questionVersion, 'ssh-command-risk-v5');
+  assert.equal(threshold.model, old.model); assert.equal(threshold.minLowRisk, old.minLowRisk);
+  assert.equal(threshold.basis, old.basis); assert.match(threshold.validationRef, /^user-choice:/);
+  await f.commit();
+  const submitted = f.posts.filter(p => p.path === '/api/command-policy').at(-1).body;
+  assert.deepEqual(submitted.policy, reviewed.policy);
+  assert.deepEqual((await f.api('/api/command-policy')).targets[0].thresholds.jev, threshold);
+}));
+
+for (const provider of ['jev', 'luna']) for (const surface of ['conversion notice', 'review summary']) test(`v4 conversion explains the changed score meaning for ${provider} in ${surface}`, async () => fixture(async f => {
+  const initial = await f.api('/api/command-policy'), b = initial.bindings[0];
+  const old = { model: provider === 'jev' ? 'jev-1.14.0' : 'custom-luna', questionVersion: 'ssh-command-risk-v4', basis: 'safety-probability-v1', minLowRisk: 0.9, validationRef: 'fixture:v4' };
+  await f.seed({ targets: [{ targetId: b.targetId, targetRevision: b.targetRevision, profile: b.profile, commands: ['ls'], deniedCommands: [], externalDisclosure: true, modelExecution: true, fallback: provider === 'luna' ? 'luna' : null, thresholds: { [provider]: old } }] });
+  await f.open(); await modelTab(f.page);
+  if (provider === 'luna') await f.page.locator('.policy-advanced summary').first().click();
+  const convert = f.page.getByRole('button', { name: provider + ' 기준을 현재 방식으로 바꾸기', exact: true });
+  let notice;
+  if (surface === 'conversion notice') notice = convert.locator('..');
+  else {
+    await convert.click(); await f.checked();
+    notice = f.page.locator('.policy-change-summary');
+    assert.equal(await save(f.page).isDisabled(), true);
+  }
+  assert.ok((await notice.textContent()).includes('위험 평가는 세 분류에서 두 분류(안전·위험)로 바뀌었습니다. 기존 점수 기준은 자동 승계되지 않습니다. 기존 숫자를 재사용하려면 새 기준에 대한 검증이 필요합니다.'));
 }));
 
 for (const mode of ['edit', 'select', 'target']) test('late review cannot authorize a changed draft: ' + mode, async () => fixture(async f => {

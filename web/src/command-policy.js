@@ -9,6 +9,7 @@ const linesOf = value => value.split(/\r?\n/).map(line => line.trim()).filter(Bo
 const same = (a, b) => JSON.stringify(a ?? null, (_, value) => value && !Array.isArray(value) && typeof value === 'object' ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b))) : value) === JSON.stringify(b ?? null, (_, value) => value && !Array.isArray(value) && typeof value === 'object' ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b))) : value);
 const CURRENT = 'ssh-command-risk-v5', BASIS = 'safety-probability-v1';
 const legacy = threshold => threshold && (threshold.questionVersion !== CURRENT || threshold.basis !== BASIS);
+const v4ConversionNotice = '위험 평가는 세 분류에서 두 분류(안전·위험)로 바뀌었습니다. 기존 점수 기준은 자동 승계되지 않습니다. 기존 숫자를 재사용하려면 새 기준에 대한 검증이 필요합니다.';
 
 /** Preserve the owner policy; only explicitly edited settings become a proposal. */
 export function createCommandPolicyEditor({ document, api, onNavigate = () => {}, isSignedOut = () => false }) {
@@ -111,8 +112,9 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
     score.min = '50'; score.max = '100'; score.step = 'any';
     const old = provider === 'jev' ? legacyBox : el('div', '', 'policy-warning'); if (provider !== 'jev') box.append(old);
     const convert = el('button', provider + tr(' 기준을 현재 방식으로 바꾸기'), 'secondary'); convert.type = 'button';
-    old.append(el('p', tr('이전 점수 방식이 저장돼 있습니다. 명령만 바꾸면 그대로 보존합니다. 전환하면 기존 confidence 조건을 없애고 낮은 위험 점수 하나를 쓰며, Jev 자동 실행이 켜져 있다면 실행 가능 범위가 달라질 수 있습니다.')), convert);
-    scores[provider] = { box, model, score, old, convert };
+    const conversionNotice = el('p', tr(v4ConversionNotice));
+    old.append(el('p', tr('이전 점수 방식이 저장돼 있습니다. 명령만 바꾸면 그대로 보존합니다. 전환하면 자동 실행 가능 범위가 달라질 수 있습니다.')), conversionNotice, convert);
+    scores[provider] = { box, model, score, old, convert, conversionNotice };
   }
   const three = section(3, tr('위험도 확인 후 저장'));
   const summary = el('div', '', 'policy-change-summary'); three.append(summary);
@@ -212,6 +214,7 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
       const threshold = original?.thresholds[provider], isLegacy = legacy(threshold) && !converted.has(provider);
       inputs.box.hidden = provider !== 'jev' && !threshold && fallback.value !== provider;
       inputs.old.hidden = !isLegacy; inputs.score.disabled = isLegacy; inputs.model.disabled = isLegacy;
+      inputs.conversionNotice.hidden = threshold?.questionVersion !== 'ssh-command-risk-v4';
     }
     const active = Object.keys(original?.thresholds ?? {}).join(', ') || tr('없음');
     advancedHeading.textContent = tr('대체 평가·이전 기준 · 대체 ') + (original?.fallback ?? tr('없음'));
@@ -224,7 +227,9 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
     const threshold = original?.thresholds.jev;
     if (threshold || execution.checked || changed.has('jev')) lines.push(tr('Jev 기준 ') + probability.value + '% · ' + (legacy(threshold) && !converted.has('jev') ? tr('이전 방식 보존') : tr('낮은 위험 점수 방식 · 사용자 선택 기준')));
     if (changed.has('jev') && scores.jev.model.value !== (original?.thresholds.jev?.model ?? 'jev-1.14.0')) lines.push(tr('Jev 모델 변경: ') + scores.jev.model.value);
-    if (converted.size) lines.push(tr('점수 방식 전환: ') + [...converted].join(', ') + tr(' · 기존 confidence 조건 제거'));
+    if (converted.size) lines.push(tr('점수 방식 전환: ') + [...converted].join(', '));
+    if ([...converted].some(provider => original?.thresholds[provider]?.questionVersion === 'ssh-command-risk-v4')) lines.push(tr(v4ConversionNotice));
+    if ([...converted].some(provider => Object.hasOwn(original?.thresholds[provider] ?? {}, 'minConfidence'))) lines.push(tr('기존 confidence 조건이 제거됩니다.'));
     if (fallback.value) lines.push(tr('대체 평가자 ') + fallback.value + tr(' · 연결 상태 미확인'));
     for (const line of lines) summary.append(el('p', line));
     for (const [label, value, before] of [[tr('자동승인 명령'), chosen, original?.commands ?? []], [tr('금지 명령'), linesOf(denied.value), original?.deniedCommands ?? []]]) {
