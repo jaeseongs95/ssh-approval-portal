@@ -58,6 +58,10 @@ class FullController(unittest.TestCase):
             (root / 'app/releases').mkdir(parents=True, mode=0o755)
             old = root / 'app/releases/fixture-old'
             shutil.copytree(old_source, old, symlinks=True)
+            old.chmod(0o755)
+            for path in old.rglob('*'):
+                if not path.is_symlink():
+                    path.chmod((path.stat().st_mode & 0o777) | (0o555 if path.is_dir() else 0o444))
             (root / 'app/approval-bridge').symlink_to(old)
             state = root / 'transfers'; state.mkdir(mode=0o700)
             run('/usr/bin/chown', 'mcpbridge:mcpbridge', state)
