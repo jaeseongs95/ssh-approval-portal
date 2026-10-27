@@ -189,6 +189,9 @@ for failure in capture start-before start-after release; do
     release) [[ "$new" != "$old" ]]; health "$new" false ;;
   esac
   if [[ "$failure" == start-after ]]; then
+    alias_owner="$(dirname "$owner")/../$(basename "$(dirname "$owner")")/owner"
+    if sudo bash scripts/compose-update.sh --recover "$alias_owner"; then echo 'An unnormalized owner path was unexpectedly accepted' >&2; exit 1; fi
+    health "$new" true
     printf '\n# unapproved fixture change\n' | sudo tee -a "$BRIDGE_COMPOSE_ENV_FILE" >/dev/null
     if sudo bash scripts/compose-update.sh --recover "$owner"; then echo 'Changed environment was unexpectedly recovered' >&2; exit 1; fi
     health "$new" true

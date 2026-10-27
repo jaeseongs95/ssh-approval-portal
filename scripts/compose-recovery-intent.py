@@ -24,7 +24,8 @@ def open_private(path, mode, *, create=False):
 
 
 def validate_owner(owner):
-    owner = os.path.abspath(owner)
+    if owner != os.path.abspath(owner):
+        raise ValueError('Owner path must be absolute and normalized')
     job = os.path.dirname(owner)
     if os.path.dirname(job) != BASE or os.path.basename(owner) != 'owner' or not JOB.fullmatch(os.path.basename(job)):
         raise ValueError('Invalid owner path')
