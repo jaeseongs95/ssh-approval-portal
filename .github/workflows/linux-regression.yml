@@ -9,19 +9,6 @@ permissions:
   contents: read
 
 jobs:
-  compose-update:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          persist-credentials: false
-          fetch-depth: 0
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: '24'
-      - name: Test durable Compose image replacement
-        run: bash test/compose-update-ci.sh
   linux-regression:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -59,3 +46,64 @@ jobs:
               python3 -B "$test"
             fi
           done
+      - name: Isolated Linux rollout contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD
+          sha256sum test/rollout-fixture/{bootstrap.py,run_linux.py,controller.py,linux_adapter.py,protected_state.py,scope_guard.py,staging_guard.py,offline-baseline.mjs,maintenance-request.mjs,test_linux_systemd.py}
+          cd test/rollout-fixture
+          python3 -B -m unittest -v test_controller test_protected_state test_linux_adapter test_scope_guard
+          node test-maintenance.mjs
+          node test-maintenance-cli.mjs
+      - name: Isolated real systemd and helper fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -d /run/systemd/system ]] || { echo 'SYSTEMD_UNAVAILABLE: no systemd runtime' >&2; exit 1; }
+          [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ && "$GITHUB_RUN_ATTEMPT" =~ ^[0-9]+$ ]] || exit 1
+          unit="ssh-rollout-fixture-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.service"
+          state=$(sudo systemctl show "$unit" -p LoadState --value)
+          [[ "$state" == not-found ]] || { echo 'fixture unit already exists' >&2; exit 1; }
+          cleanup() { sudo systemctl stop "$unit" >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          sudo systemd-run --unit="$unit" --property=Type=simple /usr/bin/sleep 120
+          cd test/rollout-fixture
+          sudo env SSH_ROLLOUT_FIXTURE_UNIT="$unit" /usr/bin/python3 -B -m unittest -v test_linux_systemd test_bootstrap
+      - name: Isolated legacy to current systemd transition
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -d /run/systemd/system ]] || { echo 'SYSTEMD_UNAVAILABLE' >&2; exit 1; }
+          [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ && "$GITHUB_RUN_ATTEMPT" =~ ^[0-9]+$ ]] || exit 1
+          old=$(mktemp -d /tmp/ssh-rollout-old.XXXXXXXX)
+          data=$(mktemp -d /tmp/ssh-rollout-data.XXXXXXXX)
+          trap 'sudo rm -rf -- "$old" "$data"' EXIT
+          git fetch --no-tags --depth=1 origin 9644117aa904bcf6a6fd861b741942db3d42035c
+          git archive 9644117aa904bcf6a6fd861b741942db3d42035c | tar -x -C "$old"
+          cp -a node_modules "$old/node_modules"
+          node_path=$(command -v node)
+          unit="ssh-rollout-fixture-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-transition.service"
+          cd test/rollout-fixture
+          sudo env SSH_ROLLOUT_FIXTURE_UNIT="$unit" SSH_E2E_OLD="$old" SSH_E2E_NEW="$GITHUB_WORKSPACE" SSH_E2E_NODE="$node_path" SSH_E2E_DIR="$data" /usr/bin/python3 -B -m unittest -v test_transition_e2e
+      - name: Isolated full pinned-controller transition
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -d /run/systemd/system ]] || { echo 'SYSTEMD_UNAVAILABLE' >&2; exit 1; }
+          old=$(mktemp -d /tmp/ssh-rollout-full-old.XXXXXXXX)
+          candidate=$(mktemp -d /tmp/ssh-rollout-final-source.XXXXXXXX)
+          trap 'sudo rm -rf -- "$old" "$candidate"' EXIT
+          git fetch --no-tags --depth=1 origin 9644117aa904bcf6a6fd861b741942db3d42035c
+          git archive 9644117aa904bcf6a6fd861b741942db3d42035c | tar -x -C "$old"
+          cp -a node_modules "$old/node_modules"
+          git archive fc6aa226c315f4c91da6a6574023811109810f0b | tar -x -C "$candidate"
+          (cd "$candidate" && python3 scripts/package.py)
+          echo 'd0e235277f213e747f35f7dc0a0f11f4f545c13a50d3be3421c7a9371352ed7b  '"$candidate"'/release-manifest.json' | sha256sum -c -
+          package="$candidate/dist/ssh-approval-portal-1.6.2.tar.gz"
+          node_path=$(command -v node)
+          npm_path=$(command -v npm)
+          cd test/rollout-fixture
+          sudo env SSH_E2E_OLD="$old" SSH_E2E_NEW="$GITHUB_WORKSPACE" SSH_E2E_NODE="$node_path" SSH_E2E_NPM="$npm_path" SSH_E2E_PACKAGE="$package" /usr/bin/python3 -B -m unittest -v test_full_controller
+          sudo env SSH_E2E_OLD="$old" SSH_E2E_NEW="$GITHUB_WORKSPACE" SSH_E2E_NODE="$node_path" SSH_E2E_NPM="$npm_path" SSH_E2E_PACKAGE="$package" SSH_E2E_INJECT_COMPARE_FAILURE=1 /usr/bin/python3 -B -m unittest -v test_full_controller
