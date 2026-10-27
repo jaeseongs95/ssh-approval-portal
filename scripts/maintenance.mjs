@@ -20,8 +20,15 @@ try {
   const response = await post(['capture', 'compare'].includes(action) ? 'preservation/' + action : action);
   if (!response.ok) throw Error('Maintenance refused');
   const body = await response.json();
-  const valid = action === 'compare' ? body.status === 'PASS' : body[{ reserve: 'reserved', release: 'released', capture: 'captured' }[action]] === true;
-  if (body.ownership !== 'durable-v1' || !valid) throw Error('Maintenance request did not pass');
+  if (body.ownership !== 'durable-v1') throw Error('Unsupported maintenance API');
+  if (action === 'compare') {
+    const keys = ['commandRequestsChecked', 'cliRequestsChecked', 'outputsChecked', 'outputPayloadsVerified', 'outputsUnavailable', 'expiredOutputsRemoved'];
+    if (keys.some(key => !Number.isSafeInteger(body[key]) || body[key] < 0)) throw Error('Invalid preservation summary');
+    console.log(JSON.stringify(Object.fromEntries(keys.map(key => [key, body[key]]))));
+    if (body.outputsUnavailable || body.expiredOutputsRemoved) console.error('Some output payloads were unavailable or expired; complete payload preservation was not verified.');
+  }
+  const valid = action === 'compare' ? body.status === 'PASS' && body.outputsUnavailable === 0 && body.expiredOutputsRemoved === 0 : body[{ reserve: 'reserved', release: 'released', capture: 'captured' }[action]] === true;
+  if (!valid) throw Error('Maintenance request did not pass');
   console.log('Maintenance ' + action + ' confirmed');
 } catch {
   console.error('Maintenance refused or response unknown. Retain the owner token for recovery; check the current service and reservation before retrying. Legacy services require a separately controlled offline update.');

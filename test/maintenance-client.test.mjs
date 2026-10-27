@@ -15,7 +15,7 @@ test('client verifies durable capability before mutation and passes the same own
     calls.push({ path: req.url, owner: req.headers['x-maintenance-owner'] });
     if (req.url.endsWith('capabilities') && legacy) { res.writeHead(404); res.end(); return; }
     res.setHeader('Content-Type', 'application/json');
-    const result = req.url.endsWith('capabilities') ? {} : req.url.endsWith('compare') ? { status: comparison } :
+    const result = req.url.endsWith('capabilities') ? {} : req.url.endsWith('compare') ? { status: comparison, commandRequestsChecked: 1, cliRequestsChecked: 0, outputsChecked: 1, outputPayloadsVerified: 1, outputsUnavailable: comparison === 'PARTIAL' ? 1 : 0, expiredOutputsRemoved: 0 } :
       { [req.url.endsWith('reserve') ? 'reserved' : req.url.endsWith('capture') ? 'captured' : 'released']: true };
     res.end(JSON.stringify({ ownership: 'durable-v1', ...result }));
   });
@@ -42,6 +42,11 @@ test('client verifies durable capability before mutation and passes the same own
     const failed = await run('compare');
     assert.notEqual(failed.code, 0);
     assert.ok(!failed.output.includes(owner));
+    assert.deepEqual(calls.map(x => x.path), ['/api/maintenance/capabilities', '/api/maintenance/preservation/compare']);
+    comparison = 'PARTIAL'; calls.length = 0;
+    const partial = await run('compare');
+    assert.notEqual(partial.code, 0);
+    assert.match(partial.output, /complete payload preservation was not verified/);
     assert.deepEqual(calls.map(x => x.path), ['/api/maintenance/capabilities', '/api/maintenance/preservation/compare']);
   } finally { await new Promise(resolve => server.close(resolve)); await rm(dir, { recursive: true }); }
 });
