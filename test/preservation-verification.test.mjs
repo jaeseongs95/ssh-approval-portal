@@ -6,7 +6,7 @@ import {join} from 'node:path';
 import {createCommandState} from '../src/adapters/storage/command-state.mjs';
 import {createAgentCliState} from '../src/adapters/storage/agent-cli-state.mjs';
 import {CommandOutputs} from '../src/adapters/storage/command-output.mjs';
-import {capturePreservationSnapshot, comparePreservationSnapshots} from '../src/application/preservation-verification.mjs';
+import {capturePreservationSnapshot, comparePreservationSnapshots} from '../src/adapters/storage/preservation-verification.mjs';
 
 test('real journals compare old rows and payload after restart, allowing expiry and new requests', t => {
   const root = mkdtempSync(join(tmpdir(), 'preservation-')); t.after(() => rmSync(root, {recursive: true, force: true}));
