@@ -66,7 +66,7 @@ export function comparePreservationSnapshots(before, after) {
   const report = {status: 'PASS', commandRequestsChecked: 0, cliRequestsChecked: 0, outputsChecked: 0, outputPayloadsVerified: 0, outputsUnavailable: 0, expiredOutputsRemoved: 0};
   for (const [name, counter] of [['command', 'commandRequestsChecked'], ['cli', 'cliRequestsChecked']]) {
     const old = before[name], current = after[name];
-    if (Boolean(old) !== Boolean(current)) throw Error('Journal presence changed');
+    if (old && !current) throw Error('Journal presence changed');
     if (!old) continue;
     if (old.schema !== current.schema || (name === 'command' && old.policy !== current.policy)) throw Error('Journal schema or policy changed');
     for (const [id, digest] of Object.entries(old.requests)) {

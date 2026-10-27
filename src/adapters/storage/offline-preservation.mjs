@@ -31,6 +31,14 @@ function journal(db, cli) {
   }};
 }
 
+// Disabled automation must still retain a readable view of its existing journal.
+export function openDormantCommandState(root) {
+  const path = join(root, 'command-automation.sqlite');
+  try { lstatSync(path); } catch (error) { if (error.code === 'ENOENT') return undefined; throw error; }
+  const db = openReadOnly(path);
+  return { ...journal(db, false), close: () => db.close() };
+}
+
 /** Run as the bridge account after independent proof of clean service stop. */
 export function prepareOfflinePreservationBaseline({root, owner, commandEnabled, cliEnabled, now = Date.now()}) {
   if (typeof root !== 'string' || !/^[a-f0-9]{64}$/.test(owner ?? '') || typeof commandEnabled !== 'boolean' || typeof cliEnabled !== 'boolean') throw Error('Invalid offline preservation input');
@@ -39,7 +47,10 @@ export function prepareOfflinePreservationBaseline({root, owner, commandEnabled,
   const opened = [];
   const db = path => { const connection = openReadOnly(path); opened.push(connection); return connection; };
   try {
-    const command = commandEnabled ? journal(db(join(absolute, 'command-automation.sqlite')), false) : null;
+    const commandPath = join(absolute, 'command-automation.sqlite');
+    let commandExists = true;
+    try { lstatSync(commandPath); } catch (error) { if (error.code !== 'ENOENT') throw error; commandExists = false; }
+    const command = commandEnabled || commandExists ? journal(db(commandPath), false) : null;
     const cli = cliEnabled ? journal(db(join(absolute, 'agent-cli.sqlite')), true) : null;
     const outputRoot = join(absolute, 'command-outputs');
     const outInfo = lstatSync(outputRoot);

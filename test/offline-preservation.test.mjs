@@ -43,6 +43,19 @@ test('offline preparation refuses a live database owner and leaves no reservatio
   } finally {commands?.close();outputs?.close();await rm(root,{recursive:true,force:true});}
 });
 
+test('offline baseline includes existing dormant command journal', async()=>{
+  const root=await mkdtemp(join(tmpdir(),'ssh-offline-dormant-')); let app;
+  try {
+    const id='e'.repeat(48), commands=createCommandState(root);
+    commands.insert({id,kind:'command',state:'completed',operation:{kind:'command',command:'true'}},'fixed-request','f'.repeat(64)); commands.close();
+    const outputs=new CommandOutputs(root); outputs.close();
+    prepareOfflinePreservationBaseline({root,owner,commandEnabled:false,cliEnabled:false});
+    app=await open(root);await new Promise(resolve=>app.adminHttp.listen(0,'127.0.0.1',resolve));
+    const result=await post(app,'preservation/compare'); assert.equal(result.status,200);
+    assert.equal((await result.json()).commandRequestsChecked,1);
+  } finally {await app?.close();await rm(root,{recursive:true,force:true});}
+});
+
 test('offline baseline refuses interrupted requests and first startup detects later data changes', async()=>{
   const root=await mkdtemp(join(tmpdir(),'ssh-offline-change-'));let app;
   try {

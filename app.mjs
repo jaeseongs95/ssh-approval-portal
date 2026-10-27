@@ -22,6 +22,7 @@ import { createSecretService } from './src/application/secret-service.mjs';
 import { createLocalSecretStore } from './src/adapters/secrets/local-file.mjs';
 import { createVaultSecretStore } from './src/adapters/secrets/vault-kv.mjs';
 import { createCommandState } from './src/adapters/storage/command-state.mjs';
+import { openDormantCommandState } from './src/adapters/storage/offline-preservation.mjs';
 import { createMaintenanceState } from './src/adapters/storage/maintenance-state.mjs';
 import { capturePreservationSnapshot, comparePreservationSnapshots } from './src/adapters/storage/preservation-verification.mjs';
 import { createCommandAutomation } from './src/application/command-automation.mjs';
@@ -58,7 +59,7 @@ export async function createApplication({ registry, classify, executeCommand, ex
   const store = new Artifacts(transferRoot, { maxBytes: settings.maxBytes, budget: settings.budget });
   await store.init();
   const outputs = new CommandOutputs(transferRoot);
-  let commandState, cliState, maintenanceState;
+  let commandState, dormantCommandState, cliState, maintenanceState;
   try {
   let risk = riskAssessor, apiKey;
   if (settings.jevEnabled) {
@@ -80,6 +81,7 @@ export async function createApplication({ registry, classify, executeCommand, ex
     risk ??= createJevAssessor({ apiKey });
   }
   commandState = settings.commandAutomation ? createCommandState(transferRoot) : undefined;
+  dormantCommandState = settings.commandAutomation ? undefined : openDormantCommandState(transferRoot);
   cliState = executeAgentCli ? createAgentCliState(transferRoot) : undefined;
   const cliCatalog = cliState && (agentReleaseCatalog ?? createAgentReleaseCatalog());
   const evaluators = { ...riskEvaluators };
@@ -251,13 +253,13 @@ export async function createApplication({ registry, classify, executeCommand, ex
       if (!maintenanceState.owns(owner) || !queue.maintenance || queue.busy() || queue.listAll().some(job => ['pending', 'evaluating', 'running'].includes(job.state)) || commands.busy() || files.busy() || store.hasActiveWork()) throw Error('Preservation boundary unavailable');
       const prior = maintenanceState.baseline(owner);
       if (prior) { if (prior.instance !== preservationInstance) throw Error('Preservation baseline already belongs to an earlier instance'); return; }
-      maintenanceState.saveBaseline(owner, { instance: preservationInstance, snapshot: capturePreservationSnapshot({ commandState, cliState, outputs }) });
+      maintenanceState.saveBaseline(owner, { instance: preservationInstance, snapshot: capturePreservationSnapshot({ commandState: commandState ?? dormantCommandState, cliState, outputs }) });
     },
     compare(owner) {
       if (!maintenanceState.owns(owner) || !queue.maintenance || queue.busy() || queue.listAll().some(job => ['pending', 'evaluating', 'running'].includes(job.state)) || commands.busy() || files.busy() || store.hasActiveWork()) throw Error('Preservation boundary unavailable');
       const baseline = maintenanceState.baseline(owner);
       if (!baseline || baseline.instance === preservationInstance) throw Error('A new service instance is required');
-      return comparePreservationSnapshots(baseline.snapshot, capturePreservationSnapshot({ commandState, cliState, outputs }));
+      return comparePreservationSnapshots(baseline.snapshot, capturePreservationSnapshot({ commandState: commandState ?? dormantCommandState, cliState, outputs }));
     },
   };
   const environmentEditor = createEnvironmentEditor({ lifecycle, audit, ...(environmentTransport ? { transport: environmentTransport } : {}) });
@@ -277,8 +279,8 @@ export async function createApplication({ registry, classify, executeCommand, ex
         // Drain normal responses, then close unfinished HTTP bodies before systemd times out.
         const deadline = setTimeout(() => server.closeAllConnections(), 5000); deadline.unref();
         server.close(() => { clearTimeout(deadline); resolve(); });
-      })))).finally(() => { browserSessions?.close(); for (const runtime of runtimes) {runtime.commands.close();runtime.cli?.close();} commandState?.close();cliState?.close(); maintenanceState?.close(); outputs.close(); });
+      })))).finally(() => { browserSessions?.close(); for (const runtime of runtimes) {runtime.commands.close();runtime.cli?.close();} commandState?.close();dormantCommandState?.close();cliState?.close(); maintenanceState?.close(); outputs.close(); });
     },
   };
-  } catch (error) { browserSessions?.close(); commandState?.close();cliState?.close(); maintenanceState?.close(); outputs.close(); throw error; }
+  } catch (error) { browserSessions?.close(); commandState?.close();dormantCommandState?.close();cliState?.close(); maintenanceState?.close(); outputs.close(); throw error; }
 }
