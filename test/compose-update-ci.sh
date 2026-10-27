@@ -151,7 +151,7 @@ for ((i=0; i+2<${#args[@]}; i++)); do
   if [[ "${args[i]}" == node && "${args[i+1]}" == scripts/maintenance.mjs && "${args[i+2]}" == "$FIXTURE_FAILURE" ]]; then
     id=$(/usr/bin/docker ps -q --filter "label=com.docker.compose.project=$BRIDGE_COMPOSE_PROJECT" --filter 'label=com.docker.compose.service=bridge')
     [[ -n "$id" ]]
-    /usr/bin/docker cp "$RESPONSE_LOSS_FILE" "$id:/tmp/compose-response-loss.mjs"
+    /usr/bin/docker exec -i "$id" sh -c 'cat > /tmp/compose-response-loss.mjs' < "$RESPONSE_LOSS_FILE"
     args=("${args[@]:0:i+1}" --import /tmp/compose-response-loss.mjs "${args[@]:i+1}")
     break
   fi
