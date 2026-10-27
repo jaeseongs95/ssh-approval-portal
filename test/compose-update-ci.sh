@@ -43,6 +43,10 @@ fi
 [[ $(docker inspect "$old" --format '{{.Image}}') == "$(docker image inspect "$legacy" --format '{{.Id}}')" ]]
 BRIDGE_IMAGE="$baseline" "${compose[@]}" up -d --no-build --wait --wait-timeout 90
 old=$("${compose[@]}" ps -q bridge)
+if sudo env BRIDGE_COMPOSE_PROJECT="$project" BRIDGE_COMPOSE_ENV_FILE="$BRIDGE_COMPOSE_ENV_FILE" BRIDGE_COMPOSE_OVERRIDE=/dev/null bash scripts/compose-update.sh "$candidate"; then
+  echo 'An unsupported Compose override was unexpectedly accepted' >&2; exit 1
+fi
+[[ $("${compose[@]}" ps -q bridge) == "$old" ]]
 sudo --preserve-env=BRIDGE_COMPOSE_PROJECT,BRIDGE_COMPOSE_ENV_FILE bash scripts/compose-update.sh "$candidate" | tee "$RUNNER_TEMP/compose-update-result.txt"
 grep -F '"commandRequestsChecked":1' "$RUNNER_TEMP/compose-update-result.txt"
 new=$(sudo "${compose[@]}" ps -q bridge)

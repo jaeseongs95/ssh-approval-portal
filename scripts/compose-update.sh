@@ -7,12 +7,12 @@ image=$1
 source_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 env_file=${BRIDGE_COMPOSE_ENV_FILE:-/etc/ssh-approval-portal/compose.env}
 compose=(docker compose -p "${BRIDGE_COMPOSE_PROJECT:-ssh-approval-portal}" --env-file "$env_file" -f "$source_dir/docker/compose.yaml")
-if [[ -n ${BRIDGE_COMPOSE_OVERRIDE:-} ]]; then compose+=(-f "$BRIDGE_COMPOSE_OVERRIDE"); fi
+[[ -z ${BRIDGE_COMPOSE_OVERRIDE:-} ]] || { echo 'Compose overrides require a separately verified update procedure.' >&2; exit 1; }
 candidate=$(docker image inspect "$image" --format '{{.Id}}')
 [[ "$candidate" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Candidate must resolve to one immutable image.' >&2; exit 1; }
 # A different entrypoint or command can bypass the verified application entirely.
 docker image inspect "$candidate" --format '{{json .Config}}' | python3 -c 'import json,sys; c=json.load(sys.stdin); assert c.get("Entrypoint") in (None,[]) and c.get("Cmd")==["node","bridge.mjs"] and c.get("WorkingDir")=="/opt/portal"'
-"${compose[@]}" config --format json | python3 -c 'import json,sys; c=json.load(sys.stdin)["services"]["bridge"]; assert c.get("entrypoint") in (None,[]) and c.get("command") in (None,[]) and c.get("working_dir") in (None,"/opt/portal")'
+BRIDGE_IMAGE="$candidate" "${compose[@]}" config --format json | python3 -c 'import json,sys; c=json.load(sys.stdin)["services"]["bridge"]; assert c.get("entrypoint") in (None,[]) and c.get("command") in (None,[]) and c.get("working_dir") in (None,"/opt/portal"); roots=[".ssh",".config/ssh-mcp",".local/share/ssh-mcp","transfers"]; expected={"/var/lib/ssh-mcp/"+x for x in roots}; volumes=c.get("volumes",[]); assert len(volumes)==len(expected) and {v.get("target") for v in volumes}==expected and all(v.get("type")=="bind" and v.get("source")==v.get("target") for v in volumes)'
 expected=$(sha256sum "$source_dir/release-manifest.json" | cut -d' ' -f1)
 verify_node=/opt/ssh-approval/node/bin/node
 [[ -x "$verify_node" ]] || { echo 'Verified host Node runtime is required.' >&2; exit 1; }
@@ -36,6 +36,7 @@ exec 9>/var/lib/ssh-mcp/.portal-install.lock
 flock -n 9 || { echo 'An installation is already in progress.' >&2; exit 1; }
 old_container=$("${compose[@]}" ps -q bridge)
 [[ -n "$old_container" ]] || { echo 'A running durable bridge is required; legacy and offline updates are unsupported.' >&2; exit 1; }
+docker inspect "$old_container" --format '{{json .Mounts}}' | python3 -c 'import json,sys; roots=[".ssh",".config/ssh-mcp",".local/share/ssh-mcp","transfers"]; expected={"/var/lib/ssh-mcp/"+x for x in roots}; mounts=[m for m in json.load(sys.stdin) if m.get("Destination") in expected]; assert len(mounts)==len(expected) and {m.get("Destination") for m in mounts}==expected and all(m.get("Type")=="bind" and m.get("Source")==m.get("Destination") for m in mounts)'
 old_image=$(docker inspect "$old_container" --format '{{.Image}}')
 [[ "$old_image" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Running image is not identifiable.' >&2; exit 1; }
 . "$source_dir/scripts/maintenance-owner.sh"
@@ -49,6 +50,7 @@ import {loadSecrets} from "./src/adapters/config/secrets.mjs";
 import {parseSettings} from "./src/adapters/config/settings.mjs";
 const owner=readFileSync(0,"utf8").trim(), env=await loadSecrets(process.env,process.env.BRIDGE_SECRET_ENV_FILE), {adminPort}=parseSettings(env);
 if(!/^[a-f0-9]{64}$/.test(owner)) throw Error("Invalid owner");
+if((env.BRIDGE_TRANSFER_ROOT ?? "/var/lib/ssh-mcp/transfers")!=="/var/lib/ssh-mcp/transfers") throw Error("Unsupported state directory");
 const response=await fetch(`http://127.0.0.1:${adminPort}/api/maintenance/capabilities`,{method:"POST",headers:{Authorization:"Bearer "+env.BRIDGE_ADMIN_TOKEN,Origin:env.BRIDGE_ADMIN_ORIGIN,"X-Maintenance-Owner":owner},signal:AbortSignal.timeout(5000)});
 if(!response.ok || (await response.json()).ownership!=="durable-v1") throw Error("Durable maintenance unavailable");
 ' < "$maintenance_owner_file" || { echo 'Legacy or unverified bridge; no reservation or image change attempted.' >&2; exit 1; }
