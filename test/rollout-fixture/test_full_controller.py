@@ -137,6 +137,12 @@ class FullController(unittest.TestCase):
             completed = subprocess.run(['/usr/bin/python3','-I','-B','-c',launcher,str(task),sha(intentfile),sha(task/'bootstrap.py')],
                                        capture_output=True,text=True,timeout=300)
             receipt = json.loads((task/'receipt.json').read_text()) if (task/'receipt.json').exists() else {}
+            if completed.returncode and receipt.get('phase') == 'start':
+                # CI fixture contains only synthetic values. Keep live hosts out
+                # of this diagnostic path.
+                log = subprocess.run(['/usr/bin/journalctl','-u','ssh-approval-bridge.service',
+                                      '-n','40','-o','cat','--no-pager'],capture_output=True,text=True,timeout=10)
+                receipt['fixtureJournal'] = log.stdout[-5000:]
             if completed.returncode and receipt.get('phase') == 'compare':
                 # Fixture-only bounded observation; owner/token and output data
                 # are synthetic and are never printed.
