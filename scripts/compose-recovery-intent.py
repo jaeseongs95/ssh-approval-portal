@@ -47,9 +47,10 @@ def validate_owner(owner):
 
 
 def valid(record):
-    return (set(record) == {'candidate', 'before_env', 'env_file', 'project', 'manifest'}
+    return (set(record) == {'candidate', 'before_env', 'after_env', 'env_file', 'project', 'manifest'}
             and isinstance(record['candidate'], str) and IMAGE.fullmatch(record['candidate'])
             and isinstance(record['before_env'], str) and HEX.fullmatch(record['before_env'])
+            and isinstance(record['after_env'], str) and HEX.fullmatch(record['after_env'])
             and isinstance(record['manifest'], str) and HEX.fullmatch(record['manifest'])
             and isinstance(record['project'], str) and PROJECT.fullmatch(record['project'])
             and isinstance(record['env_file'], str) and os.path.isabs(record['env_file'])
@@ -64,9 +65,9 @@ def main(args):
     job = validate_owner(owner)
     path = os.path.join(job, 'compose-intent.json')
     if action == 'save':
-        if len(values) != 5:
+        if len(values) != 6:
             raise ValueError('Invalid binding')
-        record = dict(zip(('candidate', 'before_env', 'env_file', 'project', 'manifest'), values))
+        record = dict(zip(('candidate', 'before_env', 'after_env', 'env_file', 'project', 'manifest'), values))
         if not valid(record):
             raise ValueError('Invalid binding')
         fd = open_private(path, 0o600, create=True)
@@ -88,7 +89,7 @@ def main(args):
             record = json.load(stream)
         if not valid(record):
             raise ValueError('Invalid binding')
-        for key in ('candidate', 'before_env', 'env_file', 'project', 'manifest'):
+        for key in ('candidate', 'before_env', 'after_env', 'env_file', 'project', 'manifest'):
             print(record[key])
 
 

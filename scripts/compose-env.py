@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Refresh service IDs without changing the administrator's image selection."""
 import json
+import hashlib
 import os
 from pathlib import Path
 import re
@@ -89,10 +90,9 @@ def prepare(path, uid, gid):
     write_file(path, existing, text)
 
 
-def update_image(path, image):
+def render_image(text, image):
     if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._:/@-]+', image):
         raise ValueError('Invalid image reference')
-    path, existing, text = load_file(path)
     entries = [entry for entry in assignments(text) if entry[0] == 'BRIDGE_IMAGE']
     for _, start, end in reversed(entries):
         text = text[:start] + image + text[end:]
@@ -101,13 +101,21 @@ def update_image(path, image):
         if text and not text.endswith(('\n', '\r')):
             text += newline
         text += 'BRIDGE_IMAGE=' + image + newline
-    write_file(path, existing, text)
+    return text
+
+
+def update_image(path, image):
+    path, existing, text = load_file(path)
+    write_file(path, existing, render_image(text, image))
 
 
 if __name__ == '__main__':
     if len(sys.argv) != 4:
         raise ValueError('Usage: compose-env.py FILE UID GID | compose-env.py image FILE IMAGE')
-    if sys.argv[1] == 'image':
+    if sys.argv[1] == 'expected-image-sha':
+        _, _, text = load_file(sys.argv[2])
+        print(hashlib.sha256(render_image(text, sys.argv[3]).encode('utf-8')).hexdigest())
+    elif sys.argv[1] == 'image':
         update_image(sys.argv[2], sys.argv[3])
     else:
         prepare(*sys.argv[1:])

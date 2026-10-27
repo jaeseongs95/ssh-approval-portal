@@ -41,8 +41,21 @@ test('reservation is owner-bound across replacement and preservation comparison 
     assert.equal(result.status,200); const report=await result.json();
     assert.equal(report.status,'PASS');
     assert.ok(!JSON.stringify(report).includes(owner));
+    assert.equal((await post(second,'status')).status,200);
+    assert.equal((await (await post(second,'status')).json()).status,'reserved');
     assert.equal((await post(second,'release')).status,200);
     assert.equal(second.queue.maintenance,false);
+    assert.equal((await (await post(second,'status')).json()).status,'released');
+    assert.equal((await post(second,'release')).status,200,'lost release response can be retried');
+    assert.equal((await post(second,'reserve')).status,409,'a released owner cannot be reused');
+    await second.close(); second = await open(root); await listen(second);
+    assert.equal((await (await post(second,'status')).json()).status,'released','receipt survives replacement');
+    assert.equal((await post(second,'reserve',other)).status,200);
+    assert.equal((await (await post(second,'status')).json()).status,'unknown','another reservation cannot be mistaken for recovery');
+    assert.equal((await post(second,'release')).status,409,'old owner cannot release the new reservation');
+    assert.equal(second.queue.maintenance,true);
+    assert.equal((await post(second,'release',other)).status,200);
+    assert.equal((await (await post(second,'status')).json()).status,'unknown','superseded receipt is conservative');
   } finally { await first?.close(); await second?.close(); await rm(root,{recursive:true,force:true}); }
 });
 

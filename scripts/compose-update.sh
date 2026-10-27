@@ -9,8 +9,8 @@ source_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 if [[ "$mode" == recover ]]; then
   binding=$(/usr/bin/python3 -I "$source_dir/scripts/compose-recovery-intent.py" read "$recovery_owner") || { echo 'Recovery binding unavailable.' >&2; exit 1; }
   mapfile -t values <<< "$binding"
-  [[ ${#values[@]} == 5 ]] || { echo 'Invalid recovery binding.' >&2; exit 1; }
-  image=${values[0]}; saved_env=${values[1]}; env_file=${values[2]}; project=${values[3]}; saved_manifest=${values[4]}
+  [[ ${#values[@]} == 6 ]] || { echo 'Invalid recovery binding.' >&2; exit 1; }
+  image=${values[0]}; saved_env=${values[1]}; saved_after_env=${values[2]}; env_file=${values[3]}; project=${values[4]}; saved_manifest=${values[5]}
 else
   env_file=$(/usr/bin/python3 -I -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "${BRIDGE_COMPOSE_ENV_FILE:-/etc/ssh-approval-portal/compose.env}")
   project=${BRIDGE_COMPOSE_PROJECT:-ssh-approval-portal}
@@ -19,7 +19,7 @@ env_fingerprint() {
   /usr/bin/python3 -I -c 'import hashlib,os,stat,sys; from pathlib import Path; path=os.path.abspath(sys.argv[1]); parent=os.path.dirname(path); dirs=[parent,*map(str,Path(parent).parents)]; assert os.path.realpath(parent)==parent and all(stat.S_ISDIR(os.lstat(d).st_mode) and not stat.S_ISLNK(os.lstat(d).st_mode) and os.lstat(d).st_uid==0 and not(os.lstat(d).st_mode&0o022) for d in dirs); fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW); s=os.fstat(fd); assert stat.S_ISREG(s.st_mode) and s.st_uid==0 and not(s.st_mode&0o022) and s.st_nlink==1 and s.st_size<=1048576; f=os.fdopen(fd,"rb"); data=f.read(1048577); f.close(); assert len(data)==s.st_size; print(hashlib.sha256(data).hexdigest())' "$env_file"
 }
 before_env=$(env_fingerprint) || { echo 'Unsafe Compose environment file.' >&2; exit 1; }
-if [[ "$mode" == recover && "$before_env" != "$saved_env" ]]; then echo 'Compose configuration no longer matches the recorded baseline; manual review is required.' >&2; exit 1; fi
+if [[ "$mode" == recover && "$before_env" != "$saved_env" && "$before_env" != "$saved_after_env" ]]; then echo 'Compose configuration no longer matches the recorded baseline; manual review is required.' >&2; exit 1; fi
 compose=(docker compose -p "$project" --env-file "$env_file" -f "$source_dir/docker/compose.yaml")
 [[ -z ${BRIDGE_COMPOSE_OVERRIDE:-} ]] || { echo 'Compose overrides require a separately verified update procedure.' >&2; exit 1; }
 candidate=$(docker image inspect "$image" --format '{{.Id}}')
@@ -71,17 +71,29 @@ if [[ "$mode" == recover ]]; then
   maintenance_owner_file=$recovery_owner
   maintenance_owner_dir=$(dirname -- "$recovery_owner")
   maintenance() { "${compose[@]}" exec -T bridge node scripts/maintenance.mjs "$1" < "$maintenance_owner_file"; }
-  maintenance compare || { echo 'Recovery comparison incomplete; maintenance retained.' >&2; exit 1; }
-  [[ $(env_fingerprint) == "$saved_env" ]] || { echo 'Compose configuration changed; maintenance retained.' >&2; exit 1; }
-  /usr/bin/python3 -I "$source_dir/scripts/compose-env.py" image "$env_file" "$candidate" || { echo 'Image configuration update failed; maintenance retained.' >&2; exit 1; }
-  maintenance release || { echo 'Recovery release failed or is unknown; retain owner and binding.' >&2; exit 1; }
+  state=$(maintenance status) || { echo 'Recovery status unavailable; retain owner and binding.' >&2; exit 1; }
+  if [[ "$state" == reserved ]]; then
+    maintenance compare || { echo 'Recovery comparison incomplete; maintenance retained.' >&2; exit 1; }
+    [[ $(env_fingerprint) == "$before_env" ]] || { echo 'Compose configuration changed; maintenance retained.' >&2; exit 1; }
+    if [[ "$before_env" == "$saved_env" ]]; then
+      /usr/bin/python3 -I "$source_dir/scripts/compose-env.py" image "$env_file" "$candidate" || { echo 'Image configuration update failed; maintenance retained.' >&2; exit 1; }
+    fi
+    [[ $(env_fingerprint) == "$saved_after_env" ]] || { echo 'Candidate configuration mismatch; maintenance retained.' >&2; exit 1; }
+    maintenance release || { echo 'Recovery release failed or is unknown; retain owner and binding.' >&2; exit 1; }
+  elif [[ "$state" == released && "$before_env" == "$saved_after_env" ]]; then
+    [[ $(env_fingerprint) == "$saved_after_env" ]] || { echo 'Compose configuration changed; retain owner and binding.' >&2; exit 1; }
+  else
+    echo 'Recovery outcome cannot be established; retain owner and binding.' >&2; exit 1
+  fi
   rm -f -- "$maintenance_owner_dir/compose-intent.json"
   maintenance_forget_owner
   echo "Compose recovery verified: $candidate"
   exit 0
 fi
+after_env=$(/usr/bin/python3 -I "$source_dir/scripts/compose-env.py" expected-image-sha "$env_file" "$candidate")
+[[ $(env_fingerprint) == "$before_env" ]] || { echo 'Compose configuration changed before reservation.' >&2; exit 1; }
 maintenance_new_owner
-/usr/bin/python3 -I "$source_dir/scripts/compose-recovery-intent.py" save "$maintenance_owner_file" "$candidate" "$before_env" "$env_file" "$project" "$expected" || { echo 'Recovery binding could not be saved; no reservation attempted.' >&2; exit 1; }
+/usr/bin/python3 -I "$source_dir/scripts/compose-recovery-intent.py" save "$maintenance_owner_file" "$candidate" "$before_env" "$after_env" "$env_file" "$project" "$expected" || { echo 'Recovery binding could not be saved; no reservation attempted.' >&2; exit 1; }
 echo "Compose previous image: $old_image; candidate image: $candidate" >&2
 maintenance() { "${compose[@]}" exec -T bridge node scripts/maintenance.mjs "$1" < "$maintenance_owner_file"; }
 # Do not trust the old image's CLI: legacy versions reserve without owner checks.
@@ -105,6 +117,7 @@ new_container=$(BRIDGE_IMAGE="$candidate" "${compose[@]}" ps -q bridge)
 maintenance compare || { echo 'Post-restart preservation incomplete; maintenance retained.' >&2; exit 1; }
 [[ $(env_fingerprint) == "$before_env" ]] || { echo 'Compose configuration changed; maintenance retained.' >&2; exit 1; }
 /usr/bin/python3 -I "$source_dir/scripts/compose-env.py" image "$env_file" "$candidate" || { echo 'Image configuration update failed; maintenance retained.' >&2; exit 1; }
+[[ $(env_fingerprint) == "$after_env" ]] || { echo 'Candidate configuration mismatch; maintenance retained.' >&2; exit 1; }
 maintenance release || { echo 'Maintenance release failed or is unknown; retain owner for recovery.' >&2; exit 1; }
 rm -f -- "$maintenance_owner_dir/compose-intent.json"
 maintenance_forget_owner

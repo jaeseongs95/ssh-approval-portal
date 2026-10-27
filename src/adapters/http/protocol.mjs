@@ -140,6 +140,7 @@ export function createProtocolAdapters({ queue, commands, files, store, lifecycl
       if (url.pathname === '/api/maintenance/preservation/compare') return json(res, 200, { ...preservation.compare(req.headers['x-maintenance-owner']), ownership: 'durable-v1' });
       if (url.pathname === '/api/maintenance/capabilities') return json(res, 200, { ownership: 'durable-v1' });
       if (url.pathname === '/api/maintenance/reserve') { lifecycle.reserve(req.headers['x-maintenance-owner']); return json(res, 200, { reserved: true, ownership: 'durable-v1' }); }
+      if (url.pathname === '/api/maintenance/status') return json(res, 200, { status: lifecycle.status(req.headers['x-maintenance-owner']), ownership: 'durable-v1' });
       if (url.pathname === '/api/maintenance/release') { lifecycle.release(req.headers['x-maintenance-owner']); return json(res, 200, { released: true, ownership: 'durable-v1' }); }
       const action = /^\/api\/([a-f0-9]{48})\/(approve|deny|download)$/.exec(url.pathname);
       if (!action) return json(res, 404, { error: 'Not found' });

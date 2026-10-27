@@ -14,7 +14,12 @@ export function createLifecycleService({ queue, store, commands, files, closeCon
       queue.reserveMaintenance();
       try { maintenanceState?.reserve(owner); } catch (error) { queue.releaseMaintenance(); throw error; }
     },
+    status(owner) {
+      const state = maintenanceState?.status(owner) ?? 'unknown';
+      return (state === 'released' && queue.maintenance) || (state === 'reserved' && !queue.maintenance) ? 'unknown' : state;
+    },
     release(owner) {
+      if (maintenanceState?.status(owner) === 'released' && !queue.maintenance) return;
       if (maintenanceState && !maintenanceState.owns(owner)) throw Error('Maintenance ownership mismatch');
       // Audit first: if audit fails, the durable claim remains and admission stays closed.
       queue.releaseMaintenance();

@@ -2,7 +2,7 @@ import { loadSecrets } from '../src/adapters/config/secrets.mjs';
 import { parseSettings } from '../src/adapters/config/settings.mjs';
 import { readFileSync } from 'node:fs';
 const action = process.argv[2];
-if (!['reserve', 'release', 'capture', 'compare'].includes(action)) throw Error('Expected reserve, release, capture or compare');
+if (!['reserve', 'release', 'capture', 'compare', 'status'].includes(action)) throw Error('Expected reserve, release, capture or compare');
 // Ownership is passed on stdin, never in arguments or logs.
 const owner = readFileSync(0, 'utf8').trim();
 if (!/^[a-f0-9]{64}$/.test(owner)) throw Error('Invalid maintenance owner');
@@ -21,6 +21,7 @@ try {
   if (!response.ok) throw Error('Maintenance refused');
   const body = await response.json();
   if (body.ownership !== 'durable-v1') throw Error('Unsupported maintenance API');
+  if (action === 'status') { if (!['reserved', 'released', 'unknown'].includes(body.status)) throw Error('Invalid maintenance status'); console.log(body.status); process.exit(0); }
   if (action === 'compare') {
     const keys = ['commandRequestsChecked', 'cliRequestsChecked', 'outputsChecked', 'outputPayloadsVerified', 'outputsUnavailable', 'expiredOutputsRemoved'];
     if (keys.some(key => !Number.isSafeInteger(body[key]) || body[key] < 0)) throw Error('Invalid preservation summary');
