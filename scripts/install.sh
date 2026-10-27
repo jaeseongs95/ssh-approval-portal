@@ -57,6 +57,8 @@ if systemctl is-active --quiet ssh-approval-bridge.service; then
   maintenance_new_owner
   "$maintenance_node" "$source_dir/scripts/maintenance.mjs" reserve < "$maintenance_owner_file"
   maintenance_reserved=1
+  # A lost/failed capture is not followed by an automatic release or rollback.
+  "$maintenance_node" "$source_dir/scripts/maintenance.mjs" capture < "$maintenance_owner_file" || { echo 'Preservation capture unconfirmed; maintenance retained.' >&2; exit 1; }
 fi
 trap 'release_maintenance || echo "Maintenance release not confirmed; retain recovery file." >&2' EXIT
 node "$source_dir/scripts/verify.mjs" "$source_dir"
@@ -110,6 +112,9 @@ restore() {
     fi
   else systemctl stop ssh-approval-bridge.service || true; fi
   if [[ -f "$backup/was-enabled" ]]; then systemctl enable ssh-approval-bridge.service || failed=1; else systemctl disable ssh-approval-bridge.service || true; fi
+  if [[ "$failed" == 0 && "$maintenance_reserved" == 1 ]]; then
+    "$maintenance_node" "$source_dir/scripts/maintenance.mjs" compare < "$maintenance_owner_file" || failed=1
+  fi
   if [[ "$failed" == 0 ]]; then release_maintenance || failed=1; fi
   echo "Installation failed. Restore attempted; failures=$failed; backup=$backup" >&2
   exit "$rc"
@@ -170,6 +175,11 @@ systemctl enable ssh-approval-bridge.service
 systemctl restart ssh-approval-bridge.service
 wait_healthy
 trap - EXIT
+if [[ "$maintenance_reserved" == 1 ]]; then
+  "$maintenance_node" "$source_dir/scripts/maintenance.mjs" compare < "$maintenance_owner_file" || { echo 'Post-restart preservation unconfirmed; maintenance retained.' >&2; exit 1; }
+else
+  echo 'Post-restart preservation was not verified: no running durable predecessor was captured.' >&2
+fi
 release_maintenance || { echo 'Installation succeeded but maintenance release is unconfirmed; manual recovery required.' >&2; exit 1; }
 echo "Installed release: $release"
 echo "Rollback backup: $backup"
