@@ -12,7 +12,10 @@ import time
 
 
 def run(*args, **kw):
-    return subprocess.run(list(map(str, args)), check=True, capture_output=True, text=True, timeout=300, **kw)
+    result = subprocess.run(list(map(str, args)), capture_output=True, text=True, timeout=300, **kw)
+    if result.returncode:
+        raise RuntimeError(f'fixture command failed: {result.stderr[-4000:]}')
+    return result
 
 
 def sha(path):
