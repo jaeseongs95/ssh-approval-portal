@@ -1,6 +1,7 @@
 """Root-only isolated CI fixture. Never use on TEST or production hosts."""
 import os
 import hashlib
+import grp
 from pathlib import Path
 import subprocess
 import tempfile
@@ -8,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from controller import Identity
-from linux_adapter import LinuxAdapter
+from linux_adapter import LinuxAdapter, normalize_dependencies
 import scope_guard
 from protected_state import capture
 
@@ -53,6 +54,24 @@ class RealLinuxFixture(unittest.TestCase):
         self.assertEqual(0o755, self.a.helper.stat().st_mode & 0o777)
         self.a._install_helper(backup, old_digest, new_digest)
         self.assertEqual(b'old helper', self.a.helper.read_bytes())
+
+    def test_dependency_permissions_allow_service_account_and_reject_escape(self):
+        self.root.chmod(0o755)
+        stage = self.root / 'stage'
+        package = stage / 'node_modules' / 'example'
+        package.mkdir(parents=True, mode=0o700)
+        (package / 'package.json').write_text('{}')
+        (package / 'package.json').chmod(0o600)
+        stage.chmod(0o755)
+        (stage / 'node_modules').chmod(0o700)
+        link = stage / 'node_modules' / 'link'
+        link.symlink_to('example', target_is_directory=True)
+        normalize_dependencies(stage, grp.getgrnam('nogroup').gr_gid)
+        subprocess.run(['/usr/bin/sudo', '-n', '-u', 'nobody', '--', '/usr/bin/test', '-r', str(link / 'package.json')], check=True)
+        link.unlink()
+        link.symlink_to('/etc/passwd')
+        with self.assertRaisesRegex(RuntimeError, 'unsafe dependency symlink'):
+            normalize_dependencies(stage, grp.getgrnam('nogroup').gr_gid)
 
     def test_failed_activation_restores_helper_without_changing_old_link(self):
         self.a.helper = self.root / 'environment-helper'

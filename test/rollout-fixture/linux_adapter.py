@@ -73,6 +73,26 @@ class HostCommandError(RuntimeError):
     pass
 
 
+def normalize_dependencies(stage, gid):
+    stage = Path(stage)
+    root = stage / 'node_modules'
+    if root.is_symlink() or not root.is_dir():
+        raise RuntimeError('unsafe dependency directory')
+    for path in (root, *root.rglob('*')):
+        info = path.lstat()
+        if stat.S_ISLNK(info.st_mode):
+            try:
+                path.resolve(strict=True).relative_to(stage)
+            except (ValueError, FileNotFoundError, RuntimeError) as exc:
+                raise RuntimeError('unsafe dependency symlink') from exc
+            os.chown(path, 0, gid, follow_symlinks=False)
+        elif stat.S_ISDIR(info.st_mode) or (stat.S_ISREG(info.st_mode) and info.st_nlink == 1):
+            os.chown(path, 0, gid)
+            os.chmod(path, 0o750 if stat.S_ISDIR(info.st_mode) or info.st_mode & 0o111 else 0o640)
+        else:
+            raise RuntimeError('unsafe dependency entry')
+
+
 def checked(argv, *, owner=None, user=None, extra_env=None):
     command = list(argv) if user is None else ['/usr/bin/sudo', '-n', '-u', user, '--', *argv]
     env = {'PATH': '/opt/ssh-approval/node/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'LANG': 'C.UTF-8'}
@@ -234,6 +254,7 @@ class LinuxAdapter:
 
     def _stage(self, identity):
         import grp
+        service_gid = grp.getgrnam('mcpbridge').gr_gid
         self.subphase = 'stage-precheck'
         self._active(self.old)
         module = self._update()
@@ -252,9 +273,11 @@ class LinuxAdapter:
                     extra_env={'HOME': str(self.root), 'npm_config_cache': str(self.root / 'npm-cache'),
                                'npm_config_userconfig': str(self.root / 'npm-userrc'),
                                'npm_config_globalconfig': str(self.root / 'npm-globalrc')})
+            self.subphase = 'stage-dependency-permissions'
+            normalize_dependencies(stage, service_gid)
             self.subphase = 'stage-import-check'
-            checked([str(self.node), str(stage / 'scripts/check-package-imports.mjs')])
-        module.publish_release(self.source, self.new, grp.getgrnam('mcpbridge').gr_gid, verify)
+            checked([str(self.node), str(stage / 'scripts/check-package-imports.mjs')], user='mcpbridge')
+        module.publish_release(self.source, self.new, service_gid, verify)
 
     def prepare_offline_baseline(self, identity, owner):
         self._stage(identity)
