@@ -143,6 +143,11 @@ class FullController(unittest.TestCase):
                 log = subprocess.run(['/usr/bin/journalctl','-u','ssh-approval-bridge.service',
                                       '-n','40','-o','cat','--no-pager'],capture_output=True,text=True,timeout=10)
                 receipt['fixtureJournal'] = log.stdout[-5000:]
+                paths = [new/'node_modules', new/'node_modules/ssh-mcp', new/'node_modules/ssh-mcp/package.json']
+                receipt['fixtureDependency'] = {str(path.relative_to(new)): ({'exists': True, 'mode': oct(path.stat().st_mode & 0o777),
+                    'uid': path.stat().st_uid, 'gid': path.stat().st_gid,
+                    'serviceCanRead': subprocess.run(['/usr/bin/sudo','-n','-u','mcpbridge','--','/usr/bin/test','-r',str(path)]).returncode == 0}
+                    if path.exists() else {'exists': False}) for path in paths}
             if completed.returncode and receipt.get('phase') == 'compare':
                 # Fixture-only bounded observation; owner/token and output data
                 # are synthetic and are never printed.
