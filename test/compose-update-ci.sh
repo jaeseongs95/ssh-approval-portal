@@ -29,19 +29,53 @@ printf 'BRIDGE_UID=10001\nBRIDGE_GID=10001\nBRIDGE_IMAGE=%s\n' "$legacy" | sudo 
 python3 scripts/package.py
 version=$(node -p 'require("./package.json").version')
 docker build --build-arg "PACKAGE_ARCHIVE=dist/ssh-approval-portal-${version}.tar.gz" -f docker/Dockerfile -t "$candidate" .
+candidate_id=$(docker image inspect "$candidate" --format '{{.Id}}')
+sudo install -d -m 0700 /etc/ssh-approval-portal/trusted-images
+printf '%s\n' "$candidate_id" | sudo tee "/etc/ssh-approval-portal/trusted-images/${candidate_id#sha256:}.sha256" >/dev/null
+sudo chmod 0600 "/etc/ssh-approval-portal/trusted-images/${candidate_id#sha256:}.sha256"
 printf 'FROM %s\nLABEL ci.fixture=baseline\n' "$candidate" | docker build -t "$baseline" -
+malicious="ssh-compose-malicious:${GITHUB_RUN_ID}"
+probe_dir=$(mktemp -d)
+printf 'if (process.argv.some(x => x.endsWith("bridge.mjs"))) require("fs").writeFileSync("/tmp/injected-marker", "bad");\n' > "$probe_dir/injected.cjs"
+printf 'FROM %s\nENV NODE_OPTIONS=--require=/tmp/injected.cjs\nCOPY injected.cjs /tmp/injected.cjs\n' "$candidate" | docker build -t "$malicious" -f - "$probe_dir"
+malicious_id=$(docker image inspect "$malicious" --format '{{.Id}}')
+printf '%s\n' "$malicious_id" | sudo tee "/etc/ssh-approval-portal/trusted-images/${malicious_id#sha256:}.sha256" >/dev/null
+sudo chmod 0600 "/etc/ssh-approval-portal/trusted-images/${malicious_id#sha256:}.sha256"
 legacy_dir=$(mktemp -d)
 git archive 9644117aa904bcf6a6fd861b741942db3d42035c | tar -x -C "$legacy_dir"
 (cd "$legacy_dir" && python3 scripts/package.py && docker build -f docker/Dockerfile -t "$legacy" .)
 "${compose[@]}" up -d --no-build --wait --wait-timeout 90
 old=$("${compose[@]}" ps -q bridge)
 docker exec "$old" node test/delivery-runtime.mjs
+if sudo --preserve-env=BRIDGE_COMPOSE_PROJECT,BRIDGE_COMPOSE_ENV_FILE bash scripts/compose-update.sh "$baseline"; then
+  echo 'An image without a trusted ID was unexpectedly accepted' >&2; exit 1
+fi
+[[ $("${compose[@]}" ps -q bridge) == "$old" ]]
 if sudo --preserve-env=BRIDGE_COMPOSE_PROJECT,BRIDGE_COMPOSE_ENV_FILE bash scripts/compose-update.sh "$candidate"; then
   echo 'A legacy bridge was unexpectedly accepted' >&2; exit 1
 fi
 [[ $("${compose[@]}" ps -q bridge) == "$old" ]]
 [[ $(docker inspect "$old" --format '{{.Image}}') == "$(docker image inspect "$legacy" --format '{{.Id}}')" ]]
 BRIDGE_IMAGE="$baseline" "${compose[@]}" up -d --no-build --wait --wait-timeout 90
+old=$("${compose[@]}" ps -q bridge)
+if sudo --preserve-env=BRIDGE_COMPOSE_PROJECT,BRIDGE_COMPOSE_ENV_FILE bash scripts/compose-update.sh "$malicious"; then
+  echo 'An image containing an untrusted Node preload was unexpectedly accepted' >&2; exit 1
+fi
+[[ $("${compose[@]}" ps -q bridge) == "$old" ]]
+mkdir -p "$RUNNER_TEMP/compose-nested"
+cat > "$RUNNER_TEMP/compose-nested.yaml" <<YAML
+services:
+  bridge:
+    volumes:
+      - $RUNNER_TEMP/compose-nested:/var/lib/ssh-mcp/transfers/nested
+YAML
+BRIDGE_IMAGE="$baseline" "${compose[@]}" -f "$RUNNER_TEMP/compose-nested.yaml" up -d --no-build --force-recreate --wait --wait-timeout 90
+nested=$("${compose[@]}" ps -q bridge)
+if sudo --preserve-env=BRIDGE_COMPOSE_PROJECT,BRIDGE_COMPOSE_ENV_FILE bash scripts/compose-update.sh "$candidate"; then
+  echo 'An existing container with an extra nested mount was unexpectedly accepted' >&2; exit 1
+fi
+[[ $("${compose[@]}" ps -q bridge) == "$nested" ]]
+BRIDGE_IMAGE="$baseline" "${compose[@]}" up -d --no-build --force-recreate --wait --wait-timeout 90
 old=$("${compose[@]}" ps -q bridge)
 if sudo env BRIDGE_COMPOSE_PROJECT="$project" BRIDGE_COMPOSE_ENV_FILE="$BRIDGE_COMPOSE_ENV_FILE" BRIDGE_COMPOSE_OVERRIDE=/dev/null bash scripts/compose-update.sh "$candidate"; then
   echo 'An unsupported Compose override was unexpectedly accepted' >&2; exit 1
