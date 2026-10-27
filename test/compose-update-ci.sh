@@ -16,7 +16,7 @@ sudo install -d -m 0755 /var/lib/ssh-mcp /etc/ssh-approval-portal
 sudo install -d -m 0700 -o 10001 -g 10001 /var/lib/ssh-mcp/.ssh /var/lib/ssh-mcp/.config/ssh-mcp /var/lib/ssh-mcp/.local/share/ssh-mcp /var/lib/ssh-mcp/transfers
 sudo ssh-keygen -q -t ed25519 -N '' -f /var/lib/ssh-mcp/.ssh/id_ed25519
 sudo chown 10001:10001 /var/lib/ssh-mcp/.ssh/id_ed25519 /var/lib/ssh-mcp/.ssh/id_ed25519.pub
-pin=$(ssh-keygen -lf /var/lib/ssh-mcp/.ssh/id_ed25519.pub | awk '{print $2}')
+pin=$(sudo ssh-keygen -lf /var/lib/ssh-mcp/.ssh/id_ed25519.pub | awk '{print $2}')
 sed "s|HOST_KEY_FINGERPRINT|$pin|g" "$source_dir/config/config.example.toml" | sudo tee /var/lib/ssh-mcp/.config/ssh-mcp/config.toml >/dev/null
 sudo chown 10001:10001 /var/lib/ssh-mcp/.config/ssh-mcp/config.toml
 sudo chmod 0600 /var/lib/ssh-mcp/.config/ssh-mcp/config.toml
