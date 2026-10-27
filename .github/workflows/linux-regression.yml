@@ -103,3 +103,4 @@ jobs:
           npm_path=$(command -v npm)
           cd test/rollout-fixture
           sudo env SSH_E2E_OLD="$old" SSH_E2E_NEW="$GITHUB_WORKSPACE" SSH_E2E_NODE="$node_path" SSH_E2E_NPM="$npm_path" SSH_E2E_PACKAGE="$package" /usr/bin/python3 -B -m unittest -v test_full_controller
+          sudo env SSH_E2E_OLD="$old" SSH_E2E_NEW="$GITHUB_WORKSPACE" SSH_E2E_NODE="$node_path" SSH_E2E_NPM="$npm_path" SSH_E2E_PACKAGE="$package" SSH_E2E_INJECT_COMPARE_FAILURE=1 /usr/bin/python3 -B -m unittest -v test_full_controller

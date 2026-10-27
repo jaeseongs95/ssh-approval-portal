@@ -51,6 +51,7 @@ class FullController(unittest.TestCase):
         npm = Path(os.environ['SSH_E2E_NPM'])
         package = Path(os.environ['SSH_E2E_PACKAGE'])
         fixture = Path(__file__).parent
+        inject_failure = os.environ.get('SSH_E2E_INJECT_COMPARE_FAILURE') == '1'
         created_users = []
         try:
             run('/usr/sbin/useradd', '--system', '--home-dir', str(root), '--shell', '/usr/sbin/nologin', 'mcpbridge')
@@ -104,10 +105,13 @@ class FullController(unittest.TestCase):
                 'BRIDGE_ADMIN_ORIGIN=https://example.test', 'BRIDGE_UI_TICKET_KEY=' + 'b' * 64,
                 'BRIDGE_UI_ENABLED=true', 'BRIDGE_COMMAND_AUTOMATION=true', f'BRIDGE_MCP_PORT={mcp}',
                 f'BRIDGE_ADMIN_PORT={admin}', '']), encoding='utf-8'); envfile.chmod(0o600)
+            if inject_failure:
+                (state / 'fixture-deny-compare').write_text('fixture fault')
             run('/usr/bin/sudo', '-n', '-u', 'mcpbridge', '--', node, fixture_scripts / 'e2e-seed.mjs', old, state)
             unit.write_text('[Unit]\nDescription=isolated fixture\n[Service]\nType=simple\nUser=mcpbridge\nGroup=mcpbridge\n'
                 + f'ExecStart={node} {fixture_scripts / "e2e-service.mjs"} {root / "app/approval-bridge"} {state} {admin} {mcp} full\n', encoding='utf-8')
             unit.chmod(0o644)
+            protected = {path: sha(path) for path in (envfile, unit, audit)}
             run('/usr/bin/systemctl', 'daemon-reload')
             run('/usr/bin/systemctl', 'start', 'ssh-approval-bridge.service')
             for _ in range(100):
@@ -137,6 +141,32 @@ class FullController(unittest.TestCase):
             completed = subprocess.run(['/usr/bin/python3','-I','-B','-c',launcher,str(task),sha(intentfile),sha(task/'bootstrap.py')],
                                        capture_output=True,text=True,timeout=300)
             receipt = json.loads((task/'receipt.json').read_text()) if (task/'receipt.json').exists() else {}
+            if inject_failure:
+                self.assertNotEqual(0, completed.returncode)
+                self.assertEqual(('NEEDS_REVIEW', 'compare'), (receipt.get('status'), receipt.get('phase')))
+                self.assertEqual(str(new), os.readlink(root/'app/approval-bridge'))
+                self.assertEqual(sha(new/'helper/environment-helper.py'), sha(helper))
+                self.assertEqual('active', run('/usr/bin/systemctl', 'is-active', 'ssh-approval-bridge.service').stdout.strip())
+                instance = run('/usr/bin/systemctl', 'show', 'ssh-approval-bridge.service', '-p', 'InvocationID', '--value').stdout.strip()
+                self.assertTrue(instance)
+                with urlopen(f'http://127.0.0.1:{mcp}/health', timeout=3) as response:
+                    self.assertTrue(json.load(response)['maintenance'])
+                self.assertEqual(protected, {path: sha(path) for path in protected})
+                owner = (task/'owner').read_text()
+                # Resolve the known injected fault, then independently verify
+                # durable data before releasing the same reservation owner.
+                (state / 'fixture-deny-compare').unlink()
+                comparison = run(node, new/'scripts/maintenance.mjs', 'compare', input=owner).stdout.splitlines()
+                counts = json.loads(comparison[0])
+                self.assertEqual('Maintenance compare confirmed', comparison[1])
+                self.assertEqual((1, 1, 1, 0, 0), tuple(counts[key] for key in
+                    ('commandRequestsChecked', 'cliRequestsChecked', 'outputPayloadsVerified', 'outputsUnavailable', 'expiredOutputsRemoved')))
+                self.assertEqual(protected, {path: sha(path) for path in protected})
+                self.assertEqual(instance, run('/usr/bin/systemctl', 'show', 'ssh-approval-bridge.service', '-p', 'InvocationID', '--value').stdout.strip())
+                self.assertIn('Maintenance release confirmed', run(node, new/'scripts/maintenance.mjs', 'release', input=owner).stdout)
+                with urlopen(f'http://127.0.0.1:{mcp}/health', timeout=3) as response:
+                    self.assertFalse(json.load(response)['maintenance'])
+                return
             if completed.returncode and receipt.get('phase') == 'start':
                 # CI fixture contains only synthetic values. Keep live hosts out
                 # of this diagnostic path.
