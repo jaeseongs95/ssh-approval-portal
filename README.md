@@ -8,7 +8,7 @@ Jev assists with commands outside the preapproved list. Owner settings determine
 
 [Secret management (Korean)](docs/secret-management.ko.md) separates secret references from provider adapters. Its first backend is a private POSIX local store managed through a hidden-input operator CLI. Jev resolves a reference at startup; actual values stay out of chat, MCP results, and packages.
 
-Version **1.6.1** adds approval/completion waits and assessment failure details, and bounds MCP body size and tool input structure before validation. Approval policies and model thresholds are preserved. The release’s `VALIDATION.json` records the verified server and browser scope. Responsibilities are separated into domain, application, and adapter layers while preserving approval rules. Existing client tests, agent-upload observations, and local validation of the restructuring are recorded separately.
+Version **1.6.2** adds durable maintenance ownership and post-restart preservation comparison. Existing approval policies and model thresholds are preserved. See `VALIDATION.json` for the exact tested environments and preservation scope; a health check alone does not verify data preservation. Version 1.6.1 added approval/completion waits, assessment failure details, and bounded MCP inputs.
 
 | Area | Verified scope and remaining limits |
 | --- | --- |
@@ -77,11 +77,11 @@ sudo bash scripts/install.sh --admin-origin https://ssh-approve.example.com --gr
 
 `--grant-sudo-all` grants `mcpops` unrestricted passwordless sudo. This applies to other sessions using that SSH account as well as the approval bridge. Omit the option to use ordinary account permissions. Existing sudo configuration is neither rewritten nor removed.
 
-To update an existing server, run `sudo bash scripts/install.sh` from the new package. Finish or deny pending and running requests first. Existing settings, tokens, and SSH keys are preserved; the first update adds a UI signing key if the installation has none. Restore the previous version with `sudo bash scripts/rollback.sh BACKUP`, using the backup path printed by the installer.
+For an existing server, use `sudo bash scripts/install.sh` from the new package after checking the maintenance and recovery procedure. Existing settings, tokens, and SSH keys are preserved; the first update adds a UI signing key if the installation has none. The installer does not automatically roll back to a version that cannot enforce durable maintenance. First upgrades from older versions need a separate verified offline procedure.
 
 User changes to an existing unit are preserved. An ExecStart outside the managed pattern is not overwritten automatically. The original `ssh-mcp.service` is not installed.
 
-Version 0.3 updates and rollbacks reserve maintenance through the administrator API first. Running or pending requests and incomplete uploads prevent the reservation. Once reserved, new reads, approvals, and transfers are blocked. Version 0.2 has no maintenance API: finish requests, run `sudo systemctl stop ssh-approval-bridge.service` in the administrator terminal, and then install. If the installer is forcibly terminated while maintenance is reserved, release it with `sudo /opt/ssh-approval/node/bin/node scripts/maintenance.mjs release`.
+Maintenance reservation requires an owner token and blocks new work on cooperating paths. Running or pending requests and incomplete uploads prevent reservation. If the installer is interrupted or the result is unknown, retain its protected owner file and inspect the actual state before recovery; do not blindly release the reservation. Non-cooperating root processes and older versions can bypass this protection. See [maintenance testing and recovery](docs/maintenance-test-and-recovery.ko.md).
 
 ## Connection and card checks
 
@@ -120,7 +120,7 @@ For prebuilt images, check the actual tag and architecture in the release asset'
 
 Tokens are provided through `/run/secrets/bridge_config`, not Compose environment variables. The host source is `/etc/ssh-approval-portal/docker-secrets.env`, readable only by the service account. SSH keys and configuration are mounted read-only; audit data and transfer staging use separate writable mounts. Linux host networking preserves the existing localhost SSH and Cloudflare Tunnel paths.
 
-Prepare the new image, then run `sudo bash scripts/compose-update.sh IMAGE_TAG_OR_DIGEST`. The updater reserves maintenance to block new execution before switching and returns to the previous image ID if startup checks fail. Pass the printed previous image ID to the same script to roll back. Do not indiscriminately remove images, transfer staging, or secrets with `docker compose down -v`. Before rolling back to an exact-only version, replace wildcard entries with verified exact hostnames or restore that version's protected configuration backup. Recognizing `BRIDGE_UPLOAD_SOURCE_HOSTS` does not imply support for wildcard values. Restore a compatible protected backup as well when the older image does not recognize the key.
+Compose updates support a limited configuration: the running bridge must support durable maintenance, both images must have independently verified identities registered in the protected trust directory, and the default host bind storage and runtime constraints must match. The updater reserves maintenance, compares preservation after the new container starts, and releases only after confirmation. Failure or an unknown result retains the reservation and owner file; it does not automatically roll back to an older image. Legacy upgrades, Compose overrides and custom storage need a separately verified procedure. See [maintenance testing and recovery](docs/maintenance-test-and-recovery.ko.md) for exact constraints and recovery. Do not indiscriminately remove images, transfer staging, or secrets with `docker compose down -v`.
 
 ## Verification and status
 

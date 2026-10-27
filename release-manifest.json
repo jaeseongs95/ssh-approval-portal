@@ -165,8 +165,8 @@
     },
     {
       "path": "docs/maintenance-test-and-recovery.ko.md",
-      "size": 7664,
-      "sha256": "1451762257e834358a467393b88910a4e96dd78765e6ad42d50b365dc47b7a4f"
+      "size": 8470,
+      "sha256": "316300fd8b3a2d8dc5b3c77a5c26cdd4342860db0cc06b6d4d49af153fdad51d"
     },
     {
       "path": "docs/multi-targets.ko.md",
@@ -221,12 +221,12 @@
     {
       "path": "README.ko.md",
       "size": 20261,
-      "sha256": "48dee5d18f5c4a49d9f575eafa2615c1ae4cd87e0f218331e531ebc766d06694"
+      "sha256": "accbc4a979a2a2244ba282114d73c7c37059f0af0568111db90a743fb41615d5"
     },
     {
       "path": "README.md",
-      "size": 18646,
-      "sha256": "06d361566c60eb2a3a943cdeec67f02e1cc600ee69eb7158e1944d4703ed38b3"
+      "size": 18635,
+      "sha256": "7207e2c10ed8d31e7c76bd5d6b5f90acc6f4492de946c42f827734dcbeb2a363"
     },
     {
       "path": "scripts/admin-access-config.mjs",
@@ -284,9 +284,14 @@
       "sha256": "a4cdcc54924757ec04126565e15fd45c9b229737a8ad008ba548b6650a1504b4"
     },
     {
+      "path": "scripts/compose-recovery-intent.py",
+      "size": 3989,
+      "sha256": "cd25e70fa567916f0be6f3ce9afe560181aa73b296f46fbec63a5f6a511b5248"
+    },
+    {
       "path": "scripts/compose-update.sh",
-      "size": 10561,
-      "sha256": "fcf607828d0626dbd0fc0ba6a48f8ddebd8ef46d4bf2aa2abc0eb671bf275f75"
+      "size": 13048,
+      "sha256": "e5b23fc1a075e8d576408b64ae0fa643f7673c386d08b42d3e2bbdc945ebecfa"
     },
     {
       "path": "scripts/configure-admin-access.sh",
@@ -1029,6 +1034,16 @@
       "sha256": "ab3755ef256c3dd66f4d264eb79f912490cef1c9ff3b57d4071831cada6fb8aa"
     },
     {
+      "path": "test/compose-recovery-debug.mjs",
+      "size": 998,
+      "sha256": "67f9e66786d7dc2a82b6c4b7655ec16becf369ca804e0d4039199a59b05d3d12"
+    },
+    {
+      "path": "test/compose-response-loss.mjs",
+      "size": 416,
+      "sha256": "f759e023805ff27c4f10a0f4b96222a188cc4c9725559d91c83ce0299482a671"
+    },
+    {
       "path": "test/compose-runtime.ps1",
       "size": 3688,
       "sha256": "539be6d5635b109216771abae7360292aa775cccb7b64c4ee3732b3daeecca8f"
@@ -1040,8 +1055,8 @@
     },
     {
       "path": "test/compose-update-ci.sh",
-      "size": 11327,
-      "sha256": "558a004c5e585f382fb442852cda218b6d2120f91b7710c335372df2e6a96633"
+      "size": 16219,
+      "sha256": "ccc4b87edf7f64aad8e799535e1a012601bb62ac3eb22a58b2a17507f3aca40c"
     },
     {
       "path": "test/config-contracts.test.mjs",
