@@ -15,8 +15,9 @@ test('client verifies durable capability before mutation and passes the same own
     calls.push({ path: req.url, owner: req.headers['x-maintenance-owner'] });
     if (req.url.endsWith('capabilities') && legacy) { res.writeHead(404); res.end(); return; }
     res.setHeader('Content-Type', 'application/json');
-    res.end(JSON.stringify(req.url.endsWith('capabilities') ? { ownership: 'durable-v1' } :
-      { ownership: 'durable-v1', [req.url.endsWith('reserve') ? 'reserved' : 'released']: true }));
+    const result = req.url.endsWith('capabilities') ? {} : req.url.endsWith('compare') ? { status: 'PASS' } :
+      { [req.url.endsWith('reserve') ? 'reserved' : req.url.endsWith('capture') ? 'captured' : 'released']: true };
+    res.end(JSON.stringify({ ownership: 'durable-v1', ...result }));
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const owner = 'a'.repeat(64);
@@ -32,10 +33,10 @@ test('client verifies durable capability before mutation and passes the same own
     assert.notEqual((await run('reserve')).code, 0);
     assert.deepEqual(calls.map(x => x.path), ['/api/maintenance/capabilities']);
     legacy = false; calls.length = 0;
-    for (const action of ['reserve', 'release']) {
+    for (const action of ['reserve', 'capture', 'compare', 'release']) {
       const result = await run(action); assert.equal(result.code, 0); assert.ok(!result.output.includes(owner));
     }
-    assert.deepEqual(calls.map(x => x.path), ['/api/maintenance/capabilities', '/api/maintenance/reserve', '/api/maintenance/capabilities', '/api/maintenance/release']);
+    assert.deepEqual(calls.map(x => x.path), ['/api/maintenance/capabilities', '/api/maintenance/reserve', '/api/maintenance/capabilities', '/api/maintenance/preservation/capture', '/api/maintenance/capabilities', '/api/maintenance/preservation/compare', '/api/maintenance/capabilities', '/api/maintenance/release']);
     assert.ok(calls.every(x => x.owner === owner));
   } finally { await new Promise(resolve => server.close(resolve)); await rm(dir, { recursive: true }); }
 });
