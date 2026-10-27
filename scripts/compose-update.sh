@@ -14,11 +14,24 @@ candidate=$(docker image inspect "$image" --format '{{.Id}}')
 docker image inspect "$candidate" --format '{{json .Config}}' | python3 -c 'import json,sys; c=json.load(sys.stdin); assert c.get("Entrypoint") in (None,[]) and c.get("Cmd")==["node","bridge.mjs"] and c.get("WorkingDir")=="/opt/portal"'
 "${compose[@]}" config --format json | python3 -c 'import json,sys; c=json.load(sys.stdin)["services"]["bridge"]; assert c.get("entrypoint") in (None,[]) and c.get("command") in (None,[]) and c.get("working_dir") in (None,"/opt/portal")'
 expected=$(sha256sum "$source_dir/release-manifest.json" | cut -d' ' -f1)
-actual=$(docker run --rm --network none --entrypoint sha256sum "$candidate" /opt/portal/release-manifest.json | cut -d' ' -f1)
+verify_node=/opt/ssh-approval/node/bin/node
+[[ -x "$verify_node" ]] || { echo 'Verified host Node runtime is required.' >&2; exit 1; }
+probe_dir=$(mktemp -d)
+probe_container=
+cleanup_probe() { [[ -z "$probe_container" ]] || docker rm "$probe_container" >/dev/null; rm -rf -- "$probe_dir"; }
+trap cleanup_probe EXIT
+probe_container=$(docker create --entrypoint /bin/true "$candidate")
+docker cp "$probe_container:/opt/portal/." "$probe_dir"
+docker cp "$probe_container:/usr/local/bin/node" "$probe_dir/candidate-node"
+[[ $(sha256sum "$probe_dir/candidate-node" | cut -d' ' -f1) == "$(sha256sum "$verify_node" | cut -d' ' -f1)" ]] || { echo 'Candidate Node runtime differs from the verified host runtime.' >&2; exit 1; }
+actual=$(sha256sum "$probe_dir/release-manifest.json" | cut -d' ' -f1)
 [[ "$actual" == "$expected" ]] || { echo 'Candidate does not match this verified package manifest.' >&2; exit 1; }
-docker run --rm --network none --entrypoint node "$candidate" scripts/verify.mjs .
+"$verify_node" "$source_dir/scripts/verify.mjs" "$probe_dir"
+cleanup_probe
+trap - EXIT
+probe=(docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --pids-limit 128 --tmpfs /tmp:rw,noexec,nosuid,size=64m)
 # Exercise the candidate's reservation and restart contracts in an isolated filesystem.
-docker run --rm --network none --entrypoint node "$candidate" --test test/maintenance-durable.test.mjs test/preservation-integration.test.mjs
+"${probe[@]}" --entrypoint node "$candidate" --test test/maintenance-durable.test.mjs test/preservation-integration.test.mjs
 exec 9>/var/lib/ssh-mcp/.portal-install.lock
 flock -n 9 || { echo 'An installation is already in progress.' >&2; exit 1; }
 old_container=$("${compose[@]}" ps -q bridge)
