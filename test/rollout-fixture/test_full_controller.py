@@ -84,6 +84,18 @@ class FullController(unittest.TestCase):
                 if path.is_dir(): path.chmod(0o700)
                 elif path.is_file(): path.chmod(0o600)
                 else: self.fail('unexpected package entry')
+            # Synthetic package only: reproduce the exact isolated npm settings
+            # separately so CI failures reveal a safe, non-secret stderr.
+            diagnostic = task / 'npm-diagnostic-source'
+            shutil.copytree(source, diagnostic)
+            npm_env = {'PATH':'/opt/ssh-approval/node/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'LANG':'C.UTF-8',
+                       'HOME':str(task), 'npm_config_cache':str(task/'npm-cache'),
+                       'npm_config_userconfig':'/dev/null', 'npm_config_globalconfig':'/dev/null'}
+            probe = subprocess.run([str(runtime/'node/bin/npm'),'ci','--omit=dev','--ignore-scripts',
+                                    '--no-audit','--no-fund','--prefix',str(diagnostic)],
+                                   env=npm_env,capture_output=True,text=True,timeout=300)
+            shutil.rmtree(diagnostic)
+            self.assertEqual(0, probe.returncode, 'synthetic npm diagnostic: ' + probe.stderr[-4000:])
             helper.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(old / 'helper/environment-helper.py', helper); helper.chmod(0o755)
             admin, mcp = port(), port(); self.assertNotEqual(admin, mcp)
