@@ -47,6 +47,12 @@ if sudo env BRIDGE_COMPOSE_PROJECT="$project" BRIDGE_COMPOSE_ENV_FILE="$BRIDGE_C
   echo 'An unsupported Compose override was unexpectedly accepted' >&2; exit 1
 fi
 [[ $("${compose[@]}" ps -q bridge) == "$old" ]]
+sudo sed -i 's/^BRIDGE_UID=10001$/BRIDGE_UID=10002/' "$BRIDGE_COMPOSE_ENV_FILE"
+if sudo --preserve-env=BRIDGE_COMPOSE_PROJECT,BRIDGE_COMPOSE_ENV_FILE bash scripts/compose-update.sh "$candidate"; then
+  echo 'A changed Compose user was unexpectedly accepted' >&2; exit 1
+fi
+[[ $("${compose[@]}" ps -q bridge) == "$old" ]]
+sudo sed -i 's/^BRIDGE_UID=10002$/BRIDGE_UID=10001/' "$BRIDGE_COMPOSE_ENV_FILE"
 sudo --preserve-env=BRIDGE_COMPOSE_PROJECT,BRIDGE_COMPOSE_ENV_FILE bash scripts/compose-update.sh "$candidate" | tee "$RUNNER_TEMP/compose-update-result.txt"
 grep -F '"commandRequestsChecked":1' "$RUNNER_TEMP/compose-update-result.txt"
 new=$(sudo "${compose[@]}" ps -q bridge)

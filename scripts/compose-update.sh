@@ -36,7 +36,9 @@ exec 9>/var/lib/ssh-mcp/.portal-install.lock
 flock -n 9 || { echo 'An installation is already in progress.' >&2; exit 1; }
 old_container=$("${compose[@]}" ps -q bridge)
 [[ -n "$old_container" ]] || { echo 'A running durable bridge is required; legacy and offline updates are unsupported.' >&2; exit 1; }
-docker inspect "$old_container" --format '{{json .Mounts}}' | python3 -c 'import json,sys; roots=[".ssh",".config/ssh-mcp",".local/share/ssh-mcp","transfers"]; expected={"/var/lib/ssh-mcp/"+x for x in roots}; mounts=[m for m in json.load(sys.stdin) if m.get("Destination") in expected]; assert len(mounts)==len(expected) and {m.get("Destination") for m in mounts}==expected and all(m.get("Type")=="bind" and m.get("Source")==m.get("Destination") for m in mounts)'
+docker inspect "$old_container" --format '{{json .Mounts}}' | python3 -c 'import json,sys; roots=[".ssh",".config/ssh-mcp",".local/share/ssh-mcp","transfers"]; expected={"/var/lib/ssh-mcp/"+x for x in roots}; all_mounts=json.load(sys.stdin); mounts=[m for m in all_mounts if m.get("Destination") in expected]; assert len(mounts)==len(expected) and {m.get("Destination") for m in mounts}==expected and all(m.get("Type")=="bind" and m.get("Source")==m.get("Destination") for m in mounts); secrets=[m for m in all_mounts if m.get("Destination")=="/run/secrets/bridge_config"]; assert len(secrets)==1 and secrets[0].get("Type")=="bind" and secrets[0].get("Source")=="/etc/ssh-approval-portal/docker-secrets.env" and not secrets[0].get("RW")'
+candidate_user=$(BRIDGE_IMAGE="$candidate" "${compose[@]}" config --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["services"]["bridge"]["user"])')
+[[ $(docker inspect "$old_container" --format '{{.Config.User}}') == "$candidate_user" ]] || { echo 'Bridge user changed; update requires a separate procedure.' >&2; exit 1; }
 old_image=$(docker inspect "$old_container" --format '{{.Image}}')
 [[ "$old_image" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Running image is not identifiable.' >&2; exit 1; }
 . "$source_dir/scripts/maintenance-owner.sh"
