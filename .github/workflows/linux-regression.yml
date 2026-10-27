@@ -46,3 +46,25 @@ jobs:
               python3 -B "$test"
             fi
           done
+      - name: Isolated Linux rollout contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD
+          sha256sum test/rollout-fixture/{controller.py,linux_adapter.py,protected_state.py,scope_guard.py,staging_guard.py,offline-baseline.mjs,test_linux_systemd.py}
+          cd test/rollout-fixture
+          python3 -B -m unittest -v test_controller test_protected_state test_linux_adapter test_scope_guard
+      - name: Isolated real systemd and helper fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -d /run/systemd/system ]] || { echo 'SYSTEMD_UNAVAILABLE: no systemd runtime' >&2; exit 1; }
+          [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ && "$GITHUB_RUN_ATTEMPT" =~ ^[0-9]+$ ]] || exit 1
+          unit="ssh-rollout-fixture-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.service"
+          state=$(sudo systemctl show "$unit" -p LoadState --value)
+          [[ "$state" == not-found ]] || { echo 'fixture unit already exists' >&2; exit 1; }
+          cleanup() { sudo systemctl stop "$unit" >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          sudo systemd-run --unit="$unit" --property=Type=simple /usr/bin/sleep 120
+          cd test/rollout-fixture
+          sudo env SSH_ROLLOUT_FIXTURE_UNIT="$unit" /usr/bin/python3 -B -m unittest -v test_linux_systemd
