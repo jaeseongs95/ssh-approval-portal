@@ -86,3 +86,18 @@ jobs:
           unit="ssh-rollout-fixture-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-transition.service"
           cd test/rollout-fixture
           sudo env SSH_ROLLOUT_FIXTURE_UNIT="$unit" SSH_E2E_OLD="$old" SSH_E2E_NEW="$GITHUB_WORKSPACE" SSH_E2E_NODE="$node_path" SSH_E2E_DIR="$data" /usr/bin/python3 -B -m unittest -v test_transition_e2e
+      - name: Isolated full pinned-controller transition
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -d /run/systemd/system ]] || { echo 'SYSTEMD_UNAVAILABLE' >&2; exit 1; }
+          old=$(mktemp -d /tmp/ssh-rollout-full-old.XXXXXXXX)
+          trap 'sudo rm -rf -- "$old"' EXIT
+          git archive 9644117aa904bcf6a6fd861b741942db3d42035c | tar -x -C "$old"
+          cp -a node_modules "$old/node_modules"
+          python3 scripts/package.py
+          package="$GITHUB_WORKSPACE/dist/ssh-approval-portal-1.6.1.tar.gz"
+          node_path=$(command -v node)
+          npm_path=$(command -v npm)
+          cd test/rollout-fixture
+          sudo env SSH_E2E_OLD="$old" SSH_E2E_NEW="$GITHUB_WORKSPACE" SSH_E2E_NODE="$node_path" SSH_E2E_NPM="$npm_path" SSH_E2E_PACKAGE="$package" /usr/bin/python3 -B -m unittest -v test_full_controller
