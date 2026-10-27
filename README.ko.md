@@ -1,4 +1,4 @@
-# SSH Approval Portal 1.6.1
+# SSH Approval Portal 1.6.2
 
 [English](README.md) · [관리자 로그인](docs/admin-login.ko.md) · [에이전트 파일 업로드](docs/agent-upload.ko.md) · [구조와 호환성](docs/architecture.ko.md)
 
@@ -67,11 +67,11 @@ PC 파일은 카드에서 고르고 목적지 경로·덮어쓰기·sudo를 지�
 
 ## 네이티브 설치와 업데이트
 
-이번 릴리스의 검증 대상은 Ubuntu 22.04/24.04 x86_64입니다. ARM64 설치 경로는 남아 있지만 검증은 후속 고도화로 보류했습니다. 인터넷 연결과 서버 관리자 터미널이 필요합니다. 런타임은 Node 24.2 이상, 25 미만을 요구합니다. Node 24는 전용 경로에 설치하며 시스템 Node를 교체하지 않습니다.
+이전 릴리스는 Ubuntu 22.04/24.04 x86_64에서 검증했습니다. ARM64 설치 경로는 남아 있지만 검증은 후속 고도화로 보류했습니다. 인터넷 연결과 서버 관리자 터미널이 필요합니다. 런타임은 Node 24.2 이상, 25 미만을 요구합니다. Node 24는 전용 경로에 설치하며 시스템 Node를 교체하지 않습니다.
 
 ```sh
-tar -xzf ssh-approval-portal-1.6.1.tar.gz
-cd ssh-approval-portal-1.6.1
+tar -xzf ssh-approval-portal-1.6.2.tar.gz
+cd ssh-approval-portal-1.6.2
 sudo bash scripts/install.sh --admin-origin https://ssh-approve.example.com --grant-sudo-all
 ```
 
