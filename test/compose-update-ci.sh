@@ -34,6 +34,11 @@ sudo install -d -m 0700 /etc/ssh-approval-portal/trusted-images
 printf '%s\n' "$candidate_id" | sudo tee "/etc/ssh-approval-portal/trusted-images/${candidate_id#sha256:}.sha256" >/dev/null
 sudo chmod 0600 "/etc/ssh-approval-portal/trusted-images/${candidate_id#sha256:}.sha256"
 printf 'FROM %s\nLABEL ci.fixture=baseline\n' "$candidate" | docker build -t "$baseline" -
+baseline_id=$(docker image inspect "$baseline" --format '{{.Id}}')
+printf '%s\n' "$baseline_id" | sudo tee "/etc/ssh-approval-portal/trusted-images/${baseline_id#sha256:}.sha256" >/dev/null
+sudo chmod 0600 "/etc/ssh-approval-portal/trusted-images/${baseline_id#sha256:}.sha256"
+untrusted="ssh-compose-untrusted:${GITHUB_RUN_ID}"
+printf 'FROM %s\nLABEL ci.fixture=untrusted\n' "$candidate" | docker build -t "$untrusted" -
 malicious="ssh-compose-malicious:${GITHUB_RUN_ID}"
 probe_dir=$(mktemp -d)
 printf 'if (process.argv.some(x => x.endsWith("bridge.mjs"))) require("fs").writeFileSync("/tmp/injected-marker", "bad");\n' > "$probe_dir/injected.cjs"
@@ -44,10 +49,27 @@ sudo chmod 0600 "/etc/ssh-approval-portal/trusted-images/${malicious_id#sha256:}
 legacy_dir=$(mktemp -d)
 git archive 9644117aa904bcf6a6fd861b741942db3d42035c | tar -x -C "$legacy_dir"
 (cd "$legacy_dir" && python3 scripts/package.py && docker build -f docker/Dockerfile -t "$legacy" .)
+legacy_id=$(docker image inspect "$legacy" --format '{{.Id}}')
+printf '%s\n' "$legacy_id" | sudo tee "/etc/ssh-approval-portal/trusted-images/${legacy_id#sha256:}.sha256" >/dev/null
+sudo chmod 0600 "/etc/ssh-approval-portal/trusted-images/${legacy_id#sha256:}.sha256"
 "${compose[@]}" up -d --no-build --wait --wait-timeout 90
 old=$("${compose[@]}" ps -q bridge)
 docker exec "$old" node test/delivery-runtime.mjs
-if sudo --preserve-env=BRIDGE_COMPOSE_PROJECT,BRIDGE_COMPOSE_ENV_FILE bash scripts/compose-update.sh "$baseline"; then
+trust_file="/etc/ssh-approval-portal/trusted-images/${candidate_id#sha256:}.sha256"
+sudo chmod 0644 "$trust_file"
+if sudo --preserve-env=BRIDGE_COMPOSE_PROJECT,BRIDGE_COMPOSE_ENV_FILE bash scripts/compose-update.sh "$candidate"; then
+  echo 'A trust record readable by others was unexpectedly accepted' >&2; exit 1
+fi
+sudo chmod 0600 "$trust_file"
+sudo mv "$trust_file" "$trust_file.saved"
+sudo ln -s "$trust_file.saved" "$trust_file"
+if sudo --preserve-env=BRIDGE_COMPOSE_PROJECT,BRIDGE_COMPOSE_ENV_FILE bash scripts/compose-update.sh "$candidate"; then
+  echo 'A symlink trust record was unexpectedly accepted' >&2; exit 1
+fi
+sudo rm "$trust_file"
+sudo mv "$trust_file.saved" "$trust_file"
+[[ $("${compose[@]}" ps -q bridge) == "$old" ]]
+if sudo --preserve-env=BRIDGE_COMPOSE_PROJECT,BRIDGE_COMPOSE_ENV_FILE bash scripts/compose-update.sh "$untrusted"; then
   echo 'An image without a trusted ID was unexpectedly accepted' >&2; exit 1
 fi
 [[ $("${compose[@]}" ps -q bridge) == "$old" ]]
@@ -58,6 +80,13 @@ fi
 [[ $(docker inspect "$old" --format '{{.Image}}') == "$(docker image inspect "$legacy" --format '{{.Id}}')" ]]
 BRIDGE_IMAGE="$baseline" "${compose[@]}" up -d --no-build --wait --wait-timeout 90
 old=$("${compose[@]}" ps -q bridge)
+baseline_trust="/etc/ssh-approval-portal/trusted-images/${baseline_id#sha256:}.sha256"
+sudo mv "$baseline_trust" "$baseline_trust.saved"
+if sudo --preserve-env=BRIDGE_COMPOSE_PROJECT,BRIDGE_COMPOSE_ENV_FILE bash scripts/compose-update.sh "$candidate"; then
+  echo 'An existing image without a trusted ID was unexpectedly accepted' >&2; exit 1
+fi
+sudo mv "$baseline_trust.saved" "$baseline_trust"
+[[ $("${compose[@]}" ps -q bridge) == "$old" ]]
 if sudo --preserve-env=BRIDGE_COMPOSE_PROJECT,BRIDGE_COMPOSE_ENV_FILE bash scripts/compose-update.sh "$malicious"; then
   echo 'An image containing an untrusted Node preload was unexpectedly accepted' >&2; exit 1
 fi
