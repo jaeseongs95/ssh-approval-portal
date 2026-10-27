@@ -355,8 +355,10 @@ class LinuxAdapter:
         checked(['/usr/bin/systemctl', 'start', self.unit_name])
         for _ in range(30):
             try:
-                return self._instance()
-            except RuntimeError:
+                instance = self._instance()
+                self._candidate_health(instance)
+                return instance
+            except (RuntimeError, OSError, ValueError):
                 time.sleep(1)
         raise RuntimeError('new instance not active')
 

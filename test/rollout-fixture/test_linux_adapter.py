@@ -36,6 +36,15 @@ class LinuxAdapterContract(unittest.TestCase):
             self.assertEqual('d' * 64, run.call_args.kwargs['owner'])
             health.assert_called_once_with('instance', maintenance=False)
 
+    def test_start_waits_for_maintenance_health_before_returning_instance(self):
+        from urllib.error import URLError
+        with patch.object(self.a, '_active'), patch('linux_adapter.checked'), \
+             patch('linux_adapter.staging_guard.before_start'), patch('linux_adapter.time.sleep'), \
+             patch.object(self.a, '_instance', return_value='instance'), \
+             patch.object(self.a, '_candidate_health', side_effect=[URLError('not ready'), None]) as health:
+            self.assertEqual('instance', self.a.start_and_identify(self.i))
+            self.assertEqual(2, health.call_count)
+
     def test_compare_rejects_invalid_output(self):
         with patch.object(self.a, '_instance', return_value='instance'), patch('linux_adapter.checked', return_value='unexpected'):
             with self.assertRaises(RuntimeError):

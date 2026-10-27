@@ -8,7 +8,7 @@ import socket
 import subprocess
 import unittest
 from urllib.request import Request, urlopen
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 import time
 
 
@@ -149,6 +149,8 @@ class FullController(unittest.TestCase):
                         receipt['fixtureCompare'] = {'http':response.status,'body':json.load(response)}
                 except HTTPError as error:
                     receipt['fixtureCompare'] = {'http':error.code}
+                except URLError:
+                    receipt['fixtureCompare'] = {'http':'unavailable'}
             self.assertEqual(0, completed.returncode, f'stderr={completed.stderr}; receipt={receipt}')
             self.assertEqual('PASS', receipt['status'])
             self.assertEqual(1, receipt['comparison']['commandRequestsChecked'])
