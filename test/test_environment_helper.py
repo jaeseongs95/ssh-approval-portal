@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import urllib.request
 
 spec = importlib.util.spec_from_file_location('environment_helper', Path(__file__).resolve().parents[1] / 'helper/environment-helper.py')
 helper = importlib.util.module_from_spec(spec)
@@ -228,6 +229,57 @@ class EditorTests(unittest.TestCase):
         self.assertEqual(calls, [])
         self.assertEqual(self.released, [])
         self.assertTrue((self.path / 'state' / ('owner-' + job)).exists())
+
+    def test_command_automation_toggle_real_helper_and_application(self):
+        fixture = Path(__file__).resolve().parent / 'environment-toggle-process.fixture.mjs'
+        transfer = self.path / 'transfer'
+        transfer.mkdir(mode=0o700)
+        owner = 'a' * 64
+        proc = None
+        port = None
+
+        def start(enabled):
+            nonlocal proc, port
+            proc = subprocess.Popen(['node', str(fixture), str(transfer), enabled], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+            port = int(proc.stdout.readline().strip())
+
+        def stop():
+            nonlocal proc
+            proc.communicate('stop\n', timeout=30)
+            self.assertEqual(proc.returncode, 0)
+            proc = None
+
+        def call(action, token=owner):
+            request = urllib.request.Request('http://127.0.0.1:' + str(port) + '/api/maintenance/' + action,
+                method='POST', headers={'Authorization': 'Bearer test-admin', 'Origin': 'https://example.test', 'X-Maintenance-Owner': token})
+            with urllib.request.urlopen(request, timeout=10) as response:
+                return json.load(response)
+
+        try:
+            # Create an existing journal before either direction of the toggle.
+            start('true')
+            stop()
+            for previous, next_value in [('true', 'false'), ('false', 'true')]:
+                self.env.write_bytes(self.original + ('BRIDGE_COMMAND_AUTOMATION=' + previous + '\r\n').encode())
+                self.env.chmod(0o600)
+                start(previous)
+                self.assertTrue(call('reserve')['reserved'])
+                self.save({'BRIDGE_COMMAND_AUTOMATION': next_value})
+                job = self.restart()
+                self.editor.capture = lambda token: call('preservation/capture', token.decode())
+                self.editor.compare = lambda token: self.assertEqual(call('preservation/compare', token.decode())['status'], 'PASS')
+                self.editor.release = lambda token: self.assertTrue(call('release', token.decode())['released'])
+                def replace():
+                    stop()
+                    start(next_value)
+                self.editor.restart(job, replace, lambda _: True)
+                self.assertEqual(self.read()['restart']['state'], 'healthy')
+                self.assertFalse(self.read()['pendingRestart'])
+                stop()
+        finally:
+            if proc:
+                proc.kill()
+                proc.communicate(timeout=10)
 
     def test_plain_restart_failure_does_not_claim_env_recovery(self):
         job = self.restart()
