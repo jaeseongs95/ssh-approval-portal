@@ -169,6 +169,8 @@ for failure in capture start-before start-after release; do
   if sudo env PATH="$RUNNER_TEMP/docker-wrapper:$PATH" BRIDGE_COMPOSE_PROJECT="$project" BRIDGE_COMPOSE_ENV_FILE="$BRIDGE_COMPOSE_ENV_FILE" FIXTURE_FAILURE="$failure" RESPONSE_LOSS_FILE="$source_dir/test/compose-response-loss.mjs" bash scripts/compose-update.sh "$candidate" > "$RUNNER_TEMP/compose-${failure}-out.txt" 2> "$err"; then
     echo "Synthetic $failure failure was unexpectedly accepted" >&2; exit 1
   fi
+  printf 'Synthetic case: %s\n' "$failure"
+  cat "$err"
   owner=$(sed -n 's/^Maintenance recovery file: //p' "$err" | tail -1)
   [[ "$owner" =~ ^/var/lib/ssh-mcp/\.maintenance-owners/job\.[A-Za-z0-9]+/owner$ ]]
   sudo test -f "$owner"
@@ -183,7 +185,12 @@ for failure in capture start-before start-after release; do
     new=$(sudo "${compose[@]}" ps -q bridge)
   fi
   if [[ "$failure" != release ]]; then
-    sudo bash -c 'set -e; docker exec -i "$1" node scripts/maintenance.mjs compare < "$2"; docker exec -i "$1" node scripts/maintenance.mjs release < "$2"' _ "$new" "$owner"
+    echo 'Verifying explicit recovery using the retained owner'
+    if ! sudo bash -c 'docker exec -i "$1" node scripts/maintenance.mjs compare < "$2"' _ "$new" "$owner"; then
+      sudo bash -c 'docker exec -i "$1" node test/compose-recovery-debug.mjs < "$2"' _ "$new" "$owner"
+      exit 1
+    fi
+    sudo bash -c 'docker exec -i "$1" node scripts/maintenance.mjs release < "$2"' _ "$new" "$owner"
     health "$new" false
   fi
   sudo rm -- "$owner"
