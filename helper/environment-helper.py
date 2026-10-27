@@ -138,9 +138,10 @@ def validate(data):
 
 
 class Editor:
-    def __init__(self, env=ENV, root=ROOT, validator=validate, scheduler=None):
+    def __init__(self, env=ENV, root=ROOT, validator=validate, scheduler=None, release=None):
         self.env, self.root, self.validate = env, root, validator
         self.scheduler = scheduler or self.schedule
+        self.release = release or self.release_maintenance
 
     def initialize(self):
         self.root.mkdir(mode=0o700, exist_ok=True)
@@ -210,7 +211,12 @@ class Editor:
                 state = {'state': 'idle', 'savedRevision': self.revision(proposed)}
                 self.record(state)
                 return self.snapshot(proposed, state) | {'saved': True, 'backupId': backup}
+            owner = request.get('maintenanceOwner')
+            if not isinstance(owner, str) or not re.fullmatch(r'[a-f0-9]{64}', owner):
+                raise Refused('maintenance-owner-required')
             job = secrets.token_hex(16)
+            # The credential is never included in status, logs, or process arguments.
+            atomic(self.root / ('owner-' + job), owner.encode('ascii'))
             state = {'state': 'scheduled', 'id': job, 'revision': self.revision(data)}
             self.record(state)
             try:
@@ -224,6 +230,12 @@ class Editor:
         clean_run(['/usr/bin/systemd-run', '--quiet', '--on-active=3s', '--collect', '--unit=ssh-approval-env-restart-' + job,
                    '/usr/bin/python3', '-I', HELPER, '--restart', job])
 
+    @staticmethod
+    def release_maintenance(owner):
+        subprocess.run(['/opt/ssh-approval/node/bin/node', '/var/lib/ssh-mcp/app/approval-bridge/scripts/maintenance.mjs', 'release'],
+                       input=owner, env={'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'},
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15, check=True)
+
     def restart(self, job, restart=None, healthy=None):
         restart = restart or (lambda: clean_run(['/usr/bin/systemctl', 'restart', SERVICE], timeout=200))
         healthy = healthy or self.healthy
@@ -235,6 +247,10 @@ class Editor:
             data = read_private(self.env)
             if state.get('id') != job or state['state'] != 'scheduled':
                 raise Refused('stale-restart')
+            owner_path = self.root / ('owner-' + job)
+            owner = read_private(owner_path)
+            if not re.fullmatch(rb'[a-f0-9]{64}', owner):
+                raise Refused('invalid-maintenance-owner')
             if state.get('revision') != self.revision(data):
                 self.record({'state': 'conflict', 'id': job})
                 return
@@ -257,6 +273,13 @@ class Editor:
                         state['state'] = 'rolled-back' if healthy(backup) else 'recovery-failed'
                     except Exception:
                         state['state'] = 'recovery-failed'
+            if state['state'] in ('healthy', 'rolled-back'):
+                try:
+                    self.release(owner)
+                except Exception:
+                    state['state'] = 'maintenance-release-unconfirmed'
+                else:
+                    owner_path.unlink()
             if state['state'] in ('healthy', 'rolled-back') and (self.root / 'pending.env').exists():
                 # Backup archive remains; only the pending marker is cleared.
                 os.unlink(self.root / 'pending.env')

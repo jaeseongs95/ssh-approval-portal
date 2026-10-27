@@ -2,6 +2,7 @@
 set -euo pipefail
 [[ $(id -u) == 0 ]] || { echo 'Run as root.' >&2; exit 1; }
 source_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
+. "$source_dir/scripts/maintenance-owner.sh"
 admin_origin=
 grant_sudo=0
 while [[ $# -gt 0 ]]; do
@@ -45,14 +46,19 @@ maintenance_reserved=0
 source "$source_dir/scripts/ensure-node-runtime.sh"
 maintenance_node=$runtime/bin/node
 release_maintenance() {
-  if [[ "$maintenance_reserved" == 1 ]]; then "$maintenance_node" "$source_dir/scripts/maintenance.mjs" release || true; fi
+  if [[ "$maintenance_reserved" == 1 ]]; then
+    "$maintenance_node" "$source_dir/scripts/maintenance.mjs" release < "$maintenance_owner_file" || return 1
+    maintenance_forget_owner
+    maintenance_reserved=0
+  fi
 }
-trap release_maintenance EXIT
 if systemctl is-active --quiet ssh-approval-bridge.service; then
   [[ -x "$maintenance_node" ]] || { echo 'Stop the legacy service in the administrator terminal before updating' >&2; exit 1; }
-  "$maintenance_node" "$source_dir/scripts/maintenance.mjs" reserve
+  maintenance_new_owner
+  "$maintenance_node" "$source_dir/scripts/maintenance.mjs" reserve < "$maintenance_owner_file"
   maintenance_reserved=1
 fi
+trap 'release_maintenance || echo "Maintenance release not confirmed; retain recovery file." >&2' EXIT
 node "$source_dir/scripts/verify.mjs" "$source_dir"
 stamp=$(date -u +%Y%m%dT%H%M%SZ)-$$
 backup=$app/backups/$stamp
@@ -94,9 +100,17 @@ restore() {
   done
   if [[ "$grant_created" == 1 ]]; then rm -f -- "$grant" || failed=1; fi
   systemctl daemon-reload || failed=1
-  if [[ -f "$backup/was-running" ]]; then systemctl restart ssh-approval-bridge.service && wait_healthy || failed=1; else systemctl stop ssh-approval-bridge.service || true; fi
+  if [[ -f "$backup/was-running" ]]; then
+    if [[ -n "$old_active" && -f "$old_active/scripts/maintenance.mjs" ]] && grep -Fq 'durable-v1' "$old_active/scripts/maintenance.mjs"; then
+      systemctl restart ssh-approval-bridge.service && wait_healthy || failed=1
+    else
+      systemctl stop ssh-approval-bridge.service || true
+      echo 'Previous release cannot enforce durable maintenance; service stopped for manual recovery.' >&2
+      failed=1
+    fi
+  else systemctl stop ssh-approval-bridge.service || true; fi
   if [[ -f "$backup/was-enabled" ]]; then systemctl enable ssh-approval-bridge.service || failed=1; else systemctl disable ssh-approval-bridge.service || true; fi
-  release_maintenance
+  if [[ "$failed" == 0 ]]; then release_maintenance || failed=1; fi
   echo "Installation failed. Restore attempted; failures=$failed; backup=$backup" >&2
   exit "$rc"
 }
@@ -156,6 +170,7 @@ systemctl enable ssh-approval-bridge.service
 systemctl restart ssh-approval-bridge.service
 wait_healthy
 trap - EXIT
+release_maintenance || { echo 'Installation succeeded but maintenance release is unconfirmed; manual recovery required.' >&2; exit 1; }
 echo "Installed release: $release"
 echo "Rollback backup: $backup"
 echo 'UI approval remains governed by BRIDGE_UI_ENABLED. Run the harmless host probe before enabling it.'
