@@ -4,7 +4,7 @@ import hashlib
 import json
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 from controller import Identity
 from linux_adapter import LinuxAdapter, verify_release_tree
@@ -45,6 +45,21 @@ class LinuxAdapterContract(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self.a.activate_exact(self.i)
 
+    def test_protected_capture_requires_prereservation_baseline(self):
+        self.a.protected_files = [self.root / 'settings']
+        with self.assertRaises(RuntimeError):
+            self.a.capture_protected(self.i)
+
+    def test_legacy_reservation_requires_health_proof(self):
+        response = MagicMock()
+        response.__enter__.return_value = response
+        with patch.object(self.a, '_active'), patch.object(self.a, '_instance', return_value='instance'), \
+             patch('linux_adapter.checked') as run, patch('linux_adapter.urlopen', return_value=response), \
+             patch('linux_adapter.json.load', return_value={'healthy': True, 'maintenance': False}):
+            with self.assertRaises(RuntimeError):
+                self.a.reserve_legacy(self.i, 'instance')
+            run.assert_called_once()
+
     def test_offline_seed_uses_stdin_for_owner_and_published_source(self):
         (self.root / 'offline-baseline.mjs').write_text('fixed helper', encoding='utf-8')
         with patch.object(self.a, '_stage') as stage, patch('linux_adapter.checked') as run:
@@ -68,7 +83,12 @@ class LinuxAdapterContract(unittest.TestCase):
         manifest = root / 'release-manifest.json'
         manifest.write_text(json.dumps({'files': entries}), encoding='utf-8')
         pin = hashlib.sha256(manifest.read_bytes()).hexdigest()
-        verify_release_tree(root, pin)
+        verify_release_tree(root, pin, strict=True)
+        extra = root / 'unexpected.py'
+        extra.write_bytes(b'unlisted')
+        with self.assertRaises(RuntimeError):
+            verify_release_tree(root, pin, strict=True)
+        extra.unlink()
         (scripts / 'verify.mjs').write_bytes(b'tamper!')
         with self.assertRaises(RuntimeError):
             verify_release_tree(root, pin)

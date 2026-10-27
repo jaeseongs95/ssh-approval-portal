@@ -27,7 +27,7 @@ def digest_file(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def verify_release_tree(root, expected):
+def verify_release_tree(root, expected, *, strict=False):
     root = Path(root)
     if root.is_symlink() or not root.is_dir() or root.resolve() != root:
         raise RuntimeError('unsafe release root')
@@ -56,12 +56,24 @@ def verify_release_tree(root, expected):
     for required in ('scripts/verify.mjs', 'scripts/update_release.py', 'scripts/settings_contract.py'):
         if required not in names:
             raise RuntimeError('release verifier missing')
+    if strict:
+        found = set()
+        for path in root.rglob('*'):
+            if path.is_symlink():
+                raise RuntimeError('unexpected source symlink')
+            if path.is_file():
+                found.add(path.relative_to(root).as_posix())
+            elif not path.is_dir():
+                raise RuntimeError('unexpected source entry')
+        if found != names | {'release-manifest.json'}:
+            raise RuntimeError('unexpected or missing source file')
 
 
-def checked(argv, *, owner=None, user=None):
+def checked(argv, *, owner=None, user=None, extra_env=None):
     command = list(argv) if user is None else ['/usr/bin/sudo', '-n', '-u', user, '--', *argv]
-    result = subprocess.run(command, input=owner, text=True, capture_output=True, timeout=180,
-                            env={'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LANG': 'C.UTF-8'})
+    env = {'PATH': '/opt/ssh-approval/node/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'LANG': 'C.UTF-8'}
+    if extra_env: env.update(extra_env)
+    result = subprocess.run(command, input=owner, text=True, capture_output=True, timeout=300, env=env)
     if result.returncode != 0:
         raise RuntimeError('host operation failed')
     return result.stdout
@@ -86,6 +98,8 @@ class LinuxAdapter:
         self.owner_path = self.root / 'owner'
         self.helper = Path('/usr/local/libexec/ssh-approval-environment-helper')
         self.baseline = None
+        self.pre_protected = None
+        self.pre_staging = None
 
     def _private_root(self):
         s = self.root.lstat()
@@ -126,13 +140,22 @@ class LinuxAdapter:
             raise RuntimeError('host mismatch')
         old_manifest = digest_file(self.old / 'release-manifest.json')
         new_manifest = digest_file(self.source / 'release-manifest.json')
-        verify_release_tree(self.source, identity.candidate_manifest)
+        verify_release_tree(self.source, identity.candidate_manifest, strict=True)
         verify_release_tree(self.old, identity.old_manifest)
         checked([str(self.node), str(self.source / 'scripts/verify.mjs'), str(self.source)])
         checked([str(self.node), str(self.source / 'scripts/verify.mjs'), str(self.old)])
+        if not self.protected_files:
+            raise RuntimeError('explicit protected scope required')
+        old_instance = self._instance()
+        initial_config = digest_file('/etc/ssh-mcp-approval-bridge.env')
+        self.pre_protected = {'audit': capture([], self.audit), 'paths': scope_guard.snapshot(self.protected_files)}
+        self.pre_staging = self._staging_entries()
+        self._active(self.old)
+        if self._instance() != old_instance or digest_file('/etc/ssh-mcp-approval-bridge.env') != initial_config:
+            raise RuntimeError('instance or configuration changed during preflight')
         return {'hostname': socket.gethostname(), 'manifest': old_manifest, 'candidate': new_manifest,
-                'candidate_verified': True, 'config': digest_file('/etc/ssh-mcp-approval-bridge.env'),
-                'old_instance': self._instance(), 'independent_channel': self.independent_channel,
+                'candidate_verified': True, 'config': initial_config,
+                'old_instance': old_instance, 'independent_channel': self.independent_channel,
                 'durable': False}
 
     def claim_once(self, identity):
@@ -156,18 +179,28 @@ class LinuxAdapter:
         checked([str(self.node), str(self.root / 'maintenance-request.mjs'), 'reserve'])
         if self._instance() != instance:
             raise RuntimeError('old instance changed after reserve')
+        with urlopen('http://127.0.0.1:' + str(self.mcp_port) + '/health', timeout=5) as response:
+            body = json.load(response)
+        if body.get('healthy') is not True or body.get('maintenance') is not True or self._instance() != instance:
+            raise RuntimeError('legacy reservation not observed')
 
     def reserve_and_capture(self, identity, owner, instance):
         raise RuntimeError('durable predecessor not supported by this first-transition adapter')
+
+    def _staging_entries(self):
+        entries = {}
+        for path in self.state_root.iterdir():
+            if staging_guard.PART.fullmatch(path.name):
+                entries[str(path)] = staging_guard.state(path)
+        return entries
 
     def backup_staging(self, identity, instance):
         if self._instance() != instance:
             raise RuntimeError('old instance changed before staging backup')
         self._active(self.old)
-        entries = {}
-        for path in self.state_root.iterdir():
-            if staging_guard.PART.fullmatch(path.name):
-                entries[str(path)] = staging_guard.state(path)
+        entries = self._staging_entries()
+        if entries != self.pre_staging:
+            raise RuntimeError('staging changed since preflight')
         staging_guard.backup(self.state_root, entries, self.root / 'staging-cache')
         if self._instance() != instance:
             raise RuntimeError('old instance changed during staging backup')
@@ -196,6 +229,9 @@ class LinuxAdapter:
             if digest_file(stage / 'release-manifest.json') != identity.candidate_manifest:
                 raise RuntimeError('candidate manifest mismatch')
             checked([str(self.node), str(stage / 'scripts/verify.mjs'), str(stage)])
+            checked(['/opt/ssh-approval/node/bin/npm', 'ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund', '--prefix', str(stage)],
+                    extra_env={'HOME': str(self.root), 'npm_config_cache': str(self.root / 'npm-cache'),
+                               'npm_config_userconfig': '/dev/null', 'npm_config_globalconfig': '/dev/null'})
             checked([str(self.node), str(stage / 'scripts/check-package-imports.mjs')])
         module.publish_release(self.source, self.new, grp.getgrnam('mcpbridge').gr_gid, verify)
 
@@ -209,8 +245,10 @@ class LinuxAdapter:
                 owner=owner, user='mcpbridge')
 
     def capture_protected(self, identity):
-        if not self.protected_files:
-            raise RuntimeError('explicit protected path scope required')
+        if self.pre_protected is None:
+            raise RuntimeError('pre-reservation protected baseline unavailable')
+        compare(self.pre_protected['audit'])
+        scope_guard.verify(self.protected_files, self.pre_protected['paths'])
         self.baseline = {'audit': capture([], self.audit), 'paths': scope_guard.snapshot(self.protected_files)}
         return self.baseline
 

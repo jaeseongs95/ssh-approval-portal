@@ -1,0 +1,15 @@
+import fs from 'node:fs/promises';import os from 'node:os';import path from 'node:path';import assert from 'node:assert/strict';import {createServer} from 'node:http';import {spawn} from 'node:child_process';
+const temp=await fs.mkdtemp(path.join(os.tmpdir(),'ssh-maintenance-cli-')),secret='synthetic-never-log-token';let mode='ok',calls=[];
+const server=createServer((req,res)=>{calls.push({url:req.url,authorization:req.headers.authorization,origin:req.headers.origin,method:req.method});if(mode==='lost'){req.socket.destroy();return;}res.writeHead(mode==='refused'?409:200,{'Content-Type':'application/json'});res.end(JSON.stringify(mode==='refused'?{}:req.url.endsWith('/reserve')?{reserved:true}:{released:true}));});
+await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const port=server.address().port;
+try{
+ for(const [index,action,current,expected]of [[0,'reserve','ok',0],[1,'reserve','refused',1],[2,'reserve','lost',1],[3,'release','ok',0],[4,'reserve','config-failed',1]]){
+  mode=current;calls=[];const dir=path.join(temp,String(index));await fs.mkdir(path.join(dir,'source/src/adapters/config'),{recursive:true});await fs.copyFile(new URL('./maintenance-request.mjs',import.meta.url),path.join(dir,'maintenance-request.mjs'));
+  await fs.writeFile(path.join(dir,'source/src/adapters/config/secrets.mjs'),current==='config-failed'?`export async function loadSecrets(){throw Error(${JSON.stringify(secret)})}`:`export async function loadSecrets(){return {}}`);
+  await fs.writeFile(path.join(dir,'source/src/adapters/config/settings.mjs'),`export function parseSettings(){return ${JSON.stringify({adminPort:port,adminToken:secret,adminOrigin:'https://example.test'})}}`);
+  const run=await new Promise((resolve,reject)=>{const child=spawn(process.execPath,[path.join(dir,'maintenance-request.mjs'),action],{env:{PATH:process.env.PATH},windowsHide:true});let output='';child.stdout.on('data',b=>output+=b);child.stderr.on('data',b=>output+=b);child.on('error',reject);child.on('close',code=>resolve({code,output}));});
+  assert.equal(run.code,expected);const bytes=await fs.readFile(path.join(dir,'maintenance-summary.jsonl'),'utf8'),record=JSON.parse(bytes);assert.equal(record.action,action);assert.equal(record.confirmed,expected===0);assert.ok(!bytes.includes(secret)&&!run.output.includes(secret));
+  if(current==='config-failed'){assert.equal(record.configurationFailed,true);assert.equal(calls.length,0);}else{assert.equal(calls.length,1);assert.equal(calls[0].authorization,'Bearer '+secret);assert.equal(calls[0].origin,'https://example.test');assert.equal(calls[0].method,'POST');assert.equal(calls[0].url,'/api/maintenance/'+action);if(current==='lost')assert.equal(record.transportFailed,true);else assert.equal(record.httpStatus,current==='refused'?409:200);}
+ }
+ console.log('5 real CLI/loopback checks PASS; strict success/refusal/lost response/config failure/release; secrets absent');
+}finally{await new Promise(resolve=>server.close(resolve));assert.equal(path.dirname(temp),await fs.realpath(os.tmpdir()));assert.ok(path.basename(temp).startsWith('ssh-maintenance-cli-'));await fs.rm(temp,{recursive:true,force:true});}
