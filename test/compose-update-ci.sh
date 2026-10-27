@@ -80,6 +80,12 @@ fi
 [[ $(docker inspect "$old" --format '{{.Image}}') == "$(docker image inspect "$legacy" --format '{{.Id}}')" ]]
 BRIDGE_IMAGE="$baseline" "${compose[@]}" up -d --no-build --wait --wait-timeout 90
 old=$("${compose[@]}" ps -q bridge)
+sudo chmod 0777 /var/lib/ssh-mcp
+if sudo --preserve-env=BRIDGE_COMPOSE_PROJECT,BRIDGE_COMPOSE_ENV_FILE bash scripts/compose-update.sh "$candidate"; then
+  echo 'A writable recovery ancestor was unexpectedly accepted' >&2; exit 1
+fi
+sudo chmod 0755 /var/lib/ssh-mcp
+[[ $("${compose[@]}" ps -q bridge) == "$old" ]]
 baseline_trust="/etc/ssh-approval-portal/trusted-images/${baseline_id#sha256:}.sha256"
 sudo mv "$baseline_trust" "$baseline_trust.saved"
 if sudo --preserve-env=BRIDGE_COMPOSE_PROJECT,BRIDGE_COMPOSE_ENV_FILE bash scripts/compose-update.sh "$candidate"; then

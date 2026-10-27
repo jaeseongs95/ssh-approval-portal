@@ -28,6 +28,10 @@ def validate_owner(owner):
     job = os.path.dirname(owner)
     if os.path.dirname(job) != BASE or os.path.basename(owner) != 'owner' or not JOB.fullmatch(os.path.basename(job)):
         raise ValueError('Invalid owner path')
+    for path in ('/', '/var', '/var/lib', '/var/lib/ssh-mcp'):
+        info = os.lstat(path)
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022 or os.path.realpath(path) != path:
+            raise ValueError('Unsafe recovery ancestor')
     for path in (BASE, job):
         info = os.lstat(path)
         if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or stat.S_IMODE(info.st_mode) != 0o700 or os.path.realpath(path) != path:
