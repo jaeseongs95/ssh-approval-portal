@@ -60,6 +60,7 @@ test('reservation is owner-bound across replacement and preservation comparison 
     assert.equal((await post(second,'release')).status,409,'old owner cannot release the new reservation');
     assert.equal(second.queue.maintenance,true);
     assert.equal((await post(second,'release',other)).status,200);
+    assert.equal((await (await post(second,'status',other)).json()).status,'unknown','ordinary release without comparison is not preservation evidence');
     assert.equal((await (await post(second,'status')).json()).status,'unknown','superseded receipt is conservative');
   } finally { await first?.close(); await second?.close(); await rm(root,{recursive:true,force:true}); }
 });

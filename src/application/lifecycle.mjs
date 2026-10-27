@@ -16,7 +16,7 @@ export function createLifecycleService({ queue, store, commands, files, closeCon
     },
     status(owner) {
       const state = maintenanceState?.status(owner) ?? 'unknown';
-      return (state === 'released' && (queue.maintenance || !releasedInInstance)) || (state === 'reserved' && !queue.maintenance) ? 'unknown' : state;
+      return (state === 'released' && (queue.maintenance || !releasedInInstance || !comparedInInstance)) || (state === 'reserved' && !queue.maintenance) ? 'unknown' : state;
     },
     markCompared(owner) { if (!maintenanceState?.owns(owner) || !queue.maintenance) throw Error('Maintenance ownership mismatch'); comparedInInstance = true; },
     release(owner, requireCompare = false) {
