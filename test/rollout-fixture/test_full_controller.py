@@ -90,7 +90,7 @@ class FullController(unittest.TestCase):
             shutil.copytree(source, diagnostic)
             npm_env = {'PATH':'/opt/ssh-approval/node/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'LANG':'C.UTF-8',
                        'HOME':str(task), 'npm_config_cache':str(task/'npm-cache'),
-                       'npm_config_userconfig':'/dev/null', 'npm_config_globalconfig':'/dev/null'}
+                       'npm_config_userconfig':str(task/'npm-probe-user'), 'npm_config_globalconfig':str(task/'npm-probe-global')}
             probe = subprocess.run([str(runtime/'node/bin/npm'),'ci','--omit=dev','--ignore-scripts',
                                     '--no-audit','--no-fund','--prefix',str(diagnostic)],
                                    env=npm_env,capture_output=True,text=True,timeout=300)

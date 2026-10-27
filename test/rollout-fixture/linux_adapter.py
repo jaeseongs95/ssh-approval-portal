@@ -233,6 +233,10 @@ class LinuxAdapter:
         self.subphase = 'stage-precheck'
         self._active(self.old)
         module = self._update()
+        for name in ('npm-userrc', 'npm-globalrc'):
+            descriptor = os.open(self.root / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            try: os.fsync(descriptor)
+            finally: os.close(descriptor)
         def verify(stage):
             self.subphase = 'stage-manifest'
             if digest_file(stage / 'release-manifest.json') != identity.candidate_manifest:
@@ -242,7 +246,8 @@ class LinuxAdapter:
             self.subphase = 'stage-npm'
             checked(['/opt/ssh-approval/node/bin/npm', 'ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund', '--prefix', str(stage)],
                     extra_env={'HOME': str(self.root), 'npm_config_cache': str(self.root / 'npm-cache'),
-                               'npm_config_userconfig': '/dev/null', 'npm_config_globalconfig': '/dev/null'})
+                               'npm_config_userconfig': str(self.root / 'npm-userrc'),
+                               'npm_config_globalconfig': str(self.root / 'npm-globalrc')})
             self.subphase = 'stage-import-check'
             checked([str(self.node), str(stage / 'scripts/check-package-imports.mjs')])
         module.publish_release(self.source, self.new, grp.getgrnam('mcpbridge').gr_gid, verify)
