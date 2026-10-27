@@ -15,13 +15,6 @@ done
 . /etc/os-release
 [[ "$ID" == ubuntu && "$VERSION_ID" =~ ^(22.04|24.04)$ ]] || { echo 'Supported Ubuntu versions: 22.04, 24.04' >&2; exit 1; }
 case "$(uname -m)" in x86_64) architecture=x64;; aarch64) architecture=arm64;; *) echo 'Unsupported CPU' >&2; exit 1;; esac
-for executable in curl xz python3 ssh-keygen sshd sudo flock; do
-  if ! command -v "$executable" >/dev/null; then
-    apt-get update
-    DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl xz-utils python3 openssh-server sudo util-linux
-    break
-  fi
-done
 base=/var/lib/ssh-mcp
 app=$base/app
 active=$app/approval-bridge
@@ -30,6 +23,17 @@ unit=/etc/systemd/system/ssh-approval-bridge.service
 helper=/usr/local/libexec/ssh-approval-file-helper
 grant=/etc/sudoers.d/90-mcpops-approval-bridge
 runtime=/opt/ssh-approval/node
+. "$source_dir/scripts/install-state-guard.sh"
+if ! systemctl is-active --quiet ssh-approval-bridge.service; then
+  require_fresh_installation "$active" "$unit" "$env_file"
+fi
+for executable in curl xz python3 ssh-keygen sshd sudo flock; do
+  if ! command -v "$executable" >/dev/null; then
+    apt-get update
+    DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl xz-utils python3 openssh-server sudo util-linux
+    break
+  fi
+done
 for secret_file in "$env_file" /etc/ssh-approval-portal/docker-secrets.env; do
   probe_port=$(python3 "$source_dir/scripts/settings_contract.py" port "$secret_file" mcp)
   if ! systemctl is-active --quiet ssh-approval-bridge.service && curl -fsS "http://127.0.0.1:$probe_port/health" >/dev/null 2>&1; then
@@ -59,6 +63,9 @@ if systemctl is-active --quiet ssh-approval-bridge.service; then
   maintenance_reserved=1
   # A lost/failed capture is not followed by an automatic release or rollback.
   "$maintenance_node" "$source_dir/scripts/maintenance.mjs" capture < "$maintenance_owner_file" || { echo 'Preservation capture unconfirmed; maintenance retained.' >&2; exit 1; }
+else
+  # Recheck under the installation lock in case the existing service stopped meanwhile.
+  require_fresh_installation "$active" "$unit" "$env_file"
 fi
 trap 'release_maintenance || echo "Maintenance release not confirmed; retain recovery file." >&2' EXIT
 node "$source_dir/scripts/verify.mjs" "$source_dir"
