@@ -259,7 +259,9 @@ export async function createApplication({ registry, classify, executeCommand, ex
       if (!maintenanceState.owns(owner) || !queue.maintenance || queue.busy() || queue.listAll().some(job => ['pending', 'evaluating', 'running'].includes(job.state)) || commands.busy() || files.busy() || store.hasActiveWork()) throw Error('Preservation boundary unavailable');
       const baseline = maintenanceState.baseline(owner);
       if (!baseline || baseline.instance === preservationInstance) throw Error('A new service instance is required');
-      return comparePreservationSnapshots(baseline.snapshot, capturePreservationSnapshot({ commandState: commandState ?? dormantCommandState, cliState, outputs }));
+      const result = comparePreservationSnapshots(baseline.snapshot, capturePreservationSnapshot({ commandState: commandState ?? dormantCommandState, cliState, outputs }));
+      if (result.status === 'PASS') lifecycle.markCompared(owner);
+      return result;
     },
   };
   const environmentEditor = createEnvironmentEditor({ lifecycle, audit, ...(environmentTransport ? { transport: environmentTransport } : {}) });

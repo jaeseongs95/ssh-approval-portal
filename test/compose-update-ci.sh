@@ -146,6 +146,9 @@ cat > "$RUNNER_TEMP/docker-wrapper/docker" <<'SH'
 #!/bin/bash
 set -euo pipefail
 args=("$@")
+if [[ "$FIXTURE_FAILURE" == compare-restart && "$*" == *'node scripts/maintenance.mjs release-verified'* ]]; then
+  /usr/bin/docker compose -p "$BRIDGE_COMPOSE_PROJECT" --env-file "$BRIDGE_COMPOSE_ENV_FILE" -f "$COMPOSE_FILE_PATH" up -d --no-build --force-recreate --wait --wait-timeout 90
+fi
 if [[ "$*" == *' up -d --no-build --wait '* ]]; then
   case "$FIXTURE_FAILURE" in
     start-before) exit 73 ;;
@@ -154,7 +157,7 @@ if [[ "$*" == *' up -d --no-build --wait '* ]]; then
   esac
 fi
 for ((i=0; i+2<${#args[@]}; i++)); do
-  if [[ "${args[i]}" == node && "${args[i+1]}" == scripts/maintenance.mjs && ( "${args[i+2]}" == "$FIXTURE_FAILURE" || ( "$FIXTURE_FAILURE" == release-before && "${args[i+2]}" == release ) ) ]]; then
+  if [[ "${args[i]}" == node && "${args[i+1]}" == scripts/maintenance.mjs && ( "${args[i+2]}" == "$FIXTURE_FAILURE" || ( ( "$FIXTURE_FAILURE" == release-before || "$FIXTURE_FAILURE" == release-restart || "$FIXTURE_FAILURE" == release ) && "${args[i+2]}" == release-verified ) ) ]]; then
     id=$(/usr/bin/docker ps -q --filter "label=com.docker.compose.project=$BRIDGE_COMPOSE_PROJECT" --filter 'label=com.docker.compose.service=bridge')
     [[ -n "$id" ]]
     /usr/bin/docker exec -i "$id" sh -c 'cat > /tmp/compose-response-loss.mjs' < "$RESPONSE_LOSS_FILE"
@@ -168,7 +171,7 @@ chmod 0755 "$RUNNER_TEMP/docker-wrapper/docker"
 health() {
   docker exec "$1" node --input-type=module -e 'import assert from "node:assert/strict"; const r=await fetch("http://127.0.0.1:39124/health"); assert.equal((await r.json()).maintenance,process.argv[1]==="true")' "$2"
 }
-for failure in capture start-before start-after release-before release; do
+for failure in capture start-before start-after release-before release release-restart compare-restart; do
   sudo /usr/bin/python3 -I scripts/compose-env.py image "$BRIDGE_COMPOSE_ENV_FILE" "$baseline"
   if [[ "$failure" == start-after ]]; then sudo cp -a -- "$BRIDGE_COMPOSE_ENV_FILE" "$RUNNER_TEMP/compose-before-recovery.env"; fi
   sudo env BRIDGE_IMAGE="$baseline" "${compose[@]}" up -d --no-build --force-recreate --wait --wait-timeout 90
@@ -176,7 +179,7 @@ for failure in capture start-before start-after release-before release; do
   err="$RUNNER_TEMP/compose-${failure}-err.txt"
   loss_file="$source_dir/test/compose-response-loss.mjs"
   [[ "$failure" != release-before ]] || loss_file="$source_dir/test/compose-response-before.mjs"
-  if sudo env PATH="$RUNNER_TEMP/docker-wrapper:$PATH" BRIDGE_COMPOSE_PROJECT="$project" BRIDGE_COMPOSE_ENV_FILE="$BRIDGE_COMPOSE_ENV_FILE" FIXTURE_FAILURE="$failure" RESPONSE_LOSS_FILE="$loss_file" bash scripts/compose-update.sh "$candidate" > "$RUNNER_TEMP/compose-${failure}-out.txt" 2> "$err"; then
+  if sudo env PATH="$RUNNER_TEMP/docker-wrapper:$PATH" BRIDGE_COMPOSE_PROJECT="$project" BRIDGE_COMPOSE_ENV_FILE="$BRIDGE_COMPOSE_ENV_FILE" FIXTURE_FAILURE="$failure" RESPONSE_LOSS_FILE="$loss_file" COMPOSE_FILE_PATH="$source_dir/docker/compose.yaml" bash scripts/compose-update.sh "$candidate" > "$RUNNER_TEMP/compose-${failure}-out.txt" 2> "$err"; then
     echo "Synthetic $failure failure was unexpectedly accepted" >&2; exit 1
   fi
   printf 'Synthetic case: %s\n' "$failure"
@@ -188,8 +191,8 @@ for failure in capture start-before start-after release-before release; do
   case "$failure" in
     capture|start-before) [[ "$new" == "$old" ]]; health "$new" true ;;
     start-after) [[ "$new" != "$old" ]]; health "$new" true; sudo grep -F "$baseline" "$BRIDGE_COMPOSE_ENV_FILE" ;;
-    release-before) [[ "$new" != "$old" ]]; health "$new" true ;;
-    release) [[ "$new" != "$old" ]]; health "$new" false ;;
+    release-before|compare-restart) [[ "$new" != "$old" ]]; health "$new" true ;;
+    release|release-restart) [[ "$new" != "$old" ]]; health "$new" false ;;
   esac
   if [[ "$failure" == start-after ]]; then
     alias_owner="$(dirname "$owner")/../$(basename "$(dirname "$owner")")/owner"
@@ -208,7 +211,19 @@ for failure in capture start-before start-after release-before release; do
     if sudo test -e "$owner"; then echo 'Owner retained after confirmed recovery' >&2; exit 1; fi
     continue
   fi
-  if [[ "$failure" == release || "$failure" == release-before ]]; then
+  if [[ "$failure" == release-restart ]]; then
+    sudo grep -F "$candidate_id" "$BRIDGE_COMPOSE_ENV_FILE"
+    sudo "${compose[@]}" up -d --no-build --force-recreate --wait --wait-timeout 90
+    restarted=$(sudo "${compose[@]}" ps -q bridge)
+    [[ "$restarted" != "$new" && $(docker inspect "$restarted" --format '{{.Image}}') == "$candidate_id" ]]
+    health "$restarted" false
+    if sudo bash scripts/compose-update.sh --recover "$owner"; then echo 'Recovery after an unverified restart was unexpectedly accepted' >&2; exit 1; fi
+    sudo test -f "$owner"
+    sudo rm -- "$(dirname "$owner")/compose-intent.json" "$owner"
+    sudo rmdir -- "$(dirname "$owner")"
+    continue
+  fi
+  if [[ "$failure" == release || "$failure" == release-before || "$failure" == compare-restart ]]; then
     sudo grep -F "$candidate_id" "$BRIDGE_COMPOSE_ENV_FILE"
     sudo cp -a -- "$BRIDGE_COMPOSE_ENV_FILE" "$RUNNER_TEMP/compose-candidate.env"
     printf '\n# unapproved fixture change\n' | sudo tee -a "$BRIDGE_COMPOSE_ENV_FILE" >/dev/null

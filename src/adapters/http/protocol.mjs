@@ -141,7 +141,7 @@ export function createProtocolAdapters({ queue, commands, files, store, lifecycl
       if (url.pathname === '/api/maintenance/capabilities') return json(res, 200, { ownership: 'durable-v1' });
       if (url.pathname === '/api/maintenance/reserve') { lifecycle.reserve(req.headers['x-maintenance-owner']); return json(res, 200, { reserved: true, ownership: 'durable-v1' }); }
       if (url.pathname === '/api/maintenance/status') return json(res, 200, { status: lifecycle.status(req.headers['x-maintenance-owner']), ownership: 'durable-v1' });
-      if (url.pathname === '/api/maintenance/release') { lifecycle.release(req.headers['x-maintenance-owner']); return json(res, 200, { released: true, ownership: 'durable-v1' }); }
+      if (url.pathname === '/api/maintenance/release') { const required = req.headers['x-maintenance-compare-required']; if (required !== undefined && required !== '1') throw Error('Invalid comparison requirement'); lifecycle.release(req.headers['x-maintenance-owner'], required === '1'); return json(res, 200, { released: true, ownership: 'durable-v1' }); }
       const action = /^\/api\/([a-f0-9]{48})\/(approve|deny|download)$/.exec(url.pathname);
       if (!action) return json(res, 404, { error: 'Not found' });
       if (action[2] === 'download') return json(res, 200, { downloadUrl: capabilities.downloadLink(queue.get(action[1])) });

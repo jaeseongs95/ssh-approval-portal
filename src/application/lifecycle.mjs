@@ -4,7 +4,7 @@
  * @param {{queue:import('../domain/approval-queue.mjs').ApprovalQueue, store:{hasActiveWork:()=>boolean}, commands:{busy:()=>boolean}, files:{busy:()=>boolean,reap:()=>Promise<void>,close:()=>Promise<void>},closeConnections:()=>Promise<void>,onReap?:()=>void}} ports
  */
 export function createLifecycleService({ queue, store, commands, files, closeConnections, maintenanceState, onReap = () => {} }) {
-  let closing;
+  let closing, releasedInInstance = false, comparedInInstance = false;
   if (maintenanceState?.occupied()) queue.maintenance = true;
   return {
     snapshot() { return { busy: queue.busy() || commands.busy(), pending: queue.list().length, maintenance: queue.maintenance }; },
@@ -12,18 +12,20 @@ export function createLifecycleService({ queue, store, commands, files, closeCon
       if (maintenanceState?.occupied()) { if (maintenanceState.owns(owner)) return; throw Error('Maintenance is reserved'); }
       if (commands.busy() || files.busy() || store.hasActiveWork()) throw Error('Transfer or read in progress');
       queue.reserveMaintenance();
-      try { maintenanceState?.reserve(owner); } catch (error) { queue.releaseMaintenance(); throw error; }
+      try { maintenanceState?.reserve(owner); releasedInInstance = false; comparedInInstance = false; } catch (error) { queue.releaseMaintenance(); throw error; }
     },
     status(owner) {
       const state = maintenanceState?.status(owner) ?? 'unknown';
-      return (state === 'released' && queue.maintenance) || (state === 'reserved' && !queue.maintenance) ? 'unknown' : state;
+      return (state === 'released' && (queue.maintenance || !releasedInInstance)) || (state === 'reserved' && !queue.maintenance) ? 'unknown' : state;
     },
-    release(owner) {
-      if (maintenanceState?.status(owner) === 'released' && !queue.maintenance) return;
+    markCompared(owner) { if (!maintenanceState?.owns(owner) || !queue.maintenance) throw Error('Maintenance ownership mismatch'); comparedInInstance = true; },
+    release(owner, requireCompare = false) {
+      if (requireCompare && !comparedInInstance) throw Error('Current instance has no verified preservation comparison');
+      if (maintenanceState?.status(owner) === 'released' && !queue.maintenance && releasedInInstance) return;
       if (maintenanceState && !maintenanceState.owns(owner)) throw Error('Maintenance ownership mismatch');
       // Audit first: if audit fails, the durable claim remains and admission stays closed.
       queue.releaseMaintenance();
-      try { maintenanceState?.release(owner); } catch (error) { queue.maintenance = true; throw error; }
+      try { maintenanceState?.release(owner); releasedInInstance = true; } catch (error) { queue.maintenance = true; throw error; }
     },
     async reap() {
       // A failing expiry audit must not prevent independent staging/capability cleanup.

@@ -79,7 +79,7 @@ if [[ "$mode" == recover ]]; then
       /usr/bin/python3 -I "$source_dir/scripts/compose-env.py" image "$env_file" "$candidate" || { echo 'Image configuration update failed; maintenance retained.' >&2; exit 1; }
     fi
     [[ $(env_fingerprint) == "$saved_after_env" ]] || { echo 'Candidate configuration mismatch; maintenance retained.' >&2; exit 1; }
-    maintenance release || { echo 'Recovery release failed or is unknown; retain owner and binding.' >&2; exit 1; }
+    maintenance release-verified || { echo 'Recovery release failed or is unknown; retain owner and binding.' >&2; exit 1; }
   elif [[ "$state" == released && "$before_env" == "$saved_after_env" ]]; then
     [[ $(env_fingerprint) == "$saved_after_env" ]] || { echo 'Compose configuration changed; retain owner and binding.' >&2; exit 1; }
   else
@@ -118,7 +118,7 @@ maintenance compare || { echo 'Post-restart preservation incomplete; maintenance
 [[ $(env_fingerprint) == "$before_env" ]] || { echo 'Compose configuration changed; maintenance retained.' >&2; exit 1; }
 /usr/bin/python3 -I "$source_dir/scripts/compose-env.py" image "$env_file" "$candidate" || { echo 'Image configuration update failed; maintenance retained.' >&2; exit 1; }
 [[ $(env_fingerprint) == "$after_env" ]] || { echo 'Candidate configuration mismatch; maintenance retained.' >&2; exit 1; }
-maintenance release || { echo 'Maintenance release failed or is unknown; retain owner for recovery.' >&2; exit 1; }
+maintenance release-verified || { echo 'Maintenance release failed or is unknown; retain owner for recovery.' >&2; exit 1; }
 rm -f -- "$maintenance_owner_dir/compose-intent.json"
 maintenance_forget_owner
 echo "Compose update verified: $candidate; previous image: $old_image"
