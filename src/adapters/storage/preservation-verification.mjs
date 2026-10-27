@@ -85,5 +85,6 @@ export function comparePreservationSnapshots(before, after) {
     else report.outputPayloadsVerified++;
     report.outputsChecked++;
   }
+  if (report.outputsUnavailable || report.expiredOutputsRemoved) report.status = 'PARTIAL';
   return report;
 }

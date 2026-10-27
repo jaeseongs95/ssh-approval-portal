@@ -43,6 +43,7 @@ test('real journals compare old rows and payload after restart, allowing expiry 
   assert.throws(() => comparePreservationSnapshots(before, capture()), /output changed/i);
   clock = 1101; outputs.reap(); after = capture();
   assert.equal(comparePreservationSnapshots(before, after).expiredOutputsRemoved, 1);
+  assert.equal(comparePreservationSnapshots(before, after).status, 'PARTIAL');
   const pending = outputs.reserve({executionId:id});
   assert.throws(() => capture(), /Pending or invalid output/);
   outputs.abandon(pending);
