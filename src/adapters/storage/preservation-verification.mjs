@@ -63,7 +63,7 @@ export function capturePreservationSnapshot({commandState, cliState, outputs, no
 /** Strictly compare old rows; new rows are counted, never treated as old data. */
 export function comparePreservationSnapshots(before, after) {
   if (before?.version !== 1 || after?.version !== 1 || !Number.isSafeInteger(before.observedAt) || !Number.isSafeInteger(after.observedAt) || after.observedAt < before.observedAt) throw Error('Invalid preservation snapshots');
-  const report = {status: 'PASS', commandRequestsChecked: 0, cliRequestsChecked: 0, outputsChecked: 0, expiredOutputsRemoved: 0};
+  const report = {status: 'PASS', commandRequestsChecked: 0, cliRequestsChecked: 0, outputsChecked: 0, outputPayloadsVerified: 0, outputsUnavailable: 0, expiredOutputsRemoved: 0};
   for (const [name, counter] of [['command', 'commandRequestsChecked'], ['cli', 'cliRequestsChecked']]) {
     const old = before[name], current = after[name];
     if (Boolean(old) !== Boolean(current)) throw Error('Journal presence changed');
@@ -81,6 +81,8 @@ export function comparePreservationSnapshots(before, after) {
       if (old.expiresAt > after.observedAt) throw Error('Unexpired output missing');
       report.expiredOutputsRemoved++;
     } else if (old.row !== current.row || old.payload !== current.payload || old.expiresAt !== current.expiresAt) throw Error('Existing output changed');
+    else if (old.payload === null) report.outputsUnavailable++;
+    else report.outputPayloadsVerified++;
     report.outputsChecked++;
   }
   return report;

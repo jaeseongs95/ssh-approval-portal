@@ -24,7 +24,7 @@ test('real journals compare old rows and payload after restart, allowing expiry 
   commandState.close(); cliState.close(); outputs.close();
   commandState = createCommandState(root); cliState = createAgentCliState(root); outputs = new CommandOutputs(root, options);
   let after = capture();
-  assert.deepEqual(comparePreservationSnapshots(before, after), {status:'PASS', commandRequestsChecked:1, cliRequestsChecked:1, outputsChecked:1, expiredOutputsRemoved:0});
+  assert.deepEqual(comparePreservationSnapshots(before, after), {status:'PASS', commandRequestsChecked:1, cliRequestsChecked:1, outputsChecked:1, outputPayloadsVerified:1, outputsUnavailable:0, expiredOutputsRemoved:0});
   assert.ok(!JSON.stringify(comparePreservationSnapshots(before, after)).includes('private output'));
   commandState.insert({...job,id:'e'.repeat(48)}, 'new-request-key', 'f'.repeat(64));
   after = capture(); assert.equal(comparePreservationSnapshots(before, after).status, 'PASS');
