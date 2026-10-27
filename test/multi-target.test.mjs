@@ -27,7 +27,7 @@ async function fixture(options={}) {
   const client=new Client({name:'multi-fixture',version:'1'});
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${app.mcpHttp.address().port}/mcp`),{requestInit:{headers:{Authorization:'Bearer fixture-mcp'}}}));
   return {root,app,client,calls,events,profiles,web,get closed(){return closed;},call:(name,args={})=>client.callTool({name,arguments:args}),
-    http:(path,method='GET')=>fetch(web+path,{method,headers:{Authorization:'Bearer fixture-admin',Origin:'https://admin.example.test'}}),
+    http:(path,method='GET')=>fetch(web+path,{method,headers:{Authorization:'Bearer fixture-admin',Origin:'https://admin.example.test','X-Maintenance-Owner':'a'.repeat(64)}}),
     async close(){await client.close();await app.close();await rm(root,{recursive:true});}};
 }
 const transfer=target=>({target,direction:'upload',remotePath:'/tmp/same.bin',elevate:false,overwrite:false});
@@ -69,7 +69,7 @@ test('file bootstrap, staged bytes, approval tickets and cleanup remain target-o
    const runtime=f.app.targets.select(id);runtime.transfers.upload=async op=>{const fd=await runtime.store.verified(op.artifactId);try{const chunks=[];for await(const chunk of fd.createReadStream({start:0,autoClose:false}))chunks.push(chunk);assert.deepEqual(Buffer.concat(chunks),bytes);}finally{await fd.close();}f.calls.push({profile:id+'-upload',artifactId:op.artifactId});return {failed:false,texts:['uploaded']};};
    await f.call('ui-decide-request',{id:job.structuredContent.id,action:'approve',ticket:job._meta.sshApproval.approvalTicket});await f.app.queue.wait(job.structuredContent.id);
   }
-  assert.deepEqual(f.calls.map(x=>x.artifactId),[a.id,b.id]);await f.app.store.reap();assert.equal(f.app.store.reserved,0);assert.deepEqual(await readdir(f.root),['command-outputs']);
+  assert.deepEqual(f.calls.map(x=>x.artifactId),[a.id,b.id]);await f.app.store.reap();assert.equal(f.app.store.reserved,0);assert.deepEqual((await readdir(f.root)).filter(name=>!name.startsWith('maintenance.sqlite')),['command-outputs']);
   const reserve=target=>f.app.targets.files.beginUpload({target,fileName:'quota.bin',remotePath:'/tmp/quota.bin',size:64,sha256,overwrite:false,elevate:false});
   const first=await reserve('alpha'),second=await reserve('beta');assert.equal(f.app.store.reserved,128);
   await assert.rejects(reserve('gamma'));assert.equal(f.app.store.size,2);

@@ -3,15 +3,23 @@
  * files.close aborts and drains imports; closeTransports stops accepting HTTP work.
  * @param {{queue:import('../domain/approval-queue.mjs').ApprovalQueue, store:{hasActiveWork:()=>boolean}, commands:{busy:()=>boolean}, files:{busy:()=>boolean,reap:()=>Promise<void>,close:()=>Promise<void>},closeConnections:()=>Promise<void>,onReap?:()=>void}} ports
  */
-export function createLifecycleService({ queue, store, commands, files, closeConnections, onReap = () => {} }) {
+export function createLifecycleService({ queue, store, commands, files, closeConnections, maintenanceState, onReap = () => {} }) {
   let closing;
+  if (maintenanceState?.occupied()) queue.maintenance = true;
   return {
     snapshot() { return { busy: queue.busy() || commands.busy(), pending: queue.list().length, maintenance: queue.maintenance }; },
-    reserve() {
+    reserve(owner) {
+      if (maintenanceState?.occupied()) { if (maintenanceState.owns(owner)) return; throw Error('Maintenance is reserved'); }
       if (commands.busy() || files.busy() || store.hasActiveWork()) throw Error('Transfer or read in progress');
       queue.reserveMaintenance();
+      try { maintenanceState?.reserve(owner); } catch (error) { queue.releaseMaintenance(); throw error; }
     },
-    release() { queue.releaseMaintenance(); },
+    release(owner) {
+      if (maintenanceState && !maintenanceState.owns(owner)) throw Error('Maintenance ownership mismatch');
+      // Audit first: if audit fails, the durable claim remains and admission stays closed.
+      queue.releaseMaintenance();
+      try { maintenanceState?.release(owner); } catch (error) { queue.maintenance = true; throw error; }
+    },
     async reap() {
       // A failing expiry audit must not prevent independent staging/capability cleanup.
       try { queue.reap(); } finally { try { await files.reap(); } finally { onReap(); } }

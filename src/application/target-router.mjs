@@ -66,7 +66,7 @@ export function createTargetRouter(runtimes, { defaultTarget, legacy, store, aud
     busy: () => runtimes.some(runtime => runtime.queue.busy()),
     reap() { let failure; for (const runtime of runtimes) { try { runtime.queue.reap(); } catch (error) { failure ??= error; } } if (failure) throw failure; },
     reserveMaintenance() {
-      if (maintenance || runtimes.some(runtime => runtime.commands.busy() || runtime.files.busy() || runtime.queue.busy() || runtime.queue.list().length) || store.hasActiveWork()) throw Error('All targets must finish before maintenance');
+      if (maintenance || runtimes.some(runtime => runtime.commands.busy() || runtime.files.busy() || runtime.queue.busy() || runtime.queue.listAll().some(job => ['pending', 'evaluating'].includes(job.state))) || store.hasActiveWork()) throw Error('All targets must finish before maintenance');
       audit({ action: 'maintenance-reserved' }); queue.maintenance = true;
     },
     releaseMaintenance() { audit({ action: 'maintenance-released' }); queue.maintenance = false; },

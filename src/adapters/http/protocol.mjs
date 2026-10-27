@@ -11,7 +11,7 @@ const json = (res, status, value) => { res.writeHead(status, { 'Content-Type': '
 
 const escapeHtml = value => value.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
 
-export function createProtocolAdapters({ queue, commands, files, store, lifecycle, settings, signer, adminAccess, browserSessions, authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal, targets, requestSafety, commandPolicy, commandOutputs, automationMetrics, environmentEditor,agentCli }) {
+export function createProtocolAdapters({ queue, commands, files, store, lifecycle, settings, signer, adminAccess, browserSessions, authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal, targets, requestSafety, commandPolicy, commandOutputs, automationMetrics, environmentEditor,agentCli, preservation }) {
   const capabilities = createCapabilities({ queue, store, signer, settings, targets, adminAuthMode: adminAccess.mode });
   const mcpServer = createMcpAdapter({ queue, commands, files, settings, capabilities, uiHtml, bindFileSource, shutdownSignal, targets, requestSafety, commandOutputs });
   const mcpHttp = createServer(async (req, res) => {
@@ -106,10 +106,12 @@ export function createProtocolAdapters({ queue, commands, files, store, lifecycl
       if (['/api/command-policy', '/api/command-policy/review'].includes(url.pathname) && commandPolicy) {
         if (req.method === 'GET' && url.pathname === '/api/command-policy') return json(res, 200, await commandPolicy.get());
         if (req.method === 'POST') {
+          if (queue.maintenance) throw Error('Maintenance in progress');
           const chunks = []; let size = 0;
           for await (const chunk of req) { size += chunk.length; if (size > 65536) throw Error('Policy too large'); chunks.push(chunk); }
           const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
           if (url.pathname.endsWith('/review')) return json(res, 200, await commandPolicy.review(body.policy, body.expectedRevision));
+          if (queue.maintenance) throw Error('Maintenance in progress');
           return json(res, 200, commandPolicy.set(body.policy, body.expectedRevision, body.reviewToken, body.acknowledged));
         }
       }
@@ -134,8 +136,11 @@ export function createProtocolAdapters({ queue, commands, files, store, lifecycl
       if (req.method === 'GET' && url.pathname === '/api/requests') return json(res, 200, visible(queue.listAll()).map(presentJob));
       const single = /^\/api\/([a-f0-9]{48})$/.exec(url.pathname);
       if (req.method === 'GET' && single) { const job = queue.get(single[1]); return json(res, 200, job ? presentJob(job) : { error: 'Unknown request' }); }
-      if (url.pathname === '/api/maintenance/reserve') { lifecycle.reserve(); return json(res, 200, { reserved: true }); }
-      if (url.pathname === '/api/maintenance/release') { lifecycle.release(); return json(res, 200, { released: true }); }
+      if (url.pathname === '/api/maintenance/preservation/capture') { preservation.capture(req.headers['x-maintenance-owner']); return json(res, 200, { captured: true, ownership: 'durable-v1' }); }
+      if (url.pathname === '/api/maintenance/preservation/compare') return json(res, 200, { ...preservation.compare(req.headers['x-maintenance-owner']), ownership: 'durable-v1' });
+      if (url.pathname === '/api/maintenance/capabilities') return json(res, 200, { ownership: 'durable-v1' });
+      if (url.pathname === '/api/maintenance/reserve') { lifecycle.reserve(req.headers['x-maintenance-owner']); return json(res, 200, { reserved: true, ownership: 'durable-v1' }); }
+      if (url.pathname === '/api/maintenance/release') { lifecycle.release(req.headers['x-maintenance-owner']); return json(res, 200, { released: true, ownership: 'durable-v1' }); }
       const action = /^\/api\/([a-f0-9]{48})\/(approve|deny|download)$/.exec(url.pathname);
       if (!action) return json(res, 404, { error: 'Not found' });
       if (action[2] === 'download') return json(res, 200, { downloadUrl: capabilities.downloadLink(queue.get(action[1])) });

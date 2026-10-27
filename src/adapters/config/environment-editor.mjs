@@ -1,4 +1,5 @@
 import { createConnection } from 'node:net';
+import { randomBytes } from 'node:crypto';
 
 const messages = {
   conflict: '서버 ENV가 변경됐습니다. 현재 설정을 다시 불러온 뒤 수정해 주세요.',
@@ -45,12 +46,13 @@ export function createEnvironmentEditor({ lifecycle, audit, transport = environm
       const state = lifecycle.snapshot();
       if (state.busy || state.pending || state.maintenance) throw refusal('실행 중·승인 대기 요청 또는 유지보수가 있습니다. 모두 종료한 뒤 다시 시도해 주세요.');
       mutating = true; let reserved = false;
+      const owner = randomBytes(32).toString('hex');
       try {
-        try { lifecycle.reserve(); reserved = true; } catch { throw refusal('진행 중인 요청이나 전송이 있습니다. 모두 종료한 뒤 다시 시도해 주세요.'); }
+        try { lifecycle.reserve(owner); reserved = true; } catch { throw refusal('진행 중인 요청이나 전송이 있습니다. 모두 종료한 뒤 다시 시도해 주세요.'); }
         // Record only setting names. Never audit input values, revisions or exception strings.
         try { audit({ action: 'environment-' + action + '-requested', changedFields: action === 'save' ? Object.keys(body.changes ?? {}).length : 0 }); }
         catch { throw refusal('감사 기록을 저장하지 못해 ENV 작업을 시작하지 않았습니다.'); }
-        const result = await call({ action, ...body });
+        const result = await call({ action, ...body, ...(action === 'restart' ? { maintenanceOwner: owner } : {}) });
         try { audit({ action: 'environment-' + action + '-accepted' }); } catch { result.auditWarning = true; }
         // Restart remains reserved until the root timer replaces this process.
         if (action === 'restart' && result.accepted) reserved = false;
@@ -60,7 +62,7 @@ export function createEnvironmentEditor({ lifecycle, audit, transport = environm
         // Keep maintenance until process replacement; never admit competing SSH work.
         if (action === 'restart' && reserved && !error.refused) reserved = false;
         throw error;
-      } finally { if (reserved) lifecycle.release(); mutating = false; }
+      } finally { if (reserved) lifecycle.release(owner); mutating = false; }
     },
   };
 }

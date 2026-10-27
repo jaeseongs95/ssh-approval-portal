@@ -49,7 +49,7 @@ for(const mode of ['access','oidc'])test(mode+' web requires signed owner, cooki
     await app.store.remove(artifact.id);
     const maintenance=url+'/api/maintenance/';
     assert.equal((await fetch(maintenance+'reserve',{method:'POST',headers:owner})).status,401);
-    const server={Authorization:'Bearer fixture-admin',Origin:origin};
+    const server={Authorization:'Bearer fixture-admin',Origin:origin,'X-Maintenance-Owner':'a'.repeat(64)};
     assert.equal((await fetch(maintenance+'reserve',{method:'POST',headers:server})).status,200);
     assert.equal((await fetch(maintenance+'release',{method:'POST',headers:server})).status,200);
   }finally{await app.close();await rm(root,{recursive:true});}

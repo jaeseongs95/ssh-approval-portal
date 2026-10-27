@@ -22,6 +22,8 @@ import { createSecretService } from './src/application/secret-service.mjs';
 import { createLocalSecretStore } from './src/adapters/secrets/local-file.mjs';
 import { createVaultSecretStore } from './src/adapters/secrets/vault-kv.mjs';
 import { createCommandState } from './src/adapters/storage/command-state.mjs';
+import { createMaintenanceState } from './src/adapters/storage/maintenance-state.mjs';
+import { capturePreservationSnapshot, comparePreservationSnapshots } from './src/adapters/storage/preservation-verification.mjs';
 import { createCommandAutomation } from './src/application/command-automation.mjs';
 import { AUTOMATION_QUESTION, AUTOMATION_QUESTION_VERSION, COMMAND_SET_QUESTION, deniedCommand } from './src/domain/command-policy.mjs';
 import { createCommandPolicyReview } from './src/application/command-policy-review.mjs';
@@ -56,7 +58,7 @@ export async function createApplication({ registry, classify, executeCommand, ex
   const store = new Artifacts(transferRoot, { maxBytes: settings.maxBytes, budget: settings.budget });
   await store.init();
   const outputs = new CommandOutputs(transferRoot);
-  let commandState, cliState;
+  let commandState, cliState, maintenanceState;
   try {
   let risk = riskAssessor, apiKey;
   if (settings.jevEnabled) {
@@ -240,8 +242,22 @@ export async function createApplication({ registry, classify, executeCommand, ex
   const requestSafety = createRequestSafety({ queue, maxCalls: settings.jevMaxCalls,
     assessor: settings.jevEnabled ? risk : undefined });
   let protocols;
-  const lifecycle = createLifecycleService({ queue, store, commands, files, closeConnections: async () => { await targets.drain(); await registry.closeAll(); },
+  maintenanceState = createMaintenanceState(transferRoot);
+  const lifecycle = createLifecycleService({ queue, store, commands, files, maintenanceState, closeConnections: async () => { await targets.drain(); await registry.closeAll(); },
     onReap: () => { protocols?.reapCapabilities(); void modelCatalog.refreshDue(); } });
+  const preservationInstance = randomBytes(32).toString('hex');
+  const preservation = {
+    capture(owner) {
+      if (!maintenanceState.owns(owner) || !queue.maintenance || queue.busy() || queue.listAll().some(job => ['pending', 'evaluating', 'running'].includes(job.state)) || commands.busy() || files.busy() || store.hasActiveWork()) throw Error('Preservation boundary unavailable');
+      maintenanceState.saveBaseline(owner, { instance: preservationInstance, snapshot: capturePreservationSnapshot({ commandState, cliState, outputs }) });
+    },
+    compare(owner) {
+      if (!maintenanceState.owns(owner) || !queue.maintenance || queue.busy() || queue.listAll().some(job => ['pending', 'evaluating', 'running'].includes(job.state)) || commands.busy() || files.busy() || store.hasActiveWork()) throw Error('Preservation boundary unavailable');
+      const baseline = maintenanceState.baseline(owner);
+      if (baseline.instance === preservationInstance) throw Error('A new service instance is required');
+      return comparePreservationSnapshots(baseline.snapshot, capturePreservationSnapshot({ commandState, cliState, outputs }));
+    },
+  };
   const environmentEditor = createEnvironmentEditor({ lifecycle, audit, ...(environmentTransport ? { transport: environmentTransport } : {}) });
   const shutdown = new AbortController();
   const [webHtml, webJs] = await Promise.all([
@@ -249,7 +265,7 @@ export async function createApplication({ registry, classify, executeCommand, ex
     readFile(new URL('./web/dist/app.js', import.meta.url), 'utf8'),
   ]);
   protocols = createProtocolAdapters({ queue, commands, files, store, lifecycle, settings, signer, adminAccess, browserSessions, targets, requestSafety,
-    authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal: shutdown.signal, commandPolicy, commandOutputs, environmentEditor,agentCli, automationMetrics: createAutomationMetrics({state:commandState}) });
+    authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal: shutdown.signal, commandPolicy, commandOutputs, environmentEditor,agentCli, preservation, automationMetrics: createAutomationMetrics({state:commandState}) });
   const timer = setInterval(() => { lifecycle.reap().catch(() => {}); try { outputs.reap(); } catch { /* Failed deletions stay charged. */ } }, 30_000); timer.unref();
   let closing;
   return { ...protocols, queue, store, targets, transfers: runtimes[0].transfers, enabled: settings.uiEnabled,
@@ -259,8 +275,8 @@ export async function createApplication({ registry, classify, executeCommand, ex
         // Drain normal responses, then close unfinished HTTP bodies before systemd times out.
         const deadline = setTimeout(() => server.closeAllConnections(), 5000); deadline.unref();
         server.close(() => { clearTimeout(deadline); resolve(); });
-      })))).finally(() => { browserSessions?.close(); for (const runtime of runtimes) {runtime.commands.close();runtime.cli?.close();} commandState?.close();cliState?.close(); outputs.close(); });
+      })))).finally(() => { browserSessions?.close(); for (const runtime of runtimes) {runtime.commands.close();runtime.cli?.close();} commandState?.close();cliState?.close(); maintenanceState?.close(); outputs.close(); });
     },
   };
-  } catch (error) { browserSessions?.close(); commandState?.close();cliState?.close(); outputs.close(); throw error; }
+  } catch (error) { browserSessions?.close(); commandState?.close();cliState?.close(); maintenanceState?.close(); outputs.close(); throw error; }
 }

@@ -15,19 +15,22 @@ test('maintenance atomically excludes pending/running jobs and blocks new execut
   });
   await new Promise(resolve => app.adminHttp.listen(0, '127.0.0.1', resolve));
   const endpoint = `http://127.0.0.1:${app.adminHttp.address().port}/api/maintenance/`;
-  const post = action => fetch(endpoint + action, { method: 'POST', headers: { Authorization: 'Bearer test-admin', Origin: 'https://example.test' } });
+  const post = (action, owner = 'a'.repeat(64)) => fetch(endpoint + action, { method: 'POST', headers: { Authorization: 'Bearer test-admin', Origin: 'https://example.test', 'X-Maintenance-Owner': owner } });
   try {
     const job = app.queue.submit('sudo id');
     assert.equal((await post('reserve')).status, 409);
     app.queue.start(job.id);
     assert.equal((await post('reserve')).status, 409);
     complete({ content: [{ type: 'text', text: 'done' }] }); await app.queue.wait(job.id);
-    const reservations = await Promise.all([post('reserve'), post('reserve')]);
+    const reservations = await Promise.all([post('reserve'), post('reserve', 'b'.repeat(64))]);
     assert.deepEqual(reservations.map(x => x.status).sort(), [200, 409]);
     assert.throws(() => app.queue.submit('sudo new'));
     assert.throws(() => app.queue.submitOperation({ kind: 'download', remotePath: '/tmp/x', elevate: false }));
     assert.equal(app.queue.maintenance, true);
-    assert.equal((await post('release')).status, 200);
+    const winner = reservations[0].status === 200 ? 'a'.repeat(64) : 'b'.repeat(64);
+    const loser = winner === 'a'.repeat(64) ? 'b'.repeat(64) : 'a'.repeat(64);
+    assert.equal((await post('release', loser)).status, 409);
+    assert.equal((await post('release', winner)).status, 200);
     const staged = await app.store.begin({ fileName: 'x', remotePath: '/tmp/x', size: 0, sha256: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855' });
     assert.equal((await post('reserve')).status, 409, 'An incomplete upload must survive until completed/expired');
     await app.store.remove(staged.id);
