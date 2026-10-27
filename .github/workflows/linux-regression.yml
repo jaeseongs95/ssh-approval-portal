@@ -100,7 +100,9 @@ jobs:
           cp -a node_modules "$old/node_modules"
           git fetch --no-tags --depth=1 origin fc6aa226c315f4c91da6a6574023811109810f0b
           git archive fc6aa226c315f4c91da6a6574023811109810f0b | tar -x -C "$candidate"
+          cp "$candidate/release-manifest.json" "$candidate.before.json"
           (cd "$candidate" && python3 scripts/package.py)
+          diff -u "$candidate.before.json" "$candidate/release-manifest.json" || true
           echo 'd0e235277f213e747f35f7dc0a0f11f4f545c13a50d3be3421c7a9371352ed7b  '"$candidate"'/release-manifest.json' | sha256sum -c -
           package="$candidate/dist/ssh-approval-portal-1.6.2.tar.gz"
           node_path=$(command -v node)
