@@ -9,9 +9,29 @@
       "sha256": "737d7e220630fecc51f5937bedd9cd360554a21d94030b9ac07dbc451f2b567a"
     },
     {
+      "path": "LICENSE",
+      "size": 1089,
+      "sha256": "a41bf0e7f66598a74481580ba6082b84c928e2464b8c0b6c08fd41450e17eb04"
+    },
+    {
+      "path": "README.ko.md",
+      "size": 20261,
+      "sha256": "accbc4a979a2a2244ba282114d73c7c37059f0af0568111db90a743fb41615d5"
+    },
+    {
+      "path": "README.md",
+      "size": 18635,
+      "sha256": "7207e2c10ed8d31e7c76bd5d6b5f90acc6f4492de946c42f827734dcbeb2a363"
+    },
+    {
+      "path": "THIRD_PARTY_NOTICES.json",
+      "size": 706505,
+      "sha256": "de4ac54ef13f16f1a2f9c8106a16676beaf3422d38c3e1938b27183488318929"
+    },
+    {
       "path": "app.mjs",
-      "size": 23635,
-      "sha256": "222c9b996c1b812fcd761119e883669d7a5f6e06557491cc28bac3be80432ad1"
+      "size": 23731,
+      "sha256": "b32031ebad9a09f6e685778f3f24bdeec52e5c2bdd6c7ccd00a5364bb1888b05"
     },
     {
       "path": "bridge.mjs",
@@ -64,14 +84,14 @@
       "sha256": "1e23be79add0dc6890b19c4d32b055c1a500510f076e069d5caf54c47cee0f10"
     },
     {
-      "path": "docker/compose.yaml",
-      "size": 1128,
-      "sha256": "623ccf8b22db0b5c8bc7a54fbb8085524ea774b1bf8b7b35d2aba2a70fc39187"
-    },
-    {
       "path": "docker/Dockerfile",
       "size": 1594,
       "sha256": "6abc7217d793a4c652e14e3b29bf62e209c753bc13b89afde9d7caf95c263333"
+    },
+    {
+      "path": "docker/compose.yaml",
+      "size": 1128,
+      "sha256": "623ccf8b22db0b5c8bc7a54fbb8085524ea774b1bf8b7b35d2aba2a70fc39187"
     },
     {
       "path": "docs/admin-login.en.md",
@@ -165,8 +185,8 @@
     },
     {
       "path": "docs/maintenance-test-and-recovery.ko.md",
-      "size": 8886,
-      "sha256": "9c68eff46b40ee587b94f42e851126b886b2147b7fc236689516d17853abe0e2"
+      "size": 9096,
+      "sha256": "4ccf805446caac77998ec11ac32b192182702d6c99b0d3ee3fc94d900d948470"
     },
     {
       "path": "docs/multi-targets.ko.md",
@@ -204,11 +224,6 @@
       "sha256": "dd5844be42f9b11e24b56327f4407ef3702d38f00f53f3f211490dea78ff2a2d"
     },
     {
-      "path": "LICENSE",
-      "size": 1089,
-      "sha256": "a41bf0e7f66598a74481580ba6082b84c928e2464b8c0b6c08fd41450e17eb04"
-    },
-    {
       "path": "package-lock.json",
       "size": 100104,
       "sha256": "301675dafad519a19ed036919d1ef8e68dff3971df01fb379b9c35191b9836d8"
@@ -217,16 +232,6 @@
       "path": "package.json",
       "size": 740,
       "sha256": "3bb56b9ccaa414c1f72e44087cb79ba8c4725a7341e7cd31329d049a1c458726"
-    },
-    {
-      "path": "README.ko.md",
-      "size": 20261,
-      "sha256": "accbc4a979a2a2244ba282114d73c7c37059f0af0568111db90a743fb41615d5"
-    },
-    {
-      "path": "README.md",
-      "size": 18635,
-      "sha256": "7207e2c10ed8d31e7c76bd5d6b5f90acc6f4492de946c42f827734dcbeb2a363"
     },
     {
       "path": "scripts/admin-access-config.mjs",
@@ -290,8 +295,8 @@
     },
     {
       "path": "scripts/compose-update.sh",
-      "size": 14153,
-      "sha256": "e48913fe6e084fe6439cb810d2530fb675e7aa6b0b32b53eeefc172159c82f1a"
+      "size": 14171,
+      "sha256": "fc6a05a83c3c6f46298c64695978182d8fa11d9ae55d9c4fafddca1ce51caf5b"
     },
     {
       "path": "scripts/configure-admin-access.sh",
@@ -375,8 +380,8 @@
     },
     {
       "path": "scripts/maintenance.mjs",
-      "size": 2942,
-      "sha256": "462b89cdb4e2b2eaf757be80cc3328e9aacd7d7f1264f89321c50d72f64d0769"
+      "size": 3124,
+      "sha256": "b54acb38b89c777e5752aa4bc00d7df4fc913b68ca331076ddfb504c50b28d77"
     },
     {
       "path": "scripts/manage-agent-cli.py",
@@ -400,8 +405,8 @@
     },
     {
       "path": "scripts/package.py",
-      "size": 5388,
-      "sha256": "316b3d4c4da35edc43a92ce7571f9a0b744bc2d77c4f6f5c12b3e1372b87fd47"
+      "size": 5726,
+      "sha256": "d46015a53a6157d85cfa99e9dc4b11194291eea9f0495186b5f61b58af8c7ae0"
     },
     {
       "path": "scripts/portal-client.mjs",
@@ -535,8 +540,8 @@
     },
     {
       "path": "src/adapters/http/protocol.mjs",
-      "size": 15818,
-      "sha256": "a8957480563527acdce62c20624d5d0c6a75eef15013a440c1ff80c508531779"
+      "size": 15995,
+      "sha256": "7068b2f5410687d3c140011dda28f4d8e9beeb9186e60d35ac15f82ae4c52d6e"
     },
     {
       "path": "src/adapters/mcp/server.mjs",
@@ -705,8 +710,8 @@
     },
     {
       "path": "src/application/lifecycle.mjs",
-      "size": 2368,
-      "sha256": "7406a3cb1cdc03d708421da0d6e382095f7cfb59d1d9562744bc269fba9c13d8"
+      "size": 2884,
+      "sha256": "c3be1c43f32e7b3a77ff36f8e14b9a3156a895842b9812a3848509ed69b49ebb"
     },
     {
       "path": "src/application/model-catalog.mjs",
@@ -787,6 +792,16 @@
       "path": "src/domain/validation.mjs",
       "size": 1173,
       "sha256": "11bb2f623214689ab16f37eb5474b9b00e2eccd7403dcd5120376987cb475198"
+    },
+    {
+      "path": "test/Dockerfile",
+      "size": 684,
+      "sha256": "747bc9928dcf917acb566752969e8dde7ac8d2df02ac06d5cec10f349ab8a636"
+    },
+    {
+      "path": "test/PLAN.md",
+      "size": 10156,
+      "sha256": "066861a69bf8e9e5f88c3ff2b3c1b9eb8b0a58d95a569502fb6847b84d008b32"
     },
     {
       "path": "test/admin-access-http.test.mjs",
@@ -1060,8 +1075,8 @@
     },
     {
       "path": "test/compose-update-ci.sh",
-      "size": 17468,
-      "sha256": "1d4c61915cd22cdc86b028fac6cd2ff634d3fc7b3af6a1a7ad4ea824295b9727"
+      "size": 18681,
+      "sha256": "6bc1266867eaf103af1901a273fc9ac13260b1de20dc13cd7520c88e9cfd8fa0"
     },
     {
       "path": "test/config-contracts.test.mjs",
@@ -1097,11 +1112,6 @@
       "path": "test/docker-tests.ps1",
       "size": 2709,
       "sha256": "e17611e25a2aa718534134838b9b4324dd41e1a7c5f94e49aa427211d991c9a2"
-    },
-    {
-      "path": "test/Dockerfile",
-      "size": 684,
-      "sha256": "747bc9928dcf917acb566752969e8dde7ac8d2df02ac06d5cec10f349ab8a636"
     },
     {
       "path": "test/download-delivery.test.mjs",
@@ -1225,8 +1235,8 @@
     },
     {
       "path": "test/maintenance-durable.test.mjs",
-      "size": 5586,
-      "sha256": "7505d69d7d19e3373bb6548cd2fb5e9345c2a7b24183b9b68b72f328ae9fd5ec"
+      "size": 6349,
+      "sha256": "27285bdc2e41a8dfc25294af6243fd3bff8337125832c25fc7d7fc3ad52999c6"
     },
     {
       "path": "test/maintenance.test.mjs",
@@ -1292,11 +1302,6 @@
       "path": "test/oidc-access.test.mjs",
       "size": 5750,
       "sha256": "cd69413cd67e1bb3dc1aa009a5489510a39c690bdbd3bf9aef234623ed4738aa"
-    },
-    {
-      "path": "test/PLAN.md",
-      "size": 10156,
-      "sha256": "066861a69bf8e9e5f88c3ff2b3c1b9eb8b0a58d95a569502fb6847b84d008b32"
     },
     {
       "path": "test/portal-client-bound-files.test.mjs",
@@ -1575,8 +1580,8 @@
     },
     {
       "path": "test/test_package.py",
-      "size": 13686,
-      "sha256": "56b04c2958b02711430129470b7a2f31d376f9d528932808100cd2445f17f906"
+      "size": 14723,
+      "sha256": "d2def5eb09c42e76e2b2bd153751a77e4e53ecc577c9f2e592d0967dcd25ed64"
     },
     {
       "path": "test/test_portal_setup.py",
@@ -1642,11 +1647,6 @@
       "path": "test/web-session.test.mjs",
       "size": 17752,
       "sha256": "4d2cad86accdc107ee5bda33860bc9091ad117b042b1d4c87a29481f7b3d49d6"
-    },
-    {
-      "path": "THIRD_PARTY_NOTICES.json",
-      "size": 706505,
-      "sha256": "de4ac54ef13f16f1a2f9c8106a16676beaf3422d38c3e1938b27183488318929"
     },
     {
       "path": "ui/build.mjs",
