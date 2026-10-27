@@ -87,7 +87,7 @@ if sudo --preserve-env=BRIDGE_COMPOSE_PROJECT,BRIDGE_COMPOSE_ENV_FILE bash scrip
 fi
 sudo mv "$baseline_trust.saved" "$baseline_trust"
 [[ $("${compose[@]}" ps -q bridge) == "$old" ]]
-if sudo --preserve-env=BRIDGE_COMPOSE_PROJECT,BRIDGE_COMPOSE_ENV_FILE bash scripts/compose-update.sh "$malicious"; then
+if sudo env PYTHONOPTIMIZE=1 BRIDGE_COMPOSE_PROJECT="$project" BRIDGE_COMPOSE_ENV_FILE="$BRIDGE_COMPOSE_ENV_FILE" bash scripts/compose-update.sh "$malicious"; then
   echo 'An image containing an untrusted Node preload was unexpectedly accepted' >&2; exit 1
 fi
 [[ $("${compose[@]}" ps -q bridge) == "$old" ]]
