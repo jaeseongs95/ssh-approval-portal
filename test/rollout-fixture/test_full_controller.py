@@ -58,6 +58,10 @@ class FullController(unittest.TestCase):
             created_users.append('mcpops')
             root.mkdir(mode=0o755); ops_home.mkdir(mode=0o700)
             run('/usr/bin/chown', 'mcpops:mcpops', ops_home)
+            fixture_scripts = root / 'fixture-scripts'; fixture_scripts.mkdir(mode=0o755)
+            for name in ('e2e-seed.mjs', 'e2e-service.mjs'):
+                shutil.copyfile(fixture / name, fixture_scripts / name)
+                (fixture_scripts / name).chmod(0o644)
             (root / 'app/releases').mkdir(parents=True, mode=0o755)
             old = root / 'app/releases/fixture-old'
             shutil.copytree(old_source, old, symlinks=True)
@@ -87,9 +91,9 @@ class FullController(unittest.TestCase):
                 'BRIDGE_ADMIN_ORIGIN=https://example.test', 'BRIDGE_UI_TICKET_KEY=' + 'b' * 64,
                 'BRIDGE_UI_ENABLED=true', 'BRIDGE_COMMAND_AUTOMATION=true', f'BRIDGE_MCP_PORT={mcp}',
                 f'BRIDGE_ADMIN_PORT={admin}', '']), encoding='utf-8'); envfile.chmod(0o600)
-            run('/usr/bin/sudo', '-n', '-u', 'mcpbridge', '--', node, fixture / 'e2e-seed.mjs', old, state)
+            run('/usr/bin/sudo', '-n', '-u', 'mcpbridge', '--', node, fixture_scripts / 'e2e-seed.mjs', old, state)
             unit.write_text('[Unit]\nDescription=isolated fixture\n[Service]\nType=simple\nUser=mcpbridge\nGroup=mcpbridge\n'
-                + f'ExecStart={node} {fixture / "e2e-service.mjs"} {root / "app/approval-bridge"} {state} {admin} {mcp} full\n', encoding='utf-8')
+                + f'ExecStart={node} {fixture_scripts / "e2e-service.mjs"} {root / "app/approval-bridge"} {state} {admin} {mcp} full\n', encoding='utf-8')
             unit.chmod(0o644)
             run('/usr/bin/systemctl', 'daemon-reload')
             run('/usr/bin/systemctl', 'start', 'ssh-approval-bridge.service')
