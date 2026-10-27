@@ -27,7 +27,9 @@ class EditorTests(unittest.TestCase):
         self.env.chmod(0o600)
         self.scheduled = []
         self.released = []
-        self.editor = helper.Editor(self.env, self.path / 'state', lambda _: None, self.scheduled.append, self.released.append)
+        self.captured = []
+        self.compared = []
+        self.editor = helper.Editor(self.env, self.path / 'state', lambda _: None, self.scheduled.append, self.released.append, self.captured.append, self.compared.append)
 
     def read(self):
         return self.editor.dispatch({'action': 'read'})
@@ -149,6 +151,8 @@ class EditorTests(unittest.TestCase):
         self.editor.restart(job, lambda: calls.append(1), lambda _: True)
         self.assertEqual(calls, [1])
         self.assertEqual(self.released, [b'a' * 64])
+        self.assertEqual(self.captured, [b'a' * 64])
+        self.assertEqual(self.compared, [b'a' * 64])
         self.assertFalse((self.path / 'state' / ('owner-' + job)).exists())
         self.assertEqual(self.read()['restart']['state'], 'healthy')
         self.assertFalse(self.read()['pendingRestart'])
@@ -200,6 +204,30 @@ class EditorTests(unittest.TestCase):
         self.assertEqual(self.read()['restart']['state'], 'maintenance-release-unconfirmed')
         self.assertTrue((self.path / 'state' / ('owner-' + job)).exists())
         self.assertTrue(self.read()['pendingRestart'])
+
+    def test_unconfirmed_comparison_keeps_owner_and_pending_backup(self):
+        self.save({'BRIDGE_UI_ENABLED': 'true'})
+        job = self.restart()
+        def fail(_):
+            raise RuntimeError('synthetic comparison failure')
+        self.editor.compare = fail
+        self.editor.restart(job, lambda: None, lambda _: True)
+        self.assertEqual(self.read()['restart']['state'], 'preservation-compare-unconfirmed')
+        self.assertEqual(self.released, [])
+        self.assertTrue((self.path / 'state' / ('owner-' + job)).exists())
+        self.assertTrue(self.read()['pendingRestart'])
+
+    def test_unconfirmed_capture_never_restarts_or_releases(self):
+        job = self.restart()
+        calls = []
+        def fail(_):
+            raise RuntimeError('synthetic capture failure')
+        self.editor.capture = fail
+        self.editor.restart(job, lambda: calls.append(1), lambda _: True)
+        self.assertEqual(self.read()['restart']['state'], 'preservation-capture-unconfirmed')
+        self.assertEqual(calls, [])
+        self.assertEqual(self.released, [])
+        self.assertTrue((self.path / 'state' / ('owner-' + job)).exists())
 
     def test_plain_restart_failure_does_not_claim_env_recovery(self):
         job = self.restart()
