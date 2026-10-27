@@ -29,8 +29,8 @@ export function createMaintenanceState(root) {
     },
     baseline(owner) {
       const row = db.prepare('SELECT baseline FROM reservation WHERE id=1 AND owner_hash=?').get(digest(owner));
-      if (!row?.baseline) throw Error('Preservation baseline unavailable');
-      return JSON.parse(row.baseline);
+      if (!row) throw Error('Maintenance ownership mismatch');
+      return row.baseline ? JSON.parse(row.baseline) : null;
     },
     release(owner) { if (db.prepare('DELETE FROM reservation WHERE id=1 AND owner_hash=?').run(digest(owner)).changes !== 1) throw Error('Maintenance ownership mismatch'); },
     close: () => db.close(),

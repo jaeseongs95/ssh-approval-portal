@@ -29,13 +29,14 @@ test('reservation is owner-bound across replacement and preservation comparison 
     assert.equal((await post(first,'release',other)).status,409);
     assert.equal((await post(first,'preservation/capture',other)).status,409);
     assert.equal((await post(first,'preservation/capture')).status,200);
-    assert.equal((await post(first,'preservation/capture')).status,409);
+    assert.equal((await post(first,'preservation/capture')).status,200,'a lost reply can be reconciled without replacing the baseline');
     assert.equal((await post(first,'preservation/compare')).status,409);
     await first.close(); first = undefined;
     second = await open(root); await listen(second);
     assert.equal(second.queue.maintenance,true);
     assert.throws(()=>second.queue.submit('id'),/Maintenance/);
     assert.equal((await post(second,'release',other)).status,409);
+    assert.equal((await post(second,'preservation/capture')).status,409,'a newer instance cannot replace the fixed baseline');
     const result=await post(second,'preservation/compare');
     assert.equal(result.status,200); const report=await result.json();
     assert.equal(report.status,'PASS');

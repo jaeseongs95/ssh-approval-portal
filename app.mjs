@@ -249,12 +249,14 @@ export async function createApplication({ registry, classify, executeCommand, ex
   const preservation = {
     capture(owner) {
       if (!maintenanceState.owns(owner) || !queue.maintenance || queue.busy() || queue.listAll().some(job => ['pending', 'evaluating', 'running'].includes(job.state)) || commands.busy() || files.busy() || store.hasActiveWork()) throw Error('Preservation boundary unavailable');
+      const prior = maintenanceState.baseline(owner);
+      if (prior) { if (prior.instance !== preservationInstance) throw Error('Preservation baseline already belongs to an earlier instance'); return; }
       maintenanceState.saveBaseline(owner, { instance: preservationInstance, snapshot: capturePreservationSnapshot({ commandState, cliState, outputs }) });
     },
     compare(owner) {
       if (!maintenanceState.owns(owner) || !queue.maintenance || queue.busy() || queue.listAll().some(job => ['pending', 'evaluating', 'running'].includes(job.state)) || commands.busy() || files.busy() || store.hasActiveWork()) throw Error('Preservation boundary unavailable');
       const baseline = maintenanceState.baseline(owner);
-      if (baseline.instance === preservationInstance) throw Error('A new service instance is required');
+      if (!baseline || baseline.instance === preservationInstance) throw Error('A new service instance is required');
       return comparePreservationSnapshots(baseline.snapshot, capturePreservationSnapshot({ commandState, cliState, outputs }));
     },
   };
