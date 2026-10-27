@@ -165,8 +165,8 @@
     },
     {
       "path": "docs/maintenance-test-and-recovery.ko.md",
-      "size": 8470,
-      "sha256": "316300fd8b3a2d8dc5b3c77a5c26cdd4342860db0cc06b6d4d49af153fdad51d"
+      "size": 8886,
+      "sha256": "9c68eff46b40ee587b94f42e851126b886b2147b7fc236689516d17853abe0e2"
     },
     {
       "path": "docs/multi-targets.ko.md",
@@ -280,18 +280,18 @@
     },
     {
       "path": "scripts/compose-env.py",
-      "size": 4168,
-      "sha256": "a4cdcc54924757ec04126565e15fd45c9b229737a8ad008ba548b6650a1504b4"
+      "size": 4434,
+      "sha256": "de8ae88f71a9e17d902aed49b9a44c5b881be5456bb8298aad654aaefd19b11b"
     },
     {
       "path": "scripts/compose-recovery-intent.py",
-      "size": 3989,
-      "sha256": "cd25e70fa567916f0be6f3ce9afe560181aa73b296f46fbec63a5f6a511b5248"
+      "size": 4120,
+      "sha256": "4a80e299265d6fb00ba43d3fd1175522b5aabd2f365d0c4b5dac5ee02b156e44"
     },
     {
       "path": "scripts/compose-update.sh",
-      "size": 13048,
-      "sha256": "e5b23fc1a075e8d576408b64ae0fa643f7673c386d08b42d3e2bbdc945ebecfa"
+      "size": 14153,
+      "sha256": "e48913fe6e084fe6439cb810d2530fb675e7aa6b0b32b53eeefc172159c82f1a"
     },
     {
       "path": "scripts/configure-admin-access.sh",
@@ -375,8 +375,8 @@
     },
     {
       "path": "scripts/maintenance.mjs",
-      "size": 2751,
-      "sha256": "0435124303ac22fd6bc95132ac3bb10b5aeb2e34bb2ca026213d82330c96555a"
+      "size": 2942,
+      "sha256": "462b89cdb4e2b2eaf757be80cc3328e9aacd7d7f1264f89321c50d72f64d0769"
     },
     {
       "path": "scripts/manage-agent-cli.py",
@@ -440,8 +440,8 @@
     },
     {
       "path": "scripts/rollback.sh",
-      "size": 2988,
-      "sha256": "dd1acbe1c268de281271d396348f7f158a3e512e6325b2f7e8b5dbb05e64b697"
+      "size": 3100,
+      "sha256": "c3112d68546006567326817e154647f4e21b9942c132eebb31000e6a1076babb"
     },
     {
       "path": "scripts/settings_contract.py",
@@ -535,8 +535,8 @@
     },
     {
       "path": "src/adapters/http/protocol.mjs",
-      "size": 15650,
-      "sha256": "b8f68f807123bf310e0cc926af7e9c35519ee9ce253094fb7f8e2bc42cf3ee74"
+      "size": 15818,
+      "sha256": "a8957480563527acdce62c20624d5d0c6a75eef15013a440c1ff80c508531779"
     },
     {
       "path": "src/adapters/mcp/server.mjs",
@@ -590,8 +590,8 @@
     },
     {
       "path": "src/adapters/security/admin-policy.mjs",
-      "size": 2497,
-      "sha256": "f77cb8375e243b124f03fb6af96b4c3274040ee3c6057f04c6749913d9e7d91e"
+      "size": 2524,
+      "sha256": "b73fd0eb0fdd7c64331c7a99a03bc1cbc66dff4fa8e2699b40a33322b06218ec"
     },
     {
       "path": "src/adapters/security/oidc-access.mjs",
@@ -650,8 +650,8 @@
     },
     {
       "path": "src/adapters/storage/maintenance-state.mjs",
-      "size": 2454,
-      "sha256": "7965c9aeb0104bd32a5aadd46be77308c7115c6c1066597f0cc7d2d1287b1d23"
+      "size": 3226,
+      "sha256": "6ea3f0b71ea12f481ab41f5cd8cb998c48ac1c7e902374c356a2e6ebc6b59e33"
     },
     {
       "path": "src/adapters/storage/offline-preservation.mjs",
@@ -705,8 +705,8 @@
     },
     {
       "path": "src/application/lifecycle.mjs",
-      "size": 2061,
-      "sha256": "e2ea98e1156aff5c582201df33ccfbad07b08bac7303d6bd465100a329d97b85"
+      "size": 2368,
+      "sha256": "7406a3cb1cdc03d708421da0d6e382095f7cfb59d1d9562744bc269fba9c13d8"
     },
     {
       "path": "src/application/model-catalog.mjs",
@@ -1039,6 +1039,11 @@
       "sha256": "67f9e66786d7dc2a82b6c4b7655ec16becf369ca804e0d4039199a59b05d3d12"
     },
     {
+      "path": "test/compose-response-before.mjs",
+      "size": 273,
+      "sha256": "310e16cd486b4e2c03c2c7e59ad1345c17d1ef46df89de9ee7a1479d9e868541"
+    },
+    {
       "path": "test/compose-response-loss.mjs",
       "size": 416,
       "sha256": "f759e023805ff27c4f10a0f4b96222a188cc4c9725559d91c83ce0299482a671"
@@ -1055,8 +1060,8 @@
     },
     {
       "path": "test/compose-update-ci.sh",
-      "size": 16219,
-      "sha256": "ccc4b87edf7f64aad8e799535e1a012601bb62ac3eb22a58b2a17507f3aca40c"
+      "size": 17468,
+      "sha256": "1d4c61915cd22cdc86b028fac6cd2ff634d3fc7b3af6a1a7ad4ea824295b9727"
     },
     {
       "path": "test/config-contracts.test.mjs",
@@ -1220,13 +1225,13 @@
     },
     {
       "path": "test/maintenance-durable.test.mjs",
-      "size": 4433,
-      "sha256": "907dbae8bb71867baa29ca299ca6344d8838110a9828f2ef0814af9e0b414df9"
+      "size": 5586,
+      "sha256": "7505d69d7d19e3373bb6548cd2fb5e9345c2a7b24183b9b68b72f328ae9fd5ec"
     },
     {
       "path": "test/maintenance.test.mjs",
-      "size": 2833,
-      "sha256": "0f40693c9a8fc21a6a6b7f277ed5c131c5d9eb9e6c4db6dc92d12fdcbf593c6d"
+      "size": 2865,
+      "sha256": "1811e2c684285e7145f5af4c68c274e9f5f9855887e72847788c9d584088ed9d"
     },
     {
       "path": "test/malformed-server.fixture.mjs",
@@ -1384,6 +1389,16 @@
       "sha256": "7b16b17485711700d23b5066218c0dddf42b641a251706d5beeadfa8085a844f"
     },
     {
+      "path": "test/rollback-stopped-fixture.sh",
+      "size": 1556,
+      "sha256": "d206c3cb89bf86c7f999fd51966aeee5ff96fdf798d7d46642f523e1b97f462c"
+    },
+    {
+      "path": "test/rollback-stopped.test.mjs",
+      "size": 531,
+      "sha256": "6600267fce877680d92320a049a2930355dde4010b05264830cded92029672ff"
+    },
+    {
       "path": "test/safety-http.test.mjs",
       "size": 7147,
       "sha256": "65865651d10274c36503fa57e660a368492f1efe20b72f0683897affb9f41c8b"
@@ -1530,8 +1545,8 @@
     },
     {
       "path": "test/test_environment_helper.py",
-      "size": 20445,
-      "sha256": "f91330ddbf2de0cd3cc3a664c88a6f6cc54dba09aad0218d4e9f53bfc703ad06"
+      "size": 20524,
+      "sha256": "3c5be295fce29b42b2f50bfac8c9fc8951dcd600a128b879d30af813ac384262"
     },
     {
       "path": "test/test_helper.py",
