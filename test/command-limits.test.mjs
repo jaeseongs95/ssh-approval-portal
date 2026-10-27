@@ -60,7 +60,7 @@ test('LIMIT-RECURSION repeated sudo beyond bounded grammar is incomplete',()=>{
 test('LIMIT-JEV exact full command and tail delivered once without experimental header',async()=>{
  let seen,calls=0;
  const assessor=createJevAssessor({apiKey:'synthetic-only',fetchImpl:async(_url,options)=>{
-  calls++;seen=options;return new Response(JSON.stringify({model:'jev-1.14.0',answers:{risk:{type:'choice',choice:'uncertain',confidence:1,probabilities:{low_risk:0,high_risk:0,uncertain:1}}},usage:{input_tokens:1,output_tokens:1}}),{headers:{'content-type':'application/json'}});
+  calls++;seen=options;return new Response(JSON.stringify({model:'jev-1.14.0',answers:{risk:{type:'choice',choice:'high_risk',confidence:1,probabilities:{low_risk:0,high_risk:1}}},usage:{input_tokens:1,output_tokens:1}}),{headers:{'content-type':'application/json'}});
  }});
  for(const command of [full('TAIL_DENIED'), 'printf '+ '가'.repeat(10000)+'END']) {
   const input={command,target:'fixture',environment:'synthetic fixture',context:'Inspect exact synthetic command; never execute'};

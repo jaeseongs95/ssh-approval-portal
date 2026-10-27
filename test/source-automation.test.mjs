@@ -21,11 +21,11 @@ import { executePythonSource } from '../src/adapters/ssh/vendor.mjs';
 const source = "# PRIVATE_BODY_SOURCE_32\nprint('한글 literal source')\n";
 const context = 'Synthetic local test; print a literal only, no resources mutated, no recovery needed';
 const env = { BRIDGE_MCP_TOKEN: 'fixture-mcp', BRIDGE_ADMIN_TOKEN: 'fixture-owner', BRIDGE_UI_TICKET_KEY: 'a'.repeat(64), BRIDGE_ADMIN_ORIGIN: 'https://owner.test', BRIDGE_COMMAND_AUTOMATION: 'true' };
-const low = { status: 'assessed', model: 'jev-1.14.0', label: 'low_risk', confidence: 0.1, probabilities: { low_risk: 0.8, high_risk: 0.1, uncertain: 0.1 } };
-const threshold = probability => ({ model: low.model, questionVersion: 'ssh-command-risk-v4', basis: 'safety-probability-v1', minLowRisk: probability, validationRef: 'synthetic:source-contract' });
+const low = { status: 'assessed', model: 'jev-1.14.0', label: 'low_risk', confidence: 0.1, probabilities: { low_risk: 0.8, high_risk: 0.2 } };
+const threshold = probability => ({ model: low.model, questionVersion: 'ssh-command-risk-v5', basis: 'safety-probability-v1', minLowRisk: probability, validationRef: 'synthetic:source-contract' });
 async function fixture(t, options = {}) {
   const root = await mkdtemp(join(tmpdir(), 'source-product-')), executions = [], inputs = [], events = [], profiles = new Map();
-  const evaluator = { model: low.model, questionVersion: 'ssh-command-risk-v4', assess: async input => { inputs.push(input); return low; } };
+  const evaluator = { model: low.model, questionVersion: 'ssh-command-risk-v5', assess: async input => { inputs.push(input); return low; } };
   const executeSource = async (plan, verify) => { verify(); executions.push(plan); return { failed: false, texts: ['synthetic output'] }; };
   const make = () => createApplication({
     registry: { getProfile: name => { if (!profiles.has(name)) profiles.set(name, { host: '127.0.0.1', port: 22, user: 'fixture', readOnly: name === 'aws-readonly' }); return profiles.get(name); }, closeAll: async () => {} },
@@ -55,7 +55,7 @@ async function fixture(t, options = {}) {
 
 test('SOURCE-PRODUCT-01 exact source reaches the real Jev HTTP adapter via MCP, then the identical bound executor, without public or durable body copies', async t => {
   let payload, modelCalls = 0;
-  const assessor = createJevAssessor({ apiKey: 'synthetic-only', question: AUTOMATION_QUESTION, questionVersion: 'ssh-command-risk-v4', inputKind: 'execution', fetchImpl: async (_url, options) => {
+  const assessor = createJevAssessor({ apiKey: 'synthetic-only', question: AUTOMATION_QUESTION, questionVersion: 'ssh-command-risk-v5', inputKind: 'execution', fetchImpl: async (_url, options) => {
     modelCalls++; payload = JSON.parse(options.body);
     return new Response(JSON.stringify({ model: low.model, answers: { risk: { type: 'choice', choice: low.label, confidence: low.confidence, probabilities: low.probabilities } }, usage: { input_tokens: 11, output_tokens: 3 } }), { headers: { 'content-type': 'application/json' } });
   } });
@@ -127,7 +127,7 @@ test('SOURCE-PRODUCT-04 protected pending source review is exact/no-store, unaut
 
 test('SOURCE-PRODUCT-05 source probability threshold remains per user, unfavorable valid answers are never retried through fallback', async t => {
   let fallbackCalls = 0;
-  const f = await fixture(t, { riskEvaluators: { jev: { model: low.model, questionVersion: 'ssh-command-risk-v4', assess: async () => low }, luna: { model: 'luna-fixture', questionVersion: 'ssh-command-risk-v4', assess: async () => { fallbackCalls++; return { ...low, model: 'luna-fixture' }; } } } });
+  const f = await fixture(t, { riskEvaluators: { jev: { model: low.model, questionVersion: 'ssh-command-risk-v5', assess: async () => low }, luna: { model: 'luna-fixture', questionVersion: 'ssh-command-risk-v5', assess: async () => { fallbackCalls++; return { ...low, model: 'luna-fixture' }; } } } });
   for (const [probability, state] of [[0.8, 'completed'], [0.9, 'pending'], [0.7, 'completed']]) {
     await f.policy({ fallback: 'luna', thresholds: { jev: threshold(probability), luna: { ...threshold(0.7), model: 'luna-fixture' } } });
     const job = await f.run(); assert.equal(job.state, state); assert.equal(job.decision.threshold.minLowRisk, probability);
@@ -148,7 +148,7 @@ test('SOURCE-PRODUCT-06 key conflicts bind body, argv, cwd, elevation and contex
 
 test('SOURCE-PRODUCT-07 async evaluation policy changes withhold dispatch and async connection verification refuses a revoked grant', async t => {
   let complete;
-  const f = await fixture(t, { riskEvaluators: { jev: { model: low.model, questionVersion: 'ssh-command-risk-v4', assess: () => new Promise(resolve => { complete = resolve; }) } } });
+  const f = await fixture(t, { riskEvaluators: { jev: { model: low.model, questionVersion: 'ssh-command-risk-v5', assess: () => new Promise(resolve => { complete = resolve; }) } } });
   await f.policy({}); const result = await f.app.targets.commands.runSource({ source, cwd: '/tmp', context });
   await new Promise(resolve => setImmediate(resolve)); assert.equal(f.app.queue.get(result.job.id).state, 'evaluating');
   await f.policy({ sourceExecutionContract: null }); complete(low); await f.app.targets.drain();
@@ -209,8 +209,8 @@ test('SOURCE-PRODUCT-12 owner revocation during unavailable primary prevents fal
     let release, entered, fallbackCalls = 0;
     const started = new Promise(resolve => { entered = resolve; });
     const f = await fixture(t, { riskEvaluators: {
-      jev: { model: low.model, questionVersion: 'ssh-command-risk-v4', assess: () => { entered(); return new Promise(resolve => { release = resolve; }); } },
-      luna: { model: 'luna-fixture', questionVersion: 'ssh-command-risk-v4', assess: async () => { fallbackCalls++; return { ...low, model: 'luna-fixture' }; } },
+      jev: { model: low.model, questionVersion: 'ssh-command-risk-v5', assess: () => { entered(); return new Promise(resolve => { release = resolve; }); } },
+      luna: { model: 'luna-fixture', questionVersion: 'ssh-command-risk-v5', assess: async () => { fallbackCalls++; return { ...low, model: 'luna-fixture' }; } },
     } });
     const initial = { fallback: 'luna', thresholds: { jev: threshold(0.7), luna: { ...threshold(0.7), model: 'luna-fixture' } } };
     await f.policy(initial);

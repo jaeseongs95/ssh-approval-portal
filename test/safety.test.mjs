@@ -12,10 +12,10 @@ import { AUTOMATION_QUESTION, COMMAND_SET_QUESTION, explicitUserApproval } from 
 
 const input = { command: 'id -u', target: 'fixture-a', environment: 'synthetic Linux', context: 'uid inspection' };
 const wire = () => ({ model: 'jev-1.14.0', answers: { risk: { type: 'choice', choice: 'low_risk', confidence: 1,
-  probabilities: { low_risk: 1, high_risk: 0, uncertain: 0 } } }, usage: { input_tokens: 20, output_tokens: 4 } });
+  probabilities: { low_risk: 1, high_risk: 0 } } }, usage: { input_tokens: 20, output_tokens: 4 } });
 const response = body => new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json; charset=utf-8' } });
 const valid = () => ({ status:'assessed',model:'jev-1.14.0',label:'low_risk',confidence:1,
-  probabilities:{low_risk:1,high_risk:0,uncertain:0},inputTokens:20,outputTokens:4 });
+  probabilities:{low_risk:1,high_risk:0},inputTokens:20,outputTokens:4 });
 
 test('JEV-01 request has fixed route/model/question, no labels or extra secret fields', async () => {
   let calls = 0;
@@ -32,7 +32,7 @@ test('JEV-01 request has fixed route/model/question, no labels or extra secret f
   assert.equal(calls, 1);
 });
 
-test('v4 sends explicit user approval only for matching owner command names, and registration sends proposals', async () => {
+test('execution sends explicit user approval only for matching owner command names, and registration sends proposals', async () => {
   const seen = [], fetchImpl = async (_url, options) => { seen.push(JSON.parse(options.body)); return response(wire()); };
   const assessor = createJevAssessor({ apiKey: 'fixture', fetchImpl, question: AUTOMATION_QUESTION, inputKind: 'execution' });
   const approved = { ...input, preapprovedCommands: ['id', 'sudo'], userApproval: explicitUserApproval(input.command, ['id', 'sudo']), threshold: 0.99, ownerToken: 'never-send' };
@@ -68,7 +68,7 @@ test('JEV-03 malformed answer/model/usage never yields an assessed result', asyn
     b => { b.answers.risk.confidence = '1'; }, b => { b.answers.risk.confidence = 1.01; },
     b => { b.answers.risk.probabilities.low_risk = -1; }, b => { b.answers.risk.probabilities.high_risk = 0.1; },
     b => { b.answers.risk.probabilities.low_risk = 0.1; b.answers.risk.probabilities.high_risk = 0.9; },
-    b => { b.answers.risk.probabilities.extra = 0; }, b => { delete b.answers.risk.probabilities.uncertain; },
+    b => { b.answers.risk.probabilities.extra = 0; }, b => { delete b.answers.risk.probabilities.high_risk; }, b => { b.answers.risk.choice = 'uncertain'; }, b => { b.answers.risk.probabilities.uncertain = 0; },
     b => { b.usage.input_tokens = 0.2; }, b => { b.usage.output_tokens = -1; }, b => { delete b.usage; },
   ];
   for (const mutate of mutations) {
@@ -128,10 +128,10 @@ test('JEV-08 deadline includes slow response body; cancellation occurs', async (
   await new Promise(resolve=>setImmediate(resolve)); assert.equal(cancelled,true);
 });
 
-test('JEV-09 candidate threshold rejects high-risk/uncertain/low confidence and is never authority', () => {
+test('JEV-09 candidate threshold rejects high-risk/low confidence and is never authority', () => {
   assert.equal(candidateMatch(valid()),true);
-  for(const value of [{...valid(),confidence:0.989},{...valid(),probabilities:{low_risk:0.998,high_risk:0.002,uncertain:0}},
-    {...valid(),label:'high_risk',probabilities:{low_risk:0,high_risk:1,uncertain:0}}, {...valid(),confidence:NaN}]) assert.equal(candidateMatch(value),false);
+  for(const value of [{...valid(),confidence:0.989},{...valid(),probabilities:{low_risk:0.998,high_risk:0.002}},
+    {...valid(),label:'high_risk',probabilities:{low_risk:0,high_risk:1}}, {...valid(),confidence:NaN}]) assert.equal(candidateMatch(value),false);
   assert.equal(validateAssessment({...valid(),inputTokens:Infinity}),null);
   assert.equal(SAFETY_PROTOCOL.automaticExecutionEnabled,false); assert.equal(SAFETY_PROTOCOL.thresholdStatus,'unvalidated');
 });
@@ -165,7 +165,7 @@ test('EVAL-03 simulated report preserves deliberate wrong/failed cases and hand-
   assert.equal(report.correct,16);assert.equal(report.incorrect,3);assert.equal(report.accuracy,0.8);
   assert.equal(report.candidates,7);assert.equal(report.falseCandidates,2);
   assert.deepEqual(report.usage,{inputTokens:1900,outputTokens:380});
-  assert.deepEqual(report.confusion,{low_risk:{low_risk:5,high_risk:0,uncertain:1},high_risk:{low_risk:1,high_risk:8,uncertain:0},uncertain:{low_risk:1,high_risk:0,uncertain:3}});
+  assert.deepEqual(report.confusion,{low_risk:{low_risk:5,high_risk:1},high_risk:{low_risk:2,high_risk:11}});
   assert.equal(report.stage5Ready,false);assert.equal(report.usageComplete,false);
   assert.match(report.datasetDigest,/^sha256:[a-f0-9]{64}$/);assert.equal(Object.keys(report.sourceFiles).length,4);
 });

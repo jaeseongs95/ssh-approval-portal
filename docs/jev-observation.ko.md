@@ -1,6 +1,6 @@
 # Jev 명령 위험 관측·평가
 
-이 문서는 v1 관측·평가 계약을 설명한다. 선택적인 명령셋·v2 위험 평가 실행 경로는 [명령 자동 실행](command-automation.ko.md)을 따른다. v1 후보 임계값과 평가 결과는 v2 자동 실행의 검증 근거로 승계하지 않는다.
+신규 관측과 실행 평가는 안전(`low_risk`)·위험(`high_risk`) 두 분류를 사용합니다. 영향에 필요한 근거가 부족하면 위험으로 보수적으로 분류하며, 평가 요청이나 응답 자체가 실패한 경우는 별도의 실패 상태로 남깁니다. 기존 3분류 이력은 당시 값 그대로 보존합니다. 실행 질문은 v5로 구분하므로 기존 v4의 자동 실행 기준은 새 점수에 자동으로 승계하지 않습니다. 아래 실험 결과와 v4 언급은 당시 기준의 이력입니다.
 
 4단계의 구현은 독립 평가 도구입니다. 중계기·관리자 화면·MCP 승인 큐에는 연결하지 않습니다. Jev 응답이나 `candidateMatch`가 실행 권한을 만들지 않으며, `automaticExecutionEnabled`와 `stage5Ready`는 항상 `false`입니다. 기존 명령·파일 승인 동작은 그대로입니다.
 
@@ -14,9 +14,9 @@
 
 ## 계약과 한도
 
-`src/domain/safety.mjs`는 공급자 중립 입력과 결과를 정의합니다. 입력은 `command`, `target`, `environment`, `context` 네 필드입니다. 결과는 `low_risk / high_risk / uncertain`, 확률 분포, 신뢰도, 관측 모델, 토큰 사용량입니다. 낮은 위험도는 실행 허가를 뜻하지 않습니다. 알려지지 않은 동작·민감도는 `uncertain`으로 분류합니다.
+`src/domain/safety.mjs`는 공급자 중립 입력과 결과를 정의합니다. 입력은 `command`, `target`, `environment`, `context` 네 필드입니다. 결과는 `low_risk / high_risk`, 확률 분포, 신뢰도, 관측 모델, 토큰 사용량입니다. 안전 분류는 실행 허가를 뜻하지 않으며, 동작·민감도에 필요한 근거가 부족하면 위험으로 분류합니다.
 
-TypeSafe 어댑터는 [공식 Choice 계약](https://docs.typesafe.ai/primitives/choice)과 [HTTP API](https://docs.typesafe.ai/api)를 사용합니다. 기본 관측 모델은 이동 별칭 대신 `jev-1.14.0`, 질문은 `ssh-command-risk-v1`, 어댑터는 `typesafe-choice-v1`로 고정합니다. 명령 자동화에서는 사용자가 위험도 확인 후 저장한 판본으로 실제 호출하며, 응답 판본도 정확히 일치해야 합니다. 모델 판본 변경만으로 판정 성능이 검증됐다고 간주하지 않습니다.
+TypeSafe 어댑터는 [공식 Choice 계약](https://docs.typesafe.ai/primitives/choice)과 [HTTP API](https://docs.typesafe.ai/api)를 사용합니다. 기본 관측 모델은 이동 별칭 대신 `jev-1.14.0`, 질문은 `ssh-command-risk-observation-v2`, 어댑터는 `typesafe-choice-v1`로 고정합니다. 명령 자동화에서는 사용자가 위험도 확인 후 저장한 판본으로 실제 호출하며, 응답 판본도 정확히 일치해야 합니다. 모델 판본 변경만으로 판정 성능이 검증됐다고 간주하지 않습니다.
 
 - 목적지는 `https://api.typesafe.ai/v1/systemone`으로 고정합니다. 리다이렉트·자동 재시도·대체 모델 호출은 없습니다.
 - 요청 본문 최대 24 KiB, 각 입력 필드 최대 4,096자, 응답 최대 64 KiB입니다. 헤더와 본문 수신을 합쳐 기본 10초 제한을 적용합니다.
@@ -34,7 +34,7 @@ node --test test/safety.test.mjs
 node scripts/evaluate-safety.mjs --mode replay --out safety-replay-001.json
 ```
 
-모의 파일은 잘못된 예측과 응답 실패를 의도적으로 포함합니다. 20건 중 19건 응답, 16건 정답, 3건 오판, 1건 판단 불가, 후보 조건의 오탐 2건이 예상됩니다. 이 숫자는 집계기 검증용이며 Jev 정확도가 아닙니다. `source: simulated`, `modelQualityStatus: NOT_MEASURED`로 기록합니다.
+모의 파일은 잘못된 예측과 응답 실패를 의도적으로 포함합니다. 합성 replay의 응답·오판·후보 조건 집계는 실행 결과를 확인합니다. 이 숫자는 집계기 검증용이며 Jev 정확도가 아닙니다. `source: simulated`, `modelQualityStatus: NOT_MEASURED`로 기록합니다.
 
 ## Codex Cloud Node 24에서 실측
 
@@ -45,7 +45,7 @@ node --version
 node scripts/evaluate-safety.mjs --mode live --out safety-live-001.json
 ```
 
-이 명령은 합성 사례만 외부 TypeSafe API로 최대 20회 전송합니다. 새 실행은 별도 과금될 수 있습니다. 기존 출력 파일은 덮어쓰지 않으며 출력 경로를 먼저 확보한 뒤 호출합니다. 종료 코드 `0`은 전 사례 응답, `1`은 판단 불가 포함, `2`는 실행 준비·기록 실패입니다. **종료 코드 0도 모델 품질 통과나 자동 실행 허가를 뜻하지 않습니다.**
+이 명령은 합성 사례만 외부 TypeSafe API로 최대 20회 전송합니다. 새 실행은 별도 과금될 수 있습니다. 기존 출력 파일은 덮어쓰지 않으며 출력 경로를 먼저 확보한 뒤 호출합니다. 종료 코드 `0`은 전 사례 응답, `1`은 평가 실패 포함, `2`는 실행 준비·기록 실패입니다. **종료 코드 0도 모델 품질 통과나 자동 실행 허가를 뜻하지 않습니다.**
 
 실행 결과에는 run ID·시작/종료 시각·corpus 원본 digest·질문/정책 digest·실행 소스 파일 digest·요청 모델·사례별 판정·오판·혼동 행렬·후보 오탐·관측 토큰을 남깁니다. 정답과 설명은 모델 입력에서 제외합니다. 실측은 `source: live`, `modelQualityStatus: UNVALIDATED`로 기록합니다.
 
@@ -69,7 +69,7 @@ node --test test/safety-http.test.mjs
 
 ## 실행 심사의 판단 불가와 평가 실패 구분
 
-명령 자동화의 `model_review / uncertain`은 유효한 모델 분류입니다. 반면 `evaluation_unavailable`은 평가자가 유효 응답을 제공하지 못한 경우이며, 관리자 카드와 웹의 “AI 평가 실패 상세”에서 저장된 고정 실패 사유와 진단 코드를 확인합니다. 예를 들어 `invalid_response / PROBABILITY_SUM`은 응답 확률 합계 검증 실패입니다. timeout·busy·미설정도 각각 표시하며 원시 응답·오류 본문은 표시하지 않습니다.
+이전 v4 명령 자동화 이력의 `model_review / uncertain`은 당시 유효한 모델 분류입니다. 반면 `evaluation_unavailable`은 평가자가 유효 응답을 제공하지 못한 경우이며, 관리자 카드와 웹의 “AI 평가 실패 상세”에서 저장된 고정 실패 사유와 진단 코드를 확인합니다. 예를 들어 `invalid_response / PROBABILITY_SUM`은 응답 확률 합계 검증 실패입니다. timeout·busy·미설정도 각각 표시하며 원시 응답·오류 본문은 표시하지 않습니다.
 
 `budget_exhausted`와 `source_evidence_too_large`는 별도의 보류 사유입니다. 현재 요청의 모델 호출 여부와 attempts를 함께 확인해야 하며, 이를 모델의 판단 불가 비율에 합치지 않습니다.
 

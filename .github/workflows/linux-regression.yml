@@ -1,0 +1,48 @@
+name: Linux regression
+
+on:
+  push:
+    branches: [fix/jev-binary-assessment]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - run: npm ci --ignore-scripts
+      - name: Node regression
+        run: node --test --test-skip-pattern='^CLI-LOOPBACK exact helper executes inspection/status over pinned SSH and preserves authentication bytes$' test/*.test.mjs
+      - name: Isolated CLI loopback fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          if getent passwd 10001 || getent group 10001 || [[ -e /tmp/cli-fixture-home ]]; then
+            echo 'Fixture identity or home already exists' >&2
+            exit 1
+          fi
+          sudo groupadd --gid 10001 sshclitest
+          sudo useradd --system --uid 10001 --gid 10001 --home-dir /tmp/cli-fixture-home --shell /usr/sbin/nologin sshclitest
+          sudo install -d -m 700 -o 10001 -g 10001 /tmp/cli-fixture-home /tmp/cli-fixture-source
+          sudo cp -a "$GITHUB_WORKSPACE/." /tmp/cli-fixture-source/
+          sudo chown -R 10001:10001 /tmp/cli-fixture-source
+          cd /tmp/cli-fixture-source
+          sudo -u sshclitest env HOME=/tmp/cli-fixture-home PATH="$PATH" node --test --test-name-pattern='^CLI-LOOPBACK exact helper executes inspection/status over pinned SSH and preserves authentication bytes$' test/agent-cli-delivery.test.mjs
+      - name: Python regression (non-root)
+        shell: bash
+        run: |
+          set -euo pipefail
+          for test in test/test_*.py; do
+            if [[ "$test" != test/test_env_editor_lock.py ]]; then
+              python3 -B "$test"
+            fi
+          done

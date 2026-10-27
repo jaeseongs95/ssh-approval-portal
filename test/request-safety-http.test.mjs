@@ -9,7 +9,7 @@ import { createApplication } from '../app.mjs';
 
 const listen = server => new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const assessment = { status: 'assessed', model: 'jev-1.14.0', label: 'low_risk', confidence: 1,
-  probabilities: { low_risk: 1, high_risk: 0, uncertain: 0 }, inputTokens: 7, outputTokens: 1 };
+  probabilities: { low_risk: 1, high_risk: 0 }, inputTokens: 7, outputTokens: 1 };
 
 test('authenticated MCP observes a bound request only after explicit disclosure and leaves approval pending', async () => {
   for (const enabled of [false, true]) {
