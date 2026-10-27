@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
-[[ $(id -u) == 0 && $# == 1 ]] || { echo 'Usage: sudo bash scripts/compose-update.sh IMAGE_TAG_OR_DIGEST' >&2; exit 1; }
-source_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
+[[ $# == 1 ]] || { echo 'Usage: sudo bash scripts/compose-update.sh IMAGE_TAG_OR_DIGEST' >&2; exit 1; }
 image=$1
 [[ "$image" =~ ^[A-Za-z0-9][A-Za-z0-9._:/@-]+$ ]] || { echo 'Invalid image reference' >&2; exit 1; }
+[[ $(id -u) == 0 ]] || { echo 'Run as root.' >&2; exit 1; }
+source_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 env_file=${BRIDGE_COMPOSE_ENV_FILE:-/etc/ssh-approval-portal/compose.env}
 compose=(docker compose -p "${BRIDGE_COMPOSE_PROJECT:-ssh-approval-portal}" --env-file "$env_file" -f "$source_dir/docker/compose.yaml")
 if [[ -n ${BRIDGE_COMPOSE_OVERRIDE:-} ]]; then compose+=(-f "$BRIDGE_COMPOSE_OVERRIDE"); fi
