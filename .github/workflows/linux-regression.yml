@@ -70,3 +70,19 @@ jobs:
           sudo systemd-run --unit="$unit" --property=Type=simple /usr/bin/sleep 120
           cd test/rollout-fixture
           sudo env SSH_ROLLOUT_FIXTURE_UNIT="$unit" /usr/bin/python3 -B -m unittest -v test_linux_systemd test_bootstrap
+      - name: Isolated legacy to current systemd transition
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -d /run/systemd/system ]] || { echo 'SYSTEMD_UNAVAILABLE' >&2; exit 1; }
+          [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ && "$GITHUB_RUN_ATTEMPT" =~ ^[0-9]+$ ]] || exit 1
+          old=$(mktemp -d /tmp/ssh-rollout-old.XXXXXXXX)
+          data=$(mktemp -d /tmp/ssh-rollout-data.XXXXXXXX)
+          trap 'sudo rm -rf -- "$old" "$data"' EXIT
+          git fetch --no-tags --depth=1 origin 9644117aa904bcf6a6fd861b741942db3d42035c
+          git archive 9644117aa904bcf6a6fd861b741942db3d42035c | tar -x -C "$old"
+          cp -a node_modules "$old/node_modules"
+          node_path=$(command -v node)
+          unit="ssh-rollout-fixture-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-transition.service"
+          cd test/rollout-fixture
+          sudo env SSH_ROLLOUT_FIXTURE_UNIT="$unit" SSH_E2E_OLD="$old" SSH_E2E_NEW="$GITHUB_WORKSPACE" SSH_E2E_NODE="$node_path" SSH_E2E_DIR="$data" /usr/bin/python3 -B -m unittest -v test_transition_e2e

@@ -1,13 +1,16 @@
 """Root-only isolated CI fixture. Never use on TEST or production hosts."""
 import os
+import hashlib
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from controller import Identity
 from linux_adapter import LinuxAdapter
 import scope_guard
+from protected_state import capture
 
 
 class RealLinuxFixture(unittest.TestCase):
@@ -50,6 +53,28 @@ class RealLinuxFixture(unittest.TestCase):
         self.assertEqual(0o755, self.a.helper.stat().st_mode & 0o777)
         self.a._install_helper(backup, old_digest, new_digest)
         self.assertEqual(b'old helper', self.a.helper.read_bytes())
+
+    def test_failed_activation_restores_helper_without_changing_old_link(self):
+        self.a.helper = self.root / 'environment-helper'
+        self.a.helper.write_bytes(b'old helper'); self.a.helper.chmod(0o755)
+        for release, contents in ((self.a.old, b'old helper'), (self.a.new, b'new helper')):
+            (release / 'helper').mkdir(parents=True)
+            (release / 'helper/environment-helper.py').write_bytes(contents)
+        (self.a.new / 'release-manifest.json').write_bytes(b'candidate')
+        self.a.active = self.root / 'active'
+        self.a.active.symlink_to(self.a.old, target_is_directory=True)
+        self.a.protected_files = [self.a.helper]
+        self.a.audit.write_bytes(b'audit')
+        self.a.baseline = {'paths': scope_guard.snapshot(self.a.protected_files), 'audit': capture([], self.a.audit)}
+        identity = Identity('fixture', 'fixture-host', 'a' * 64, hashlib.sha256(b'candidate').hexdigest(), 'c' * 64)
+        class Failure:
+            def activate_release(self, *args): raise RuntimeError('fixture activation failure')
+        with patch.object(self.a, '_update', return_value=Failure()), patch('linux_adapter.checked'):
+            with self.assertRaises(RuntimeError):
+                self.a.activate_exact(identity)
+        self.assertEqual(str(self.a.old), os.readlink(self.a.active))
+        self.assertEqual(b'old helper', self.a.helper.read_bytes())
+        self.assertEqual(b'old helper', (self.root / 'environment-helper.before').read_bytes())
 
 if __name__ == '__main__':
     unittest.main()
