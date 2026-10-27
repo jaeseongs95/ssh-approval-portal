@@ -38,8 +38,8 @@ class EditorTests(unittest.TestCase):
     def save(self, changes, revision=None):
         return self.editor.dispatch({'action': 'save', 'expectedRevision': revision or self.read()['revision'], 'changes': changes, 'acknowledged': True})
 
-    def restart(self):
-        return self.editor.dispatch({'action': 'restart', 'expectedRevision': self.read()['revision'], 'acknowledged': True, 'maintenanceOwner': 'a' * 64})['restart']['id']
+    def restart(self, owner='a' * 64):
+        return self.editor.dispatch({'action': 'restart', 'expectedRevision': self.read()['revision'], 'acknowledged': True, 'maintenanceOwner': owner})['restart']['id']
 
     def test_snapshot_write_only_and_opaque_revision(self):
         value = self.read()
@@ -249,7 +249,8 @@ class EditorTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 0)
             proc = None
 
-        def call(action, token=owner):
+        def call(action, token=None):
+            token = token or owner
             request = urllib.request.Request('http://127.0.0.1:' + str(port) + '/api/maintenance/' + action,
                 method='POST', headers={'Authorization': 'Bearer test-admin', 'Origin': 'https://example.test', 'X-Maintenance-Owner': token})
             with urllib.request.urlopen(request, timeout=10) as response:
@@ -259,13 +260,13 @@ class EditorTests(unittest.TestCase):
             # Create an existing journal before either direction of the toggle.
             start('true')
             stop()
-            for previous, next_value in [('true', 'false'), ('false', 'true')]:
+            for owner, previous, next_value in [('a' * 64, 'true', 'false'), ('b' * 64, 'false', 'true')]:
                 self.env.write_bytes(self.original + ('BRIDGE_COMMAND_AUTOMATION=' + previous + '\r\n').encode())
                 self.env.chmod(0o600)
                 start(previous)
                 self.assertTrue(call('reserve')['reserved'])
                 self.save({'BRIDGE_COMMAND_AUTOMATION': next_value})
-                job = self.restart()
+                job = self.restart(owner)
                 self.editor.capture = lambda token: call('preservation/capture', token.decode())
                 self.editor.compare = lambda token: self.assertEqual(call('preservation/compare', token.decode())['status'], 'PASS')
                 self.editor.release = lambda token: self.assertTrue(call('release', token.decode())['released'])
