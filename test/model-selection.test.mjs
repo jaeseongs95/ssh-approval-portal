@@ -4,11 +4,11 @@ import { createJevAssessor } from '../src/adapters/safety/jev.mjs';
 import { createModelCatalog } from '../src/application/model-catalog.mjs';
 
 const input = { command: 'pwd', target: 'synthetic', environment: 'synthetic only', context: 'Compatibility fixture only' };
-const response = model => new Response(JSON.stringify({ model, answers: { risk: { type: 'choice', choice: 'low_risk', confidence: 1, probabilities: { low_risk: 1, high_risk: 0, uncertain: 0 } } }, usage: { input_tokens: 1, output_tokens: 1 } }), { headers: { 'content-type': 'application/json' } });
+const response = model => new Response(JSON.stringify({ model, answers: { risk: { type: 'choice', choice: 'low_risk', confidence: 1, probabilities: { low_risk: 1, high_risk: 0 } } }, usage: { input_tokens: 1, output_tokens: 1 } }), { headers: { 'content-type': 'application/json' } });
 test('selected pinned version reaches the API and old saved versions remain exact; aliases cannot move authority', async () => {
   const seen = [];
-  const assessor = createJevAssessor({ apiKey: 'synthetic', questionVersion: 'ssh-command-risk-v4', fetchImpl: async (_url, options) => { const body = JSON.parse(options.body); seen.push(body.model); return response(body.model); } });
-  for (const model of ['jev-1.13.0', 'jev-1.14.0']) { const selected = assessor.forModel(model); assert.equal(selected.questionVersion, 'ssh-command-risk-v4'); assert.equal((await selected.assess(input)).model, model); }
+  const assessor = createJevAssessor({ apiKey: 'synthetic', questionVersion: 'ssh-command-risk-v5', fetchImpl: async (_url, options) => { const body = JSON.parse(options.body); seen.push(body.model); return response(body.model); } });
+  for (const model of ['jev-1.13.0', 'jev-1.14.0']) { const selected = assessor.forModel(model); assert.equal(selected.questionVersion, 'ssh-command-risk-v5'); assert.equal((await selected.assess(input)).model, model); }
   assert.deepEqual(seen, ['jev-1.13.0', 'jev-1.14.0']); assert.equal(assessor.model, 'jev-1.14.0'); assert.equal(assessor.forModel('jev-latest'), undefined);
   const wrong = createJevAssessor({ apiKey: 'synthetic', fetchImpl: async () => response('jev-1.13.0') });
   assert.equal((await wrong.assess(input)).reason, 'invalid_response');

@@ -130,7 +130,7 @@ const english = {
   '연결된 모델을 선택해 주세요.':'Choose a connected model.','위험도를 확인할 준비를 합니다.':'Preparing risk review.','위험도를 확인하는 중입니다…':'Reviewing risk…',
   '확인 결과가 만료됐습니다. 위험도를 다시 확인해 주세요.':'Review expired. Review risk again.','저장 전 확인해 주세요':'Review before saving',
   '저장된 설정과 같습니다. 새 평가 결과는 없습니다.':'Matches saved settings. No new assessment.',
-  '낮음':'Low','높음':'High','판단 불충분':'Inconclusive',' · 종합 위험도 ':' · overall risk ','등록할 명령 없음':'No commands to register',
+  '낮음':'Low','높음':'High','판단 불충분':'Inconclusive','안전':'Safe','위험':'Risk','평가 없음':'No assessment','안전 점수 ':'Safe score ','% · 위험 점수 ':'% · Risk score ',' · 종합 위험도 ':' · overall risk ','등록할 명령 없음':'No commands to register',
   '서버의 등록 규칙과 사용 가능한 Jev 평가를 반영한 안내입니다. 파일 자동업로드나 영향이 큰 명령은 서버 규칙에서 높은 위험으로 안내합니다.':'Based on server registration rules and available Jev assessment. Server rules label automatic uploads and impactful commands as high risk.',
   'Jev 분류: ':'Jev classification: ',' · 구체적인 위험 사유는 제공되지 않았습니다.':' · No specific risk reason was provided.',
   '평가 상세':'Assessment details','낮은 위험 점수 ':'Low-risk score ','% · 실제 안전을 보증하지 않습니다.':'% · does not guarantee safety.',

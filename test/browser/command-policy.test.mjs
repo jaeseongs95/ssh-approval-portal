@@ -8,7 +8,7 @@ import { classifyCommand } from 'ssh-mcp/build/policy/classifier.js';
 import { createApplication } from '../../app.mjs';
 
 const recommended = ['pwd', 'ls', 'stat', 'df', 'du', 'uname', 'uptime', 'whoami', 'id', 'hostname'];
-const low = { status: 'assessed', model: 'jev-1.14.0', label: 'low_risk', confidence: 0.7, probabilities: { low_risk: 0.95, high_risk: 0.02, uncertain: 0.03 } };
+const low = { status: 'assessed', model: 'jev-1.14.0', label: 'low_risk', confidence: 0.7, probabilities: { low_risk: 0.95, high_risk: 0.05 } };
 const targets = ['alpha', 'beta'].map(id => ({ id, displayName: id === 'alpha' ? '테스트 서버' : '운영 서버', readProfile: id + '-read', writeProfile: id + '-write', credentialRevision: 'v1' }));
 const tab = (page, name) => page.getByRole('tab', { name, exact: true });
 const commandTab = async page => { await tab(page, '명령 관리').click(); const bulk = page.locator('.command-bulk'); if (!await bulk.evaluate(n => n.open)) await bulk.locator('summary').click(); };
@@ -120,10 +120,15 @@ test('Jev 90 percent needs no manual reference and persists exactly the reviewed
   assert.equal(await page.getByLabel('Jev 자동승인 기준 (%)', { exact: true }).inputValue(), '90');
   await screenshot(page, 'mobile-390-settings');
   await f.checked(); assert.equal(f.calls.length, 1);
-  await page.getByText('Jev 분류: 낮음 · 구체적인 위험 사유는 제공되지 않았습니다.', { exact: true }).waitFor();
-  assert.equal(await page.getByText(/낮은 위험 점수 95.0%/).isVisible(), false);
+  await page.getByText('Jev 분류: 안전 · 구체적인 위험 사유는 제공되지 않았습니다.', { exact: true }).waitFor();
+  await page.getByText('평가 상세', { exact: true }).click();
+  const details = page.locator('.policy-risk details').first();
+  assert.match(await details.textContent(), /안전.*95\.0%/);
+  assert.match(await details.textContent(), /위험.*5\.0%/);
+  assert.doesNotMatch(await details.textContent(), /판단 불가|불확실/);
   const proposed = f.posts.find(x => x.path.endsWith('/review')).body;
   assert.equal(proposed.policy.targets[0].thresholds.jev.minLowRisk, 0.9);
+  assert.equal(proposed.policy.targets[0].thresholds.jev.questionVersion, 'ssh-command-risk-v5');
   assert.match(proposed.policy.targets[0].thresholds.jev.validationRef, /^user-choice:/);
   assert.equal(f.calls[0].userApproval, undefined); assert.deepEqual(f.calls[0].proposedCommands, recommended);
   await f.commit();
@@ -151,10 +156,28 @@ test('legacy, 80 percent, fallback, denied rules and other targets survive comma
   await reviewTab(page); await page.getByText(/기존 confidence 조건 제거/).waitFor();
   await f.checked(); await f.commit();
   const migrated = (await f.api('/api/command-policy')).targets;
-  assert.equal(migrated[0].thresholds.jev.questionVersion, 'ssh-command-risk-v4'); assert.equal(migrated[0].thresholds.jev.basis, 'safety-probability-v1');
+  assert.equal(migrated[0].thresholds.jev.questionVersion, 'ssh-command-risk-v5'); assert.equal(migrated[0].thresholds.jev.basis, 'safety-probability-v1');
   assert.equal(migrated[0].thresholds.jev.minLowRisk, 0.9); assert.equal(Object.hasOwn(migrated[0].thresholds.jev, 'minConfidence'), false);
   assert.deepEqual(migrated[0].thresholds.luna, thresholds.luna); assert.deepEqual(migrated[0].thresholds.sonnet, thresholds.sonnet); assert.deepEqual(migrated[1], policy.targets[1]);
 }, { multi: true }));
+
+test('v4 threshold stays unchanged until an explicit v5 conversion is reviewed and saved', async () => fixture(async f => {
+  const initial = await f.api('/api/command-policy'), b = initial.bindings[0];
+  const old = { model: 'jev-1.14.0', questionVersion: 'ssh-command-risk-v4', basis: 'safety-probability-v1', minLowRisk: 0.9, validationRef: 'fixture:v4' };
+  await f.seed({ targets: [{ targetId: b.targetId, targetRevision: b.targetRevision, profile: b.profile, commands: ['ls'], deniedCommands: [], externalDisclosure: true, modelExecution: true, fallback: null, thresholds: { jev: old } }] });
+  await f.open(); const { page } = f;
+  await modelTab(page);
+  assert.equal(await page.getByLabel('Jev 자동승인 기준 (%)', { exact: true }).isDisabled(), true);
+  await commandTab(page); await names(page).fill('ls\npwd'); await f.checked(); await f.commit();
+  assert.deepEqual((await f.api('/api/command-policy')).targets[0].thresholds.jev, old);
+  const writes = f.posts.filter(p => p.path === '/api/command-policy').length;
+  await modelTab(page); await page.getByRole('button', { name: 'jev 기준을 현재 방식으로 바꾸기', exact: true }).click();
+  assert.equal(await save(page).isDisabled(), true);
+  assert.equal(f.posts.filter(p => p.path === '/api/command-policy').length, writes);
+  assert.deepEqual((await f.api('/api/command-policy')).targets[0].thresholds.jev, old);
+  await f.checked(); assert.equal(await save(page).isDisabled(), true); await f.commit();
+  assert.equal((await f.api('/api/command-policy')).targets[0].thresholds.jev.questionVersion, 'ssh-command-risk-v5');
+}));
 
 for (const mode of ['edit', 'select', 'target']) test('late review cannot authorize a changed draft: ' + mode, async () => fixture(async f => {
   const { page } = f; await f.open(); await commandTab(page); await names(page).fill('ls');
@@ -196,7 +219,7 @@ test('expired feedback clears OK without losing input, and an unobserved save pr
 
 test('local high-risk warning remains prominent even when Jev reports low risk', async () => fixture(async f => {
   const { page } = f; await f.open(); await commandTab(page); await names(page).fill('rm'); await modelTab(page); await page.getByRole('checkbox', { name: /^Jev에 정보 전송/ }).check();
-  await f.checked(); await page.getByText(/종합 위험도 높음/).waitFor();
+  await f.checked(); await page.getByText(/종합 위험도 위험/).waitFor();
   assert.equal(await page.locator('.policy-risk').getAttribute('data-level'), 'high_risk');
   assert.equal(await save(page).isDisabled(), true); assert.equal((await f.api('/api/command-policy')).targets.length, 0);
 }));
@@ -273,7 +296,7 @@ test('upload opt-in is explicit, review-bound, preserved per target and reversib
   await f.checked(); await ok(page).check(); await upload.check();
   assert.equal(await save(page).isDisabled(), true); assert.equal(await ok(page).isChecked(), false);
   assert.ok((await page.locator('.policy-change-summary').textContent()).includes('설정/인증/자동 실행 파일도 포함'));
-  await f.checked(); await page.getByText(/종합 위험도 높음/).waitFor(); await f.commit();
+  await f.checked(); await page.getByText(/종합 위험도 위험/).waitFor(); await f.commit();
   const stored = await f.api('/api/command-policy'); assert.equal(stored.targets[0].automaticUploads, true);
   await page.getByLabel('정책 편집 대상', { exact: true }).selectOption('beta'); assert.equal(await upload.isChecked(), false);
   await commandTab(page); await names(page).fill('ls'); await f.checked(); await f.commit();
@@ -425,7 +448,7 @@ test('selection exposes capability and same-count deltas; 128 names remain filte
 },{width:320}));
 
 test('hidden advanced errors open their ancestors and expired consent restores keyboard focus',async()=>fixture(async f=>{
-  const {page}=f;const c=await f.api('/api/command-policy'),b=c.bindings[0];await f.seed({targets:[{targetId:b.targetId,targetRevision:b.targetRevision,profile:b.profile,commands:['ls'],deniedCommands:[],externalDisclosure:false,modelExecution:false,fallback:null,thresholds:{luna:{model:'custom-luna',questionVersion:'ssh-command-risk-v4',basis:'safety-probability-v1',minLowRisk:0.9,validationRef:'fixture:luna'}}}]});
+  const {page}=f;const c=await f.api('/api/command-policy'),b=c.bindings[0];await f.seed({targets:[{targetId:b.targetId,targetRevision:b.targetRevision,profile:b.profile,commands:['ls'],deniedCommands:[],externalDisclosure:false,modelExecution:false,fallback:null,thresholds:{luna:{model:'custom-luna',questionVersion:'ssh-command-risk-v5',basis:'safety-probability-v1',minLowRisk:0.9,validationRef:'fixture:luna'}}}]});
   await page.clock.install();await f.open();await modelTab(page);const advanced=page.locator('.policy-advanced');await advanced.locator('summary').first().click();const score=page.getByLabel('luna 자동승인 기준 (%)',{exact:true});await modelTab(page); await score.fill('50');await advanced.locator('summary').first().click();
   await reviewTab(page); await review(page).click();assert.equal(await advanced.evaluate(n=>n.open),true);assert.equal(await score.evaluate(n=>n===document.activeElement),true);assert.equal(await score.getAttribute('aria-invalid'),'true');
   await modelTab(page); await score.fill('90');await f.checked();await ok(page).check();await save(page).focus();await page.clock.fastForward(300001);assert.equal(await review(page).evaluate(n=>n===document.activeElement),true);assert.equal(await save(page).isDisabled(),true);
