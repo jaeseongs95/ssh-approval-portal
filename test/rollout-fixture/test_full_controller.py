@@ -7,7 +7,8 @@ import shutil
 import socket
 import subprocess
 import unittest
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError
 import time
 
 
@@ -136,6 +137,18 @@ class FullController(unittest.TestCase):
             completed = subprocess.run(['/usr/bin/python3','-I','-B','-c',launcher,str(task),sha(intentfile),sha(task/'bootstrap.py')],
                                        capture_output=True,text=True,timeout=300)
             receipt = json.loads((task/'receipt.json').read_text()) if (task/'receipt.json').exists() else {}
+            if completed.returncode and receipt.get('phase') == 'compare':
+                # Fixture-only bounded observation; owner/token and output data
+                # are synthetic and are never printed.
+                fixture_owner = (task/'owner').read_text()
+                headers = {'Authorization':'Bearer fixture-admin','Origin':'https://example.test',
+                           'X-Maintenance-Owner':fixture_owner}
+                request = Request(f'http://127.0.0.1:{admin}/api/maintenance/preservation/compare',data=b'',headers=headers,method='POST')
+                try:
+                    with urlopen(request,timeout=3) as response:
+                        receipt['fixtureCompare'] = {'http':response.status,'body':json.load(response)}
+                except HTTPError as error:
+                    receipt['fixtureCompare'] = {'http':error.code}
             self.assertEqual(0, completed.returncode, f'stderr={completed.stderr}; receipt={receipt}')
             self.assertEqual('PASS', receipt['status'])
             self.assertEqual(1, receipt['comparison']['commandRequestsChecked'])

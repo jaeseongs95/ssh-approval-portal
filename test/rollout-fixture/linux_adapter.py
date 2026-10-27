@@ -69,13 +69,17 @@ def verify_release_tree(root, expected, *, strict=False):
             raise RuntimeError('unexpected or missing source file')
 
 
+class HostCommandError(RuntimeError):
+    pass
+
+
 def checked(argv, *, owner=None, user=None, extra_env=None):
     command = list(argv) if user is None else ['/usr/bin/sudo', '-n', '-u', user, '--', *argv]
     env = {'PATH': '/opt/ssh-approval/node/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'LANG': 'C.UTF-8'}
     if extra_env: env.update(extra_env)
     result = subprocess.run(command, input=owner, text=True, capture_output=True, timeout=300, env=env)
     if result.returncode != 0:
-        raise RuntimeError('host operation failed')
+        raise HostCommandError('host operation failed')
     return result.stdout
 
 
