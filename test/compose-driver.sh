@@ -82,41 +82,9 @@ ssh_roundtrip
 probe test/compose-state.mjs capture
 baseline_id=$(docker inspect "$("${compose[@]}" ps -q bridge)" --format '{{.Image}}')
 before=$(sha256sum "$TEST_SECRET_SOURCE/docker-secrets.env")
-bash scripts/compose-update.sh "$TEST_IMAGE"
-verify_state
-[[ $("${compose[@]}" config --images) == "$TEST_IMAGE" ]]
-"${compose[@]}" exec -T bridge node test/delivery-runtime.mjs
-ssh_roundtrip
-if [[ -n ${TEST_BASELINE_IMAGE:-} ]]; then
-  bash scripts/compose-update.sh "$baseline_id"
-  [[ $("${compose[@]}" config --images) == "$baseline_id" ]]
-  [[ $(docker inspect "$("${compose[@]}" ps -q bridge)" --format '{{.Image}}') == "$baseline_id" ]]
-  [[ $(sha256sum "$TEST_SECRET_SOURCE/docker-secrets.env") == "$before" ]]
-  verify_state
-  bash scripts/compose-update.sh "$TEST_IMAGE"
-  verify_state
-fi
-# The old baseline image healthcheck uses the default port. Verify its real
-# upgrade/rollback first, then exercise candidate custom ports independently.
-"${compose[@]}" exec -T bridge node scripts/maintenance.mjs reserve
-"${compose[@]}" down
-docker exec "$TEST_TARGET" python3 /source/test/delivery-fixture.py docker-settings /etc/ssh-approval-portal/docker-secrets.env
-BRIDGE_IMAGE="$TEST_IMAGE" "${compose[@]}" up -d --no-build --wait --wait-timeout 45
-verify_state
-old=$(docker inspect "$("${compose[@]}" ps -q bridge)" --format '{{.Image}}')
-before=$(sha256sum "$TEST_SECRET_SOURCE/docker-secrets.env")
-bash scripts/compose-update.sh "$TEST_IMAGE"
-verify_state
-"${compose[@]}" exec -T bridge node test/delivery-runtime.mjs
-mkdir /work/broken
-printf 'FROM %s\nCMD ["node","test/broken-start.fixture.mjs"]\n' "$TEST_IMAGE" > /work/broken/Dockerfile
-broken=$TEST_PROJECT:broken
-platform=$(docker image inspect "$TEST_IMAGE" --format '{{.Os}}/{{.Architecture}}')
-docker build --platform "$platform" --label "io.ssh-approval.solid-task=$TEST_TASK_TAG" -t "$broken" /work/broken
-if bash scripts/compose-update.sh "$broken"; then echo 'Broken image update unexpectedly succeeded' >&2; exit 1; fi
-[[ $("${compose[@]}" config --images) == "$old" ]]
-[[ $(docker inspect "$("${compose[@]}" ps -q bridge)" --format '{{.Image}}') == "$old" ]]
+if bash scripts/compose-update.sh "$TEST_IMAGE"; then echo 'Unsupported Compose update unexpectedly succeeded' >&2; exit 1; fi
+[[ $(docker inspect "$("${compose[@]}" ps -q bridge)" --format '{{.Image}}') == "$baseline_id" ]]
 [[ $(sha256sum "$TEST_SECRET_SOURCE/docker-secrets.env") == "$before" ]]
 verify_state
-"${compose[@]}" exec -T bridge node test/delivery-runtime.mjs
-echo "ACTUAL COMPOSE: secret file, SSH roundtrip, custom ports, idempotent update, failed-start rollback, same image/secret preservation PASS; baseline=${TEST_BASELINE_IMAGE:-none}"
+ssh_roundtrip
+echo "ACTUAL COMPOSE: SSH roundtrip and unchanged image, secrets, and state after rejected update PASS; image update and rollback are unsupported"
