@@ -24,6 +24,7 @@ flock -n 9
 before=$(sha256sum "$env_file" | cut -d' ' -f1)
 work=$(mktemp -d /run/ssh-admin-access.XXXXXXXX)
 reserved=0
+captured=0
 changed=0
 backup=
 stage=
@@ -53,10 +54,13 @@ cleanup() {
       else echo "Restore failed. Administrator recovery needed: $backup" >&2; fi
     fi
   fi
-  if [[ $reserved == 1 && $recovery_ok == 1 ]]; then
+  if [[ $reserved == 1 && $recovery_ok == 1 && $captured == 1 ]]; then
+    "$node" "$active/scripts/maintenance.mjs" compare < "$maintenance_owner_file" || { recovery_ok=0; rc=1; }
+  fi
+  if [[ $reserved == 1 && $recovery_ok == 1 && $captured == 1 ]]; then
     if "$node" "$active/scripts/maintenance.mjs" release < "$maintenance_owner_file"; then maintenance_forget_owner; else rc=1; fi
   fi
-  if [[ $reserved == 1 && $recovery_ok != 1 ]]; then echo 'Maintenance retained: recovery not confirmed.' >&2; fi
+  if [[ $reserved == 1 && ( $recovery_ok != 1 || $captured != 1 ) ]]; then echo 'Maintenance retained: preservation or recovery not confirmed.' >&2; fi
   rm -f -- "$work/proposed.env"
   if [[ -n "$stage" ]]; then rm -f -- "$stage"; fi
   if [[ -n "$restore_stage" ]]; then rm -f -- "$restore_stage"; fi
@@ -71,6 +75,8 @@ trap 'exit 130' INT TERM
 maintenance_new_owner
 "$node" "$active/scripts/maintenance.mjs" reserve < "$maintenance_owner_file"
 reserved=1
+"$node" "$active/scripts/maintenance.mjs" capture < "$maintenance_owner_file" || { echo 'Preservation capture unconfirmed; maintenance retained.' >&2; exit 1; }
+captured=1
 [[ $(sha256sum "$env_file" | cut -d' ' -f1) == "$before" ]] || { echo 'Configuration changed during maintenance reservation; no settings were replaced.' >&2; exit 1; }
 backup=/etc/ssh-mcp-approval-bridge.env.before-access.$(date -u +%Y%m%dT%H%M%SZ).$$
 cp -a -- "$env_file" "$backup"

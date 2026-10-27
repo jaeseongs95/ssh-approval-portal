@@ -138,10 +138,12 @@ def validate(data):
 
 
 class Editor:
-    def __init__(self, env=ENV, root=ROOT, validator=validate, scheduler=None, release=None):
+    def __init__(self, env=ENV, root=ROOT, validator=validate, scheduler=None, release=None, capture=None, compare=None):
         self.env, self.root, self.validate = env, root, validator
         self.scheduler = scheduler or self.schedule
         self.release = release or self.release_maintenance
+        self.capture = capture or (lambda owner: self.maintenance_action('capture', owner))
+        self.compare = compare or (lambda owner: self.maintenance_action('compare', owner))
 
     def initialize(self):
         self.root.mkdir(mode=0o700, exist_ok=True)
@@ -231,10 +233,14 @@ class Editor:
                    '/usr/bin/python3', '-I', HELPER, '--restart', job])
 
     @staticmethod
-    def release_maintenance(owner):
-        subprocess.run(['/opt/ssh-approval/node/bin/node', '/var/lib/ssh-mcp/app/approval-bridge/scripts/maintenance.mjs', 'release'],
+    def maintenance_action(action, owner):
+        subprocess.run(['/opt/ssh-approval/node/bin/node', '/var/lib/ssh-mcp/app/approval-bridge/scripts/maintenance.mjs', action],
                        input=owner, env={'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'},
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15, check=True)
+
+    @staticmethod
+    def release_maintenance(owner):
+        Editor.maintenance_action('release', owner)
 
     def restart(self, job, restart=None, healthy=None):
         restart = restart or (lambda: clean_run(['/usr/bin/systemctl', 'restart', SERVICE], timeout=200))
@@ -253,6 +259,11 @@ class Editor:
                 raise Refused('invalid-maintenance-owner')
             if state.get('revision') != self.revision(data):
                 self.record({'state': 'conflict', 'id': job})
+                return
+            try:
+                self.capture(owner)
+            except Exception:
+                self.record({'state': 'preservation-capture-unconfirmed', 'id': job})
                 return
             self.record({'state': 'restarting', 'id': job})
             try:
@@ -275,11 +286,16 @@ class Editor:
                         state['state'] = 'recovery-failed'
             if state['state'] in ('healthy', 'rolled-back'):
                 try:
-                    self.release(owner)
+                    self.compare(owner)
                 except Exception:
-                    state['state'] = 'maintenance-release-unconfirmed'
+                    state['state'] = 'preservation-compare-unconfirmed'
                 else:
-                    owner_path.unlink()
+                    try:
+                        self.release(owner)
+                    except Exception:
+                        state['state'] = 'maintenance-release-unconfirmed'
+                    else:
+                        owner_path.unlink()
             if state['state'] in ('healthy', 'rolled-back') and (self.root / 'pending.env').exists():
                 # Backup archive remains; only the pending marker is cleared.
                 os.unlink(self.root / 'pending.env')

@@ -16,6 +16,7 @@ if systemctl is-active --quiet ssh-approval-bridge.service; then
   maintenance_new_owner
   /opt/ssh-approval/node/bin/node "$source_dir/scripts/maintenance.mjs" reserve < "$maintenance_owner_file"
   maintenance_reserved=1
+  /opt/ssh-approval/node/bin/node "$source_dir/scripts/maintenance.mjs" capture < "$maintenance_owner_file" || { echo 'Preservation capture unconfirmed; maintenance retained.' >&2; exit 1; }
 fi
 for pair in 'ssh-mcp-approval-bridge.env:/etc/ssh-mcp-approval-bridge.env' 'ssh-approval-bridge.service:/etc/systemd/system/ssh-approval-bridge.service' 'ssh-approval-file-helper:/usr/local/libexec/ssh-approval-file-helper'; do
   saved=${pair%%:*}; destination=${pair#*:}
@@ -32,6 +33,7 @@ done
 curl -fsS "http://127.0.0.1:$mcp_port/health" >/dev/null
 systemctl is-active --quiet ssh-approval-bridge.service
 if [[ "$maintenance_reserved" == 1 ]]; then
+  /opt/ssh-approval/node/bin/node "$source_dir/scripts/maintenance.mjs" compare < "$maintenance_owner_file" || { echo 'Post-rollback preservation unconfirmed; maintenance retained.' >&2; exit 1; }
   /opt/ssh-approval/node/bin/node "$source_dir/scripts/maintenance.mjs" release < "$maintenance_owner_file" || { echo 'Maintenance release unconfirmed; manual recovery required.' >&2; exit 1; }
   maintenance_forget_owner
 fi
