@@ -17,6 +17,9 @@ if systemctl is-active --quiet ssh-approval-bridge.service; then
   /opt/ssh-approval/node/bin/node "$source_dir/scripts/maintenance.mjs" reserve < "$maintenance_owner_file"
   maintenance_reserved=1
   /opt/ssh-approval/node/bin/node "$source_dir/scripts/maintenance.mjs" capture < "$maintenance_owner_file" || { echo 'Preservation capture unconfirmed; maintenance retained.' >&2; exit 1; }
+else
+  echo 'Existing service is stopped; an independently verified offline rollback is required.' >&2
+  exit 1
 fi
 for pair in 'ssh-mcp-approval-bridge.env:/etc/ssh-mcp-approval-bridge.env' 'ssh-approval-bridge.service:/etc/systemd/system/ssh-approval-bridge.service' 'ssh-approval-file-helper:/usr/local/libexec/ssh-approval-file-helper'; do
   saved=${pair%%:*}; destination=${pair#*:}
