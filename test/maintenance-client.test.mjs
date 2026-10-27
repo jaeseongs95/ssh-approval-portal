@@ -10,12 +10,12 @@ import { fileURLToPath } from 'node:url';
 test('client verifies durable capability before mutation and passes the same owner on reserve and release', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'maintenance-client-'));
   const secret = join(dir, 'env'); await writeFile(secret, '');
-  let legacy = true; const calls = [];
+  let legacy = true, comparison = 'PASS'; const calls = [];
   const server = createServer((req, res) => {
     calls.push({ path: req.url, owner: req.headers['x-maintenance-owner'] });
     if (req.url.endsWith('capabilities') && legacy) { res.writeHead(404); res.end(); return; }
     res.setHeader('Content-Type', 'application/json');
-    const result = req.url.endsWith('capabilities') ? {} : req.url.endsWith('compare') ? { status: 'PASS' } :
+    const result = req.url.endsWith('capabilities') ? {} : req.url.endsWith('compare') ? { status: comparison } :
       { [req.url.endsWith('reserve') ? 'reserved' : req.url.endsWith('capture') ? 'captured' : 'released']: true };
     res.end(JSON.stringify({ ownership: 'durable-v1', ...result }));
   });
@@ -38,5 +38,10 @@ test('client verifies durable capability before mutation and passes the same own
     }
     assert.deepEqual(calls.map(x => x.path), ['/api/maintenance/capabilities', '/api/maintenance/reserve', '/api/maintenance/capabilities', '/api/maintenance/preservation/capture', '/api/maintenance/capabilities', '/api/maintenance/preservation/compare', '/api/maintenance/capabilities', '/api/maintenance/release']);
     assert.ok(calls.every(x => x.owner === owner));
+    comparison = 'FAIL'; calls.length = 0;
+    const failed = await run('compare');
+    assert.notEqual(failed.code, 0);
+    assert.ok(!failed.output.includes(owner));
+    assert.deepEqual(calls.map(x => x.path), ['/api/maintenance/capabilities', '/api/maintenance/preservation/compare']);
   } finally { await new Promise(resolve => server.close(resolve)); await rm(dir, { recursive: true }); }
 });
