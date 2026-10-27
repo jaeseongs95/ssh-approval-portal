@@ -101,6 +101,7 @@ class LinuxAdapter:
         self.baseline = None
         self.pre_protected = None
         self.pre_staging = None
+        self.subphase = None
 
     def _private_root(self):
         s = self.root.lstat()
@@ -229,20 +230,26 @@ class LinuxAdapter:
 
     def _stage(self, identity):
         import grp
+        self.subphase = 'stage-precheck'
         self._active(self.old)
         module = self._update()
         def verify(stage):
+            self.subphase = 'stage-manifest'
             if digest_file(stage / 'release-manifest.json') != identity.candidate_manifest:
                 raise RuntimeError('candidate manifest mismatch')
+            self.subphase = 'stage-verifier'
             checked([str(self.node), str(stage / 'scripts/verify.mjs'), str(stage)])
+            self.subphase = 'stage-npm'
             checked(['/opt/ssh-approval/node/bin/npm', 'ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund', '--prefix', str(stage)],
                     extra_env={'HOME': str(self.root), 'npm_config_cache': str(self.root / 'npm-cache'),
                                'npm_config_userconfig': '/dev/null', 'npm_config_globalconfig': '/dev/null'})
+            self.subphase = 'stage-import-check'
             checked([str(self.node), str(stage / 'scripts/check-package-imports.mjs')])
         module.publish_release(self.source, self.new, grp.getgrnam('mcpbridge').gr_gid, verify)
 
     def prepare_offline_baseline(self, identity, owner):
         self._stage(identity)
+        self.subphase = 'offline-helper'
         # Pass fixed JavaScript, not its root-only task pathname, to the bridge account.
         # Owner is supplied on stdin and never included in argv.
         self._check_task_file('offline-baseline.mjs')

@@ -85,5 +85,6 @@ def rollout(identity, backend):
         return True
     except Exception as exc:
         if claimed:
-            backend.write_receipt(identity, {'status': 'NEEDS_REVIEW', 'phase': phase, 'errorType': type(exc).__name__})
+            backend.write_receipt(identity, {'status': 'NEEDS_REVIEW', 'phase': phase, 'errorType': type(exc).__name__,
+                                             'subphase': getattr(backend, 'subphase', None) if phase == 'offline-baseline' else None})
         return False
