@@ -82,7 +82,8 @@ def main(root):
     ports = contract.validated_ports('/etc/ssh-mcp-approval-bridge.env')
     adapter = LinuxAdapter(root, source, old, new, node, transfer, protected_scope(), audit,
                            command_enabled=env.get('BRIDGE_COMMAND_AUTOMATION', 'false') == 'true', cli_enabled=True,
-                           independent_channel=True, mcp_port=ports['mcp'], candidate_version=intent['candidateVersion'])
+                           independent_channel=True, mcp_port=ports['mcp'], candidate_version=intent['candidateVersion'],
+                           task_pins=intent['controllerDigests'])
     # Reuse the installer's shared flock throughout reservation, activation and release.
     with adapter._update().installer_lock(Path('/var/lib/ssh-mcp/.portal-install.lock')):
         return 0 if rollout(identity, adapter) else 1

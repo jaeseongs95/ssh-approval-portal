@@ -82,7 +82,7 @@ def checked(argv, *, owner=None, user=None, extra_env=None):
 class LinuxAdapter:
     def __init__(self, task_root, source, old_release, new_release, node, state_root,
                  protected_files, audit_path, *, command_enabled, cli_enabled,
-                 independent_channel, mcp_port, candidate_version, unit_name='ssh-approval-bridge.service'):
+                 independent_channel, mcp_port, candidate_version, unit_name='ssh-approval-bridge.service', task_pins=None):
         self.root, self.source = Path(task_root), Path(source)
         self.old, self.new, self.node, self.state_root = map(Path, (old_release, new_release, node, state_root))
         self.active = Path('/var/lib/ssh-mcp/app/approval-bridge')
@@ -95,6 +95,7 @@ class LinuxAdapter:
         if not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,79}\.service', unit_name):
             raise ValueError('invalid unit name')
         self.unit_name = unit_name
+        self.task_pins = task_pins
         self.owner_path = self.root / 'owner'
         self.helper = Path('/usr/local/libexec/ssh-approval-environment-helper')
         self.baseline = None
@@ -176,6 +177,7 @@ class LinuxAdapter:
         if self._instance() != instance:
             raise RuntimeError('old instance changed')
         # The exact, separately reviewed legacy helper owns the token loading.
+        self._check_task_file('maintenance-request.mjs')
         checked([str(self.node), str(self.root / 'maintenance-request.mjs'), 'reserve'])
         if self._instance() != instance:
             raise RuntimeError('old instance changed after reserve')
@@ -221,6 +223,10 @@ class LinuxAdapter:
         spec.loader.exec_module(module)
         return module
 
+    def _check_task_file(self, name):
+        if not isinstance(self.task_pins, dict) or digest_file(self.root / name) != self.task_pins.get(name):
+            raise RuntimeError('task file pin mismatch')
+
     def _stage(self, identity):
         import grp
         self._active(self.old)
@@ -239,6 +245,7 @@ class LinuxAdapter:
         self._stage(identity)
         # Pass fixed JavaScript, not its root-only task pathname, to the bridge account.
         # Owner is supplied on stdin and never included in argv.
+        self._check_task_file('offline-baseline.mjs')
         helper = (self.root / 'offline-baseline.mjs').read_text(encoding='utf-8')
         checked([str(self.node), '--input-type=module', '-e', helper, str(self.new),
                  str(self.state_root), str(self.command_enabled).lower(), str(self.cli_enabled).lower()],

@@ -45,7 +45,9 @@ def snapshot(paths):
                 after = os.fstat(fd)
             finally:
                 os.close(fd)
-            stable = lambda s: (s.st_dev, s.st_ino, s.st_size, s.st_mtime_ns, s.st_ctime_ns)
+            # Linux includes ctime; Windows runs local contract tests only.
+            stable = lambda s: (s.st_dev, s.st_ino, s.st_size, s.st_mtime_ns,
+                                s.st_ctime_ns if os.name != 'nt' else 0)
             current = path.lstat()
             if stable(before) != stable(after) or stable(after) != stable(current):
                 names = ('device', 'inode', 'size', 'mtime', 'ctime')

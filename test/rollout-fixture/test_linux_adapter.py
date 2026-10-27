@@ -54,6 +54,7 @@ class LinuxAdapterContract(unittest.TestCase):
         response = MagicMock()
         response.__enter__.return_value = response
         with patch.object(self.a, '_active'), patch.object(self.a, '_instance', return_value='instance'), \
+             patch.object(self.a, '_check_task_file'), \
              patch('linux_adapter.checked') as run, patch('linux_adapter.urlopen', return_value=response), \
              patch('linux_adapter.json.load', return_value={'healthy': True, 'maintenance': False}):
             with self.assertRaises(RuntimeError):
@@ -62,7 +63,7 @@ class LinuxAdapterContract(unittest.TestCase):
 
     def test_offline_seed_uses_stdin_for_owner_and_published_source(self):
         (self.root / 'offline-baseline.mjs').write_text('fixed helper', encoding='utf-8')
-        with patch.object(self.a, '_stage') as stage, patch('linux_adapter.checked') as run:
+        with patch.object(self.a, '_stage') as stage, patch.object(self.a, '_check_task_file'), patch('linux_adapter.checked') as run:
             self.a.prepare_offline_baseline(self.i, 'd' * 64)
             stage.assert_called_once_with(self.i)
             argv = run.call_args.args[0]
