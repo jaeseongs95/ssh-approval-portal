@@ -15,6 +15,7 @@ elif [[ $# != 0 ]]; then
 fi
 active=/var/lib/ssh-mcp/app/approval-bridge
 node=/opt/ssh-approval/node/bin/node
+. "$active/scripts/maintenance-owner.sh"
 env_file=/etc/ssh-mcp-approval-bridge.env
 [[ -f "$env_file" && ! -L "$env_file" ]] || { echo 'Expected a native managed secret file.' >&2; exit 1; }
 "$node" "$active/scripts/verify.mjs" "$active"
@@ -39,17 +40,23 @@ cleanup() {
   rc=$?
   trap - EXIT
   set +e
+  recovery_ok=1
   if [[ $rc != 0 && $changed == 1 ]]; then
+    recovery_ok=0
     if ! cmp -s -- "$env_file" "$work/proposed.env"; then
       echo "Configuration changed during setup. Automatic restore skipped. Recovery backup: $backup" >&2
     else
       restore_stage=$(mktemp /etc/.ssh-admin-access-restore.XXXXXXXX)
       if cp -a -- "$backup" "$restore_stage" && sync -f "$restore_stage" && mv -f -- "$restore_stage" "$env_file" && systemctl reset-failed ssh-approval-bridge.service && systemctl restart ssh-approval-bridge.service && wait_restored; then
+        recovery_ok=1
         echo "Configuration restored from $backup" >&2
       else echo "Restore failed. Administrator recovery needed: $backup" >&2; fi
     fi
   fi
-  if [[ $reserved == 1 ]]; then "$node" "$active/scripts/maintenance.mjs" release || true; fi
+  if [[ $reserved == 1 && $recovery_ok == 1 ]]; then
+    if "$node" "$active/scripts/maintenance.mjs" release < "$maintenance_owner_file"; then maintenance_forget_owner; else rc=1; fi
+  fi
+  if [[ $reserved == 1 && $recovery_ok != 1 ]]; then echo 'Maintenance retained: recovery not confirmed.' >&2; fi
   rm -f -- "$work/proposed.env"
   if [[ -n "$stage" ]]; then rm -f -- "$stage"; fi
   if [[ -n "$restore_stage" ]]; then rm -f -- "$restore_stage"; fi
@@ -61,7 +68,8 @@ trap 'exit 130' INT TERM
 "$node" "$active/scripts/admin-access-config.mjs" "$env_file" "$work/proposed.env" "${config_args[@]}"
 [[ -f "$work/proposed.env" && ! -L "$work/proposed.env" ]] || { echo 'Configuration staging did not complete.' >&2; exit 1; }
 [[ $(sha256sum "$env_file" | cut -d' ' -f1) == "$before" ]] || { echo 'Configuration changed during setup; start again.' >&2; exit 1; }
-"$node" "$active/scripts/maintenance.mjs" reserve
+maintenance_new_owner
+"$node" "$active/scripts/maintenance.mjs" reserve < "$maintenance_owner_file"
 reserved=1
 [[ $(sha256sum "$env_file" | cut -d' ' -f1) == "$before" ]] || { echo 'Configuration changed during maintenance reservation; no settings were replaced.' >&2; exit 1; }
 backup=/etc/ssh-mcp-approval-bridge.env.before-access.$(date -u +%Y%m%dT%H%M%SZ).$$

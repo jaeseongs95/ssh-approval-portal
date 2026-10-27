@@ -26,7 +26,8 @@ class EditorTests(unittest.TestCase):
         self.env.write_bytes(self.original)
         self.env.chmod(0o600)
         self.scheduled = []
-        self.editor = helper.Editor(self.env, self.path / 'state', lambda _: None, self.scheduled.append)
+        self.released = []
+        self.editor = helper.Editor(self.env, self.path / 'state', lambda _: None, self.scheduled.append, self.released.append)
 
     def read(self):
         return self.editor.dispatch({'action': 'read'})
@@ -35,7 +36,7 @@ class EditorTests(unittest.TestCase):
         return self.editor.dispatch({'action': 'save', 'expectedRevision': revision or self.read()['revision'], 'changes': changes, 'acknowledged': True})
 
     def restart(self):
-        return self.editor.dispatch({'action': 'restart', 'expectedRevision': self.read()['revision'], 'acknowledged': True})['restart']['id']
+        return self.editor.dispatch({'action': 'restart', 'expectedRevision': self.read()['revision'], 'acknowledged': True, 'maintenanceOwner': 'a' * 64})['restart']['id']
 
     def test_snapshot_write_only_and_opaque_revision(self):
         value = self.read()
@@ -147,6 +148,8 @@ class EditorTests(unittest.TestCase):
         calls = []
         self.editor.restart(job, lambda: calls.append(1), lambda _: True)
         self.assertEqual(calls, [1])
+        self.assertEqual(self.released, [b'a' * 64])
+        self.assertFalse((self.path / 'state' / ('owner-' + job)).exists())
         self.assertEqual(self.read()['restart']['state'], 'healthy')
         self.assertFalse(self.read()['pendingRestart'])
         with self.assertRaises(helper.Refused):
@@ -183,6 +186,19 @@ class EditorTests(unittest.TestCase):
         job = self.restart()
         self.editor.restart(job, lambda: None, lambda _: False)
         self.assertEqual(self.read()['restart']['state'], 'recovery-failed')
+        self.assertTrue(self.read()['pendingRestart'])
+        self.assertEqual(self.released, [])
+        self.assertTrue((self.path / 'state' / ('owner-' + job)).exists())
+
+    def test_unconfirmed_release_keeps_owner_and_pending_backup(self):
+        self.save({'BRIDGE_UI_ENABLED': 'true'})
+        job = self.restart()
+        def fail(_):
+            raise RuntimeError('synthetic response lost')
+        self.editor.release = fail
+        self.editor.restart(job, lambda: None, lambda _: True)
+        self.assertEqual(self.read()['restart']['state'], 'maintenance-release-unconfirmed')
+        self.assertTrue((self.path / 'state' / ('owner-' + job)).exists())
         self.assertTrue(self.read()['pendingRestart'])
 
     def test_plain_restart_failure_does_not_claim_env_recovery(self):
