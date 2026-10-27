@@ -106,6 +106,19 @@ fi
 [[ $("${compose[@]}" ps -q bridge) == "$nested" ]]
 BRIDGE_IMAGE="$baseline" "${compose[@]}" up -d --no-build --force-recreate --wait --wait-timeout 90
 old=$("${compose[@]}" ps -q bridge)
+cat > "$RUNNER_TEMP/compose-writable.yaml" <<YAML
+services:
+  bridge:
+    read_only: false
+YAML
+BRIDGE_IMAGE="$baseline" "${compose[@]}" -f "$RUNNER_TEMP/compose-writable.yaml" up -d --no-build --force-recreate --wait --wait-timeout 90
+writable=$("${compose[@]}" ps -q bridge)
+if sudo --preserve-env=BRIDGE_COMPOSE_PROJECT,BRIDGE_COMPOSE_ENV_FILE bash scripts/compose-update.sh "$candidate"; then
+  echo 'An existing container with a writable root filesystem was unexpectedly accepted' >&2; exit 1
+fi
+[[ $("${compose[@]}" ps -q bridge) == "$writable" ]]
+BRIDGE_IMAGE="$baseline" "${compose[@]}" up -d --no-build --force-recreate --wait --wait-timeout 90
+old=$("${compose[@]}" ps -q bridge)
 if sudo env BRIDGE_COMPOSE_PROJECT="$project" BRIDGE_COMPOSE_ENV_FILE="$BRIDGE_COMPOSE_ENV_FILE" BRIDGE_COMPOSE_OVERRIDE=/dev/null bash scripts/compose-update.sh "$candidate"; then
   echo 'An unsupported Compose override was unexpectedly accepted' >&2; exit 1
 fi
@@ -122,4 +135,19 @@ new=$(sudo "${compose[@]}" ps -q bridge)
 [[ -n "$new" && "$old" != "$new" ]]
 [[ $(docker inspect "$new" --format '{{.Image}}') == "$(docker image inspect "$candidate" --format '{{.Id}}')" ]]
 docker exec "$new" node test/delivery-runtime.mjs
+echo 'Check detected concurrent Compose configuration change and retained reservation'
+sudo env BRIDGE_IMAGE="$baseline" "${compose[@]}" up -d --no-build --force-recreate --wait --wait-timeout 90
+mkdir "$RUNNER_TEMP/docker-wrapper"
+cat > "$RUNNER_TEMP/docker-wrapper/docker" <<'SH'
+#!/bin/bash
+if [[ "$*" == *' up -d --no-build --wait '* ]]; then printf '\n# concurrent fixture change\n' >> "$BRIDGE_COMPOSE_ENV_FILE"; fi
+exec /usr/bin/docker "$@"
+SH
+chmod 0755 "$RUNNER_TEMP/docker-wrapper/docker"
+if sudo env PATH="$RUNNER_TEMP/docker-wrapper:$PATH" BRIDGE_COMPOSE_PROJECT="$project" BRIDGE_COMPOSE_ENV_FILE="$BRIDGE_COMPOSE_ENV_FILE" bash scripts/compose-update.sh "$candidate" > "$RUNNER_TEMP/compose-conflict-out.txt" 2> "$RUNNER_TEMP/compose-conflict-err.txt"; then
+  echo 'Concurrent configuration change was unexpectedly accepted' >&2; exit 1
+fi
+grep -F 'Compose configuration changed; maintenance retained.' "$RUNNER_TEMP/compose-conflict-err.txt"
+new=$(sudo "${compose[@]}" ps -q bridge)
+docker exec "$new" node --input-type=module -e 'import assert from "node:assert/strict"; const r=await fetch("http://127.0.0.1:39124/health"); assert.equal((await r.json()).maintenance,true)'
 echo 'Actual Compose durable image replacement, restart comparison and release PASS'

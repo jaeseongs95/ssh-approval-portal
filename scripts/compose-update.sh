@@ -6,6 +6,10 @@ image=$1
 [[ $(id -u) == 0 ]] || { echo 'Run as root.' >&2; exit 1; }
 source_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 env_file=${BRIDGE_COMPOSE_ENV_FILE:-/etc/ssh-approval-portal/compose.env}
+env_fingerprint() {
+  python3 -c 'import hashlib,os,stat,sys; path=os.path.abspath(sys.argv[1]); parent=os.path.dirname(path); p=os.lstat(parent); assert stat.S_ISDIR(p.st_mode) and not stat.S_ISLNK(p.st_mode) and p.st_uid==0 and not(p.st_mode&0o022) and os.path.realpath(parent)==parent; fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW); s=os.fstat(fd); assert stat.S_ISREG(s.st_mode) and s.st_uid==0 and not(s.st_mode&0o022) and s.st_nlink==1 and s.st_size<=1048576; f=os.fdopen(fd,"rb"); data=f.read(1048577); f.close(); assert len(data)==s.st_size; print(hashlib.sha256(data).hexdigest())' "$env_file"
+}
+before_env=$(env_fingerprint) || { echo 'Unsafe Compose environment file.' >&2; exit 1; }
 compose=(docker compose -p "${BRIDGE_COMPOSE_PROJECT:-ssh-approval-portal}" --env-file "$env_file" -f "$source_dir/docker/compose.yaml")
 [[ -z ${BRIDGE_COMPOSE_OVERRIDE:-} ]] || { echo 'Compose overrides require a separately verified update procedure.' >&2; exit 1; }
 candidate=$(docker image inspect "$image" --format '{{.Id}}')
@@ -16,7 +20,7 @@ trusted_image() {
 trusted_image "$candidate"
 # A different entrypoint or command can bypass the verified application entirely.
 docker image inspect "$candidate" --format '{{json .Config}}' | python3 -c 'import json,sys; c=json.load(sys.stdin); assert c.get("Entrypoint") in (None,[]) and c.get("Cmd")==["node","bridge.mjs"] and c.get("WorkingDir")=="/opt/portal"; assert sorted(c.get("Env",[]))==sorted(["HOME=/var/lib/ssh-mcp","PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"])'
-BRIDGE_IMAGE="$candidate" "${compose[@]}" config --format json | python3 -c 'import json,sys; c=json.load(sys.stdin)["services"]["bridge"]; assert c.get("entrypoint") in (None,[]) and c.get("command") in (None,[]) and c.get("working_dir") in (None,"/opt/portal"); assert c.get("environment")=={"HOME":"/var/lib/ssh-mcp","BRIDGE_SECRET_ENV_FILE":"/run/secrets/bridge_config"}; roots=[".ssh",".config/ssh-mcp",".local/share/ssh-mcp","transfers"]; expected={"/var/lib/ssh-mcp/"+x for x in roots}; volumes=c.get("volumes",[]); assert len(volumes)==len(expected) and {v.get("target") for v in volumes}==expected and all(v.get("type")=="bind" and v.get("source")==v.get("target") for v in volumes)'
+BRIDGE_IMAGE="$candidate" "${compose[@]}" config --format json | python3 -c 'import json,sys; c=json.load(sys.stdin)["services"]["bridge"]; assert c.get("entrypoint") in (None,[]) and c.get("command") in (None,[]) and c.get("working_dir") in (None,"/opt/portal") and c.get("read_only") is True; assert c.get("environment")=={"HOME":"/var/lib/ssh-mcp","BRIDGE_SECRET_ENV_FILE":"/run/secrets/bridge_config"}; roots=[".ssh",".config/ssh-mcp",".local/share/ssh-mcp","transfers"]; expected={"/var/lib/ssh-mcp/"+x for x in roots}; volumes=c.get("volumes",[]); assert len(volumes)==len(expected) and {v.get("target") for v in volumes}==expected and all(v.get("type")=="bind" and v.get("source")==v.get("target") for v in volumes)'
 expected=$(sha256sum "$source_dir/release-manifest.json" | cut -d' ' -f1)
 verify_node=/opt/ssh-approval/node/bin/node
 [[ -x "$verify_node" ]] || { echo 'Verified host Node runtime is required.' >&2; exit 1; }
@@ -42,6 +46,7 @@ old_container=$("${compose[@]}" ps -q bridge)
 [[ -n "$old_container" ]] || { echo 'A running durable bridge is required; legacy and offline updates are unsupported.' >&2; exit 1; }
 docker inspect "$old_container" --format '{{json .Mounts}}' | python3 -c 'import json,sys; roots=[".ssh",".config/ssh-mcp",".local/share/ssh-mcp","transfers"]; expected={"/var/lib/ssh-mcp/"+x for x in roots}; all_mounts=json.load(sys.stdin); assert len(all_mounts)==len(expected)+1; mounts=[m for m in all_mounts if m.get("Destination") in expected]; assert len(mounts)==len(expected) and {m.get("Destination") for m in mounts}==expected and all(m.get("Type")=="bind" and m.get("Source")==m.get("Destination") for m in mounts); secrets=[m for m in all_mounts if m.get("Destination")=="/run/secrets/bridge_config"]; assert len(secrets)==1 and secrets[0].get("Type")=="bind" and secrets[0].get("Source")=="/etc/ssh-approval-portal/docker-secrets.env" and not secrets[0].get("RW")'
 docker inspect "$old_container" --format '{{json .HostConfig.Tmpfs}}' | python3 -c 'import json,sys; assert set((json.load(sys.stdin) or {}).keys())=={"/tmp"}'
+docker inspect "$old_container" --format '{{json .HostConfig}}' | python3 -c 'import json,sys; c=json.load(sys.stdin); assert c.get("ReadonlyRootfs") is True and c.get("Privileged") is False'
 docker inspect "$old_container" --format '{{json .Config}}' | python3 -c 'import json,sys; c=json.load(sys.stdin); assert c.get("Entrypoint") in (None,[]) and c.get("Cmd")==["node","bridge.mjs"] and c.get("WorkingDir")=="/opt/portal"'
 docker inspect "$old_container" --format '{{json .Config.Env}}' | python3 -c 'import json,sys; expected=["HOME=/var/lib/ssh-mcp","PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin","BRIDGE_SECRET_ENV_FILE=/run/secrets/bridge_config"]; assert sorted(json.load(sys.stdin))==sorted(expected)'
 candidate_user=$(BRIDGE_IMAGE="$candidate" "${compose[@]}" config --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["services"]["bridge"]["user"])')
@@ -72,6 +77,7 @@ new_container=$(BRIDGE_IMAGE="$candidate" "${compose[@]}" ps -q bridge)
 [[ -n "$new_container" && "$new_container" != "$old_container" ]] || { echo 'New container not confirmed; maintenance retained.' >&2; exit 1; }
 [[ $(docker inspect "$new_container" --format '{{.Image}}') == "$candidate" ]] || { echo 'Candidate image mismatch; maintenance retained.' >&2; exit 1; }
 maintenance compare || { echo 'Post-restart preservation incomplete; maintenance retained.' >&2; exit 1; }
+[[ $(env_fingerprint) == "$before_env" ]] || { echo 'Compose configuration changed; maintenance retained.' >&2; exit 1; }
 python3 "$source_dir/scripts/compose-env.py" image "$env_file" "$candidate" || { echo 'Image configuration update failed; maintenance retained.' >&2; exit 1; }
 maintenance release || { echo 'Maintenance release failed or is unknown; retain owner for recovery.' >&2; exit 1; }
 maintenance_forget_owner
