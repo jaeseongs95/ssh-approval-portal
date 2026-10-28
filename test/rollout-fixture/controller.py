@@ -86,5 +86,7 @@ def rollout(identity, backend):
     except Exception as exc:
         if claimed:
             backend.write_receipt(identity, {'status': 'NEEDS_REVIEW', 'phase': phase, 'errorType': type(exc).__name__,
+                                             # Controller RuntimeErrors carry fixed reason strings only (no paths/secrets).
+                                             'error': str(exc) if type(exc) is RuntimeError else None,
                                              'subphase': getattr(backend, 'subphase', None) if phase == 'offline-baseline' else None})
         return False

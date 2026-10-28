@@ -14,6 +14,7 @@ import re
 import socket
 import stat
 import subprocess
+import sys
 import time
 import uuid
 from urllib.request import urlopen
@@ -174,7 +175,13 @@ class LinuxAdapter:
             raise RuntimeError('explicit protected scope required')
         old_instance = self._instance()
         initial_config = digest_file('/etc/ssh-mcp-approval-bridge.env')
+        started = time.monotonic()
         self.pre_protected = {'audit': capture([], self.audit), 'paths': scope_guard.snapshot(self.protected_files)}
+        # Aggregate only (no paths): evidence for sizing scope_guard budgets on the next rollout.
+        records = self.pre_protected['paths'].values()
+        unique = {r['identity'][:2]: r['size'] for r in records if 'size' in r}
+        print('protected snapshot: entries=%d bytes=%d seconds=%.1f'
+              % (len(records), sum(unique.values()), time.monotonic() - started), file=sys.stderr)
         self.pre_staging = self._staging_entries()
         self._active(self.old)
         if self._instance() != old_instance or digest_file('/etc/ssh-mcp-approval-bridge.env') != initial_config:

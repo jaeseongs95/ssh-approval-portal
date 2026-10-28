@@ -95,5 +95,7 @@ if __name__ == '__main__':
             raise RuntimeError('task directory required')
         sys.exit(main(sys.argv[1]))
     except Exception as error:
-        print('rollout refused: ' + type(error).__name__, file=sys.stderr)
+        # RuntimeError messages here are fixed reason strings; other errors may embed paths.
+        reason = ': ' + str(error) if type(error) is RuntimeError else ''
+        print('rollout refused: ' + type(error).__name__ + reason, file=sys.stderr)
         sys.exit(1)
