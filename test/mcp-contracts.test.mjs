@@ -8,6 +8,58 @@ import { Tickets } from '../src/adapters/security/tickets.mjs';
 import { authorizeAdminRequest } from '../src/adapters/security/admin-policy.mjs';
 
 const identifier = 'a'.repeat(48);
+
+test('actual MCP HTTP preserves 5 KiB and 32 KiB commands with path-only context in both input forms', async () => {
+  const f = await fixture(), seen = [];
+  f.commands.run = async (...args) => { seen.push(args); return { type: 'job', job: f.pending }; };
+  try {
+    for (const size of [5025, 32768]) {
+      const command = 'printf ' + 'x'.repeat(size - 7);
+      assert.equal(Buffer.byteLength(command), size);
+      const input = { command, context: 'Check metadata for .env, /etc/shadow, /home/operator/.ssh/id_ed25519 and /secrets/service; no file contents supplied.', displayContext: '.env 및 /etc/shadow, /home/operator/.ssh/id_ed25519, /secrets/service 경로의 메타데이터만 확인합니다.' };
+      for (const args of [input, { command: 'ssh-request-v1:' + JSON.stringify(input) }]) {
+        const result = await f.call('run-command', args);
+        assert.equal(result.isError, undefined, JSON.stringify(result));
+        assert.deepEqual(seen.at(-1), [command, undefined, undefined, input.context, input.displayContext]);
+      }
+    }
+    assert.equal(seen.length, 4);
+  } finally { await f.close(); }
+});
+
+test('actual MCP HTTP refuses secret or invalid descriptions with safe context codes and no dispatch', async () => {
+  const f = await fixture(); let calls = 0;
+  f.commands.run = async () => { calls++; return { type: 'job', job: f.pending }; };
+  try {
+    const cases = [
+      ['password=synthetic-private-marker', 'COMMAND_CONTEXT_CONTAINS_SECRET'],
+      ['Bearer synthetic-private-marker', 'COMMAND_CONTEXT_CONTAINS_SECRET'],
+      ['-----BEGIN PRIVATE KEY-----\nsynthetic-private-marker', 'COMMAND_CONTEXT_CONTAINS_SECRET'],
+      ['a'.repeat(8193), 'COMMAND_CONTEXT_TOO_LARGE'],
+      ['synthetic-private-marker\0invalid', 'INVALID_COMMAND_CONTEXT'],
+    ];
+    for (const field of ['context', 'displayContext']) {
+      for (const [value, code] of cases) {
+        const input = { command: 'printf fixture', context: 'Fixture metadata inspection', [field]: value };
+        for (const args of [input, { command: 'ssh-request-v1:' + JSON.stringify(input) }]) {
+          const result = await f.call('run-command', args);
+          assert.equal(result.isError, true);
+          // Top-level oversize fields are rejected by the published JSON schema;
+          // envelopes reach callerContext and therefore carry its safe error code.
+          if (value.length <= 8192 || args !== input) assert.ok(result.content.some(item => item.type === 'text' && item.text.includes(code)), JSON.stringify(result));
+          assert.equal(JSON.stringify(result).includes(value), false);
+          assert.doesNotMatch(JSON.stringify(result), /synthetic-private-marker/);
+        }
+      }
+    }
+    assert.equal(calls, 0);
+    f.commands.run = async () => { throw Error('untrusted-error synthetic-private-marker COMMAND_CONTEXT_CONTAINS_SECRET'); };
+    const unknown = await f.call('run-command', { command: 'printf fixture' });
+    assert.equal(unknown.isError, true);
+    assert.match(unknown.content[0].text, /Request refused or failed/);
+    assert.doesNotMatch(JSON.stringify(unknown), /synthetic-private-marker|COMMAND_CONTEXT_CONTAINS_SECRET/);
+  } finally { await f.close(); }
+});
 const settings = { mcpToken: 'contract-mcp', adminToken: 'contract-admin', adminOrigin: 'https://example.test', uiEnabled: true, prefix: 'ssh-approval-bridge_', maxBytes: 64 };
 const job = () => ({ id: identifier, kind: 'command', operation: { kind: 'command', command: 'sudo id' }, command: 'sudo id',
   profile: 'aws-local', commandClass: 'privileged', target: 'fixture@localhost:22', state: 'pending', createdAt: 10, expiresAt: Date.now() + 600_000 });

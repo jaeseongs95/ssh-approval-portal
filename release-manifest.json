@@ -545,8 +545,8 @@
     },
     {
       "path": "src/adapters/mcp/server.mjs",
-      "size": 22461,
-      "sha256": "0b313907722b03f52f6a26b27af4b4b0ab4f8807e36e19cc6114ba12a74f3141"
+      "size": 22474,
+      "sha256": "5c134d899e48f7559659a20b22d0a7c27e143103f92973da5f0202909ec65dcb"
     },
     {
       "path": "src/adapters/presentation/capabilities.mjs",
@@ -555,8 +555,8 @@
     },
     {
       "path": "src/adapters/presentation/results.mjs",
-      "size": 8210,
-      "sha256": "541c5db06edd5db7604e1a82fde46621b2f3254cb29874b88ff5537496f2048e"
+      "size": 8688,
+      "sha256": "fc19f1a17ed74538b2f2b01a099cde2f2b311b08358a3df330ba05c3f7b24c8b"
     },
     {
       "path": "src/adapters/releases/agent-cli.mjs",
@@ -780,8 +780,8 @@
     },
     {
       "path": "src/domain/execution-context.mjs",
-      "size": 4673,
-      "sha256": "b128f28486fb568f07c9d9174d4e7c73891f023964a4493edb27b5fb44602e71"
+      "size": 5091,
+      "sha256": "221472ca27a108ba137464a7d838f83ab6144fb7742aa3a00ac3ffd43116b016"
     },
     {
       "path": "src/domain/file-target-binding.mjs",
@@ -1150,8 +1150,8 @@
     },
     {
       "path": "test/execution-context.test.mjs",
-      "size": 4758,
-      "sha256": "ed0b915798366f0f88828eb9063a47fd65441cfd48184a02c69b77fe42badd00"
+      "size": 6428,
+      "sha256": "356c15f2841d06d45108479631de2eec2a32f223f2aededf68c016edf785e1f9"
     },
     {
       "path": "test/file-contracts.test.mjs",
@@ -1260,8 +1260,8 @@
     },
     {
       "path": "test/mcp-contracts.test.mjs",
-      "size": 16842,
-      "sha256": "d8cc7227a8ad2f9774afc8e9dd7be005ec26e91723a70e333342c847d4df81a4"
+      "size": 20057,
+      "sha256": "c9e2ad9f84376635039eb6374eaeccfe0512d882aea4313b461828efd774e72a"
     },
     {
       "path": "test/mcp-input-limits.test.mjs",

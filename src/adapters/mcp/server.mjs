@@ -31,7 +31,7 @@ export function createMcpAdapter({ queue, commands, files, settings, capabilitie
       _meta: (ui || appOnly || meta) ? { ...meta, ...((ui || appOnly) ? { ui: { ...(ui ? { resourceUri: URI } : {}), visibility: appOnly ? ['app'] : ['model', 'app'] } } : {}) } : undefined,
     }, async (args, extra) => {
       try { return await handler(args, { ...extra, signal: AbortSignal.any([shutdownSignal, requestSignal, extra?.signal].filter(Boolean)) }); }
-      catch { return refused(); }
+      catch (error) { return refused(error); }
     });
     tool('list-targets', {}, outputSchemas.targets, () => publicResult(targets?.list() ?? { targets: [{ id: 'default', displayName: settings.targetDisplayName ?? 'SSH', enabled: true, isDefault: true }], defaultTarget: 'default' }, outputSchemas.targets), { readOnly: true, description: 'List administrator-registered SSH target IDs and display names. Unknown or disabled targets are refused; an omitted target uses only the configured fixed default.' });
     tool('read-command', { target, command: commandSchema }, outputSchemas.immediate, async ({ command, target }) => immediateResult(await commands.read(command, target), identity(target)), { readOnly: true, description: 'Execute proven read-only commands immediately (maximum 32768 UTF-8 command bytes; never truncated). The redacted adapter result is stored as a file; only status and output reference are returned. Read needed ranges with read-command-output; never rerun to recover expired output.' });
