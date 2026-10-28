@@ -1,12 +1,12 @@
 {
-  "version": "1.6.3",
-  "status": "candidate-pending-live-host-verification",
+  "version": "1.6.4",
+  "status": "release",
   "runtime": "Node.js 24",
   "files": [
     {
       "path": ".dockerignore",
-      "size": 199,
-      "sha256": "6e895e200fe55bd728d28d193ec3a16ec910b7a00b2789f274b0ee65e37c454a"
+      "size": 225,
+      "sha256": "fbf06845c0bd0a38e5ed5f3fdf825bd5e27dd2d84008c60824ff69f6c5357590"
     },
     {
       "path": "LICENSE",
@@ -16,12 +16,12 @@
     {
       "path": "README.ko.md",
       "size": 21638,
-      "sha256": "16a589fbac3da5c98665cc5509a9e88021e44ad48b4c2d140d8a39211f4f4c86"
+      "sha256": "7fe8fb696392ff84e6a45dcf6ca13f9802532f2f7eed2f6076944edad342dc07"
     },
     {
       "path": "README.md",
       "size": 19918,
-      "sha256": "f463542864bf557b35156763ead730da7840c901d2fa9c10ab18baa2380e9d9f"
+      "sha256": "26a2f42f994e8d8d76beb7ddaf845613c70b4185ca8c291caad2bf1cac79bf35"
     },
     {
       "path": "THIRD_PARTY_NOTICES.json",
@@ -30,8 +30,8 @@
     },
     {
       "path": "app.mjs",
-      "size": 26376,
-      "sha256": "c22e9ee549b19c1d6c4d2d6b1535b0fba8b07d6bf89a2c76f274fd5903d5b6da"
+      "size": 26526,
+      "sha256": "be1b862e3e077492b85cb1b3734683a7e0044db0b236dee1891c9eb7e2751dd3"
     },
     {
       "path": "bridge.mjs",
@@ -51,7 +51,7 @@
     {
       "path": "config/docker.example.env",
       "size": 73,
-      "sha256": "f4522df5fd15d820950f3927aee23f78d1de6620a1dd30dd9236930948ef29a8"
+      "sha256": "b64a0c4f2b527d323629edb20ab4291cc52583c3cbb8d5f467acae5212641ecf"
     },
     {
       "path": "config/settings-contract.json",
@@ -86,12 +86,12 @@
     {
       "path": "docker/Dockerfile",
       "size": 1594,
-      "sha256": "cf93104efbc1b87b2ac4eff47e584afd5fea3951284b26331b2a08e76482911c"
+      "sha256": "c73e81967f0444065b943574d35045be482dabb9dfcf4a33d77b0040ad87950d"
     },
     {
       "path": "docker/compose.yaml",
       "size": 1128,
-      "sha256": "08dc7c2975f815fae8786be2d30a07f6cf15908e256700963d4a7195ea1bc555"
+      "sha256": "3eaccf9b78e6289bdaad7d4ab69f377f5f45fef39a8a8bed8d4cea08b11776f9"
     },
     {
       "path": "docs/admin-login.en.md",
@@ -226,12 +226,12 @@
     {
       "path": "package-lock.json",
       "size": 100104,
-      "sha256": "ceb0d87b617dea93413ebadc96a7df24cf5337226c0a1f07219749ca9da3bba3"
+      "sha256": "aee3f8220141b960dc6300a700a2fc3e17002ff151189a6955801419e80e763e"
     },
     {
       "path": "package.json",
       "size": 740,
-      "sha256": "e784853c0ded1e36cc4de6fe02b090ce310c09047e7a3de3c73bb3c73fd8d397"
+      "sha256": "9d4ec4dafe08c9b38a02f3632aa8fc8735f7a03a10299730a8ea962b7a01ed8e"
     },
     {
       "path": "scripts/admin-access-config.mjs",
@@ -245,8 +245,8 @@
     },
     {
       "path": "scripts/check-agent-cli-login.py",
-      "size": 6472,
-      "sha256": "ddc0121ac3d88c72953513f9ed8da751a27bafadd9a71723e811652196f8506f"
+      "size": 7258,
+      "sha256": "b996fde34f63a927fae7c6714d9c65f7bb3b673b639d07199de466b1b0220ea5"
     },
     {
       "path": "scripts/check-package-imports.mjs",
@@ -545,8 +545,8 @@
     },
     {
       "path": "src/adapters/mcp/server.mjs",
-      "size": 22461,
-      "sha256": "0b313907722b03f52f6a26b27af4b4b0ab4f8807e36e19cc6114ba12a74f3141"
+      "size": 22474,
+      "sha256": "5c134d899e48f7559659a20b22d0a7c27e143103f92973da5f0202909ec65dcb"
     },
     {
       "path": "src/adapters/presentation/capabilities.mjs",
@@ -555,8 +555,8 @@
     },
     {
       "path": "src/adapters/presentation/results.mjs",
-      "size": 8210,
-      "sha256": "541c5db06edd5db7604e1a82fde46621b2f3254cb29874b88ff5537496f2048e"
+      "size": 8688,
+      "sha256": "fc19f1a17ed74538b2f2b01a099cde2f2b311b08358a3df330ba05c3f7b24c8b"
     },
     {
       "path": "src/adapters/releases/agent-cli.mjs",
@@ -615,8 +615,8 @@
     },
     {
       "path": "src/adapters/ssh/agent-cli.mjs",
-      "size": 9622,
-      "sha256": "128a56e3dda48907012c972bc8309f47e075439dc8125d6f5987febc4b9c565c"
+      "size": 9903,
+      "sha256": "58eead667a8cc9f991884f64dfa0c1cdb960aefa335731efce1c0f342c7019c0"
     },
     {
       "path": "src/adapters/ssh/python-source.mjs",
@@ -680,8 +680,8 @@
     },
     {
       "path": "src/application/agent-cli.mjs",
-      "size": 9916,
-      "sha256": "adffc0a6d4b1434ffe5411188f995975d68e626cbcae74f825ca3bc8a7518a79"
+      "size": 10314,
+      "sha256": "f74a2c720a1e646f685a143268bf2bbbffcdb23c3221f15b78e87ae9f4964f0f"
     },
     {
       "path": "src/application/automation-metrics.mjs",
@@ -780,8 +780,8 @@
     },
     {
       "path": "src/domain/execution-context.mjs",
-      "size": 4673,
-      "sha256": "b128f28486fb568f07c9d9174d4e7c73891f023964a4493edb27b5fb44602e71"
+      "size": 5091,
+      "sha256": "221472ca27a108ba137464a7d838f83ab6144fb7742aa3a00ac3ffd43116b016"
     },
     {
       "path": "src/domain/file-target-binding.mjs",
@@ -825,8 +825,8 @@
     },
     {
       "path": "test/agent-cli-delivery.test.mjs",
-      "size": 24549,
-      "sha256": "036de36667852b99a368dd7cfe8b474f2a64c23dd2f9029d4cdbfb3d04ff02ed"
+      "size": 25470,
+      "sha256": "070fe3cb1d1c8d15cc562172835f5c4838f68fba8615e14c2e221f2c6f759611"
     },
     {
       "path": "test/agent-cli-history.test.mjs",
@@ -835,8 +835,8 @@
     },
     {
       "path": "test/agent-cli-http.test.mjs",
-      "size": 31535,
-      "sha256": "93d9965a855ecdb42aa2d55c800da347691d161a96eb00a30c269291211ace41"
+      "size": 32684,
+      "sha256": "9a4aff39f0f3e0952ae78edd88a479706bc1b147f899d67c51a9180f6e37f3e1"
     },
     {
       "path": "test/agent-cli-releases.test.mjs",
@@ -920,8 +920,8 @@
     },
     {
       "path": "test/browser/agent-cli.test.mjs",
-      "size": 27010,
-      "sha256": "d37890bea7a3df400bbc77540b4d6d460f38dbd5f8cff4d8f300a0f4a9924515"
+      "size": 28906,
+      "sha256": "b7bf5e1560ee61d5f8b6b27212c54315a26f773a152b62a0b60320f7dccbe09b"
     },
     {
       "path": "test/browser/async-approval.test.mjs",
@@ -1150,8 +1150,8 @@
     },
     {
       "path": "test/execution-context.test.mjs",
-      "size": 4758,
-      "sha256": "ed0b915798366f0f88828eb9063a47fd65441cfd48184a02c69b77fe42badd00"
+      "size": 6428,
+      "sha256": "356c15f2841d06d45108479631de2eec2a32f223f2aededf68c016edf785e1f9"
     },
     {
       "path": "test/file-contracts.test.mjs",
@@ -1260,8 +1260,8 @@
     },
     {
       "path": "test/mcp-contracts.test.mjs",
-      "size": 16842,
-      "sha256": "d8cc7227a8ad2f9774afc8e9dd7be005ec26e91723a70e333342c847d4df81a4"
+      "size": 20057,
+      "sha256": "c9e2ad9f84376635039eb6374eaeccfe0512d882aea4313b461828efd774e72a"
     },
     {
       "path": "test/mcp-input-limits.test.mjs",
@@ -1370,8 +1370,8 @@
     },
     {
       "path": "test/preservation-integration.test.mjs",
-      "size": 4241,
-      "sha256": "aedb5ec75b66d79ef7d4bae82fe7e4395f40a9983b076124ef9c319d06aac02a"
+      "size": 7877,
+      "sha256": "c9203b2f5c3244abfed02194059a5a56b1fbd61cd5e6e52a38e418545dcfc4be"
     },
     {
       "path": "test/preservation-verification.test.mjs",
@@ -1515,8 +1515,8 @@
     },
     {
       "path": "test/test_agent_cli_login.py",
-      "size": 8429,
-      "sha256": "57a46e068f376831b848ea4d7dca3983e12d9bd4aa80384ae60e4bf44b98a922"
+      "size": 10737,
+      "sha256": "a521461c53e0ce411e74574281bbf5330b5874d8d9d2ba32aa90376b2be446e6"
     },
     {
       "path": "test/test_cloudflare_api_lifecycle.py",
@@ -1735,8 +1735,8 @@
     },
     {
       "path": "web/dist/app.js",
-      "size": 247574,
-      "sha256": "8678670e471142a37e887052d26ecda9dbae078024ff50d431144faf237eda77"
+      "size": 250742,
+      "sha256": "f456c68c1bbeeb8f93f79cb4638abf21c4bd016826b8bf7ae3d6e33c169af47f"
     },
     {
       "path": "web/index.html",
@@ -1745,8 +1745,8 @@
     },
     {
       "path": "web/src/agent-cli.js",
-      "size": 21355,
-      "sha256": "b8a163aee6f256f924e45275e9267828b2d54325cde8b422246920eed6bdd4f8"
+      "size": 23681,
+      "sha256": "f7b83a4fea31ee9c2baaa0e11f08d9dea943b3f3164888e4c5a3b76277c16087"
     },
     {
       "path": "web/src/appearance.js",

@@ -155,3 +155,16 @@ for(const locale of ['ko-KR','en-US'])for(const failure of ['503','401','network
  await page.reload();await page.locator('#sign-in').waitFor({state:'visible'});assert.equal(starts,1);assert.doesNotMatch(await page.locator('#error').textContent(),/SYNTHETIC_PRIVATE/);
  await page.locator('#sign-in').click();await page.waitForFunction(()=>document.querySelector('#connection').classList.contains('connected'));assert.equal(starts,2);assert.equal(ends,1);assert.equal(await page.locator('#sign-in').isVisible(),false);assert.equal(paths.some(p=>['/cdn-cgi/access/logout','/oauth2/sign_out'].includes(p)),false);
 },{locale,compiled:true}));
+
+for(const locale of ['ko-KR','en-US'])test(`CLI-LOGIN ${browserName} ${locale} explains fixed reasons without exposing arbitrary details`,async()=>fixture(async f=>{
+ const {page}=f;
+ const expected={unsafe_path:locale==='ko-KR'?/소유권.*쓰기 권한.*실행하지 않았/:/ownership.*write permissions.*not executed/,invalid_installation:locale==='ko-KR'?/설치.*무결성/:/installation.*integrity/,timeout:locale==='ko-KR'?/시간.*초과/:/timed out/,output_limit:locale==='ko-KR'?/출력.*한도/:/output.*limit/,unexpected_response:locale==='ko-KR'?/응답.*판독/:/response.*recognized/,check_failed:locale==='ko-KR'?/SSH.*검사/:/SSH.*check/};
+ for(const [reason,pattern] of Object.entries(expected)){
+  f.setLoginResult({state:'unavailable',reason,error:'SYNTHETIC_PRIVATE'});await page.locator('#cli-login-check').click();await page.waitForFunction(()=>document.querySelector('#agent-cli-settings').getAttribute('aria-busy')==='false');assert.match(await page.locator('#cli-login-state').textContent(),pattern);assert.doesNotMatch(await f.panel.textContent(),/SYNTHETIC_PRIVATE/);
+ }
+ for(const reason of ['SYNTHETIC_PRIVATE /unsafe/path','__proto__',{},null]){
+  f.setLoginResult({state:'unavailable',reason});await page.locator('#cli-login-check').click();await page.waitForFunction(()=>document.querySelector('#agent-cli-settings').getAttribute('aria-busy')==='false');assert.doesNotMatch(await f.panel.textContent(),/SYNTHETIC_PRIVATE|unsafe_path|object Object/);
+ }
+ f.setLoginResult({state:'signed_in',reason:'unsafe_path'});await page.locator('#cli-login-check').click();await page.waitForFunction(()=>document.querySelector('#agent-cli-settings').getAttribute('aria-busy')==='false');assert.doesNotMatch(await page.locator('#cli-login-state').textContent(),/로그인됨|Signed in/);
+ assert.equal(f.posts.every(p=>p.path.endsWith('/login-status')),true);
+},{locale}));

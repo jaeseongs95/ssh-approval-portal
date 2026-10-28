@@ -3,10 +3,14 @@ import { COMMAND_MAX_BYTES, COMMAND_REQUEST_MAX_BYTES, utf8WithinLimit } from '.
 /** Bounded caller descriptions and an explicit whitelist of observed server metadata. */
 export const CALLER_CONTEXT_LIMIT = 8192;
 export const ASSESSMENT_CONTEXT_LIMIT = 12_288;
-export const sensitiveText = value => /-----BEGIN|\bBearer\s|(?:api[_-]?key|password|secret|token)\s*[=:]|\/etc\/shadow|\.ssh\/id_|\/secrets(?:\/|\b)|\.env(?:\b|\/)/i.test(value);
+const credentialMaterial = /-----BEGIN|\bBearer\s|(?:api[_-]?key|password|secret|token)\s*[=:]/i;
+// Resource names are useful context; commands reading them still require review.
+export const sensitiveText = value => credentialMaterial.test(value) || /\/etc\/shadow|\.ssh\/id_|\/secrets(?:\/|\b)|\.env(?:\b|\/)/i.test(value);
 
 export function callerContext(value = '') {
-  if (typeof value !== 'string' || value.length > CALLER_CONTEXT_LIMIT || value.includes('\0') || sensitiveText(value)) throw Error('Invalid or sensitive command context');
+  if (typeof value !== 'string' || value.includes('\0')) throw Object.assign(Error('Invalid command context'), { code: 'INVALID_COMMAND_CONTEXT' });
+  if (value.length > CALLER_CONTEXT_LIMIT) throw Object.assign(Error('Invalid command context length'), { code: 'COMMAND_CONTEXT_TOO_LARGE' });
+  if (credentialMaterial.test(value)) throw Object.assign(Error('Invalid or sensitive command context'), { code: 'COMMAND_CONTEXT_CONTAINS_SECRET' });
   return value;
 }
 

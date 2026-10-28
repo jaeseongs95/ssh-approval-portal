@@ -2,9 +2,30 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ApprovalQueue } from '../src/domain/approval-queue.mjs';
 import { createRequestSafety } from '../src/application/request-safety.mjs';
-import { assessmentContext, callerContext } from '../src/domain/execution-context.mjs';
+import { assessmentContext, callerContext, commandRequest, sensitiveText } from '../src/domain/execution-context.mjs';
 import { createJevAssessor } from '../src/adapters/safety/jev.mjs';
 import { AUTOMATION_QUESTION, explicitUserApproval, commandDigest } from '../src/domain/command-policy.mjs';
+
+test('context references sensitive paths without weakening command disclosure guards', () => {
+  for (const path of ['.env', '/etc/shadow', '/home/operator/.ssh/id_ed25519', '/secrets/service']) {
+    const context = `Inspect metadata for ${path}; no contents are supplied or requested.`;
+    assert.equal(callerContext(context), context);
+    assert.equal(JSON.parse(assessmentContext(context, {})).callerSituation, context);
+    assert.equal(sensitiveText(`cat ${path}`), true, path);
+    const input = { command: 'printf fixture', context, displayContext: `경로 ${path}의 메타데이터만 확인합니다.` };
+    assert.deepEqual(commandRequest(input.command, input.context, undefined, input.displayContext), { ...input, requestKey: undefined });
+    assert.deepEqual(commandRequest('ssh-request-v1:' + JSON.stringify(input)), { ...input, requestKey: undefined });
+  }
+});
+
+test('caller context rejects credential material, invalid values and overflow with stable safe codes', () => {
+  for (const value of ['-----BEGIN PRIVATE KEY-----\nSYNTHETIC\n-----END PRIVATE KEY-----', 'Bearer synthetic-credential', 'api_key=synthetic-value', 'password:synthetic-value', 'secret=synthetic-value', 'token=synthetic-value']) {
+    assert.throws(() => callerContext(value), { code: 'COMMAND_CONTEXT_CONTAINS_SECRET' });
+  }
+  for (const value of [null, false, 1, {}, 'synthetic\0invalid']) assert.throws(() => callerContext(value), { code: 'INVALID_COMMAND_CONTEXT' });
+  assert.throws(() => callerContext('a'.repeat(8193)), { code: 'COMMAND_CONTEXT_TOO_LARGE' });
+  assert.equal(callerContext('가'.repeat(8192)), '가'.repeat(8192));
+});
 
 test('detailed context keeps the complete caller account, whitelists facts and states unknowns', () => {
   const situation = '테스트 서버에서 문서 검색을 검증한다.\n' + 'Purpose, bounded impact, checked evidence and recovery plan. '.repeat(100);

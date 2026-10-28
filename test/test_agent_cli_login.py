@@ -8,11 +8,12 @@ import unittest
 from unittest.mock import patch
 
 SPEC = importlib.util.spec_from_file_location('cli_login', Path(__file__).parents[1] / 'scripts/check-agent-cli-login.py')
-login = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(login)
+login = importlib.util.module_from_spec(SPEC) if os.name == 'posix' else None
+if login is not None:
+    SPEC.loader.exec_module(login)
 
 
-@unittest.skipIf(os.geteuid() == 0, 'SSH helper requires a non-root account')
+@unittest.skipIf(os.name != 'posix' or os.geteuid() == 0, 'SSH helper requires POSIX and a non-root account')
 class LoginStatusTests(unittest.TestCase):
     def setUp(self):
         previous_umask = os.umask(0o077)
@@ -27,6 +28,47 @@ class LoginStatusTests(unittest.TestCase):
         binary.write_text('#!/usr/bin/python3\n' + body, encoding='utf-8')
         binary.chmod(0o700)
         return binary
+
+    def main_result(self, provider):
+        from io import StringIO
+        from types import SimpleNamespace
+        output = StringIO()
+        with patch.object(login.sys, 'argv', ['helper', provider]), \
+                patch.object(login.pwd, 'getpwuid', return_value=SimpleNamespace(pw_dir=str(self.home))), \
+                patch('sys.stdout', output):
+            login.main()
+        self.assertNotIn('SYNTHETIC_PRIVATE', output.getvalue())
+        self.assertNotIn(str(self.home), output.getvalue())
+        return json.loads(output.getvalue())
+
+    def test_unsafe_parent_permissions_are_explained_without_starting_process(self):
+        binary = self.binary('codex', "print('SYNTHETIC_PRIVATE')\n")
+        for parent in (self.home, self.home / '.local', binary.parent):
+            parent.chmod(0o775)
+            with patch.object(login.subprocess, 'Popen') as process:
+                self.assertEqual(self.main_result('codex'), {'provider': 'codex', 'state': 'unavailable', 'reason': 'unsafe_path'})
+            process.assert_not_called()
+            parent.chmod(0o700)
+        self.managed('claude')
+        (self.home / '.local/share').chmod(0o775)
+        with patch.object(login.subprocess, 'Popen') as process:
+            self.assertEqual(self.main_result('claude')['reason'], 'unsafe_path')
+        process.assert_not_called()
+
+    def test_failure_reasons_are_bounded_and_vendor_output_never_echoes(self):
+        for body, expected in [
+            ("import time\ntime.sleep(30)\n", 'timeout'),
+            ("print('SYNTHETIC_PRIVATE'*1000)\n", 'output_limit'),
+            ("print('SYNTHETIC_PRIVATE')\n", 'unexpected_response'),
+        ]:
+            self.binary('claude', body)
+            with patch.object(login, 'TIMEOUT', 0.2):
+                self.assertEqual(self.main_result('claude'), {'provider': 'claude', 'state': 'unavailable', 'reason': expected})
+        binary = self.managed('codex')
+        binary.write_text('#!/bin/sh\nexit 1\n', encoding='utf-8')
+        with patch.object(login.subprocess, 'Popen') as process:
+            self.assertEqual(self.main_result('codex')['reason'], 'invalid_installation')
+        process.assert_not_called()
 
     def test_fixed_arguments_actual_home_and_secret_free_environment(self):
         for provider, args in login.PROVIDERS.items():
@@ -153,7 +195,7 @@ class LoginStatusTests(unittest.TestCase):
         output = StringIO()
         with patch.object(login.sys, 'argv', ['helper', 'claude']), patch.object(login, 'check', side_effect=RuntimeError('SYNTHETIC_PRIVATE')), patch('sys.stdout', output):
             login.main()
-        self.assertEqual(json.loads(output.getvalue()), {'provider': 'claude', 'state': 'unavailable'})
+        self.assertEqual(json.loads(output.getvalue()), {'provider': 'claude', 'state': 'unavailable', 'reason': 'check_failed'})
         self.assertNotIn('SYNTHETIC_PRIVATE', output.getvalue())
 
 

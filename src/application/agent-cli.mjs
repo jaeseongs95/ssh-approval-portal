@@ -2,6 +2,7 @@ import {agentCliIntent,agentCliProvider,validateAgentRelease,AGENT_CLI_CONTRACT}
 import {hash as sha256} from '../domain/validation.mjs';
 
 const fields=['targetId','targetRevision','profile','provider','action','releaseDigest','expectedInstallationRevision','requestKey'];
+const loginReasons=['unsafe_path','invalid_installation','timeout','output_limit','unexpected_response','check_failed'];
 const record=value=>value&&typeof value==='object'&&!Array.isArray(value)&&[Object.prototype,null].includes(Object.getPrototypeOf(value));
 const exact=(value,keys)=>record(value)&&Object.keys(value).length===keys.length&&keys.every(key=>Object.hasOwn(value,key));
 const id=value=>typeof value==='string'&&/^[a-f0-9]{48}$/.test(value);
@@ -50,10 +51,11 @@ export function createAgentCliService({queue,journal,resolveTarget,readInstallat
    if(queue.maintenance||queue.busy())throw Error('CLI target is busy');
    if(typeof readLoginState!=='function')throw Error('CLI login status unavailable');
    let value;
-   try{value=await readLoginState(body.provider,binding);}catch{value={provider:body.provider,state:'unavailable'};}
+   try{value=await readLoginState(body.provider,binding);}catch{value={provider:body.provider,state:'unavailable',reason:'check_failed'};}
    open();verifyBinding(binding);if(queue.maintenance)throw Error('CLI maintenance in progress');
-   const state=value?.provider===body.provider&&['signed_in','signed_out','not_installed','unavailable'].includes(value.state)?value.state:'unavailable';
-   return Object.freeze({binding,provider:body.provider,state,checkedAt:now()});
+   const valid=record(value)&&value.provider===body.provider&&['signed_in','signed_out','not_installed','unavailable'].includes(value.state)&&(!Object.hasOwn(value,'reason')||value.state==='unavailable'&&loginReasons.includes(value.reason));
+   const state=valid?value.state:'unavailable',reason=valid?(Object.hasOwn(value,'reason')?value.reason:undefined):'check_failed';
+   return Object.freeze({binding,provider:body.provider,state,...(reason===undefined?{}:{reason}),checkedAt:now()});
   },
   async preview(body){
    open();

@@ -96,4 +96,11 @@ export function immediateResult(value, identity) {
 }
 export const sourceUnavailable = sourceHost => ({ ...publicResult({ error: 'upload-source-not-configured', sourceHost,
   message: 'File was not fetched or queued. An administrator must configure a verified exact hostname or *.domain pattern for this provider; the card file picker remains available.' }, sourceUnavailableSchema), isError: true });
-export const refused = () => ({ isError: true, content: [{ type: 'text', text: 'Request refused or failed. Check authentication, state, limits and permissions.' }] });
+const contextRefusals = new Map([
+  ['INVALID_COMMAND_CONTEXT', 'Command context must be text without NUL characters.'],
+  ['COMMAND_CONTEXT_TOO_LARGE', 'Command context exceeds the 8192-character limit.'],
+  ['COMMAND_CONTEXT_CONTAINS_SECRET', 'Command context contains credential material or a credential assignment. Do not include secret values.'],
+]);
+export const refused = error => ({ isError: true, content: [{ type: 'text', text: contextRefusals.has(error?.code)
+  ? `${error.code}: ${contextRefusals.get(error.code)} No command was submitted.`
+  : 'Request refused or failed. Check authentication, state, limits and permissions.' }] });

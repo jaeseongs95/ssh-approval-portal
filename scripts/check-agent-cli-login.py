@@ -20,9 +20,15 @@ TIMEOUT = 15
 MAX_EXECUTABLE_BYTES = 512 * 1024 * 1024
 
 
-def require(ok):
+class LoginStatusError(ValueError):
+    def __init__(self, reason):
+        super().__init__('CLI login status unavailable')
+        self.reason = reason
+
+
+def require(ok, reason='invalid_installation'):
     if not ok:
-        raise ValueError('CLI login status unavailable')
+        raise LoginStatusError(reason)
 
 
 def trusted(path, home):
@@ -32,8 +38,8 @@ def trusted(path, home):
             continue
         info = entry.lstat()
         require(info.st_uid in (0, os.geteuid()) and
-                (stat.S_ISLNK(info.st_mode) or not info.st_mode & 0o022))
-    require(resolved.is_file() and os.access(resolved, os.X_OK))
+                (stat.S_ISLNK(info.st_mode) or not info.st_mode & 0o022), 'unsafe_path')
+    require(resolved.is_file() and os.access(resolved, os.X_OK), 'unsafe_path')
     return path
 
 
@@ -98,15 +104,18 @@ def capture(binary, provider, home):
                     selector.register(stream, selectors.EVENT_READ, index)
                 while selector.get_map():
                     remaining = deadline - time.monotonic()
-                    require(remaining > 0)
+                    require(remaining > 0, 'timeout')
                     for key, _ in selector.select(min(remaining, 0.1)):
                         data = os.read(key.fd, 4096)
                         if not data:
                             selector.unregister(key.fileobj)
                         else:
                             output[key.data].extend(data)
-                            require(sum(map(len, output)) <= LIMIT)
-            code = process.wait(timeout=max(0.001, deadline - time.monotonic()))
+                            require(sum(map(len, output)) <= LIMIT, 'output_limit')
+            try:
+                code = process.wait(timeout=max(0.001, deadline - time.monotonic()))
+            except subprocess.TimeoutExpired:
+                raise LoginStatusError('timeout') from None
             return code, bytes(output[0]), bytes(output[1])
         finally:
             try:
@@ -119,9 +128,9 @@ def capture(binary, provider, home):
 
 
 def check(home, provider):
-    require(provider in PROVIDERS and os.geteuid() != 0)
+    require(provider in PROVIDERS and os.geteuid() != 0, 'check_failed')
     info = home.lstat()
-    require(stat.S_ISDIR(info.st_mode) and info.st_uid == os.geteuid() and not info.st_mode & 0o022)
+    require(stat.S_ISDIR(info.st_mode) and info.st_uid == os.geteuid() and not info.st_mode & 0o022, 'unsafe_path')
     binary = executable(home, provider)
     if binary is None:
         return 'not_installed'
@@ -129,10 +138,13 @@ def check(home, provider):
     if provider == 'codex':
         if code == 0:
             return 'signed_in'
-        if code == 1 and (stdout + stderr).decode('utf-8').strip() == 'Not logged in':
+        if code == 1 and (stdout + stderr).decode('utf-8', errors='replace').strip() == 'Not logged in':
             return 'signed_out'
     elif not stderr:
-        value = json.loads(stdout)
+        try:
+            value = json.loads(stdout)
+        except (ValueError, UnicodeError):
+            return 'unavailable'
         if isinstance(value, dict) and type(value.get('loggedIn')) is bool:
             if code == 0 and value['loggedIn']:
                 return 'signed_in'
@@ -144,11 +156,19 @@ def check(home, provider):
 def main():
     provider = sys.argv[1] if len(sys.argv) == 2 else None
     require(provider in PROVIDERS)
+    reason = None
     try:
         state = check(Path(pwd.getpwuid(os.geteuid()).pw_dir), provider)
+        if state == 'unavailable':
+            reason = 'unexpected_response'
+    except LoginStatusError as error:
+        state, reason = 'unavailable', error.reason
     except Exception:
-        state = 'unavailable'
-    print(json.dumps({'provider': provider, 'state': state}, separators=(',', ':')))
+        state, reason = 'unavailable', 'check_failed'
+    result = {'provider': provider, 'state': state}
+    if reason is not None:
+        result['reason'] = reason
+    print(json.dumps(result, separators=(',', ':')))
 
 
 if __name__ == '__main__':
