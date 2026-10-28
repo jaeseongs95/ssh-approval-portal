@@ -19,7 +19,7 @@ async function fixture(t,options={}){
   const checked=verify();assert.equal(checked.targetId,plan.manifest.targetId);assert.equal(checked.targetRevision,plan.manifest.targetRevision);assert.equal(checked.profile,plan.manifest.profile);calls.push(plan);
   if(plan.agentCli.action==='login-status'){
    if(flags.probe)await flags.probe(plan,verify);
-   return {failed:false,texts:[],data:{agentCli:{provider:plan.agentCli.provider,state:flags.login??'signed_in',private:'SYNTHETIC_PRIVATE'}}};
+   return {failed:false,texts:[],data:{agentCli:{provider:plan.agentCli.provider,state:flags.login??'signed_in',...(flags.loginReason===undefined?{}:{reason:flags.loginReason}),private:'SYNTHETIC_PRIVATE'}}};
   }
   if(plan.agentCli.action==='inspect'){
    if(flags.probe)await flags.probe(plan,verify);
@@ -205,6 +205,18 @@ test('CLI-LOGIN owner projection covers both providers and four honest states',a
  assert.equal((await f.api(path+'?extra=1',{method:'POST',body:{}})).status,409);
  assert.equal(f.app.queue.listAll().length,0);
 });
+test('CLI-LOGIN owner preserves fixed failure reasons and refuses forged or inconsistent reasons',async t=>{
+ const f=await fixture(t),body={targetId:'default',provider:'codex'},path='/api/agent-cli/login-status';
+ f.flags.login='unavailable';
+ for(const reason of ['unsafe_path','invalid_installation','timeout','output_limit','unexpected_response','check_failed']){
+  f.flags.loginReason=reason;const r=await f.api(path,{method:'POST',body});assert.equal(r.body.reason,reason);assert.equal(r.body.state,'unavailable');assert.ok(!JSON.stringify(r).includes('SYNTHETIC_PRIVATE'));
+ }
+ for(const reason of ['SYNTHETIC_PRIVATE /unsafe/path',null,{},'__proto__']){
+  f.flags.loginReason=reason;const r=await f.api(path,{method:'POST',body});assert.equal(r.body.state,'unavailable');assert.equal(r.body.reason,'check_failed');assert.ok(!JSON.stringify(r).includes('SYNTHETIC_PRIVATE'));
+ }
+ f.flags.login='signed_in';f.flags.loginReason='unsafe_path';const r=await f.api(path,{method:'POST',body});assert.equal(r.body.state,'unavailable');assert.equal(r.body.reason,'check_failed');
+});
+
 test('CLI-LOGIN probe claim rejects concurrent work, hides errors and rejects binding drift',async t=>{
  const f=await fixture(t),body={targetId:'default',provider:'codex'},path='/api/agent-cli/login-status';
  const entered=defer(),gate=defer();f.beforeClose(gate.resolve);f.flags.probe=async()=>{entered.resolve();await gate.promise;};

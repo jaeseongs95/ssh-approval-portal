@@ -87,8 +87,16 @@ export function createAgentCliPanel({document,api,isSignedOut,canLoad,storage,ra
   let value;try{value=await api('/api/agent-cli/login-status','POST',{targetId:b.targetId,provider:p});}catch{if(current())loginState.textContent=t('로그인 상태: 확인 불가. 다시 확인해 주세요.','Login status: Unavailable. Check again.');return;}
   if(!current())return;
   const states={signed_in:t('로그인됨','Signed in'),signed_out:t('로그인 안 됨','Signed out'),not_installed:t('미설치','Not installed'),unavailable:t('확인 불가','Unavailable')};
-  if(value?.provider!==p||value.binding?.targetId!==b.targetId||value.binding.targetRevision!==b.targetRevision||value.binding.profile!==b.profile||!Object.hasOwn(states,value.state)||!Number.isSafeInteger(value.checkedAt)||value.checkedAt<=0){loginState.textContent=t('로그인 상태: 확인 불가','Login status: Unavailable');return;}
-  loginState.textContent=(p==='codex'?'Codex':'Claude')+' · '+states[value.state]+' · '+t('확인 시각: ','Checked: ')+new Date(value.checkedAt).toLocaleString();
+  const reasons={
+   unsafe_path:t('실행 경로 또는 상위 디렉터리의 소유권·쓰기 권한·실행 가능 여부가 안전 기준을 충족하지 않아 CLI를 실행하지 않았습니다. 서버 관리자가 해당 SSH 계정의 설치 경로와 권한을 확인한 뒤 다시 조회하세요.','The executable path or a parent directory failed ownership, write permissions or execution safety checks. The CLI was not executed. Ask the server administrator to review this SSH account’s installation path and permissions, then check again.'),
+   invalid_installation:t('관리 설치의 메타데이터 또는 실행 파일 무결성을 확인하지 못했습니다. 서버 관리자가 설치 기록과 파일을 확인한 뒤 다시 조회하세요.','Managed installation metadata or executable integrity could not be verified. Ask the server administrator to review the installation records and files, then check again.'),
+   timeout:t('CLI 로그인 검사 시간이 초과되었습니다. 해당 SSH 계정의 터미널에서 CLI 응답을 확인한 뒤 다시 조회하세요.','The CLI login check timed out. Check CLI responsiveness in this SSH account’s terminal, then check again.'),
+   output_limit:t('CLI 로그인 검사 출력이 안전 한도를 초과했습니다. 해당 SSH 계정의 터미널에서 CLI 상태를 확인한 뒤 다시 조회하세요.','CLI login check output exceeded the safety limit. Check the CLI in this SSH account’s terminal, then check again.'),
+   unexpected_response:t('CLI 응답을 로그인 상태로 판독하지 못했습니다. 해당 SSH 계정의 터미널에서 CLI 상태와 버전을 확인하세요.','The CLI response was not recognized as a login state. Check the CLI status and version in this SSH account’s terminal.'),
+   check_failed:t('SSH 연결 또는 로그인 검사를 완료하지 못했습니다. 서버 연결과 해당 SSH 계정의 CLI 실행 가능 여부를 확인한 뒤 다시 조회하세요.','The SSH connection or login check could not be completed. Check server connectivity and CLI execution for this SSH account, then check again.')
+  };
+  if(value?.provider!==p||value.binding?.targetId!==b.targetId||value.binding.targetRevision!==b.targetRevision||value.binding.profile!==b.profile||!Object.hasOwn(states,value.state)||Object.hasOwn(value,'reason')&&(value.state!=='unavailable'||typeof value.reason!=='string'||!Object.hasOwn(reasons,value.reason))||!Number.isSafeInteger(value.checkedAt)||value.checkedAt<=0){loginState.textContent=t('로그인 상태: 확인 불가','Login status: Unavailable');return;}
+  loginState.textContent=(p==='codex'?'Codex':'Claude')+' · '+states[value.state]+' · '+t('확인 시각: ','Checked: ')+new Date(value.checkedAt).toLocaleString()+(value.reason?' · '+reasons[value.reason]:'');
  });
  inspect.onclick=()=>run(async current=>{const b=binding(),p=provider.value;const value=await api('/api/agent-cli/preview','POST',{targetId:b.targetId,provider:p});if(!current())return;
   if(value?.binding?.targetId!==b.targetId||value.binding.targetRevision!==b.targetRevision||value.binding.profile!==b.profile||value.release?.provider!==p||!validId(value.planId)||!Number.isSafeInteger(value.expiresAt)||Date.now()>=value.expiresAt||!['@openai/codex','@anthropic-ai/claude-code'].includes(value.release.packageName))throw Error('Invalid CLI preview');

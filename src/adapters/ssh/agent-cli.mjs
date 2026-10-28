@@ -8,6 +8,7 @@ const loginSource=readFileSync(new URL('../../../scripts/check-agent-cli-login.p
 const id=value=>typeof value==='string'&&/^[a-f0-9]{48}$/.test(value);
 const hex=value=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
 const stable=value=>typeof value==='string'&&/^(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$/.test(value);
+const loginReasons=['unsafe_path','invalid_installation','timeout','output_limit','unexpected_response','check_failed'];
 const record=value=>value!==null&&typeof value==='object'&&!Array.isArray(value);
 const refuse=()=>{throw Error('CLI result unknown; inspect saved status, never retry automatically');};
 function receiptDigest(args){
@@ -77,8 +78,8 @@ export function projectAgentCliResult(result,plan){
  if(!record(value))refuse();
  const {action,provider,operationId,intentDigest}=plan.agentCli;
  if(action==='login-status'){
-  if(value.provider!==provider||!['signed_in','signed_out','not_installed','unavailable'].includes(value.state))refuse();
-  return {failed:false,texts:[],data:{agentCli:Object.freeze({contract:'agent-cli-login-status-v1',provider,state:value.state})}};
+  if(value.provider!==provider||!['signed_in','signed_out','not_installed','unavailable'].includes(value.state)||Object.hasOwn(value,'reason')&&(value.state!=='unavailable'||!loginReasons.includes(value.reason)))refuse();
+  return {failed:false,texts:[],data:{agentCli:Object.freeze({contract:'agent-cli-login-status-v1',provider,state:value.state,...(Object.hasOwn(value,'reason')?{reason:value.reason}:{})})}};
  }
  let data={contract:AGENT_CLI_CONTRACT,action,provider,login:'not_checked'};
  if(action==='inspect'){

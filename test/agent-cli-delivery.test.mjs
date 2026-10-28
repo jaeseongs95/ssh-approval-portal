@@ -177,6 +177,14 @@ test('CLI-LOGIN delivery accepts only the fixed helper and discards vendor priva
    f.connection.exec=async()=>({exitCode:0,stdout:JSON.stringify({provider,state,token:'SYNTHETIC_PRIVATE',email:'SYNTHETIC_PRIVATE'}),stderr:''});
    const r=await executeAgentCli(f.registry,p,verify);assert.deepEqual(r.data.agentCli,{contract:'agent-cli-login-status-v1',provider,state});assert.ok(!JSON.stringify(r).includes('SYNTHETIC_PRIVATE'));
   }
+  for(const reason of ['unsafe_path','invalid_installation','timeout','output_limit','unexpected_response','check_failed']){
+   f.connection.exec=async()=>({exitCode:0,stdout:JSON.stringify({provider,state:'unavailable',reason,private:'SYNTHETIC_PRIVATE'}),stderr:''});
+   const r=await executeAgentCli(f.registry,p,verify);assert.equal(r.data.agentCli.reason,reason);assert.ok(!JSON.stringify(r).includes('SYNTHETIC_PRIVATE'));
+  }
+  for(const reason of ['SYNTHETIC_PRIVATE /unsafe/path',null,{},'__proto__'])for(const state of ['unavailable','signed_in']){
+   f.connection.exec=async()=>({exitCode:0,stdout:JSON.stringify({provider,state,reason}),stderr:''});await assert.rejects(()=>executeAgentCli(f.registry,p,verify));
+  }
+  f.connection.exec=async()=>({exitCode:0,stdout:JSON.stringify({provider,state:'signed_out',reason:'unsafe_path'}),stderr:''});await assert.rejects(()=>executeAgentCli(f.registry,p,verify));
   for(const change of [{provider:'other',state:'signed_in'},{provider,state:'completed'}]){f.connection.exec=async()=>({exitCode:0,stdout:JSON.stringify(change),stderr:''});await assert.rejects(()=>executeAgentCli(f.registry,p,verify));}
   for(const changed of [{...p,stdin:p.stdin+'# changed'},{...p,agentCli:{...p.agentCli,provider:'other'}},{...p,manifest:{...p.manifest,argvJson:JSON.stringify([provider,'login'])}}]){const g=fake(p);await assert.rejects(()=>executeAgentCli(g.registry,changed,verify));assert.equal(g.acquisitions,0);}
  }
