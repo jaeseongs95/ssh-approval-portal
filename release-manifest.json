@@ -30,8 +30,8 @@
     },
     {
       "path": "app.mjs",
-      "size": 26376,
-      "sha256": "c22e9ee549b19c1d6c4d2d6b1535b0fba8b07d6bf89a2c76f274fd5903d5b6da"
+      "size": 26526,
+      "sha256": "be1b862e3e077492b85cb1b3734683a7e0044db0b236dee1891c9eb7e2751dd3"
     },
     {
       "path": "bridge.mjs",
@@ -1370,8 +1370,8 @@
     },
     {
       "path": "test/preservation-integration.test.mjs",
-      "size": 4241,
-      "sha256": "aedb5ec75b66d79ef7d4bae82fe7e4395f40a9983b076124ef9c319d06aac02a"
+      "size": 7877,
+      "sha256": "c9203b2f5c3244abfed02194059a5a56b1fbd61cd5e6e52a38e418545dcfc4be"
     },
     {
       "path": "test/preservation-verification.test.mjs",
