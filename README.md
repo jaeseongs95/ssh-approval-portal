@@ -1,4 +1,4 @@
-# SSH Approval Portal 1.6.2
+# SSH Approval Portal 1.6.3
 
 [한국어](README.ko.md) · [Administrator sign-in](docs/admin-login.en.md) · [Agent file uploads](docs/agent-upload.en.md) · [Architecture and compatibility](docs/architecture.en.md)
 
@@ -70,8 +70,8 @@ An overwrite is not reported as complete if the existing file's ownership, mode,
 The previous release was validated for Ubuntu 22.04/24.04 on x86_64. The ARM64 installation path remains available, but validation is deferred to a later enhancement. An internet connection and an administrator terminal on the server are required. The runtime requires Node 24.2 or later within the 24.x series. Node 24 is installed in a dedicated path without replacing the system Node installation.
 
 ```sh
-tar -xzf ssh-approval-portal-1.6.2.tar.gz
-cd ssh-approval-portal-1.6.2
+tar -xzf ssh-approval-portal-1.6.3.tar.gz
+cd ssh-approval-portal-1.6.3
 sudo bash scripts/install.sh --admin-origin https://ssh-approve.example.com --grant-sudo-all
 ```
 

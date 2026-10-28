@@ -1,12 +1,12 @@
 {
-  "version": "1.6.2",
+  "version": "1.6.3",
   "status": "candidate-pending-live-host-verification",
   "runtime": "Node.js 24",
   "files": [
     {
       "path": ".dockerignore",
-      "size": 173,
-      "sha256": "737d7e220630fecc51f5937bedd9cd360554a21d94030b9ac07dbc451f2b567a"
+      "size": 199,
+      "sha256": "6e895e200fe55bd728d28d193ec3a16ec910b7a00b2789f274b0ee65e37c454a"
     },
     {
       "path": "LICENSE",
@@ -16,12 +16,12 @@
     {
       "path": "README.ko.md",
       "size": 21638,
-      "sha256": "90d7f4baef982e453562ceaf64d7485321dd16f814fa6b373296f9385d6597e7"
+      "sha256": "16a589fbac3da5c98665cc5509a9e88021e44ad48b4c2d140d8a39211f4f4c86"
     },
     {
       "path": "README.md",
       "size": 19918,
-      "sha256": "492a7cdb2a22525a4cafc5fa0afd11c414b0c0951b4db378fa12be8f509f66c9"
+      "sha256": "f463542864bf557b35156763ead730da7840c901d2fa9c10ab18baa2380e9d9f"
     },
     {
       "path": "THIRD_PARTY_NOTICES.json",
@@ -51,7 +51,7 @@
     {
       "path": "config/docker.example.env",
       "size": 73,
-      "sha256": "b4d62766dc5bf9ec8383e9ccc97bdef58249ebf3b06e82f3bc448479e66b7fdb"
+      "sha256": "f4522df5fd15d820950f3927aee23f78d1de6620a1dd30dd9236930948ef29a8"
     },
     {
       "path": "config/settings-contract.json",
@@ -86,12 +86,12 @@
     {
       "path": "docker/Dockerfile",
       "size": 1594,
-      "sha256": "6abc7217d793a4c652e14e3b29bf62e209c753bc13b89afde9d7caf95c263333"
+      "sha256": "cf93104efbc1b87b2ac4eff47e584afd5fea3951284b26331b2a08e76482911c"
     },
     {
       "path": "docker/compose.yaml",
       "size": 1128,
-      "sha256": "623ccf8b22db0b5c8bc7a54fbb8085524ea774b1bf8b7b35d2aba2a70fc39187"
+      "sha256": "08dc7c2975f815fae8786be2d30a07f6cf15908e256700963d4a7195ea1bc555"
     },
     {
       "path": "docs/admin-login.en.md",
@@ -226,12 +226,12 @@
     {
       "path": "package-lock.json",
       "size": 100104,
-      "sha256": "301675dafad519a19ed036919d1ef8e68dff3971df01fb379b9c35191b9836d8"
+      "sha256": "ceb0d87b617dea93413ebadc96a7df24cf5337226c0a1f07219749ca9da3bba3"
     },
     {
       "path": "package.json",
       "size": 740,
-      "sha256": "3bb56b9ccaa414c1f72e44087cb79ba8c4725a7341e7cd31329d049a1c458726"
+      "sha256": "e784853c0ded1e36cc4de6fe02b090ce310c09047e7a3de3c73bb3c73fd8d397"
     },
     {
       "path": "scripts/admin-access-config.mjs",
