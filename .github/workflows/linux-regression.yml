@@ -19,7 +19,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: '24'
+          node-version: '24.21.0'
       - name: Test durable Compose image replacement
         run: bash test/compose-update-ci.sh
   linux-regression:
@@ -31,7 +31,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: '24'
+          node-version: '24.21.0'
       - run: npm ci --ignore-scripts
       - name: Node regression
         run: node --test --test-skip-pattern='^CLI-LOOPBACK exact helper executes inspection/status over pinned SSH and preserves authentication bytes$' test/*.test.mjs
