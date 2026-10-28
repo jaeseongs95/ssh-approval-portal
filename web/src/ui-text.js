@@ -1,5 +1,10 @@
 /** UI-owned strings only. Never apply this catalog to commands, output or user input. */
 const english = {
+  '테스트 서버':'Test server',
+  '테스트 서버: ':'Test server: ',
+  ' · 테스트 서버 ':' · Test server ',
+  '사용 · 위험 심사와 개별 승인 없이 실행':'Enabled · execute without risk assessment or individual approval',
+  '이 서버의 명령·Python 코드·파일 전송을 위험 심사와 개별 승인 없이 실행합니다. 테스트 서버 지정은 관리자가 판단합니다. 다른 허용 설정과 기준값은 보존되며, 이 옵션을 끄면 다시 적용됩니다.':'Execute commands, Python code and file transfers on this server without risk assessment or individual approval. The administrator decides whether this is a test server. Other permissions and thresholds are preserved and apply again when this option is disabled.',
   "명령줄 붙여넣기":"Paste a command line",
   "명령줄에서 이름 가져오기":"Import names from a command line",
   "분석할 명령줄":"Command line to analyze",

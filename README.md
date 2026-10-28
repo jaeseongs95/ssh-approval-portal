@@ -139,3 +139,5 @@ Build the UI with its separate `ui` dependencies without upgrading the server SD
 Verify the release's `release-manifest.json` and `SHA256SUMS`. Packages exclude node_modules, actual configuration, tokens, private keys, and user sessions. Read the candidate's test records together with the verification limits above. Publishing and Cloudflare configuration changes are not performed automatically.
 
 Approval callbacks: use `wait-for-request` after showing an owner approval request to receive its actual decision without another user chat message. See [callback delivery and limits](docs/approval-callback.ko.md).
+
+The **Test server** checkbox in the important automatic-approval settings bypasses risk assessment and individual approval for that target's commands, Python source, CLI installation and file transfers. It overrides command denials and other automatic-approval switches and is off by default. Administrators decide which targets are test servers. Authentication, target binding, input/file validation, SSH account permissions and maintenance/concurrency limits remain enforced. Disabling it restores the existing policy.

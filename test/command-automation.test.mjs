@@ -535,3 +535,27 @@ test('LIMIT-AUTOMATION long approved prefix cannot bypass unmatched or denied fi
  const denied=await f.run(command.replace(/id$/,'rm /tmp/synthetic'));
  assert.equal(denied.state,'denied');assert.equal(f.inputs.length,1);assert.equal(f.executions.length,0);
 });
+
+
+test('test server bypass overrides deny, sudo and missing evaluators only after exact owner save and survives restart', async t => {
+  const f = await fixture(t);
+  await f.policy({ commands: [], deniedCommands: ['rm'], automaticSudo: false, externalDisclosure: false, modelExecution: false, testServer: true });
+  const command = 'sudo rm -rf /tmp/synthetic-only';
+  for (let round = 0; round < 2; round++) {
+    const job = await f.run(command, 'test-server-once-key-' + round, '');
+    assert.equal(job.state, 'completed'); assert.equal(job.decision.reasonCode, 'test_server_bypass');
+    assert.equal(job.approvalMode, 'automatic');
+    assert.equal((await f.run(command, 'test-server-once-key-' + round, '')).id, job.id);
+    if (!round) await f.restart();
+  }
+  assert.equal(f.inputs.length, 0); assert.equal(f.executions.length, 2);
+  const current = (await f.api('/api/command-policy')).body, rule = current.targets[0];
+  for (const testServer of ['true', 1, null, {}]) assert.throws(() => validateCommandPolicy({ targets: [{ ...rule, testServer }] }));
+  const proposal = { expectedRevision: current.revision, policy: { targets: [{ ...rule, testServer: false }] } };
+  const review = (await f.api('/api/command-policy/review', proposal)).body;
+  assert.equal((await f.api('/api/command-policy', { ...proposal, policy: { targets: [rule] }, reviewToken: review.reviewToken, acknowledged: true })).status, 409);
+  await f.policy({ commands: [], deniedCommands: ['rm'], automaticSudo: false, externalDisclosure: false, modelExecution: false, testServer: false });
+  assert.equal((await f.run(command)).state, 'denied');
+  assert.equal((await f.run('sudo id')).state, 'pending');
+  assert.equal(f.executions.length, 2);
+});

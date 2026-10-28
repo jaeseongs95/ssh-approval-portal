@@ -10,7 +10,7 @@ const hash=value=>sha256(JSON.stringify(value));
 const snapshot=definition=>Object.freeze({targetId:definition.id,targetRevision:definition.revision,profile:definition.writeProfile,enabled:definition.enabled});
 
 /** Internal use case. HTTP authentication and trusted inspection/SSH ports are mandatory at composition. */
-export function createAgentCliService({queue,journal,resolveTarget,readInstallation,readLoginState,catalog,preparePlan,executePlan,outputs,checkPolicy,now=Date.now,nonce}) {
+export function createAgentCliService({queue,journal,resolveTarget,readInstallation,readLoginState,catalog,preparePlan,executePlan,outputs,checkPolicy,automaticDecision=()=>undefined,now=Date.now,nonce}) {
  if(![resolveTarget,readInstallation,preparePlan,executePlan,checkPolicy,nonce].every(fn=>typeof fn==='function'))throw Error('CLI service ports required');
  const previews=new Map(),executions=new Map();
  let closed=false;
@@ -34,6 +34,10 @@ export function createAgentCliService({queue,journal,resolveTarget,readInstallat
   verifyBinding(entry.binding);
   if(now()>=entry.intent.expiresAt)throw Error('CLI plan expired');
   checkPolicy(entry.plan,entry.binding);
+  if(job.decision?.reasonCode==='test_server_bypass'){
+   const current=automaticDecision();
+   if(current?.reasonCode!=='test_server_bypass'||current.policyRevision!==job.decision.policyRevision)throw Error('CLI automatic policy changed');
+  }
   return entry;
  };
  return {
@@ -92,7 +96,13 @@ export function createAgentCliService({queue,journal,resolveTarget,readInstallat
    const job=queue.submitOperation(operation,'privileged',{expiresAt:intent.expiresAt});
    try{journal.insert(job,key,fingerprint);queue.track(job.id,value=>journal.save(value));}
    catch(error){queue.abortEvaluation(job.id);throw error;}
-   executions.set(job.id,{binding,intent,plan,operationJson:JSON.stringify(operation)});return job;
+   executions.set(job.id,{binding,intent,plan,operationJson:JSON.stringify(operation)});
+   const decision=automaticDecision();
+   if(decision){
+    queue.setDecision(job.id,decision);
+    try{queue.startCommand(job.id);}catch{queue.setDecision(job.id,{...decision,decision:'review',reasonCode:'execution_busy'});}
+   }
+   return queue.get(job.id);
   },
   async execute(id){
    const entry=beforeStart(queue.get(id));

@@ -217,3 +217,16 @@ test('CLI-LOGIN probe claim rejects concurrent work, hides errors and rejects bi
  f.flags.probe=null;assert.equal((await f.api(path,{method:'POST',body})).body.state,'signed_in');
  assert.equal(f.events.filter(e=>e.action==='cli-probe-started').length,f.events.filter(e=>e.action==='cli-probe-finished').length);
 });
+
+
+test('test server owner policy automatically executes a new CLI request and replay never repeats installation',async t=>{
+ const f=await fixture(t,{env:{BRIDGE_COMMAND_AUTOMATION:'true'}});
+ const current=(await f.api('/api/command-policy')).body,b=current.bindings[0];
+ const rule={targetId:b.targetId,targetRevision:b.targetRevision,profile:b.profile,commands:[],deniedCommands:['python3'],externalDisclosure:false,modelExecution:false,automaticSudo:false,testServer:true,fallback:null,thresholds:{}};
+ const proposal={expectedRevision:current.revision,policy:{targets:[rule]}};
+ const review=await f.api('/api/command-policy/review',{method:'POST',body:proposal});assert.equal(review.status,200);
+ assert.equal((await f.api('/api/command-policy',{method:'POST',body:{...proposal,reviewToken:review.body.reviewToken,acknowledged:true}})).status,200);
+ const p=await f.preview(),job=await f.submit(p);await f.app.queue.wait(job.id);
+ const done=f.app.queue.get(job.id);assert.equal(done.state,'completed');assert.equal(done.approvalMode,'automatic');assert.equal(done.decision.reasonCode,'test_server_bypass');
+ const before=f.calls.length;assert.equal((await f.submit(p)).id,job.id);assert.equal(f.calls.length,before);
+});

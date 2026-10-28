@@ -9,9 +9,7 @@ export function createFileService({ store, queue, transfers, maxConcurrent = 2, 
     const job = queue.submitOperation({ kind: 'upload', artifactId: artifact.id, remotePath: artifact.remotePath,
       fileName: artifact.fileName, size: artifact.size, sha256: artifact.sha256, overwrite: artifact.overwrite, elevate: artifact.elevate,
       ...(artifact.fileTargetBound === true ? fileTargetFields(artifact) : {}) }, artifact.elevate ? 'privileged' : 'safe');
-    if (!artifact.elevate && !artifact.overwrite) {
-      try { queue.startUpload(job.id); } catch { /* No current policy authority or execution slot: retain the owner request. */ }
-    }
+    try { queue.startUpload(job.id); } catch { /* No current policy authority or execution slot: retain the owner request. */ }
     return queue.get(job.id);
   };
   return {

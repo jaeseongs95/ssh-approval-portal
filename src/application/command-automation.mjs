@@ -20,12 +20,12 @@ export function createCommandAutomation({ queue, state, definition, classify, ev
   queue.beforeCommandStart = job => {
     definition.verify();
     const policy = state.policy();
-    if (deniedCommand(job.command, ruleFor(policy))) throw Error('Command denied by current policy');
+    if (!ruleFor(policy)?.testServer && deniedCommand(job.command, ruleFor(policy))) throw Error('Command denied by current policy');
     if (job.decision?.decision === 'execute' && policy.revision !== job.decision.policyRevision) throw Error('Command policy changed');
     if (job.operation.sourceContract) {
       const plan = sourcePlan(job.id), rule = ruleFor(policy);
-      if (sourceDenied(plan, rule)) throw Error('Source denied by current policy');
-      if (job.decision?.decision === 'execute' && sourceReview(rule)) throw Error('Source policy changed');
+      if (!rule?.testServer && sourceDenied(plan, rule)) throw Error('Source denied by current policy');
+      if (!rule?.testServer && job.decision?.decision === 'execute' && sourceReview(rule)) throw Error('Source policy changed');
     }
   };
   const decision = (job, data) => {
@@ -127,11 +127,12 @@ export function createCommandAutomation({ queue, state, definition, classify, ev
         const line = commandLineNames(command);
         const base = { policyRevision: policy.revision, targetRevision: definition.revision };
         let result;
-        if (plan ? sourceDenied(plan, rule) : deniedCommand(command, rule)) {
+        if (!rule?.testServer && (plan ? sourceDenied(plan, rule) : deniedCommand(command, rule))) {
           decision(job, { ...base, decision: 'deny', reasonCode: 'policy_denied' }); queue.finishEvaluation(job.id, 'denied');
           return;
         }
-        if (plan && sourceReview(rule)) result = { reasonCode: sourceReview(rule) };
+        if (rule?.testServer === true) result = { reasonCode: 'test_server_bypass' };
+        else if (plan && sourceReview(rule)) result = { reasonCode: sourceReview(rule) };
         else if (!plan && line.usesSudo && rule?.automaticSudo !== true) result = { reasonCode: 'sudo_not_enabled' };
         else if (!plan && line.complete && rule && line.names.every(name => name === 'sudo' ? rule.automaticSudo === true : rule.commands.includes(name))) result = { reasonCode: 'command_set', commandNames: line.names };
         else result = await assess(command, rule, context, policy.revision, plan);
@@ -140,7 +141,7 @@ export function createCommandAutomation({ queue, state, definition, classify, ev
         if (state.policy().revision !== policy.revision) result = { ...result, reasonCode: 'policy_changed' };
         const current = queue.get(job.id);
         if (current.state !== 'evaluating') return;
-        const automatic = ['command_set', 'model_passed'].includes(result.reasonCode);
+        const automatic = ['command_set', 'model_passed', 'test_server_bypass'].includes(result.reasonCode);
         decision(job, { ...base, ...result, decision: automatic ? 'execute' : 'review' });
         queue.finishEvaluation(job.id);
         if (automatic) queue.startCommand(job.id);

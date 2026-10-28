@@ -18,9 +18,9 @@ async function fixture(run, {automation = true, failAudit = false} = {}) {
     await new Promise(resolve=>app.adminHttp.listen(0,'127.0.0.1',resolve));
     const origin='http://127.0.0.1:'+app.adminHttp.address().port;
     const api=async(path,body)=>{const r=await fetch(origin+path,{method:body?'POST':'GET',headers:{Authorization:'Bearer fixture-owner',Origin:'https://owner.test','Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});return {status:r.status,body:await r.json()};};
-    const set=async(downloads,sudo=false,target='alpha')=>{
+    const set=async(downloads,sudo=false,target='alpha',changes={})=>{
       const current=(await api('/api/command-policy')).body,b=current.bindings.find(b=>b.targetId===target);
-      const rule={targetId:target,targetRevision:b.targetRevision,profile:b.profile,commands:[],deniedCommands:[],externalDisclosure:false,modelExecution:false,fallback:null,thresholds:{},automaticSudo:sudo,...(downloads===undefined?{}:{automaticDownloads:downloads})};
+      const rule={targetId:target,targetRevision:b.targetRevision,profile:b.profile,commands:[],deniedCommands:[],externalDisclosure:false,modelExecution:false,fallback:null,thresholds:{},automaticSudo:sudo,...changes,...(downloads===undefined?{}:{automaticDownloads:downloads})};
       const proposal={policy:{targets:[...current.targets.filter(r=>r.targetId!==target),rule]},expectedRevision:current.revision};
       const review=await api('/api/command-policy/review',proposal);assert.equal(review.status,200);
       assert.equal((await api('/api/command-policy',{...proposal,reviewToken:review.body.reviewToken,acknowledged:true})).status,200);return {review:review.body,rule,proposal};
@@ -73,4 +73,13 @@ test('settings is a safe HTML entry while observation data remains owner authent
   assert.equal((await fetch(origin+'/api/automation-metrics')).status,401);
   const metrics=await f.api('/api/automation-metrics?target=alpha');assert.equal(metrics.status,200);assert.equal(metrics.body.available,true);assert.equal(metrics.body.total,0);
   assert.equal((await f.api('/api/automation-metrics?target=missing')).status,409);
+}));
+
+
+test('test server bypass covers elevated downloads without other flags and never leaks across targets',async()=>fixture(async f=>{
+ await f.set(false,false,'alpha',{testServer:true});
+ const done=await f.finish(f.download(true));assert.equal(done.state,'completed');assert.equal(done.decision.reasonCode,'test_server_bypass');
+ const other=f.download(true,'beta');assert.equal(other.state,'pending');f.app.queue.deny(other.id);
+ await f.set(false,false,'alpha',{testServer:false});const revoked=f.download(true);assert.equal(revoked.state,'pending');f.app.queue.deny(revoked.id);
+ assert.equal(f.effects.length,1);
 }));

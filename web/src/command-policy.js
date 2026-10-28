@@ -86,7 +86,8 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
 
   const execution = check(importantFields, tr('Jev·다른 모델을 통한 자동승인 허용'), tr('미등록 명령이 있으면 전체 명령줄을 평가해 저장한 기준을 충족할 때 자동 실행합니다. 정보 전송 허용과 연결된 평가 모델도 필요합니다. 끄면 미등록 명령은 개별 승인하고 사전승인 명령은 계속 자동 실행합니다.'));
   const sourceExecution = check(importantFields, tr('제출한 Python 코드 평가·실행 허용'), tr('원문과 인자를 Jev·설정된 대체 평가자에 전송하고, 저장한 기준을 통과하면 같은 코드를 실행합니다. 명령 이름 사전허용으로 건너뛰지 않습니다. 임의 코드의 권한을 이름만으로 제한할 수 없어 sudo 자동승인이 꺼져 있거나 금지 명령이 있으면 개별 승인합니다. 다른 허용 설정과 기준값은 자동으로 바꾸지 않습니다.'));
-  const permissionNotes = new Map([uploads, downloads, sudo, execution, sourceExecution].map(input => { const note = el('small', '', 'policy-saved-value'); input.nextElementSibling.querySelector('strong').after(note); return [input, note]; }));
+  const testServer = check(importantFields, tr('테스트 서버'), tr('이 서버의 명령·Python 코드·파일 전송을 위험 심사와 개별 승인 없이 실행합니다. 테스트 서버 지정은 관리자가 판단합니다. 다른 허용 설정과 기준값은 보존되며, 이 옵션을 끄면 다시 적용됩니다.'));
+  const permissionNotes = new Map([uploads, downloads, sudo, execution, sourceExecution, testServer].map(input => { const note = el('small', '', 'policy-saved-value'); input.nextElementSibling.querySelector('strong').after(note); return [input, note]; }));
 
   const two = section(2, tr('Jev 도움받기'));
   const jevModel = field(two, tr('Jev 모델'), 'select', '', tr('선택한 모델로 실제 평가합니다. 바꾼 뒤 위험도 확인과 저장이 필요합니다.'));
@@ -135,7 +136,7 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
   const drafts = new Map(), archives = new Map(), removals = new Set();
   const bindingOf = id => { const b = snapshot?.bindings.find(b => b.targetId === id); return b && { targetId: b.targetId, targetRevision: b.targetRevision, profile: b.profile }; };
   const announce = (node, text) => { if (node.textContent !== text) node.textContent = text; };
-  const rawInputs = () => [commands, denied, search, selectedFilter, disclosure, execution, uploads, downloads, sudo, fallback, ...Object.values(scores).flatMap(p => [p.model, p.score]), sourceExecution];
+  const rawInputs = () => [commands, denied, search, selectedFilter, disclosure, execution, uploads, downloads, sudo, fallback, ...Object.values(scores).flatMap(p => [p.model, p.score]), sourceExecution, testServer];
   function remember() {
     if (!currentTarget || !snapshot || conflict || unknownSave) return;
     drafts.set(currentTarget, { binding: bindingOf(currentTarget), original: structuredClone(original), revision: snapshot.revision,
@@ -146,12 +147,12 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
     preservedText.textContent = [tr('자동승인 명령:'), draft.values[0], tr('금지 명령:'), draft.values[1],
       tr('정보 전송: ') + draft.values[4] + tr(' · AI 자동승인: ') + draft.values[5],
       tr('업로드: ') + draft.values[6] + tr(' · 다운로드: ') + draft.values[7] + ' · sudo: ' + draft.values[8],
-      tr('제출한 Python 코드 평가·실행 허용: ') + (draft.values.at(-1) ? tr('허용') : tr('허용 안 함')), tr('대체 평가자: ') + (draft.values[9] || tr('없음')), ...['jev', 'luna', 'sonnet'].map((p, i) => p + ': ' + draft.values[10 + i * 2] + ' · ' + draft.values[11 + i * 2] + '%')].join('\n');
+      tr('제출한 Python 코드 평가·실행 허용: ') + (draft.values.at(-2) ? tr('허용') : tr('허용 안 함')), tr('테스트 서버: ') + (draft.values.at(-1) ? tr('사용') : tr('사용 안 함')), tr('대체 평가자: ') + (draft.values[9] || tr('없음')), ...['jev', 'luna', 'sonnet'].map((p, i) => p + ': ' + draft.values[10 + i * 2] + ' · ' + draft.values[11 + i * 2] + '%')].join('\n');
   }
   function lock() {
     fields.disabled = !snapshot || busy || loading || !!unknownSave || conflict;
     importantFields.disabled = !snapshot || busy || loading || !!unknownSave;
-    for (const input of [uploads, downloads, sudo, execution, sourceExecution]) input.disabled = conflict;
+    for (const input of [uploads, downloads, sudo, execution, sourceExecution, testServer]) input.disabled = conflict;
     reviewButton.disabled = !snapshot || busy || loading || !!unknownSave || conflict;
     reload.disabled = quickLoad.disabled = busy || loading;
     reconcile.disabled = busy || loading; latest.disabled = busy || loading || !!unknownSave;
@@ -172,7 +173,7 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
     if (!snapshot || !original && loadHint.hidden) return false;
     return !same(linesOf(commands.value), original?.commands ?? []) || !same(linesOf(denied.value), original?.deniedCommands ?? []) ||
       disclosure.checked !== (original?.externalDisclosure === true) || execution.checked !== (original?.modelExecution === true) || uploads.checked !== (original?.automaticUploads === true) ||
-      sourceExecution.checked !== (original?.sourceExecutionContract === 'python-source-v1') || downloads.checked !== (original?.automaticDownloads === true) || sudo.checked !== (original?.automaticSudo === true) || (fallback.value || null) !== (original?.fallback ?? null) || changed.size > 0 || converted.size > 0;
+      testServer.checked !== (original?.testServer === true) || sourceExecution.checked !== (original?.sourceExecutionContract === 'python-source-v1') || downloads.checked !== (original?.automaticDownloads === true) || sudo.checked !== (original?.automaticSudo === true) || (fallback.value || null) !== (original?.fallback ?? null) || changed.size > 0 || converted.size > 0;
   }
   const error = text => { failure.textContent = text; failure.hidden = !text; };
   const clearFieldErrors = () => { for (const [input, note] of fieldErrors) { note.hidden = true; note.textContent = ''; input.removeAttribute('aria-invalid'); input.removeAttribute('aria-errormessage'); } };
@@ -200,9 +201,10 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
   function update() {
     for (const [input, key] of [[uploads, 'automaticUploads'], [downloads, 'automaticDownloads'], [sudo, 'automaticSudo'], [execution, 'modelExecution']]) permissionNotes.get(input).textContent = (original ? tr('마지막 저장값: ') + (original[key] === true ? tr('허용') : tr('개별 승인')) : tr('저장된 정책 없음')) + tr(' / 초안: ') + (input.checked ? tr('허용') : tr('개별 승인'));
     permissionNotes.get(sourceExecution).textContent = (original ? tr('마지막 저장값: ') + (original.sourceExecutionContract === 'python-source-v1' ? tr('허용') : tr('개별 승인')) : tr('저장된 정책 없음')) + tr(' / 초안: ') + (sourceExecution.checked ? tr('허용') : tr('개별 승인'));
+    permissionNotes.get(testServer).textContent = (original ? tr('마지막 저장값: ') + (original.testServer === true ? tr('사용') : tr('사용 안 함')) : tr('저장된 정책 없음')) + tr(' / 초안: ') + (testServer.checked ? tr('사용') : tr('사용 안 함'));
     if (snapshot) {
-      const dirty = sourceExecution.checked !== (original?.sourceExecutionContract === 'python-source-v1') || uploads.checked !== (original?.automaticUploads === true) || downloads.checked !== (original?.automaticDownloads === true) || sudo.checked !== (original?.automaticSudo === true) || execution.checked !== (original?.modelExecution === true);
-      announce(importantStatus, (unknownSave ? tr('저장 결과 확인 필요 · 이미 적용됐을 수 있습니다. 현재값을 확인하기 전까지 편집이 잠깁니다. 마지막 확인값: ') : '') + nameOf(target.value) + tr(' · 저장된 설정: 파일 업로드 ') + (original?.automaticUploads === true ? tr('허용') : tr('개별 승인')) + tr(' · 다운로드 ') + (original?.automaticDownloads === true ? tr('허용') : tr('개별 승인')) + ' · sudo ' + (original?.automaticSudo === true ? tr('허용') : tr('개별 승인')) + tr(' · AI 평가 자동승인 ') + (original?.modelExecution === true ? tr('허용') : tr('개별 승인')) + ' · ' + tr('제출한 Python 코드 평가·실행 허용') + ' ' + (original?.sourceExecutionContract === 'python-source-v1' ? tr('허용') : tr('개별 승인')) + (!unknownSave && dirty ? tr(' · 변경 사항은 아직 저장되지 않았습니다.') : ''));
+      const dirty = testServer.checked !== (original?.testServer === true) || sourceExecution.checked !== (original?.sourceExecutionContract === 'python-source-v1') || uploads.checked !== (original?.automaticUploads === true) || downloads.checked !== (original?.automaticDownloads === true) || sudo.checked !== (original?.automaticSudo === true) || execution.checked !== (original?.modelExecution === true);
+      announce(importantStatus, (unknownSave ? tr('저장 결과 확인 필요 · 이미 적용됐을 수 있습니다. 현재값을 확인하기 전까지 편집이 잠깁니다. 마지막 확인값: ') : '') + nameOf(target.value) + tr(' · 저장된 설정: 파일 업로드 ') + (original?.automaticUploads === true ? tr('허용') : tr('개별 승인')) + tr(' · 다운로드 ') + (original?.automaticDownloads === true ? tr('허용') : tr('개별 승인')) + ' · sudo ' + (original?.automaticSudo === true ? tr('허용') : tr('개별 승인')) + tr(' · AI 평가 자동승인 ') + (original?.modelExecution === true ? tr('허용') : tr('개별 승인')) + ' · ' + tr('제출한 Python 코드 평가·실행 허용') + ' ' + (original?.sourceExecutionContract === 'python-source-v1' ? tr('허용') : tr('개별 승인')) + tr(' · 테스트 서버 ') + (original?.testServer === true ? tr('사용') : tr('사용 안 함')) + (!unknownSave && dirty ? tr(' · 변경 사항은 아직 저장되지 않았습니다.') : ''));
     }
     const chosen = [...new Set(linesOf(commands.value))]; workspace.refresh();
     const draftDirty = hasChanges() || removals.size > 0;
@@ -224,6 +226,7 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
     const lines = [tr('명령 ') + commands.value.split(/\r?\n/).filter(line => line.trim()).length + tr('개 · 금지 명령 ') + denied.value.split(/\r?\n/).filter(line => line.trim()).length + tr('개'),
       tr('정보 전송 ') + (disclosure.checked ? tr('허용 (위험도 확인부터 전송)') : tr('허용 안 함')) + tr(' · Jev 기준 자동 실행 ') + (execution.checked ? tr('사용 (명령셋 밖도 포함)') : tr('사용 안 함'))];
     summary.append(el('p', tr('제출한 Python 코드 평가·실행 허용') + ': ' + (sourceExecution.checked ? tr('허용') : tr('허용 안 함')) + (sourceExecution.checked !== (original?.sourceExecutionContract === 'python-source-v1') ? tr(' · 변경 사항은 아직 저장되지 않았습니다.') : '')));
+    summary.append(el('p', tr('테스트 서버: ') + (testServer.checked ? tr('사용 · 위험 심사와 개별 승인 없이 실행') : tr('사용 안 함'))));
     const threshold = original?.thresholds.jev;
     if (threshold || execution.checked || changed.has('jev')) lines.push(tr('Jev 기준 ') + probability.value + '% · ' + (legacy(threshold) && !converted.has('jev') ? tr('이전 방식 보존') : tr('낮은 위험 점수 방식 · 사용자 선택 기준')));
     if (changed.has('jev') && scores.jev.model.value !== (original?.thresholds.jev?.model ?? 'jev-1.14.0')) lines.push(tr('Jev 모델 변경: ') + scores.jev.model.value);
@@ -237,7 +240,7 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
       summary.append(el('p', label + tr(' 추가: ') + (nameSummary(added) || tr('없음')) + tr(' · 제외: ') + (nameSummary(removed) || tr('없음'))));
       if (added.length > 8 || removed.length > 8) { const details = el('details', '', 'policy-details'); details.append(el('summary', label + tr(' 전체 변경 내역 · 추가 ') + added.length + tr('개 · 제외 ') + removed.length + tr('개')), el('p', tr('추가: ') + (added.join(', ') || tr('없음'))), el('p', tr('제외: ') + (removed.join(', ') || tr('없음')))); summary.append(details); }
     }
-    for (const [label, input, prior] of [[tr('업로드'), uploads, original?.automaticUploads], [tr('다운로드'), downloads, original?.automaticDownloads], ['sudo', sudo, original?.automaticSudo], [tr('AI 평가 자동승인'), execution, original?.modelExecution], [tr('정보 전송'), disclosure, original?.externalDisclosure]]) if (input.checked !== (prior === true)) summary.append(el('p', label + tr(' 변경: ') + (prior === true ? tr('허용') : tr('허용 안 함')) + ' → ' + (input.checked ? tr('허용') : tr('허용 안 함'))));
+    for (const [label, input, prior] of [[tr('업로드'), uploads, original?.automaticUploads], [tr('다운로드'), downloads, original?.automaticDownloads], ['sudo', sudo, original?.automaticSudo], [tr('AI 평가 자동승인'), execution, original?.modelExecution], [tr('정보 전송'), disclosure, original?.externalDisclosure], [tr('테스트 서버'), testServer, original?.testServer]]) if (input.checked !== (prior === true)) summary.append(el('p', label + tr(' 변경: ') + (prior === true ? tr('허용') : tr('허용 안 함')) + ' → ' + (input.checked ? tr('허용') : tr('허용 안 함'))));
     for (const [provider, inputs] of Object.entries(scores)) if (changed.has(provider)) summary.append(el('p', provider + tr(' 모델·기준: ') + (original?.thresholds[provider]?.model ?? tr('미설정')) + ' / ' + (original?.thresholds[provider] ? original.thresholds[provider].minLowRisk * 100 + '%' : tr('미설정')) + ' → ' + inputs.model.value + ' / ' + inputs.score.value + '%'));
     if ((fallback.value || null) !== (original?.fallback ?? null)) summary.append(el('p', tr('대체 평가자 변경: ') + (original?.fallback ?? tr('없음')) + ' → ' + (fallback.value || tr('없음'))));
     summary.append(el('p', tr('sudo 자동승인 ') + (sudo.checked ? tr('허용 · 내부 명령까지 등록 검사 · 권한 상승 포함') : tr('허용 안 함 · sudo마다 개별 승인'))));
@@ -252,6 +255,7 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
     search.value = ''; selectedFilter.value = 'rules'; workspace.entry.value = ''; workspace.resetImport(); workspace.refresh();
     disclosure.checked = original?.externalDisclosure ?? false; execution.checked = original?.modelExecution ?? false; fallback.value = original?.fallback ?? '';
     sourceExecution.checked = original?.sourceExecutionContract === 'python-source-v1';
+    testServer.checked = original?.testServer === true;
     uploads.checked = original?.automaticUploads === true; downloads.checked = original?.automaticDownloads === true; sudo.checked = original?.automaticSudo === true;
     for (const [provider, inputs] of Object.entries(scores)) {
       const catalog = snapshot.evaluators?.[provider], saved = original?.thresholds[provider]?.model;
@@ -312,7 +316,7 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
     if (event.target === acknowledged || event.target === target || workspace.controls.includes(event.target)) return;
     for (const [provider, inputs] of Object.entries(scores)) if ([inputs.model, inputs.score].includes(event.target)) changed.add(provider);
     loadHint.hidden = false; error(''); clearFieldErrors(); invalidate();
-    if ([uploads, downloads, sudo, execution, sourceExecution].includes(event.target)) onNavigate();
+    if ([uploads, downloads, sudo, execution, sourceExecution, testServer].includes(event.target)) onNavigate();
     update();
   };
   for (const [provider, inputs] of Object.entries(scores)) inputs.convert.onclick = () => { converted.add(provider); changed.add(provider); invalidate(tr('점수 방식 전환을 선택했습니다. 변경 내용과 위험도를 확인해 주세요.')); update(); };
@@ -326,6 +330,7 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
     if (!binding || binding.enabled === false || original && !activeRule(original)) throw Error(tr('서버 연결 정보가 기존 정책과 다릅니다. 자동으로 연결을 바꾸지 않습니다. 관리자에게 확인해 주세요.'));
     const rule = original ? structuredClone(original) : { targetId: binding.targetId, targetRevision: binding.targetRevision, profile: binding.profile, commands: [], deniedCommands: [], externalDisclosure: false, modelExecution: false, fallback: null, thresholds: {} };
     Object.assign(rule, { commands: names(commands, tr('자동승인 명령')), deniedCommands: names(denied, tr('금지 명령')), externalDisclosure: disclosure.checked, modelExecution: execution.checked, fallback: fallback.value || null });
+    if (testServer.checked || Object.hasOwn(rule, 'testServer')) rule.testServer = testServer.checked;
     if (uploads.checked || Object.hasOwn(rule, 'automaticUploads')) rule.automaticUploads = uploads.checked;
     if (downloads.checked || Object.hasOwn(rule, 'automaticDownloads')) rule.automaticDownloads = downloads.checked;
     if (sudo.checked || Object.hasOwn(rule, 'automaticSudo')) rule.automaticSudo = sudo.checked;

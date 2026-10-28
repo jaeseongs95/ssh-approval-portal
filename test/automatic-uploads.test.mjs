@@ -19,7 +19,7 @@ async function fixture(run,{automation=true,auditFails=()=>false}={}){
   for(const e of entries){const runtime=app.targets.select(e.id);runtime.transfers.upload=async operation=>{const fd=await runtime.store.verified(operation.artifactId);try{const chunks=[];for await(const part of fd.createReadStream({start:0,autoClose:false}))chunks.push(part);assert.deepEqual(Buffer.concat(chunks),bytes);}finally{await fd.close();}effects.push({target:e.id,...operation});return{failed:false,texts:['uploaded']};};}
   await new Promise(resolve=>app.adminHttp.listen(0,'127.0.0.1',resolve));const origin='http://127.0.0.1:'+app.adminHttp.address().port;
   const api=async(path,body)=>{const response=await fetch(origin+path,{method:body?'POST':'GET',headers:{Authorization:'Bearer fixture-owner',Origin:'https://owner.test','Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});return{status:response.status,body:await response.json()};};
-  const set=async(flag,target='alpha')=>{const current=(await api('/api/command-policy')).body,binding=current.bindings.find(b=>b.targetId===target),old=current.targets.find(r=>r.targetId===target),rule=old??{targetId:target,targetRevision:binding.targetRevision,profile:binding.profile,commands:[],deniedCommands:[],externalDisclosure:false,modelExecution:false,fallback:null,thresholds:{}};if(flag!==undefined)rule.automaticUploads=flag;const policy={targets:[...current.targets.filter(r=>r.targetId!==target),rule]},proposal={policy,expectedRevision:current.revision},reviewed=await api('/api/command-policy/review',proposal);assert.equal(reviewed.status,200);const stored=await api('/api/command-policy',{...proposal,reviewToken:reviewed.body.reviewToken,acknowledged:true});assert.equal(stored.status,200);return{reviewed:reviewed.body,stored:stored.body,proposal};};
+  const set=async(flag,target='alpha',changes={})=>{const current=(await api('/api/command-policy')).body,binding=current.bindings.find(b=>b.targetId===target),old=current.targets.find(r=>r.targetId===target),rule=old??{targetId:target,targetRevision:binding.targetRevision,profile:binding.profile,commands:[],deniedCommands:[],externalDisclosure:false,modelExecution:false,fallback:null,thresholds:{}};Object.assign(rule,changes);if(flag!==undefined)rule.automaticUploads=flag;const policy={targets:[...current.targets.filter(r=>r.targetId!==target),rule]},proposal={policy,expectedRevision:current.revision},reviewed=await api('/api/command-policy/review',proposal);assert.equal(reviewed.status,200);const stored=await api('/api/command-policy',{...proposal,reviewToken:reviewed.body.reviewToken,acknowledged:true});assert.equal(stored.status,200);return{reviewed:reviewed.body,stored:stored.body,proposal};};
   const upload=async(target='alpha',changes={})=>(await app.targets.files.requestUpload({target,source:source(),...meta,...changes})).job;
   const finish=async job=>{await app.queue.wait(job.id);return app.queue.get(job.id);};
   await run({app,api,set,upload,finish,effects,events,profiles});
@@ -71,3 +71,14 @@ test('global automation off and blocked file source cannot cause automatic trans
  await fixture(async f=>{const job=await f.upload();assert.equal(job.state,'pending');assert.equal(f.effects.length,0);f.app.queue.deny(job.id);},{automation:false});
  await fixture(async f=>{await f.set(true);const r=await f.app.targets.files.requestUpload({...meta,target:'alpha',source:{inspect:()=>({allowed:false,sourceHost:'blocked.test'}),open:()=>assert.fail('Blocked source fetched')}});assert.equal(r.type,'source-unavailable');assert.equal(f.effects.length,0);assert.equal(f.app.queue.jobs.size,0);});
 });
+
+
+test('test server bypass covers elevated overwrite uploads only on the reviewed target and is revoked at dispatch',async()=>fixture(async f=>{
+ await f.set(false,'alpha',{testServer:true,automaticSudo:false});
+ const first=await f.finish(await f.upload('alpha',{overwrite:true,elevate:true}));
+ assert.equal(first.state,'completed');assert.equal(first.decision.reasonCode,'test_server_bypass');assert.equal(first.approvalMode,'automatic');
+ const other=await f.upload('beta',{overwrite:true,elevate:true});assert.equal(other.state,'pending');f.app.queue.deny(other.id);
+ await f.set(false,'alpha',{testServer:false});
+ const stopped=await f.upload('alpha',{overwrite:true,elevate:true});assert.equal(stopped.state,'pending');f.app.queue.deny(stopped.id);
+ assert.equal(f.effects.length,1);
+}));

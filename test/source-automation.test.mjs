@@ -299,3 +299,16 @@ test('SOURCE-PRODUCT-14 source request keys cannot collide with a legacy string 
     await f.app.targets.drain(); assert.equal(f.app.queue.listAll().length, 1);
   });
 });
+
+
+test('test server executes source without disclosure, model, source opt-in or sudo opt-in and revocation restores review', async t => {
+  const f = await fixture(t);
+  const review = await f.policy({ testServer: true, sourceExecutionContract: null, automaticSudo: false, deniedCommands: ['python3'], externalDisclosure: false, modelExecution: false, thresholds: {} });
+  assert.equal(review.feedback[0].reason, 'test_server_bypass'); assert.equal(review.feedback[0].level, 'high_risk');
+  const job = await f.run({ context: '', elevate: true });
+  assert.equal(job.state, 'completed'); assert.equal(job.approvalMode, 'automatic'); assert.equal(job.decision.reasonCode, 'test_server_bypass');
+  assert.equal(f.executions.length, 1); assert.equal(f.inputs.length, 0);
+  await f.policy({ testServer: false, sourceExecutionContract: null, externalDisclosure: false });
+  assert.equal((await f.run()).decision.reasonCode, 'source_execution_not_enabled');
+  assert.equal(f.executions.length, 1);
+});

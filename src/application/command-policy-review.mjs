@@ -35,7 +35,8 @@ export function createCommandPolicyReview({ state, validateTargets, evaluator, a
           const commandRisks = rule.commands.filter(name => name !== 'sudo').map(name => ({ name, ...(risks.commands[name] ?? risks.defaultRisk) }));
           const powerful = commandRisks.filter(item => item.riskLevel === 'high').map(item => item.name);
           const selected = evaluator?.forModel ? evaluator.forModel(rule.thresholds.jev?.model) : evaluator;
-          if (rule.externalDisclosure && selected && budget.used < maxCalls) {
+          if (rule.testServer === true) reason = 'test_server_bypass';
+          else if (rule.externalDisclosure && selected && budget.used < maxCalls) {
             budget.used++;
             let timer;
             const startedAt = now();
@@ -59,8 +60,8 @@ export function createCommandPolicyReview({ state, validateTargets, evaluator, a
             evaluation = { purpose: 'registration', assessedAt: startedAt, latencyMs: Math.max(0, now() - startedAt) };
           } else if (rule.externalDisclosure) reason = selected ? 'budget_exhausted' : 'not_configured';
           feedback.push({ targetId: rule.targetId, commands: [...rule.commands], commandRisks, assessment: assessment ?? null, reason, ...(evaluation ? { evaluation } : {}), ...(failure ? { failure } : {}),
-            level: powerful.length || rule.sourceExecutionContract || rule.automaticUploads === true || rule.automaticDownloads === true || rule.automaticSudo === true ? 'high_risk' : assessment?.label ?? 'uncertain',
-            warning: (rule.sourceExecutionContract ? '제출한 Python 코드 원문과 인자를 Jev·설정된 대체 평가자에 전송하고, 평가·실행 정책이 통과하면 같은 코드로 실행합니다. 명령 이름 사전허용으로 평가를 건너뛰지 않습니다. 샌드박스가 아니며 파일·의존성·실행 환경의 실제 상태는 확인하지 않습니다. sudo 자동승인이 꺼져 있거나 금지 명령이 있으면 코드 요청은 개별 승인합니다. 다른 허용 설정이나 점수 기준은 자동으로 바꾸지 않습니다. ' : '')
+            level: rule.testServer === true || powerful.length || rule.sourceExecutionContract || rule.automaticUploads === true || rule.automaticDownloads === true || rule.automaticSudo === true ? 'high_risk' : assessment?.label ?? 'uncertain',
+            warning: (rule.testServer === true ? '테스트 서버 모드입니다. 이 서버의 명령·Python 코드·파일 전송은 금지 명령, sudo 및 개별 허용 설정과 관계없이 위험 심사와 개별 승인을 건너뜁니다. 테스트 서버 지정은 관리자가 판단합니다. ' : '') + (rule.sourceExecutionContract ? '제출한 Python 코드 원문과 인자를 Jev·설정된 대체 평가자에 전송하고, 평가·실행 정책이 통과하면 같은 코드로 실행합니다. 명령 이름 사전허용으로 평가를 건너뛰지 않습니다. 샌드박스가 아니며 파일·의존성·실행 환경의 실제 상태는 확인하지 않습니다. sudo 자동승인이 꺼져 있거나 금지 명령이 있으면 코드 요청은 개별 승인합니다. 다른 허용 설정이나 점수 기준은 자동으로 바꾸지 않습니다. ' : '')
               + (rule.automaticSudo === true ? 'sudo 자동승인을 켜면 다른 사용자 권한으로 실행할 수 있습니다. 내부 명령까지 모두 사전승인이면 Jev 없이 실행하며, 미등록 명령이 있으면 전체 명령줄을 Jev로 평가합니다. 끄면 sudo 요청은 개별 사용자 승인이 필요합니다. ' : '')
               + (rule.automaticUploads === true ? '파일 자동업로드를 켜면 SSH 계정이 쓸 수 있는 경로에 새 파일을 개별 승인 없이 저장합니다. 파일 내용은 Jev가 검사하지 않습니다. 실행 파일·설정·인증 파일 생성과 저장 공간 사용에 영향을 줄 수 있습니다. 덮어쓰기·sudo 업로드는 계속 개별 승인이 필요합니다. ' : '')
               + (rule.automaticDownloads === true ? '파일 자동다운로드를 켜면 SSH 계정이 읽을 수 있는 일반 파일을 개별 승인 없이 준비합니다. 개인정보·설정·인증 파일도 포함될 수 있으며 파일 내용은 Jev가 검사하지 않습니다. sudo 다운로드는 sudo 자동승인까지 함께 켠 경우에만 자동으로 준비합니다. 준비 완료는 PC 저장이나 에이전트 수신 완료를 뜻하지 않습니다. ' : '')

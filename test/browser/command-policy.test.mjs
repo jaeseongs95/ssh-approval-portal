@@ -381,7 +381,7 @@ test('model autoapproval is visible beside transfer controls and requires review
   await page.waitForFunction(() => !document.querySelector('#important-settings fieldset').disabled);
   const model = page.locator('#important-settings').getByRole('checkbox', { name: /^Jev·다른 모델을 통한/ });
   assert.equal(await model.isVisible(), true); assert.equal(await model.isChecked(), false);
-  assert.equal(await page.locator('#important-settings input[type=checkbox]').count(), 5);
+  assert.equal(await page.locator('#important-settings input[type=checkbox]').count(), 6);
   const posts = () => f.posts.filter(p => p.path === '/api/command-policy').length, before = posts();
   await model.check();
   await page.waitForURL('**/settings'); assert.equal(await tab(page,'명령 관리').getAttribute('aria-selected'), 'true');
@@ -517,7 +517,7 @@ test('settings workspace tabs preserve one reviewed draft through keyboard navig
   await tab(page,'Jev·모델').press('Home');assert.equal(await tab(page,'명령 관리').getAttribute('aria-selected'),'true');
   await tab(page,'명령 관리').press('Enter');assert.equal(f.posts.length,count);
   assert.equal(await names(page).inputValue(),'ls\ncustom-health');
-  assert.equal(await page.getByRole('tabpanel').count(),1);assert.equal(await page.locator('#important-settings input[type=checkbox]').count(),5);
+  assert.equal(await page.getByRole('tabpanel').count(),1);assert.equal(await page.locator('#important-settings input[type=checkbox]').count(),6);
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
 },{width:320}));
 
@@ -606,3 +606,21 @@ for(const width of [1200,320])test('command list scroll keeps headers and select
   assert.equal(await names(page).inputValue(),raw);assert.equal(f.posts.length,posts);assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   await screenshot(page,'command-scroll-'+width);
 },{width}));
+
+
+test('test server option keeps per-target drafts and saves without altering other permissions', async () => fixture(async f => {
+  const {page}=f;await f.open();
+  const target=page.getByLabel('정책 편집 대상',{exact:true}),bypass=page.getByRole('checkbox',{name:/^테스트 서버/});
+  assert.equal(await bypass.isChecked(),false);
+  await bypass.check();assert.match(await page.locator('.policy-draft-status').textContent(),/미저장 초안/);
+  assert.equal(f.posts.length,0);
+  await target.selectOption('beta');assert.equal(await bypass.isChecked(),false);
+  await target.selectOption('alpha');assert.equal(await bypass.isChecked(),true);
+  await f.checked();const proposed=f.posts.at(-1).body.policy.targets.find(r=>r.targetId==='alpha');
+  assert.equal(proposed.testServer,true);assert.equal(proposed.externalDisclosure,false);assert.equal(proposed.modelExecution,false);
+  assert.equal(proposed.automaticUploads,undefined);assert.equal(proposed.automaticDownloads,undefined);assert.equal(proposed.automaticSudo,undefined);assert.equal(proposed.sourceExecutionContract,undefined);
+  assert.deepEqual(proposed.commands,recommended);assert.deepEqual(proposed.deniedCommands,[]);
+  await f.commit();await f.open();assert.equal(await bypass.isChecked(),true);
+  await bypass.uncheck();await f.checked();await f.commit();
+  const policy=await f.api('/api/command-policy');assert.equal(policy.targets.find(r=>r.targetId==='alpha').testServer,false);
+},{multi:true}));

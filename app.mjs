@@ -131,7 +131,7 @@ export async function createApplication({ registry, classify, executeCommand, ex
     const checkCliPolicy = plan => {
       definition.verify();
       const rule = commandState?.policy().targets.find(rule => rule.targetId === definition.id && rule.targetRevision === definition.revision && rule.profile === writeProfile);
-      if (deniedCommand(plan.command+'\n'+plan.stdin+'\n'+plan.manifest.argvJson,rule)) throw Error('CLI operation denied by current policy');
+      if (!rule?.testServer && deniedCommand(plan.command+'\n'+plan.stdin+'\n'+plan.manifest.argvJson,rule)) throw Error('CLI operation denied by current policy');
     };
     const checkedCliProbe = plan => {
       definition.verify();checkCliPolicy(plan);
@@ -147,21 +147,25 @@ export async function createApplication({ registry, classify, executeCommand, ex
       cli=createAgentCliService({queue,journal:cliState,resolveTarget:id=>id===definition.id?definition:null,
         readLoginState:async(provider,binding)=>(await checkedCliProbe(prepareAgentCliPlan({action:'login-status',provider,binding}))).data?.agentCli,
         readInstallation:async(provider,binding)=>(await checkedCliProbe(prepareAgentCliPlan({action:'inspect',provider,binding}))).data?.agentCli,
+        automaticDecision:()=>{
+          const policy=commandState?.policy(),rule=policy?.targets.find(rule=>rule.targetId===definition.id&&rule.targetRevision===definition.revision&&rule.profile===writeProfile);
+          return rule?.testServer===true?{decision:'execute',reasonCode:'test_server_bypass',policyRevision:policy.revision,targetRevision:definition.revision}:undefined;
+        },
         catalog:cliCatalog,preparePlan:prepareAgentCliPlan,executePlan:executeAgentCli,outputs,checkPolicy:checkCliPolicy,nonce:()=>randomBytes(24).toString('hex')});
       const originalGuard=queue.beforeCommandStart;
       queue.beforeCommandStart=job=>cli.isJob(job)?cli.beforeStart(job):originalGuard?.(job);
     }
-    queue.beforeUploadStart = () => {
+    queue.beforeUploadStart = job => {
       definition.verify();
       const policy = commandState?.policy(), rule = policy?.targets.find(rule => rule.targetId === definition.id && rule.targetRevision === definition.revision && rule.profile === writeProfile);
-      if (rule?.automaticUploads !== true) throw Error('Automatic uploads not enabled by the user');
-      return { decision: 'execute', reasonCode: 'upload_policy', policyRevision: policy.revision, targetRevision: definition.revision };
+      if (rule?.testServer !== true && (rule?.automaticUploads !== true || job.operation.elevate || job.operation.overwrite)) throw Error('Automatic uploads not enabled by the user');
+      return { decision: 'execute', reasonCode: rule?.testServer === true ? 'test_server_bypass' : 'upload_policy', policyRevision: policy.revision, targetRevision: definition.revision };
     };
     queue.beforeDownloadStart = job => {
       definition.verify();
       const policy = commandState?.policy(), rule = policy?.targets.find(rule => rule.targetId === definition.id && rule.targetRevision === definition.revision && rule.profile === writeProfile);
-      if (rule?.automaticDownloads !== true || (job.operation.elevate && rule.automaticSudo !== true)) throw Error('Automatic download not enabled by the user');
-      return { decision: 'execute', reasonCode: 'download_policy', policyRevision: policy.revision, targetRevision: definition.revision };
+      if (rule?.testServer !== true && (rule?.automaticDownloads !== true || (job.operation.elevate && rule.automaticSudo !== true))) throw Error('Automatic download not enabled by the user');
+      return { decision: 'execute', reasonCode: rule?.testServer === true ? 'test_server_bypass' : 'download_policy', policyRevision: policy.revision, targetRevision: definition.revision };
     };
     commands = createCommandService({ queue, classify, executeCommand: checkedExecute, audit: targetAudit, target, readProfile, claimExecution, automation });
     files = createFileService({ store: targetStore, queue, transfers, claimImport });

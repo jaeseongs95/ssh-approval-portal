@@ -102,7 +102,7 @@ export class ApprovalQueue {
   }
   startUpload(id) {
     const operation = this.jobs.get(id)?.operation;
-    if (operation?.kind !== 'upload' || operation.elevate !== false || operation.overwrite !== false) throw Error('Owner upload approval required');
+    if (operation?.kind !== 'upload') throw Error('Upload policy authority required');
     return this.start(id, false, UPLOAD_AUTHORITY);
   }
   startDownload(id) {
