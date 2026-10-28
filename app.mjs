@@ -195,16 +195,20 @@ export async function createApplication({ registry, classify, executeCommand, ex
   });
   const targets = createTargetRouter(runtimes, { defaultTarget: settings.targets === null ? 'default' : settings.defaultTarget, legacy: settings.targets === null, store, audit });
   const { queue, commands, files } = targets;
+  maintenanceState = createMaintenanceState(transferRoot);
   for (const job of commandState?.list() ?? []) {
     const runtime = runtimes.find(runtime => runtime.id === (job.targetId ?? 'default'));
     if (runtime && job.kind === 'command' && job.result && !job.result.output) {
       // Publish before replacing the legacy body. On failure the original DB body survives;
       // presenters still refuse to expose it. Execution/replay identity is never changed.
       let migrated = { failed: job.result.failed, texts: [], output: { state: 'unavailable', captureSource: 'redacted-adapter-outcome', sshCompleteness: 'unknown', version: 1 } };
-      try {
-        migrated = outputs.finish(outputs.reserve({ executionId: job.id, targetId: runtime.id, targetRevision: job.targetRevision ?? runtime.revision, profile: job.profile, operationDigest: hash(job.command) }), job.result);
-        if (migrated.output.state === 'ready') commandState.save({ ...job, result: migrated });
-      } catch { /* Preserve the legacy journal; no raw fallback or SSH replay. */ }
+      // A reserved restart must retain the baseline row; only sanitize the in-memory view.
+      if (!maintenanceState.occupied()) {
+        try {
+          migrated = outputs.finish(outputs.reserve({ executionId: job.id, targetId: runtime.id, targetRevision: job.targetRevision ?? runtime.revision, profile: job.profile, operationDigest: hash(job.command) }), job.result);
+          if (migrated.output.state === 'ready') commandState.save({ ...job, result: migrated });
+        } catch { /* Preserve the legacy journal; no raw fallback or SSH replay. */ }
+      }
       job.result = migrated;
     }
     runtime?.queue.restore(job, value => commandState.save(value));
@@ -275,7 +279,6 @@ export async function createApplication({ registry, classify, executeCommand, ex
   const requestSafety = createRequestSafety({ queue, maxCalls: settings.jevMaxCalls,
     assessor: settings.jevEnabled ? risk : undefined });
   let protocols;
-  maintenanceState = createMaintenanceState(transferRoot);
   const lifecycle = createLifecycleService({ queue, store, commands, files, maintenanceState, closeConnections: async () => { await targets.drain(); await registry.closeAll(); },
     onReap: () => { protocols?.reapCapabilities(); void modelCatalog.refreshDue(); } });
   const preservationInstance = randomBytes(32).toString('hex');
