@@ -82,6 +82,25 @@ test('lost approval observation keeps unknown state until the fixed request is r
   await c.decide('fixed','approve');assert.equal(posts,1,'unknown approval never replays POST');await c.load(true);assert.equal(c.reloadState().blocked,true);
   jobState='running';await c.load(true);assert.equal(c.reloadState().blocked,false);assert.equal(posts,1);
 });
+test('approval requests async acceptance, releases the decision lock before refresh and retires an older snapshot',async()=>{
+  let accept,refresh,oldRead;const calls=[],renders=[],locks=[];
+  const state=createWebState(true),view={target:()=>undefined,selectionRevision:()=>0,loading(){},render:jobs=>renders.push(structuredClone(jobs)),connected(){},disconnected(){},error(){},deciding:value=>locks.push(value)};
+  const jobs=[{id:'first',state:'pending'},{id:'second',state:'pending'}];
+  const api=async(path,method='GET',body,options)=>{
+    calls.push({path,method,options});
+    if(method==='POST')return new Promise(resolve=>accept=()=>resolve({id:'first',state:'running'}));
+    if(calls.length===1)return jobs;
+    return new Promise(resolve=>{if(!oldRead)oldRead=()=>resolve(jobs);else refresh=()=>resolve([{id:'first',state:'running'},jobs[1]]);});
+  };
+  const c=createWebController({state,view,api,document:{hidden:false},location:{},timers:{setInterval:()=>1,clearInterval(){}}});
+  await c.load();const stale=c.load();const decision=c.decide('first','approve');
+  await c.decide('first','approve');assert.equal(calls.filter(call=>call.method==='POST').length,1);
+  assert.deepEqual(calls[2].options,{preferAsync:true});assert.equal(c.reloadState().blocked,true);
+  accept();await settle();assert.equal(c.reloadState().blocked,false);assert.equal(locks.at(-1),false);
+  assert.equal(renders.at(-1)[0].state,'running','accepted job immediately replaces the pending buttons');
+  oldRead();await stale;assert.equal(renders.at(-1)[0].state,'running','old snapshot cannot restore pending');
+  refresh();await decision;assert.equal(renders.at(-1)[1].state,'pending');
+});
 test('English web labels, ten-second automatic timer and immediate manual/action refresh',async()=>{
   const h=harness('en-US');await h.roots.load.onclick();
   assert.equal(h.timers[0].ms,10000);
@@ -107,6 +126,7 @@ test('decision refresh survives an in-flight automatic GET without waiting for t
     assert.equal(h.requests.length,4,'forced refresh cancels the previous read without waiting');
     release();await decision;await settle();
     assert.deepEqual(h.requests.map(x=>x.method),['GET','GET','POST','GET']);
+    assert.equal(h.requests[2].headers.Prefer,action==='approve'?'respond-async':undefined);
     assert.equal(h.roots['pending-count'].textContent,0);
     assert.match(h.allText(h.roots.history),action==='approve'?/Completed/:/Denied/);
   }

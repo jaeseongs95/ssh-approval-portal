@@ -97,7 +97,7 @@ Maintenance reservation requires an owner token and blocks new work on cooperati
 
 ## Web administrator interface and sign-in
 
-The website displays pending requests, history, and execution results. After connecting, it refreshes every 10 seconds while the page is visible. Manual refreshes and approval/denial actions refresh immediately. Display language can be automatic, Korean or English and is saved only in this browser. Search retained approval history by request creation date, text, status and target together. Date ranges include both calendar dates in the browser’s local time; blank dates show the full retained period.
+The website displays pending requests, history, and execution results. After connecting, it refreshes every 10 seconds while the page is visible. Manual refreshes and approval/denial actions refresh immediately. Approval acceptance immediately releases the page controls; subsequent reads show execution completion or failure. Acceptance does not mean successful execution. Display language can be automatic, Korean or English and is saved only in this browser. Search retained approval history by request creation date, text, status and target together. Date ranges include both calendar dates in the browser’s local time; blank dates show the full retained period.
 
 Administrator-token authentication is the default. Cloudflare, Google, and GitHub sign-in are **web administrator sign-in through Cloudflare Access**; they do not replace SSH login or MCP connection authentication. Configure and test the providers and actual sign-in before explicitly enabling Access mode. See the [administrator sign-in guide](docs/admin-login.en.md) for setup, access restrictions, and recovery.
 

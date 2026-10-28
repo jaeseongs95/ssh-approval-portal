@@ -1,7 +1,7 @@
 export function createWebController({ state, view, api, document, location, timers = globalThis }) {
   const capture = () => ({ target: view.target?.(), revision: view.selectionRevision?.() });
   const current = context => context.target === view.target?.() && context.revision === view.selectionRevision?.();
-  let generation = 0, activeRead, uncertainDecision, activeDownloads = 0;
+  let generation = 0, activeRead, uncertainDecision, activeDownloads = 0, latestJobs = [];
   let page = document.body?.dataset.page, pageRevision = 0;
   document.addEventListener?.('admin-scope-change', () => {
     const next = document.body?.dataset.page;
@@ -29,7 +29,7 @@ export function createWebController({ state, view, api, document, location, time
       if (state.signedOut || token !== generation || !current(context)) return;
       const matches = uncertainDecision ? jobs.filter(job => job.id === uncertainDecision) : [];
       if (matches.length === 1 && ['running', 'completed', 'failed', 'denied', 'expired', 'unknown'].includes(matches[0].state)) uncertainDecision = undefined;
-      view.render(jobs, state.deciding || !!uncertainDecision); view.connected(); view.error(uncertainDecision ? uncertainMessage() : '');
+      latestJobs = jobs; view.render(jobs, state.deciding || !!uncertainDecision); view.connected(); view.error(uncertainDecision ? uncertainMessage() : '');
     } catch (error) {
       if (!state.signedOut && token === generation && !read.signal.aborted && current(context)) {
         view.error((uncertainDecision ? uncertainMessage() + ' ' : '') + error.message); view.disconnected();
@@ -39,13 +39,18 @@ export function createWebController({ state, view, api, document, location, time
   }
   async function decide(id, action) {
     if (state.signedOut || state.deciding || uncertainDecision) return;
-    const context = capture();
     state.deciding = true; view.deciding(true); view.error('');
-    try { await api(`/api/${id}/${action}`, 'POST'); if (!state.signedOut) await load(true); }
-    catch (error) {
-      if (!state.signedOut) { uncertainDecision = id; view.error(uncertainMessage()); await load(true); }
-    }
-    finally { state.deciding = false; if (!state.signedOut) view.deciding(!!uncertainDecision); }
+    try {
+      const job = await api(`/api/${id}/${action}`, 'POST', undefined, { preferAsync: action === 'approve' });
+      if (!state.signedOut) {
+        latestJobs = latestJobs.map(previous => previous.id === id ? { ...previous, ...job } : previous);
+        view.render(latestJobs, true);
+      }
+    } catch (error) {
+      if (!state.signedOut) { uncertainDecision = id; view.error(uncertainMessage()); }
+    } finally { state.deciding = false; if (!state.signedOut) view.deciding(!!uncertainDecision); }
+    // Acceptance releases the decision lock; execution is observed by ordinary reads.
+    if (!state.signedOut) await load(true);
   }
   async function download(id) {
     if (state.signedOut || activeDownloads) return;
