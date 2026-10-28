@@ -18,6 +18,7 @@ import { Tickets } from './src/adapters/security/tickets.mjs';
 import { createProtocolAdapters } from './src/adapters/http/protocol.mjs';
 import { createJevAssessor } from './src/adapters/safety/jev.mjs';
 import { createRequestSafety } from './src/application/request-safety.mjs';
+import { createTestServerMode } from './src/application/test-server-mode.mjs';
 import { createSecretService } from './src/application/secret-service.mjs';
 import { createLocalSecretStore } from './src/adapters/secrets/local-file.mjs';
 import { createVaultSecretStore } from './src/adapters/secrets/vault-kv.mjs';
@@ -61,20 +62,21 @@ export async function createApplication({ registry, classify, executeCommand, ex
   const outputs = new CommandOutputs(transferRoot);
   let commandState, dormantCommandState, cliState, maintenanceState;
   try {
+  let resolver = secretResolver;
+  if (!resolver) {
+    const providers = settings.secretStoreDir ? { 'local-file': createLocalSecretStore(settings.secretStoreDir) } : {};
+    const local = createSecretService(providers);
+    if (settings.vaultOrigin && settings.vaultTokenRef) providers.vault = createVaultSecretStore({
+      origin: settings.vaultOrigin, mount: settings.vaultMount, getToken: () => local.resolve(settings.vaultTokenRef),
+    });
+    resolver = createSecretService(providers);
+  }
+  const testServerMode = createTestServerMode({ reference: settings.testServerSecretRef, resolver });
   let risk = riskAssessor, apiKey;
   if (settings.jevEnabled) {
     apiKey = env.JEV_API_KEY;
     if (!apiKey && settings.jevKeyRef) {
       try {
-        let resolver = secretResolver;
-        if (!resolver) {
-          const providers = settings.secretStoreDir ? { 'local-file': createLocalSecretStore(settings.secretStoreDir) } : {};
-          const local = createSecretService(providers);
-          if (settings.vaultOrigin && settings.vaultTokenRef) providers.vault = createVaultSecretStore({
-            origin: settings.vaultOrigin, mount: settings.vaultMount, getToken: () => local.resolve(settings.vaultTokenRef),
-          });
-          resolver = createSecretService(providers);
-        }
         apiKey = await resolver.resolve(settings.jevKeyRef);
       } catch { /* Missing keys grant no authority. */ }
     }
@@ -121,8 +123,20 @@ export async function createApplication({ registry, classify, executeCommand, ex
     };
     const queue = new ApprovalQueue({ classify, target, profile: writeProfile, audit: targetAudit, identity, claimExecution,
       externalBusy: () => (commands?.reading() ?? false) || cliProbes.size > 0 || claimExecution.busy(),
-      executeOperation: (operation, id) => operation.agentCliContract === AGENT_CLI_CONTRACT ? cli.execute(id) : operation.kind === 'command' ? operation.sourceContract ? checkedSourceExecute(operation, id) : checkedExecute(writeProfile, operation.command, id)
-        : operation.kind === 'upload' ? transfers.upload(operation) : transfers.download(operation),
+      executeOperation: async (operation, id) => {
+        const before = commandState?.policy(), rule = before?.targets.find(rule => rule.targetId === definition.id && rule.targetRevision === definition.revision && rule.profile === writeProfile);
+        if (rule?.testServer === true || queue.get(id)?.decision?.reasonCode === 'test_server_bypass') {
+          await testServerMode.require();
+          definition.verify();
+          const current = commandState.policy(), job = queue.get(id);
+          if (current.revision !== before.revision || job?.decision?.policyRevision !== current.revision) throw Error('Test server policy changed');
+          if (operation.kind === 'command') queue.beforeCommandStart(job);
+          else if (operation.kind === 'upload') queue.beforeUploadStart(job);
+          else queue.beforeDownloadStart(job);
+        }
+        return operation.agentCliContract === AGENT_CLI_CONTRACT ? cli.execute(id) : operation.kind === 'command' ? operation.sourceContract ? checkedSourceExecute(operation, id) : checkedExecute(writeProfile, operation.command, id)
+          : operation.kind === 'upload' ? transfers.upload(operation) : transfers.download(operation);
+      },
       onTerminal: job => { try { cli?.onTerminal(job); automation?.onTerminal(job); } finally { files?.onTerminal(job); } },
     });
     automation = commandState && createCommandAutomation({ queue, state: commandState, definition, classify, evaluators, audit: targetAudit,
@@ -138,7 +152,10 @@ export async function createApplication({ registry, classify, executeCommand, ex
       if(queue.maintenance || queue.busy())throw Error('CLI target busy');
       const release=claimExecution(),id=randomBytes(24).toString('hex');
       try{targetAudit({action:'cli-probe-started',id,profile:writeProfile,targetId:definition.id});}catch(error){release();throw error;}
-      const task=Promise.resolve().then(()=>executeAgentCli(plan,()=>{definition.verify();checkCliPolicy(plan);if(queue.maintenance)throw Error('CLI maintenance in progress');return cliBinding();})).finally(()=>{
+      const task=Promise.resolve().then(async()=>{
+        const rule=commandState?.policy().targets.find(rule=>rule.targetId===definition.id&&rule.targetRevision===definition.revision&&rule.profile===writeProfile);
+        if(rule?.testServer===true)await testServerMode.require();
+        return executeAgentCli(plan,()=>{definition.verify();checkCliPolicy(plan);if(queue.maintenance)throw Error('CLI maintenance in progress');return cliBinding();});}).finally(()=>{
         cliProbes.delete(task);try{targetAudit({action:'cli-probe-finished',id,profile:writeProfile,targetId:definition.id});}finally{release();}
       });
       cliProbes.add(task);return task;
@@ -241,9 +258,15 @@ export async function createApplication({ registry, classify, executeCommand, ex
     },
   });
   const commandPolicy = commandState && {
-    get: async () => ({ ...commandState.policy(), evaluators: await modelCatalog.get(), bindings: runtimes.map(runtime => ({ targetId: runtime.id, targetRevision: runtime.revision, profile: runtime.writeProfile, displayName: runtime.displayName, enabled: runtime.enabled })) }),
-    review: policyReview.review,
-    set: policyReview.set,
+    get: async () => ({ ...commandState.policy(), testServerAvailable: await testServerMode.available(), evaluators: await modelCatalog.get(), bindings: runtimes.map(runtime => ({ targetId: runtime.id, targetRevision: runtime.revision, profile: runtime.writeProfile, displayName: runtime.displayName, enabled: runtime.enabled })) }),
+    async review(policy, revision) {
+      if (policy?.targets?.some(rule => rule.testServer === true)) await testServerMode.require();
+      return policyReview.review(policy, revision);
+    },
+    async set(policy, revision, token, acknowledged) {
+      if (policy?.targets?.some(rule => rule.testServer === true)) await testServerMode.require();
+      return policyReview.set(policy, revision, token, acknowledged);
+    },
   };
   const requestSafety = createRequestSafety({ queue, maxCalls: settings.jevMaxCalls,
     assessor: settings.jevEnabled ? risk : undefined });

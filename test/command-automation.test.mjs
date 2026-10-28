@@ -12,12 +12,12 @@ import { createJevAssessor } from '../src/adapters/safety/jev.mjs';
 
 const low = { status: 'assessed', model: 'jev-1.14.0', label: 'low_risk', confidence: 1,
   probabilities: { low_risk: 1, high_risk: 0 } };
-const env = { BRIDGE_MCP_TOKEN: 'fixture-mcp', BRIDGE_ADMIN_TOKEN: 'fixture-owner', BRIDGE_UI_TICKET_KEY: 'a'.repeat(64), BRIDGE_ADMIN_ORIGIN: 'https://owner.test', BRIDGE_COMMAND_AUTOMATION: 'true' };
+const env = { BRIDGE_MCP_TOKEN: 'fixture-mcp', BRIDGE_ADMIN_TOKEN: 'fixture-owner', BRIDGE_UI_TICKET_KEY: 'a'.repeat(64), BRIDGE_ADMIN_ORIGIN: 'https://owner.test', BRIDGE_COMMAND_AUTOMATION: 'true', BRIDGE_TEST_SERVER_SECRET_REF: 'secret://fixture/test-server' };
 const threshold = model => ({ model, questionVersion: 'ssh-command-risk-v5', basis: 'safety-probability-v1', minLowRisk: 0.9, validationRef: 'synthetic:test-only' });
 async function fixture(t, options = {}) {
   const root = await mkdtemp(join(tmpdir(), 'command-automation-')), executions = [], inputs = [], events = [];
   const evaluator = { model: 'jev-1.14.0', questionVersion: 'ssh-command-risk-v5', async assess(input) { inputs.push(input); return low; } };
-  const make = () => createApplication({ registry: { getProfile: name => ({ host: '127.0.0.1', port: 22, user: 'fixture', readOnly: name === 'aws-readonly' }), closeAll: async () => {} },
+  const make = () => createApplication({ secretResolver: { resolve: async () => '1'.repeat(64) }, registry: { getProfile: name => ({ host: '127.0.0.1', port: 22, user: 'fixture', readOnly: name === 'aws-readonly' }), closeAll: async () => {} },
     classify: classifyCommand, executeCommand: async (profile, command) => { executions.push({ profile, command }); return { failed: false, texts: ['ok'] }; },
     audit: event => events.push(event), transferRoot: root, uiHtml: '<html>fixture</html>', env,
     riskEvaluators: { jev: evaluator }, ...options,
@@ -569,4 +569,30 @@ test('test server busy rejection is terminal and never becomes owner approval or
  assert.equal(f.executions.length,0);queue.externalBusy=externalBusy;
  assert.equal((await f.run('sudo id','test-server-busy-key-0001','')).id,job.id);assert.equal(f.executions.length,0);
  assert.throws(()=>queue.start(job.id),/not pending/);
+});
+
+
+test('test server secret is mandatory for policy registration, rechecked on save and dispatch, and hidden from clients',async t=>{
+ let value='2'.repeat(64);const resolver={resolve:async()=>value};
+ const f=await fixture(t,{secretResolver:resolver});
+ const current=(await f.api('/api/command-policy')).body,b=current.bindings[0];assert.equal(current.testServerAvailable,true);
+ const policy={targets:[{targetId:b.targetId,targetRevision:b.targetRevision,profile:b.profile,commands:[],deniedCommands:[],externalDisclosure:false,modelExecution:false,testServer:true,fallback:null,thresholds:{}}]};
+ const proposal={policy,expectedRevision:current.revision};
+ const unauthorized=await f.api('/api/command-policy/review',proposal,{Authorization:'Bearer fixture-mcp'});assert.ok([401,403].includes(unauthorized.status));
+ const review=(await f.api('/api/command-policy/review',proposal)).body;value=undefined;
+ assert.equal((await f.api('/api/command-policy')).body.testServerAvailable,false);
+ assert.equal((await f.api('/api/command-policy',{...proposal,reviewToken:review.reviewToken,acknowledged:true})).status,409);
+ assert.equal((await f.api('/api/command-policy/review',proposal)).status,409);
+ value='2'.repeat(64);await f.policy({testServer:true,commands:[],externalDisclosure:false});value=undefined;
+ const job=await f.run('sudo id');assert.equal(job.state,'failed');assert.equal(f.executions.length,0);
+ assert.doesNotMatch(JSON.stringify([current,job,f.events,(await f.api('/api/command-policy')).body]),/2222222222222222|secret:\/\/fixture\/test-server|BRIDGE_TEST_SERVER_SECRET_REF/);
+ await f.policy({testServer:false,commands:[],externalDisclosure:false});assert.equal((await f.run('sudo id')).state,'pending');
+});
+
+test('production portal without a server secret refuses a test bypass policy regardless of target display name',async t=>{
+ const f=await fixture(t,{env:{...env,BRIDGE_TEST_SERVER_SECRET_REF:'',BRIDGE_TARGET_DISPLAY_NAME:'TEST'}});
+ const current=(await f.api('/api/command-policy')).body,b=current.bindings[0];assert.equal(current.testServerAvailable,false);
+ const proposal={expectedRevision:current.revision,policy:{targets:[{targetId:b.targetId,targetRevision:b.targetRevision,profile:b.profile,commands:[],deniedCommands:[],externalDisclosure:false,modelExecution:false,testServer:true,fallback:null,thresholds:{}}]}};
+ assert.equal((await f.api('/api/command-policy/review',proposal)).status,409);
+ await f.policy({commands:[],externalDisclosure:false});assert.equal((await f.run('sudo id')).state,'pending');assert.equal(f.executions.length,0);
 });

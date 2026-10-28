@@ -112,7 +112,7 @@ export function createProtocolAdapters({ queue, commands, files, store, lifecycl
           const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
           if (url.pathname.endsWith('/review')) return json(res, 200, await commandPolicy.review(body.policy, body.expectedRevision));
           if (queue.maintenance) throw Error('Maintenance in progress');
-          return json(res, 200, commandPolicy.set(body.policy, body.expectedRevision, body.reviewToken, body.acknowledged));
+          return json(res, 200, await commandPolicy.set(body.policy, body.expectedRevision, body.reviewToken, body.acknowledged));
         }
       }
       const match = /^\/downloads\/([a-f0-9]{48})\/([a-f0-9]{32})$/.exec(url.pathname);

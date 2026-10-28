@@ -14,7 +14,7 @@ function release(provider){const name=provider==='codex'?'@openai/codex':'@anthr
 async function fixture(t,options={}){
  const root=await mkdtemp(join(tmpdir(),'cli-app-')),events=[],calls=[],profiles=new Map(),flags={probe:null,install:null,status:null,login:null,auditFail:false};
  let app,origin;const cleanup=[];t.after(async()=>{for(const release of cleanup)release();await app?.close();assert.ok(root.startsWith(join(tmpdir(),'cli-app-')));await rm(root,{recursive:true,force:true});});
- const env={BRIDGE_MCP_TOKEN:'fixture-mcp',BRIDGE_ADMIN_TOKEN:'fixture-owner',BRIDGE_UI_TICKET_KEY:'a'.repeat(64),BRIDGE_ADMIN_ORIGIN:adminOrigin,BRIDGE_JEV_ENABLED:'false',BRIDGE_COMMAND_AUTOMATION:'false',...options.env};
+ const env={BRIDGE_MCP_TOKEN:'fixture-mcp',BRIDGE_ADMIN_TOKEN:'fixture-owner',BRIDGE_UI_TICKET_KEY:'a'.repeat(64),BRIDGE_ADMIN_ORIGIN:adminOrigin,BRIDGE_JEV_ENABLED:'false',BRIDGE_COMMAND_AUTOMATION:'false',BRIDGE_TEST_SERVER_SECRET_REF:'secret://fixture/test-server',...options.env};
  const execute=async(plan,verify)=>{
   const checked=verify();assert.equal(checked.targetId,plan.manifest.targetId);assert.equal(checked.targetRevision,plan.manifest.targetRevision);assert.equal(checked.profile,plan.manifest.profile);calls.push(plan);
   if(plan.agentCli.action==='login-status'){
@@ -30,7 +30,7 @@ async function fixture(t,options={}){
   return {failed:false,texts:[],data:{agentCli:{contract:AGENT_CLI_CONTRACT,provider:plan.agentCli.provider,state:'completed',operationId:plan.agentCli.operationId,version:'1.2.3',login:'not_checked'}}};
  };
  const registry={getProfile:name=>{if(!profiles.has(name))profiles.set(name,{host:'127.0.0.1',port:22,user:'fixture',readOnly:name==='aws-readonly'});return profiles.get(name);},closeAll:async()=>{events.push({action:'fixture-connections-closed'});}};
- const make=()=>createApplication({registry,classify:classifyCommand,executeCommand:async()=>({failed:false,texts:['legacy']}),executePythonSource:async()=>({failed:false,texts:['source']}),executeAgentCli:execute,agentReleaseCatalog:{get:async provider=>({release:release(provider),expiresAt:Date.now()+300000})},audit:event=>{if(flags.auditFail&&event.action==='cli-probe-started')throw Error('SYNTHETIC_PRIVATE');events.push(event);},transferRoot:root,uiHtml:'<html></html>',...options,env});
+ const make=()=>createApplication({secretResolver:{resolve:async()=> '1'.repeat(64)},registry,classify:classifyCommand,executeCommand:async()=>({failed:false,texts:['legacy']}),executePythonSource:async()=>({failed:false,texts:['source']}),executeAgentCli:execute,agentReleaseCatalog:{get:async provider=>({release:release(provider),expiresAt:Date.now()+300000})},audit:event=>{if(flags.auditFail&&event.action==='cli-probe-started')throw Error('SYNTHETIC_PRIVATE');events.push(event);},transferRoot:root,uiHtml:'<html></html>',...options,env});
  app=await make();
  const listen=async()=>{await new Promise(resolve=>app.adminHttp.listen(0,'127.0.0.1',resolve));origin='http://127.0.0.1:'+app.adminHttp.address().port;};await listen();
  const api=async(path,{method='GET',body,token='fixture-owner',originHeader=adminOrigin,contentType='application/json',raw,signal}={})=>{

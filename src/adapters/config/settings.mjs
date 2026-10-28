@@ -63,6 +63,7 @@ export function parseSettings(env) {
     jevEnabled: value('BRIDGE_JEV_ENABLED') === 'true', jevMaxCalls,
     commandAutomation: value('BRIDGE_COMMAND_AUTOMATION') === 'true',
     secretStoreDir, jevKeyRef, vaultOrigin, vaultMount, vaultTokenRef,
+    testServerSecretRef: typeof value('BRIDGE_TEST_SERVER_SECRET_REF') === 'string' ? value('BRIDGE_TEST_SERVER_SECRET_REF') : '',
     defaultTarget: value('BRIDGE_DEFAULT_TARGET') || undefined,
     bridgeDisplayName: displayName(value('BRIDGE_DISPLAY_NAME')) || new URL(adminOrigin).host,
     targetDisplayName: displayName(value('BRIDGE_TARGET_DISPLAY_NAME')) || 'SSH', uiEnabled: value('BRIDGE_UI_ENABLED') === 'true', prefix, maxBytes, budget,

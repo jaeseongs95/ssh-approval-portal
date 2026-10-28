@@ -20,14 +20,14 @@ import { executePythonSource } from '../src/adapters/ssh/vendor.mjs';
 
 const source = "# PRIVATE_BODY_SOURCE_32\nprint('한글 literal source')\n";
 const context = 'Synthetic local test; print a literal only, no resources mutated, no recovery needed';
-const env = { BRIDGE_MCP_TOKEN: 'fixture-mcp', BRIDGE_ADMIN_TOKEN: 'fixture-owner', BRIDGE_UI_TICKET_KEY: 'a'.repeat(64), BRIDGE_ADMIN_ORIGIN: 'https://owner.test', BRIDGE_COMMAND_AUTOMATION: 'true' };
+const env = { BRIDGE_MCP_TOKEN: 'fixture-mcp', BRIDGE_ADMIN_TOKEN: 'fixture-owner', BRIDGE_UI_TICKET_KEY: 'a'.repeat(64), BRIDGE_ADMIN_ORIGIN: 'https://owner.test', BRIDGE_COMMAND_AUTOMATION: 'true', BRIDGE_TEST_SERVER_SECRET_REF: 'secret://fixture/test-server' };
 const low = { status: 'assessed', model: 'jev-1.14.0', label: 'low_risk', confidence: 0.1, probabilities: { low_risk: 0.8, high_risk: 0.2 } };
 const threshold = probability => ({ model: low.model, questionVersion: 'ssh-command-risk-v5', basis: 'safety-probability-v1', minLowRisk: probability, validationRef: 'synthetic:source-contract' });
 async function fixture(t, options = {}) {
   const root = await mkdtemp(join(tmpdir(), 'source-product-')), executions = [], inputs = [], events = [], profiles = new Map();
   const evaluator = { model: low.model, questionVersion: 'ssh-command-risk-v5', assess: async input => { inputs.push(input); return low; } };
   const executeSource = async (plan, verify) => { verify(); executions.push(plan); return { failed: false, texts: ['synthetic output'] }; };
-  const make = () => createApplication({
+  const make = () => createApplication({ secretResolver: { resolve: async () => '1'.repeat(64) },
     registry: { getProfile: name => { if (!profiles.has(name)) profiles.set(name, { host: '127.0.0.1', port: 22, user: 'fixture', readOnly: name === 'aws-readonly' }); return profiles.get(name); }, closeAll: async () => {} },
     classify: classifyCommand, executeCommand: async () => ({ failed: false, texts: ['legacy'] }), executePythonSource: executeSource,
     audit: event => events.push(event), transferRoot: root, uiHtml: '<html></html>', env, riskEvaluators: { jev: evaluator }, ...options });

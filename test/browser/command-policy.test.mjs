@@ -20,15 +20,17 @@ const names = page => page.getByLabel('자동승인할 명령', { exact: true })
 const ok = page => page.getByRole('checkbox', { name: /^위험도와 변경 내용을 확인했고/, includeHidden: true });
 const review = page => page.getByRole('button', { name: '이 설정으로 위험도 확인', exact: true, includeHidden: true });
 const save = page => page.getByRole('button', { name: '이 서버에 저장', exact: true, includeHidden: true });
-async function fixture(run, { multi = false, assess = async () => low, width = 390 } = {}) {
+async function fixture(run, { multi = false, assess = async () => low, width = 390, testServerSecret = true } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'policy-browser-')); let app, browser;
   const calls = [], posts = [];
   try {
     app = await createApplication({
       registry: { getProfile: name => ({ host: '127.0.0.1', port: multi && name.startsWith('beta') ? 23 : 22, user: multi ? name.split('-')[0] : 'fixture', trustedHostKey: 'SHA256:' + (multi ? name.split('-')[0] : 'fixture'), readOnly: multi ? name.endsWith('-read') : name === 'aws-readonly' }), closeAll: async () => {} },
       classify: classifyCommand, executeCommand: async () => ({ failed: false, texts: ['synthetic result'] }), audit: () => {}, transferRoot: root, uiHtml: '<html></html>',
+      secretResolver: { resolve: async ref => { assert.equal(ref, 'secret://fixture/test-server'); return 'd'.repeat(64); } },
       policyRiskAssessor: { assess: async input => { calls.push(input); return assess(input); } },
       env: { BRIDGE_MCP_TOKEN: 'fixture-mcp', BRIDGE_ADMIN_TOKEN: 'fixture-owner', BRIDGE_UI_TICKET_KEY: 'a'.repeat(64), BRIDGE_ADMIN_ORIGIN: 'https://owner.test', BRIDGE_COMMAND_AUTOMATION: 'true',
+        ...(testServerSecret ? { BRIDGE_TEST_SERVER_SECRET_REF: 'secret://fixture/test-server' } : {}),
         ...(multi ? { BRIDGE_TARGETS: JSON.stringify(targets), BRIDGE_DEFAULT_TARGET: 'alpha' } : {}) }
     });
     await new Promise(resolve => app.adminHttp.listen(0, '127.0.0.1', resolve));
@@ -624,3 +626,26 @@ test('test server option keeps per-target drafts and saves without altering othe
   await bypass.uncheck();await f.checked();await f.commit();
   const policy=await f.api('/api/command-policy');assert.equal(policy.targets.find(r=>r.targetId==='alpha').testServer,false);
 },{multi:true}));
+
+
+test('test server option is disabled without the server secret and exposes no secret reference', async () => fixture(async f => {
+  const {page}=f;await f.open();const bypass=page.getByRole('checkbox',{name:/^테스트 서버/});
+  assert.equal(await bypass.isChecked(),false);assert.equal(await bypass.isDisabled(),true);
+  assert.match(await page.locator('#important-settings').textContent(),/테스트용 시크릿 미등록 · 활성화 불가/);
+  const current=await f.api('/api/command-policy');assert.equal(current.testServerAvailable,false);
+  assert.doesNotMatch(JSON.stringify(current),/secret:\/\/fixture|dddddddd/);
+},{testServerSecret:false}));
+
+test('a saved test server setting can be disabled after secret availability is lost', async () => fixture(async f => {
+  const {page}=f,current=await f.api('/api/command-policy'),binding=current.bindings[0];
+  await f.seed({targets:[{targetId:binding.targetId,targetRevision:binding.targetRevision,profile:binding.profile,commands:[],deniedCommands:[],externalDisclosure:false,modelExecution:false,fallback:null,thresholds:{},testServer:true}]});
+  await page.route('**/api/command-policy',async route=>{
+    if(route.request().method()!=='GET')return route.fallback();
+    const response=await route.fetch(),body=await response.json();body.testServerAvailable=false;
+    await route.fulfill({response,json:body});
+  });
+  await f.open();const bypass=page.getByRole('checkbox',{name:/^테스트 서버/});
+  assert.equal(await bypass.isChecked(),true);assert.equal(await bypass.isDisabled(),false);
+  await bypass.uncheck();assert.equal(await bypass.isDisabled(),true);
+  await f.checked();await f.commit();assert.equal((await f.api('/api/command-policy')).targets[0].testServer,false);
+}));

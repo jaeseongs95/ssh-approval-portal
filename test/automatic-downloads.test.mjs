@@ -11,9 +11,9 @@ async function fixture(run, {automation = true, failAudit = false} = {}) {
   const entries = ['alpha','beta'].map(id => ({id, displayName:id, readProfile:id+'-read', writeProfile:id+'-write', credentialRevision:'v1'}));
   for (const e of entries) for (const name of [e.readProfile,e.writeProfile]) profiles.set(name,{host:e.id+'.test',user:'fixture',port:22,trustedHostKey:'SHA256:'+e.id,readOnly:name.endsWith('-read')});
   try {
-    app = await createApplication({registry:{getProfile:n=>profiles.get(n),closeAll:async()=>{}},classify:()=>({class:'privileged'}),executeCommand:async()=>assert.fail('No command execution'),
+    app = await createApplication({secretResolver:{resolve:async()=> '1'.repeat(64)},registry:{getProfile:n=>profiles.get(n),closeAll:async()=>{}},classify:()=>({class:'privileged'}),executeCommand:async()=>assert.fail('No command execution'),
       audit:event=>{if(failAudit&&event.action==='policy-execution-started')throw Error('audit failed');},transferRoot:root,uiHtml:'<html></html>',
-      env:{BRIDGE_MCP_TOKEN:'fixture-mcp',BRIDGE_ADMIN_TOKEN:'fixture-owner',BRIDGE_UI_TICKET_KEY:'a'.repeat(64),BRIDGE_ADMIN_ORIGIN:'https://owner.test',BRIDGE_COMMAND_AUTOMATION:String(automation),BRIDGE_TARGETS:JSON.stringify(entries),BRIDGE_DEFAULT_TARGET:'alpha'}});
+      env:{BRIDGE_MCP_TOKEN:'fixture-mcp',BRIDGE_ADMIN_TOKEN:'fixture-owner',BRIDGE_UI_TICKET_KEY:'a'.repeat(64),BRIDGE_ADMIN_ORIGIN:'https://owner.test',BRIDGE_TEST_SERVER_SECRET_REF:'secret://fixture/test-server',BRIDGE_COMMAND_AUTOMATION:String(automation),BRIDGE_TARGETS:JSON.stringify(entries),BRIDGE_DEFAULT_TARGET:'alpha'}});
     for (const e of entries) app.targets.select(e.id).transfers.download=async op=>{effects.push({target:e.id,...op});return {failed:false,texts:['server file ready']};};
     await new Promise(resolve=>app.adminHttp.listen(0,'127.0.0.1',resolve));
     const origin='http://127.0.0.1:'+app.adminHttp.address().port;
