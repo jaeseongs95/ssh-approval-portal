@@ -70,7 +70,7 @@ def snapshot(paths):
         if len(records) > MAX_ENTRIES:
             raise RuntimeError('protected entry budget exceeded')
     if any(v['count'] != v['nlink'] for v in inodes.values()):
-        raise RuntimeError('unsupported protected path')
+        raise RuntimeError('protected hardlink extends outside scope')
     return records
 
 

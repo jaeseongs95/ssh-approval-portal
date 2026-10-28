@@ -44,7 +44,7 @@ class ProtectedScope(unittest.TestCase):
             verify([protected], before)
             outside = Path(root) / 'outside-link'
             os.link(first, outside)
-            with self.assertRaisesRegex(RuntimeError, 'unsupported protected path'):
+            with self.assertRaisesRegex(RuntimeError, 'protected hardlink extends outside scope'):
                 snapshot([protected])
 
     def test_external_hardlink_added_after_baseline_fails_verify(self):
