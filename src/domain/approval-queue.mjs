@@ -109,12 +109,21 @@ export class ApprovalQueue {
     if (this.jobs.get(id)?.operation.kind !== 'download') throw Error('Download policy authority required');
     return this.start(id, false, DOWNLOAD_AUTHORITY);
   }
+  rejectAutomaticDispatch(id) {
+    const job = this.jobs.get(id);
+    if (!job || this.get(id).state !== 'pending' || job.decision?.reasonCode !== 'test_server_bypass') return false;
+    job.state = 'failed'; job.finishedAt = this.now();
+    job.decision = { ...job.decision, dispatchFailure: 'not_dispatched' };
+    job.result = { failed: true, texts: ['Automatic execution rejected before dispatch; operation was not executed.'] };
+    try { job.persist?.(this.public(job)); this.audit({ action: 'automatic-dispatch-rejected', id, reasonCode: 'not_dispatched' }); }
+    finally { try { this.onTerminal(job); } finally { this.notifyRequest(job); } }
+    return true;
+  }
   start(id, automatic = false, authority) {
     if (this.maintenance) throw Error('Maintenance in progress');
     const job = this.jobs.get(id);
     if (!job || this.get(id).state !== 'pending') throw Error('Request is not pending');
     if (automatic) throw Error('Server policy authority required');
-    if (this.busy()) throw Error('A request is already executing');
     // Source requests use the exact private-plan guard; the fixed quoted receiver
     // contains newlines that the legacy string-command boundary rightly rejects.
     if (job.operation.kind === 'command' && !job.operation.sourceContract) validateCommand(job.operation.command, this.classify);
@@ -125,6 +134,7 @@ export class ApprovalQueue {
       if (!decision || decision.decision !== 'execute') throw Error('File policy authority required');
       this.setDecision(id, decision);
     }
+    if (this.busy()) throw Error('A request is already executing');
     const release = this.claimExecution();
     const policyAuthority = authority === COMMAND_AUTHORITY || authority === UPLOAD_AUTHORITY || authority === DOWNLOAD_AUTHORITY;
     const approvalMode = policyAuthority || automatic ? 'automatic' : 'owner';

@@ -83,3 +83,10 @@ test('test server bypass covers elevated downloads without other flags and never
  await f.set(false,false,'alpha',{testServer:false});const revoked=f.download(true);assert.equal(revoked.state,'pending');f.app.queue.deny(revoked.id);
  assert.equal(f.effects.length,1);
 }));
+
+
+test('test server download slot rejection is terminal rather than owner pending',async()=>fixture(async f=>{
+ await f.set(false,false,'alpha',{testServer:true});const q=f.app.targets.select('alpha').queue,busy=q.externalBusy;q.externalBusy=()=>true;
+ const job=f.download(true);assert.equal(job.state,'failed');assert.equal(job.decision.dispatchFailure,'not_dispatched');
+ q.externalBusy=busy;assert.throws(()=>q.start(job.id),/not pending/);assert.equal(f.effects.length,0);
+}));

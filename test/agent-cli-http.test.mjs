@@ -230,3 +230,15 @@ test('test server owner policy automatically executes a new CLI request and repl
  const done=f.app.queue.get(job.id);assert.equal(done.state,'completed');assert.equal(done.approvalMode,'automatic');assert.equal(done.decision.reasonCode,'test_server_bypass');
  const before=f.calls.length;assert.equal((await f.submit(p)).id,job.id);assert.equal(f.calls.length,before);
 });
+
+
+test('test server CLI slot rejection is terminal and replay cannot start the installation',async t=>{
+ const f=await fixture(t,{env:{BRIDGE_COMMAND_AUTOMATION:'true'}});
+ const current=(await f.api('/api/command-policy')).body,b=current.bindings[0];
+ const proposal={expectedRevision:current.revision,policy:{targets:[{targetId:b.targetId,targetRevision:b.targetRevision,profile:b.profile,commands:[],deniedCommands:[],externalDisclosure:false,modelExecution:false,testServer:true,fallback:null,thresholds:{}}]}};
+ const review=await f.api('/api/command-policy/review',{method:'POST',body:proposal});assert.equal(review.status,200);
+ assert.equal((await f.api('/api/command-policy',{method:'POST',body:{...proposal,reviewToken:review.body.reviewToken,acknowledged:true}})).status,200);
+ const p=await f.preview(),q=f.app.targets.select('default').queue,busy=q.externalBusy;q.externalBusy=()=>true;
+ const job=await f.submit(p);assert.equal(job.state,'failed');assert.equal(job.decision.dispatchFailure,'not_dispatched');
+ q.externalBusy=busy;const before=f.calls.length;assert.equal((await f.submit(p)).id,job.id);assert.equal(f.calls.length,before);assert.throws(()=>q.start(job.id),/not pending/);
+});

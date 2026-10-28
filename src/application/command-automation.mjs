@@ -150,6 +150,7 @@ export function createCommandAutomation({ queue, state, definition, classify, ev
           try { decision(job, { ...queue.get(job.id)?.decision, policyRevision: policy.revision, decision: 'review', reasonCode: 'evaluation_failed' }); queue.finishEvaluation(job.id); }
           catch { queue.abortEvaluation(job.id); }
         } else if (queue.get(job.id)?.state === 'pending') {
+          if (queue.rejectAutomaticDispatch(job.id)) return;
           try { decision(job, { ...queue.get(job.id)?.decision, policyRevision: policy.revision, decision: 'review', reasonCode: 'execution_busy' }); } catch { queue.abortEvaluation(job.id); }
         }
       }).finally(() => tasks.delete(job.id));

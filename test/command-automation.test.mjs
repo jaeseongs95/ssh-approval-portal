@@ -559,3 +559,14 @@ test('test server bypass overrides deny, sudo and missing evaluators only after 
   assert.equal((await f.run('sudo id')).state, 'pending');
   assert.equal(f.executions.length, 2);
 });
+
+
+test('test server busy rejection is terminal and never becomes owner approval or deferred execution', async t => {
+ const f = await fixture(t); await f.policy({ commands: [], testServer: true, externalDisclosure: false });
+ const queue=f.app.targets.select('default').queue, externalBusy=queue.externalBusy; queue.externalBusy=()=>true;
+ const job=await f.run('sudo id','test-server-busy-key-0001','');
+ assert.equal(job.state,'failed'); assert.equal(job.decision.dispatchFailure,'not_dispatched'); assert.equal(job.approvalMode,undefined);
+ assert.equal(f.executions.length,0);queue.externalBusy=externalBusy;
+ assert.equal((await f.run('sudo id','test-server-busy-key-0001','')).id,job.id);assert.equal(f.executions.length,0);
+ assert.throws(()=>queue.start(job.id),/not pending/);
+});

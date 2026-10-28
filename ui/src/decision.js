@@ -64,6 +64,7 @@ const labels = { low_risk: ['낮은 위험', 'Low risk'], high_risk: ['높은 �
 const binaryLabels = { low_risk: ['안전', 'Safe'], high_risk: ['위험', 'Risk'] };
 const labelsFor = assessment => assessment?.probabilities && !Object.hasOwn(assessment.probabilities, 'uncertain') ? binaryLabels : labels;
 export function decisionText(decision, korean) {
+  if (decision.dispatchFailure === 'not_dispatched') return korean ? '실행 조건을 충족하지 못해 실행 전에 거부됐습니다. 개별 승인 대기가 아닙니다.' : 'Rejected before execution; the operation was not dispatched and is not awaiting owner approval.';
   if (decision.decisionRuleVersion === 'command-explanation-v1' && reviewReasons[decision.reviewReason]) {
     const label = labelsFor(decision.assessment)[decision.assessment?.label]?.[korean ? 0 : 1];
     return reviewReasons[decision.reviewReason][korean ? 0 : 1] + (label && !['high_risk', 'uncertain'].includes(decision.reviewReason) ? (korean ? ' · AI 분류: ' : ' · AI classification: ') + label : '');

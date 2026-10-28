@@ -100,7 +100,7 @@ export function createAgentCliService({queue,journal,resolveTarget,readInstallat
    const decision=automaticDecision();
    if(decision){
     queue.setDecision(job.id,decision);
-    try{queue.startCommand(job.id);}catch{queue.setDecision(job.id,{...decision,decision:'review',reasonCode:'execution_busy'});}
+    try{queue.startCommand(job.id);}catch{if(!queue.rejectAutomaticDispatch(job.id))throw Error('CLI automatic dispatch unavailable');}
    }
    return queue.get(job.id);
   },

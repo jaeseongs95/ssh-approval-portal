@@ -680,8 +680,8 @@
     },
     {
       "path": "src/application/agent-cli.mjs",
-      "size": 9880,
-      "sha256": "9491ee9529ec3235d42fde7b364fbfde28ddc3e1cce713b94cd93765c840f722"
+      "size": 9886,
+      "sha256": "e8b05554cb8b4737b14cb69ed2e225f80cf363bf741209dc4fa8a625fc31dc9b"
     },
     {
       "path": "src/application/automation-metrics.mjs",
@@ -690,8 +690,8 @@
     },
     {
       "path": "src/application/command-automation.mjs",
-      "size": 13961,
-      "sha256": "7affb22be0303b5c36948fa46d1f374189d4d72c62596bbb7ebe59bf41293c3e"
+      "size": 14023,
+      "sha256": "88a14c4055bc28403863afb072eae164a598250c098941fddf44587eda3d222e"
     },
     {
       "path": "src/application/command-policy-review.mjs",
@@ -705,8 +705,8 @@
     },
     {
       "path": "src/application/files.mjs",
-      "size": 3973,
-      "sha256": "ef1d738cdebc486f8f55a565fca89b673c3045c06cfe0e60c0c150d3474a361a"
+      "size": 4014,
+      "sha256": "118e8c180d7230c9d67fafb90d7694219d8a12cb6ec3bfaf08009c0866422678"
     },
     {
       "path": "src/application/lifecycle.mjs",
@@ -750,8 +750,8 @@
     },
     {
       "path": "src/domain/approval-queue.mjs",
-      "size": 12728,
-      "sha256": "ca8aa27aee8b6291f4a10bdeb60c1571ac506536d784446ded4859b4f76140a4"
+      "size": 13401,
+      "sha256": "dd7b30a4c65fa507a6084afa957ebdc8681a64ac399723b1813644c80de2a1f4"
     },
     {
       "path": "src/domain/automation-risk-question.json",
@@ -830,8 +830,8 @@
     },
     {
       "path": "test/agent-cli-http.test.mjs",
-      "size": 28902,
-      "sha256": "09b1fbd69f90bf8bc13a54782739534bb183008a29b6d3a64d50360e74d1bdab"
+      "size": 30108,
+      "sha256": "b096fea6442985ac450e15cc1f52b74cbdb328cff70da870363c6b4d63510c53"
     },
     {
       "path": "test/agent-cli-releases.test.mjs",
@@ -885,13 +885,13 @@
     },
     {
       "path": "test/automatic-downloads.test.mjs",
-      "size": 8413,
-      "sha256": "f0d0cb0455b44779c6b9357bd4d833c8f36e260d78471248e17d6f373e420102"
+      "size": 8896,
+      "sha256": "10c7cd16fa8bcccb70f3351f70fb40bfc7e744e9b34518e29f8b949396248e19"
     },
     {
       "path": "test/automatic-uploads.test.mjs",
-      "size": 10474,
-      "sha256": "70d71b545991687d23cd80fe3a46f7f7fa38b3ba57493f226085176ca4721783"
+      "size": 10986,
+      "sha256": "17e08b9d6bf7d4569c62e7006b55ce7c49fd555eaa9f7c89c066bc454917eb57"
     },
     {
       "path": "test/automation-metrics.test.mjs",
@@ -995,8 +995,8 @@
     },
     {
       "path": "test/command-automation.test.mjs",
-      "size": 44740,
-      "sha256": "dcedb5b0c316879b14921bffe99ef9ec6b97e0771817562cf04b8752c979ab69"
+      "size": 45541,
+      "sha256": "6e50d42e03c6506844d6fe3e23f00c5ea36c284154e1333020a49a3ed8e8fa01"
     },
     {
       "path": "test/command-lifecycle.test.mjs",
@@ -1470,8 +1470,8 @@
     },
     {
       "path": "test/source-automation.test.mjs",
-      "size": 27164,
-      "sha256": "734b8daf060f711a8a25c5ba0aef30399eca63ee5f8834751fc6af9ee5998669"
+      "size": 27820,
+      "sha256": "10560541b207dc4a80c366c551e20fd08a56c14eae709275a6f31f81b095c5d9"
     },
     {
       "path": "test/source-linux-runtime.mjs",
@@ -1665,8 +1665,8 @@
     },
     {
       "path": "ui/dist/card.html",
-      "size": 536822,
-      "sha256": "2ad7cded75bb4859f8add6f03b27c50f4e198c887421a3b7a0b6db947d10f2ca"
+      "size": 537176,
+      "sha256": "43dcc4b1d62d877aefe2dd7cd0e90af810d290e32bab80d1372958c3d21639a4"
     },
     {
       "path": "ui/package-lock.json",
@@ -1685,8 +1685,8 @@
     },
     {
       "path": "ui/src/decision.js",
-      "size": 14827,
-      "sha256": "1c1b848522c131a8c7fd2f321fc667b2fd83a0e2f025359c8b88ae8c8a1e2960"
+      "size": 15108,
+      "sha256": "fd89af3ff43bbc4c5cddf7b10c1b598aa3230bd9c0e4c730043554b668a9ad79"
     },
     {
       "path": "ui/src/host.js",
@@ -1720,8 +1720,8 @@
     },
     {
       "path": "web/dist/app.js",
-      "size": 246263,
-      "sha256": "da5b50e6bfbc39ae244a317fe72f5cb5a4d05136b2c2765c4eba71b3aaadcb93"
+      "size": 246617,
+      "sha256": "5503033e444686271ef47c82b42d5ddd0fe44b0f7ee3d2fe81ede8f4fb3b0266"
     },
     {
       "path": "web/index.html",
