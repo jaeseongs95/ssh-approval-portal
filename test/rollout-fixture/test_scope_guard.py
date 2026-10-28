@@ -30,5 +30,21 @@ class ProtectedScope(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 verify([target], before)
 
+    def test_internal_hardlinks_are_accepted_and_external_hardlinks_rejected(self):
+        import os
+        with tempfile.TemporaryDirectory() as root:
+            protected = Path(root) / 'protected'
+            protected.mkdir()
+            first = protected / 'claude.exe'
+            second = protected / 'claude'
+            first.write_bytes(b'binary-payload')
+            os.link(first, second)
+            before = snapshot([protected])
+            verify([protected], before)
+            outside = Path(root) / 'outside-link'
+            os.link(first, outside)
+            with self.assertRaises(RuntimeError):
+                snapshot([protected])
+
 if __name__ == '__main__':
     unittest.main()

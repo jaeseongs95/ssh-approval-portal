@@ -4,12 +4,12 @@ import os
 from pathlib import Path
 import stat
 
-MAX_ENTRIES = 10000
-MAX_BYTES = 1024 * 1024 * 1024
+MAX_ENTRIES = 50000
+MAX_BYTES = 4 * 1024 * 1024 * 1024
 
 
 def snapshot(paths):
-    records, total = {}, 0
+    records, total, inodes = {}, 0, {}
     pending = list(map(Path, paths))
     while pending:
         path = pending.pop()
@@ -29,36 +29,48 @@ def snapshot(paths):
             item['link'] = os.readlink(path)
         elif stat.S_ISDIR(before.st_mode):
             pending.extend(sorted(path.iterdir()))
-        elif stat.S_ISREG(before.st_mode) and before.st_nlink == 1:
-            total += before.st_size
-            if total > MAX_BYTES:
-                raise RuntimeError('protected data budget exceeded')
-            digest = hashlib.sha256()
-            fd = os.open(path, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
-            try:
-                opened = os.fstat(fd)
-                if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
-                    raise RuntimeError('protected file identity changed')
-                with os.fdopen(fd, 'rb', closefd=False) as source:
-                    for block in iter(lambda: source.read(65536), b''):
-                        digest.update(block)
-                after = os.fstat(fd)
-            finally:
-                os.close(fd)
+        elif stat.S_ISREG(before.st_mode) and before.st_nlink >= 1:
             # Linux includes ctime; Windows runs local contract tests only.
             stable = lambda s: (s.st_dev, s.st_ino, s.st_size, s.st_mtime_ns,
                                 s.st_ctime_ns if os.name != 'nt' else 0)
-            current = path.lstat()
-            if stable(before) != stable(after) or stable(after) != stable(current):
-                names = ('device', 'inode', 'size', 'mtime', 'ctime')
-                changed = [name for name, first, last, live in zip(names, stable(before), stable(after), stable(current)) if first != last or last != live]
-                raise RuntimeError('protected file changed during snapshot: ' + ','.join(changed))
-            item.update(size=before.st_size, sha256=digest.hexdigest())
+            ino_key = (before.st_dev, before.st_ino)
+            if ino_key in inodes:
+                cached = inodes[ino_key]
+                if stable(before) != cached['stable']:
+                    raise RuntimeError('protected file changed during snapshot: hardlink')
+                cached['count'] += 1
+                item.update(size=cached['size'], sha256=cached['sha256'])
+            else:
+                total += before.st_size
+                if total > MAX_BYTES:
+                    raise RuntimeError('protected data budget exceeded')
+                digest = hashlib.sha256()
+                fd = os.open(path, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
+                try:
+                    opened = os.fstat(fd)
+                    if (opened.st_dev, opened.st_ino) != ino_key:
+                        raise RuntimeError('protected file identity changed')
+                    with os.fdopen(fd, 'rb', closefd=False) as source:
+                        for block in iter(lambda: source.read(65536), b''):
+                            digest.update(block)
+                    after = os.fstat(fd)
+                finally:
+                    os.close(fd)
+                current = path.lstat()
+                if stable(before) != stable(after) or stable(after) != stable(current):
+                    names = ('device', 'inode', 'size', 'mtime', 'ctime')
+                    changed = [name for name, first, last, live in zip(names, stable(before), stable(after), stable(current)) if first != last or last != live]
+                    raise RuntimeError('protected file changed during snapshot: ' + ','.join(changed))
+                sha256 = digest.hexdigest()
+                inodes[ino_key] = {'nlink': before.st_nlink, 'count': 1, 'size': before.st_size, 'sha256': sha256, 'stable': stable(before)}
+                item.update(size=before.st_size, sha256=sha256)
         else:
             raise RuntimeError('unsupported protected path')
         records[key] = item
         if len(records) > MAX_ENTRIES:
             raise RuntimeError('protected entry budget exceeded')
+    if any(v['count'] != v['nlink'] for v in inodes.values()):
+        raise RuntimeError('unsupported protected path')
     return records
 
 
