@@ -48,7 +48,7 @@ test('preview binds exact registered target, release, revision and lifetime; str
 test('fixed source plan binds helper argv and target; root elevation and arbitrary source are absent',()=>{
  const binding={targetId:'fixture',targetRevision:revision,profile:'fixture-write'};
  const plan=prepareAgentCliPlan({action:'install',provider:'codex',binding,release:release(),expectedInstallationRevision:installationRevision,expiresAt:301000,operationId:'c'.repeat(48)});
- assert.equal(plan.manifest.elevate,false);assert.equal(plan.manifest.cwd,'/');assert.ok(plan.manifest.sourceBytes<=16384);assert.equal(plan.manifest.targetRevision,revision);
+ assert.equal(plan.manifest.elevate,false);assert.equal(plan.manifest.cwd,'/');assert.ok(plan.manifest.sourceBytes>16384&&plan.manifest.sourceBytes<=65536);assert.equal(plan.manifest.targetRevision,revision);
  assert.deepEqual(JSON.parse(plan.manifest.argvJson),['install','codex','1.2.3',release().integrity,installationRevision,'301000','c'.repeat(48)]);
  assert.throws(()=>prepareAgentCliPlan({action:'shell',provider:'codex',binding}));
  assert.throws(()=>prepareAgentCliPlan({action:'inspect',provider:'codex',binding,release:release()}));

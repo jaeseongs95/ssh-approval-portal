@@ -50,7 +50,8 @@ export function createAgentCliState(root){
    const row=this.get(id),op=row?.job.operation;
    if(!op||value?.provider!==op.agentCliProvider||value.operationId!==op.agentCliOperationId||value.login!=='not_checked'||!['not_found','unknown','preparing','installing','completed','reused','failed'].includes(value.state))throw Error('Invalid CLI remote status');
    if(value.state!=='not_found'&&(typeof value.version!=='string'||!/^(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$/.test(value.version)))throw Error('Invalid CLI status version');
-   const status={provider:value.provider,operationId:value.operationId,state:value.state,login:'not_checked',...(value.state==='not_found'?{}:{version:value.version}),...(value.state==='failed'?{error:'INSTALL_FAILED'}:{})};
+   if(value.cleanupFailures!==undefined&&(value.state==='not_found'||!Number.isSafeInteger(value.cleanupFailures)||value.cleanupFailures<=0))throw Error('Invalid CLI remote status');
+   const status={provider:value.provider,operationId:value.operationId,state:value.state,login:'not_checked',...(value.state==='not_found'?{}:{version:value.version}),...(value.state==='failed'?{error:'INSTALL_FAILED'}:{}),...(value.cleanupFailures===undefined?{}:{cleanupFailures:value.cleanupFailures})};
    db.prepare('UPDATE requests SET remote_status=? WHERE id=?').run(JSON.stringify(status),id);return status;
   },
   close(){db.close();},

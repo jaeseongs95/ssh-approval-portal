@@ -4,7 +4,7 @@ import { ConnectionRegistry } from 'ssh-mcp/build/ssh/connection-registry.js';
 import { classifyCommand } from 'ssh-mcp/build/policy/classifier.js';
 import { SftpClient } from 'ssh-mcp/build/ssh/sftp.js';
 import { redactText } from 'ssh-mcp/build/guard/redactor.js';
-import { preparePythonSource } from './python-source.mjs';
+import { preparePythonSource, preparePythonHelper } from './python-source.mjs';
 import { validateAgentCliPlan, projectAgentCliResult } from './agent-cli.mjs';
 
 const defaultRedact = text => redactText(text, { entropyScan: true });
@@ -21,10 +21,10 @@ function commandOutcome(result, auditRedact = defaultRedact) {
  * and vendor's channel lifecycle. After dispatch, errors/exit codes do not prove
  * that no effect occurred and must never trigger a source replay.
  */
-async function executeSourcePlan(registry, plan, verify, options = {}) {
+async function executeSourcePlan(registry, plan, verify, options = {}, prepare = preparePythonSource) {
   if (typeof verify !== 'function' || !plan?.manifest) throw Error('Source target verification required');
   const submitted = plan.manifest;
-  const exact = preparePythonSource({ source: plan.stdin, argv: JSON.parse(submitted.argvJson), cwd: submitted.cwd, elevate: submitted.elevate,
+  const exact = prepare({ source: plan.stdin, argv: JSON.parse(submitted.argvJson), cwd: submitted.cwd, elevate: submitted.elevate,
     targetId: submitted.targetId, targetRevision: submitted.targetRevision, profile: submitted.profile, environmentRevision: submitted.environmentRevision });
   if (exact.command !== plan.command || exact.planDigest !== plan.planDigest
     || JSON.stringify(exact.manifest) !== JSON.stringify(submitted) || JSON.stringify(exact.args) !== JSON.stringify(plan.args)) throw Error('Source execution plan changed');
@@ -67,7 +67,7 @@ export async function executeAgentCli(registry, plan, verify) {
   const exact = validateAgentCliPlan(plan);
   const timeoutMs = ['install','update'].includes(exact.agentCli.action) ? 930000 : 30000;
   let result;
-  try { result = await executeSourcePlan(registry, exact, verify, { timeoutMs }); }
+  try { result = await executeSourcePlan(registry, exact, verify, { timeoutMs }, preparePythonHelper); }
   catch { throw Error('CLI result unknown; inspect saved status, never retry automatically'); }
   return projectAgentCliResult(result, exact);
 }

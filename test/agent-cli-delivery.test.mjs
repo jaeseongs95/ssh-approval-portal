@@ -48,8 +48,8 @@ test('CLI-DELIVERY fixed receipt digest matches the Python helper canonical JSON
 });
 test('CLI-DELIVERY generic or mutated source/metadata/argv plans are refused before connection',async()=>{
  const p=plan('install');
- const generic=preparePythonSource({...binding,source:p.stdin+'\n# changed\n',argv:JSON.parse(p.manifest.argvJson),cwd:'/'});
- for(const changed of [{...generic,agentCli:p.agentCli},{...p,stdin:'print(1)\n'},{...p,command:'id'},{...p,args:['-c','pass']},{...p,planDigest:'e'.repeat(64)},{...p,manifest:{...p.manifest,targetRevision:'e'.repeat(64)}},{...p,agentCli:{...p.agentCli,action:'inspect'}},{...p,agentCli:{...p.agentCli,intentDigest:'e'.repeat(64)}}]){
+ const generic=preparePythonSource({...binding,source:"print('ok')\n",argv:JSON.parse(p.manifest.argvJson),cwd:'/'});
+ for(const changed of [{...generic,agentCli:p.agentCli},{...p,stdin:p.stdin+'\n# changed\n'},{...p,stdin:'print(1)\n'},{...p,command:'id'},{...p,args:['-c','pass']},{...p,planDigest:'e'.repeat(64)},{...p,manifest:{...p.manifest,targetRevision:'e'.repeat(64)}},{...p,agentCli:{...p.agentCli,action:'inspect'}},{...p,agentCli:{...p.agentCli,intentDigest:'e'.repeat(64)}}]){
   const f=fake(p);await assert.rejects(()=>executeAgentCli(f.registry,changed,verify));assert.equal(f.acquisitions,0);assert.equal(f.calls.length,0);
  }
 });
@@ -97,7 +97,9 @@ test('CLI-DELIVERY status preserves explicit remote states and generic failure w
   f.connection.exec=async()=>({exitCode:0,stdout:JSON.stringify({...value(p,state),error:'SYNTHETIC_PRIVATE'}),stderr:''});const outcome=await executeAgentCli(f.registry,p,verify);assert.equal(outcome.data.agentCli.state,state);assert.ok(!JSON.stringify(outcome).includes('SYNTHETIC_PRIVATE'));if(state==='failed')assert.equal(outcome.data.agentCli.error,'INSTALL_FAILED');
  }
  f.connection.exec=async()=>({exitCode:0,stdout:JSON.stringify({state:'not_found',operationId}),stderr:''});assert.equal((await executeAgentCli(f.registry,p,verify)).data.agentCli.state,'not_found');
- for(const change of [{operationId:'f'.repeat(48)},{intentDigest:'f'.repeat(64)},{provider:'claude'},{login:'authenticated'},{version:'latest'},{state:'safe'}]){f.connection.exec=async()=>({exitCode:0,stdout:JSON.stringify({...value(p),...change}),stderr:''});await assert.rejects(()=>executeAgentCli(f.registry,p,verify),unknown);}
+ f.connection.exec=async()=>({exitCode:0,stdout:JSON.stringify({...value(p,'completed'),cleanupFailures:2}),stderr:''});assert.equal((await executeAgentCli(f.registry,p,verify)).data.agentCli.cleanupFailures,2);
+ for(const change of [{operationId:'f'.repeat(48)},{intentDigest:'f'.repeat(64)},{provider:'claude'},{login:'authenticated'},{version:'latest'},{state:'safe'},{cleanupFailures:0},{cleanupFailures:-1},{cleanupFailures:'1'}]){f.connection.exec=async()=>({exitCode:0,stdout:JSON.stringify({...value(p),...change}),stderr:''});await assert.rejects(()=>executeAgentCli(f.registry,p,verify),unknown);}
+ f.connection.exec=async()=>({exitCode:0,stdout:JSON.stringify({state:'not_found',operationId,cleanupFailures:1}),stderr:''});await assert.rejects(()=>executeAgentCli(f.registry,p,verify),unknown);
 });
 test('CLI-DELIVERY install cannot report failed, wrong version or a different receipt intent as success',async()=>{
  const p=plan('install'),f=fake(p);

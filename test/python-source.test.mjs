@@ -4,7 +4,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { mkdtemp, readFile, rm, access } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { preparePythonSource, PYTHON_SOURCE_MAX_BYTES, PYTHON_SOURCE_ENVIRONMENT_REVISION } from '../src/adapters/ssh/python-source.mjs';
+import { preparePythonSource, preparePythonHelper, PYTHON_SOURCE_MAX_BYTES, PYTHON_HELPER_MAX_BYTES, PYTHON_SOURCE_ENVIRONMENT_REVISION } from '../src/adapters/ssh/python-source.mjs';
 
 const python = process.env.SOLID_PYTHON ?? (process.platform === 'win32'
   ? 'C:/Users/Lenovo/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe' : 'python3');
@@ -97,4 +97,8 @@ test('SOURCE-06 bounded validated source/arguments/binding and literal shell quo
   assert.throws(() => plan('pass\n', { argv: Array(3).fill('x'.repeat(512)) }), /too large/i);
   const compileFailed = run(plan("print('first')\nthis is ! invalid\n"));
   assert.equal(compileFailed.status, 126); assert.equal(compileFailed.stdout, ''); assert.doesNotMatch(compileFailed.stderr, /first|Traceback/);
+  const helper = preparePythonHelper({ ...binding, source: 'x'.repeat(PYTHON_SOURCE_MAX_BYTES + 100) + '\n' });
+  assert.equal(helper.manifest.sourceBytes, PYTHON_SOURCE_MAX_BYTES + 101);
+  assert.notEqual(helper.manifest.receiverSha256, p.manifest.receiverSha256);
+  assert.throws(() => preparePythonHelper({ ...binding, source: 'x'.repeat(PYTHON_HELPER_MAX_BYTES + 1) }));
 });

@@ -102,6 +102,48 @@ class AgentCli(unittest.TestCase):
             manager,integrity,_=fixture(self.home,version='1.2.4',failure=failure)
             self.assert_code(code,lambda:self.run_install(str(i)*48,manager,integrity,before['installationRevision'],action='update',version='1.2.4'))
             self.assertEqual(os.readlink(manager.root/'current'),target);self.assertEqual(manager.inspect()['version'],'1.2.3')
+    def test_storage_keeps_only_receipts_and_active_plus_prior_version(self):
+        root=self.manager.root;names=lambda op:sorted(p.name for p in (root/'operations'/op).iterdir())
+        first=self.run_install();self.assertEqual(names('a'*48),['receipt.json']);self.assertNotIn('cleanupFailures',first);revision=self.manager.inspect()['installationRevision']
+        for i,version in [(1,'1.2.4'),(2,'1.2.5')]:
+            manager,integrity,_=fixture(self.home,version=version)
+            self.run_install(str(i)*48,manager,integrity,revision,action='update',version=version);revision=manager.inspect()['installationRevision']
+        self.assertEqual(sorted(p.name.split('-')[0] for p in (root/'versions').iterdir()),['1.2.4','1.2.5'])
+        manager,integrity,_=fixture(self.home,version='1.2.6',failure='npm')
+        self.assert_code('NPM_FAILED',lambda:self.run_install('3'*48,manager,integrity,revision,action='update',version='1.2.6'))
+        self.assertEqual(names('3'*48),['receipt.json']);self.assertEqual(manager.status('3'*48)['state'],'failed');self.assertEqual(manager.inspect()['version'],'1.2.5')
+    def test_cleanup_failures_are_recorded_in_receipt_and_status_without_cascading_enotempty(self):
+        manager,integrity,_=fixture(self.home);base_runner=manager.runner
+        def runner_with_nested_cache(package,prefix,work):
+            base_runner(package,prefix,work)
+            nested=work/'cache'/'content-v2'/'sha512'/'ab'/'cd';nested.mkdir(parents=True,mode=0o700)
+            (nested/'locked.blob').write_bytes(b'cached')
+        manager.runner=runner_with_nested_cache
+        real_rmtree=m.shutil.rmtree
+        def rmtree_with_single_unlink_failure(path,ignore_errors=False,onerror=None):
+            if Path(path).name=='cache':
+                onerror(m.os.unlink,str(Path(path)/'content-v2/sha512/ab/cd/locked.blob'),(OSError,OSError(m.errno.EACCES,'denied'),None))
+                onerror(m.os.rmdir,str(Path(path)/'content-v2/sha512/ab/cd'),(OSError,OSError(m.errno.ENOTEMPTY,'not empty'),None))
+                onerror(m.os.rmdir,str(path),(OSError,OSError(m.errno.ENOTEMPTY,'not empty'),None))
+                return
+            return real_rmtree(path,ignore_errors=ignore_errors,onerror=onerror)
+        with patch.object(m.shutil,'rmtree',side_effect=rmtree_with_single_unlink_failure):
+            result=self.run_install('a'*48,manager,integrity)
+        self.assertEqual(result['state'],'completed');self.assertEqual(result['cleanupFailures'],1)
+        self.assertEqual(manager.status('a'*48)['cleanupFailures'],1)
+        failing,fail_integrity,_=fixture(self.home,version='1.2.4',failure='npm');revision=manager.inspect()['installationRevision']
+        real_unlink=m.Path.unlink
+        def unlink_fail_package(path_self,*args,**kwargs):
+            if path_self.name=='package.tgz':raise OSError(m.errno.EACCES,'unlink denied')
+            return real_unlink(path_self,*args,**kwargs)
+        with patch.object(m.Path,'unlink',unlink_fail_package):
+            self.assert_code('NPM_FAILED',lambda:self.run_install('b'*48,failing,fail_integrity,revision,action='update',version='1.2.4'))
+        failed_status=failing.status('b'*48)
+        self.assertEqual(failed_status['state'],'failed');self.assertEqual(failed_status['cleanupFailures'],1)
+        receipt_path=manager.root/'operations'/('a'*48)/'receipt.json';saved=m.read_json(receipt_path)
+        for bad in [0,-1,True,'1']:
+            saved['cleanupFailures']=bad;m.atomic_json(receipt_path,saved)
+            self.assert_code('INVALID_STATE',lambda:manager.status('a'*48))
     def test_stale_snapshot_conflicting_payload_and_expiry(self):
         self.assert_code('PLAN_EXPIRED',lambda:self.run_install(expires=NOW))
         self.run_install();self.assert_code('STALE_INSTALLATION',lambda:self.run_install('b'*48))
@@ -452,7 +494,8 @@ class AckReceiptBoundary(unittest.TestCase):
                 self.assertEqual(manager.status('b'*48)['state'],'completed');self.assertEqual(manager.status('c'*48)['state'],'reused')
                 self.no_replay(manager,integrity,before,'b'*48,'completed')
                 self.no_replay(manager,integrity,second,'c'*48,'reused')
-                self.assertEqual(len(calls),1);self.assertEqual(len(later_calls),1);self.preserved(provider,binary,old,user,auth)
+                self.assertEqual(len(calls),1);self.assertEqual(len(later_calls),1)
+                self.assertEqual(user.read_bytes(),auth);self.assertFalse(binary.exists(),'SUPERSEDED_VERSION_NOT_PRUNED')
                 self.observe('legitimate-superseded-history',manager,'b'*48)
     def test_foreign_reused_history_survives_later_managed_install(self):
         for provider in ['codex','claude']:

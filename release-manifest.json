@@ -385,8 +385,8 @@
     },
     {
       "path": "scripts/manage-agent-cli.py",
-      "size": 16334,
-      "sha256": "8e38a8ec57ddc419f359d56ccd494ecf7478a10206bdd85ccb9d75148a6dce8c"
+      "size": 27101,
+      "sha256": "ecb296d2fc889456807cc268c5a1f8f05a7ebe40a2e6af190a3e51de9432f580"
     },
     {
       "path": "scripts/manage-secrets.mjs",
@@ -615,13 +615,13 @@
     },
     {
       "path": "src/adapters/ssh/agent-cli.mjs",
-      "size": 9365,
-      "sha256": "5c299d0eed360bf984a6aca8da374cc648a120998436011b5eeee69482c1bc1a"
+      "size": 9622,
+      "sha256": "128a56e3dda48907012c972bc8309f47e075439dc8125d6f5987febc4b9c565c"
     },
     {
       "path": "src/adapters/ssh/python-source.mjs",
-      "size": 3918,
-      "sha256": "1390ce9fd8d755a7778007a083eb2ea7dccf94bd2454ccaead255df4d2de8cc7"
+      "size": 4340,
+      "sha256": "4b6424741e1537c67d22eaa0fc0d34906ed2e515de82c561ab7e8b174488f986"
     },
     {
       "path": "src/adapters/ssh/transfers.mjs",
@@ -630,13 +630,13 @@
     },
     {
       "path": "src/adapters/ssh/vendor.mjs",
-      "size": 6298,
-      "sha256": "c2fedfd494169eca4514f54c9cc3e7d136b151869849ba693fe10114bd3f360a"
+      "size": 6359,
+      "sha256": "ccfff50f9717f156113cf709e27fa275156dc6447506ab841f041f26937145cb"
     },
     {
       "path": "src/adapters/storage/agent-cli-state.mjs",
-      "size": 5826,
-      "sha256": "51cc77bf335818689a36216ed61186686a9646440a0e7e90e535645ee0c5f45b"
+      "size": 6091,
+      "sha256": "de539e78036435fcaafcdb17b705674c973996da8cc829207d5229ca582566dd"
     },
     {
       "path": "src/adapters/storage/artifacts.mjs",
@@ -820,8 +820,8 @@
     },
     {
       "path": "test/agent-cli-delivery.test.mjs",
-      "size": 20728,
-      "sha256": "a37db80cda0157174f99dd8c51a93cfa5f41cbd924977f5d77a0b2d5b5327d90"
+      "size": 21230,
+      "sha256": "d2893a5c139a1e084014c052560faa45ff25e9c433da30ff5ac57ad324fe7ba8"
     },
     {
       "path": "test/agent-cli-history.test.mjs",
@@ -830,8 +830,8 @@
     },
     {
       "path": "test/agent-cli-http.test.mjs",
-      "size": 27505,
-      "sha256": "bbe77986afc366ba7855eed70e7b4c0df00ad1468783bd32b6e544240c29d2be"
+      "size": 27674,
+      "sha256": "9118893d103fd5572a50deccb5d4e7add7a9b2a2af1ae535c96e82b2e129b664"
     },
     {
       "path": "test/agent-cli-releases.test.mjs",
@@ -840,8 +840,8 @@
     },
     {
       "path": "test/agent-cli-service.test.mjs",
-      "size": 17137,
-      "sha256": "521830a5c47b35d67ced88254d50bbd6ae132b3bec31d3022dd3d6e082b938a5"
+      "size": 17170,
+      "sha256": "154d8dc54d807d4be3c35e591717a5fe16a1fbc0c3590e2b08066d1e03fcca40"
     },
     {
       "path": "test/agent-cli.test.mjs",
@@ -1375,8 +1375,8 @@
     },
     {
       "path": "test/python-source.test.mjs",
-      "size": 7689,
-      "sha256": "c80b1d93fe5734280d8cb45eac1acd4f44cc8988ec18a4cd71732762c71ed90f"
+      "size": 8110,
+      "sha256": "d2f4acd78f5efb432b96dadf82b22eedfa2c86a13866992e68e951c8b793bb7a"
     },
     {
       "path": "test/release-version.test.mjs",
@@ -1495,8 +1495,8 @@
     },
     {
       "path": "test/test_agent_cli.py",
-      "size": 37706,
-      "sha256": "0946f06a80445bb4e5ca7e1fac3be94b921ab23d99c7153872dbde8a46d4e981"
+      "size": 41373,
+      "sha256": "c904bd26c97603b55c7b484327d52ef46524ff059ac289799339276f2774339e"
     },
     {
       "path": "test/test_agent_cli_login.py",

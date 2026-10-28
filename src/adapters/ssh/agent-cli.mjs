@@ -1,6 +1,6 @@
 import {readFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
-import {preparePythonSource} from './python-source.mjs';
+import {preparePythonHelper} from './python-source.mjs';
 import {agentCliProvider,validateAgentRelease,AGENT_CLI_CONTRACT} from '../../domain/agent-cli.mjs';
 
 const source=readFileSync(new URL('../../../scripts/manage-agent-cli.py',import.meta.url),'utf8');
@@ -32,7 +32,7 @@ export function prepareAgentCliPlan({action,provider,binding,release,expectedIns
   args=action==='login-status'?[action,provider]:[action,provider,'','','','',operationId??''];
   if(action==='status')intentDigest=expectedIntentDigest;
  }
- const plan=preparePythonSource({source:action==='login-status'?loginSource:source,argv:action==='login-status'?[provider]:args,cwd:'/',elevate:false,targetId:binding?.targetId,targetRevision:binding?.targetRevision,profile:binding?.profile});
+ const plan=preparePythonHelper({source:action==='login-status'?loginSource:source,argv:action==='login-status'?[provider]:args,cwd:'/',elevate:false,targetId:binding?.targetId,targetRevision:binding?.targetRevision,profile:binding?.profile});
  return Object.freeze({...plan,agentCli:Object.freeze({contract:AGENT_CLI_CONTRACT,action,provider,...(operationId===undefined?{}:{operationId}),...(intentDigest===undefined?{}:{intentDigest})})});
 }
 
@@ -94,8 +94,9 @@ export function projectAgentCliResult(result,plan){
   if(value.state!=='not_found'){
    if(value.provider!==provider||value.intentDigest!==intentDigest||!stable(value.version)||value.login!=='not_checked')refuse();
    if(action!=='status'&&value.version!==JSON.parse(plan.manifest.argvJson)[2])refuse();
-  }
-  data={...data,state:value.state,operationId,...(value.state==='not_found'?{}:{version:value.version}),...(value.state==='failed'?{error:'INSTALL_FAILED'}:{})};
+   if(value.cleanupFailures!==undefined&&(!Number.isSafeInteger(value.cleanupFailures)||value.cleanupFailures<=0))refuse();
+  }else if(value.cleanupFailures!==undefined)refuse();
+  data={...data,state:value.state,operationId,...(value.state==='not_found'?{}:{version:value.version}),...(value.state==='failed'?{error:'INSTALL_FAILED'}:{}),...(value.cleanupFailures===undefined?{}:{cleanupFailures:value.cleanupFailures})};
  }
  return {failed:false,texts:[],data:{agentCli:Object.freeze(data)}};
 }

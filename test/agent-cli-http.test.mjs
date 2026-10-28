@@ -165,8 +165,9 @@ test('CLI-JOURNAL pending/running normalization, conflict and remote public proj
  const root=await mkdtemp(join(tmpdir(),'cli-journal-'));let journal=createAgentCliState(root);t.after(async()=>{journal.close();await rm(root,{recursive:true,force:true});});
  const job={id:'a'.repeat(48),kind:'command',state:'pending',operation:{agentCliContract:AGENT_CLI_CONTRACT,agentCliProvider:'codex',agentCliOperationId:'b'.repeat(48)}};
  journal.insert(job,'agent-cli:journal-key-0001','c'.repeat(64));assert.throws(()=>journal.insert(job,'agent-cli:journal-key-0001','c'.repeat(64)));journal.save({...job,state:'running'});journal.close();journal=createAgentCliState(root);assert.equal(journal.get(job.id).job.state,'unknown');
- const status=journal.recordRemote(job.id,{provider:'codex',operationId:'b'.repeat(48),state:'failed',version:'1.2.3',login:'not_checked',error:'SYNTHETIC_PRIVATE',private:'SYNTHETIC_PRIVATE'});assert.equal(status.error,'INSTALL_FAILED');assert.ok(!JSON.stringify(journal.get(job.id)).includes('SYNTHETIC_PRIVATE'));
+ const status=journal.recordRemote(job.id,{provider:'codex',operationId:'b'.repeat(48),state:'failed',version:'1.2.3',login:'not_checked',cleanupFailures:3,error:'SYNTHETIC_PRIVATE',private:'SYNTHETIC_PRIVATE'});assert.equal(status.error,'INSTALL_FAILED');assert.equal(status.cleanupFailures,3);assert.ok(!JSON.stringify(journal.get(job.id)).includes('SYNTHETIC_PRIVATE'));
  assert.throws(()=>journal.recordRemote(job.id,{...status,operationId:'d'.repeat(48)}));
+ for(const bad of [0,-1,'1']){assert.throws(()=>journal.recordRemote(job.id,{...status,cleanupFailures:bad}));}
 });
 test('CLI-JOURNAL refuses a foreign symlink or permissive existing database',async t=>{
  const root=await mkdtemp(join(tmpdir(),'cli-journal-path-'));t.after(()=>rm(root,{recursive:true,force:true}));const foreign=join(root,'foreign');await writeFile(foreign,'preserve',{mode:0o600});await symlink(foreign,join(root,'agent-cli.sqlite'));assert.throws(()=>createAgentCliState(root));assert.equal(await readFile(foreign,'utf8'),'preserve');
