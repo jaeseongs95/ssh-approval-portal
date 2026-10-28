@@ -145,6 +145,11 @@ export function createProtocolAdapters({ queue, commands, files, store, lifecycl
       const action = /^\/api\/([a-f0-9]{48})\/(approve|deny|download)$/.exec(url.pathname);
       if (!action) return json(res, 404, { error: 'Not found' });
       if (action[2] === 'download') return json(res, 200, { downloadUrl: capabilities.downloadLink(queue.get(action[1])) });
+      if (action[2] === 'approve' && req.headers.prefer === 'respond-async') {
+        const accepted = queue.start(action[1]);
+        res.setHeader('Preference-Applied', 'respond-async');
+        return json(res, 202, presentJob(accepted));
+      }
       const result = action[2] === 'approve' ? await queue.approve(action[1]) : queue.deny(action[1]);
       json(res, 200, presentJob(result));
     } catch { if (!res.headersSent) json(res, 409, { error: 'Request refused, expired, busy or unavailable' }); }
