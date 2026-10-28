@@ -1,0 +1,10 @@
+import assert from 'node:assert/strict';import {requestMaintenance} from './maintenance-request.mjs';
+const settings={adminPort:39125,adminToken:'synthetic-private-token',adminOrigin:'https://example.test'};let calls=0;
+const ok=await requestMaintenance('reserve',settings,async(url,options)=>{calls++;assert.equal(url,'http://127.0.0.1:39125/api/maintenance/reserve');assert.equal(options.method,'POST');assert.equal(options.headers.Authorization,'Bearer '+settings.adminToken);assert.equal(options.headers.Origin,settings.adminOrigin);return{status:200,ok:true,json:async()=>({reserved:true})}});assert.deepEqual(ok,{action:'reserve',httpStatus:200,confirmed:true});assert.equal(calls,1);
+assert.deepEqual(await requestMaintenance('reserve',settings,async()=>({status:409,ok:false,json:async()=>({})})),{action:'reserve',httpStatus:409,confirmed:false});
+assert.equal((await requestMaintenance('reserve',settings,async()=>({status:200,ok:true,json:async()=>({})}))).confirmed,false);
+const lost=await requestMaintenance('reserve',settings,async()=>{throw Error(settings.adminToken)});assert.deepEqual(lost,{action:'reserve',transportFailed:true,confirmed:false});assert.ok(!JSON.stringify(lost).includes(settings.adminToken));
+assert.deepEqual(await requestMaintenance('release',settings,async()=>({status:200,ok:true,json:async()=>({released:true})})),{action:'release',httpStatus:200,confirmed:true});
+await assert.rejects(()=>requestMaintenance('arbitrary',settings),/Invalid fixed/);
+assert.equal((await requestMaintenance('reserve',settings,async()=>({status:201,ok:true,json:async()=>({reserved:true})}))).confirmed,false);
+console.log('7 maintenance checks PASS; exact200 required; no retries; no private values logged');
