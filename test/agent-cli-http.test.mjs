@@ -15,7 +15,7 @@ async function fixture(t,options={}){
  const root=await mkdtemp(join(tmpdir(),'cli-app-')),events=[],calls=[],profiles=new Map(),flags={probe:null,install:null,status:null,login:null,auditFail:false};
  let app,origin;const cleanup=[];t.after(async()=>{for(const release of cleanup)release();await app?.close();assert.ok(root.startsWith(join(tmpdir(),'cli-app-')));await rm(root,{recursive:true,force:true});});
  const env={BRIDGE_MCP_TOKEN:'fixture-mcp',BRIDGE_ADMIN_TOKEN:'fixture-owner',BRIDGE_UI_TICKET_KEY:'a'.repeat(64),BRIDGE_ADMIN_ORIGIN:adminOrigin,BRIDGE_JEV_ENABLED:'false',BRIDGE_COMMAND_AUTOMATION:'false',BRIDGE_TEST_SERVER_SECRET_REF:'secret://fixture/test-server',...options.env};
- const execute=async(plan,verify)=>{
+ const execute=async(plan,verify,beforeDispatch)=>{
   const checked=verify();assert.equal(checked.targetId,plan.manifest.targetId);assert.equal(checked.targetRevision,plan.manifest.targetRevision);assert.equal(checked.profile,plan.manifest.profile);calls.push(plan);
   if(plan.agentCli.action==='login-status'){
    if(flags.probe)await flags.probe(plan,verify);
@@ -26,7 +26,7 @@ async function fixture(t,options={}){
    return {failed:false,texts:[],data:{agentCli:{provider:plan.agentCli.provider,installed:false,managed:false,version:null,active:null,installationRevision:'b'.repeat(64),login:'not_checked',private:'SYNTHETIC_PRIVATE'}}};
   }
   if(plan.agentCli.action==='status')return {failed:false,texts:[],data:{agentCli:{provider:plan.agentCli.provider,operationId:plan.agentCli.operationId,state:flags.status??'completed',version:'1.2.3',login:'not_checked',private:'SYNTHETIC_PRIVATE'}}};
-  if(flags.install)await flags.install(plan,verify);
+  if(flags.install)await flags.install(plan,verify,beforeDispatch);
   return {failed:false,texts:[],data:{agentCli:{contract:AGENT_CLI_CONTRACT,provider:plan.agentCli.provider,state:'completed',operationId:plan.agentCli.operationId,version:'1.2.3',login:'not_checked'}}};
  };
  const registry={getProfile:name=>{if(!profiles.has(name))profiles.set(name,{host:'127.0.0.1',port:22,user:'fixture',readOnly:name==='aws-readonly'});return profiles.get(name);},closeAll:async()=>{events.push({action:'fixture-connections-closed'});}};
@@ -241,4 +241,17 @@ test('test server CLI slot rejection is terminal and replay cannot start the ins
  const p=await f.preview(),q=f.app.targets.select('default').queue,busy=q.externalBusy;q.externalBusy=()=>true;
  const job=await f.submit(p);assert.equal(job.state,'failed');assert.equal(job.decision.dispatchFailure,'not_dispatched');
  q.externalBusy=busy;const before=f.calls.length;assert.equal((await f.submit(p)).id,job.id);assert.equal(f.calls.length,before);assert.throws(()=>q.start(job.id),/not pending/);
+});
+
+
+test('test server CLI dispatch hook rejects revoked secret after admission and replay cannot install',async t=>{
+ let value='2'.repeat(64),effects=0;
+ const f=await fixture(t,{env:{BRIDGE_COMMAND_AUTOMATION:'true'},secretResolver:{resolve:async()=>value}});
+ const current=(await f.api('/api/command-policy')).body,b=current.bindings[0];
+ const proposal={expectedRevision:current.revision,policy:{targets:[{targetId:b.targetId,targetRevision:b.targetRevision,profile:b.profile,commands:[],deniedCommands:[],externalDisclosure:false,modelExecution:false,testServer:true,fallback:null,thresholds:{}}]}};
+ const review=await f.api('/api/command-policy/review',{method:'POST',body:proposal});assert.equal(review.status,200);
+ assert.equal((await f.api('/api/command-policy',{method:'POST',body:{...proposal,reviewToken:review.body.reviewToken,acknowledged:true}})).status,200);
+ const p=await f.preview();f.flags.install=async(_plan,_verify,beforeDispatch)=>{value=undefined;await beforeDispatch();effects++;};
+ const job=await f.submit(p);await f.app.queue.wait(job.id);assert.equal(f.app.queue.get(job.id).state,'unknown');assert.equal(effects,0);
+ const before=f.calls.length;assert.equal((await f.submit(p)).id,job.id);assert.equal(f.calls.length,before);assert.equal(effects,0);
 });

@@ -7,6 +7,18 @@ import { redactText } from 'ssh-mcp/build/guard/redactor.js';
 import { preparePythonSource, preparePythonHelper } from './python-source.mjs';
 import { validateAgentCliPlan, projectAgentCliResult } from './agent-cli.mjs';
 
+/** Per-operation view: dispatch authorization follows every connect/retry wait. */
+export function withDispatchGuard(connection, beforeDispatch = async () => {}) {
+  return new Proxy(connection, { get(target, key, receiver) {
+    if (key === 'ensureConnected') return async () => {
+      await target.ensureConnected();
+      await beforeDispatch();
+    };
+    const value = Reflect.get(target, key, target);
+    return typeof value === 'function' ? value.bind(key === 'exec' ? receiver : target) : value;
+  } });
+}
+
 const defaultRedact = text => redactText(text, { entropyScan: true });
 function commandOutcome(result, auditRedact = defaultRedact) {
   const failed = result.exitCode !== 0 || Boolean(result.signal);
@@ -21,7 +33,7 @@ function commandOutcome(result, auditRedact = defaultRedact) {
  * and vendor's channel lifecycle. After dispatch, errors/exit codes do not prove
  * that no effect occurred and must never trigger a source replay.
  */
-async function executeSourcePlan(registry, plan, verify, options = {}, prepare = preparePythonSource) {
+async function executeSourcePlan(registry, plan, verify, options = {}, prepare = preparePythonSource, beforeDispatch = async () => {}) {
   if (typeof verify !== 'function' || !plan?.manifest) throw Error('Source target verification required');
   const submitted = plan.manifest;
   const exact = prepare({ source: plan.stdin, argv: JSON.parse(submitted.argvJson), cwd: submitted.cwd, elevate: submitted.elevate,
@@ -43,7 +55,7 @@ async function executeSourcePlan(registry, plan, verify, options = {}, prepare =
   // The pinned exec() awaits/reconnects/retries before each getClient(). Use a
   // per-call view, never patch the shared connection or duplicate its lifecycle.
   // Its getClient() and client.exec() have no await between them in 2.18.0.
-  const guarded = new Proxy(connection, { get(target, key) {
+  const guarded = new Proxy(withDispatchGuard(connection, beforeDispatch), { get(target, key) {
     if (key === 'getClient') return () => {
       check();
       if (JSON.stringify(target.profile) !== profileSnapshot || JSON.stringify(registry.getProfile(m.profile)) !== profileSnapshot) throw Error('Source SSH profile changed');
@@ -58,16 +70,16 @@ async function executeSourcePlan(registry, plan, verify, options = {}, prepare =
   return result;
 }
 
-export async function executePythonSource(registry, plan, verify) {
-  return commandOutcome(await executeSourcePlan(registry, plan, verify));
+export async function executePythonSource(registry, plan, verify, beforeDispatch = async () => {}) {
+  return commandOutcome(await executeSourcePlan(registry, plan, verify, {}, preparePythonSource, beforeDispatch));
 }
 
 /** Fixed CLI helper only; not a generic raw-output or arbitrary-timeout escape hatch. */
-export async function executeAgentCli(registry, plan, verify) {
+export async function executeAgentCli(registry, plan, verify, beforeDispatch = async () => {}) {
   const exact = validateAgentCliPlan(plan);
   const timeoutMs = ['install','update'].includes(exact.agentCli.action) ? 930000 : 30000;
   let result;
-  try { result = await executeSourcePlan(registry, exact, verify, { timeoutMs }, preparePythonHelper); }
+  try { result = await executeSourcePlan(registry, exact, verify, { timeoutMs }, preparePythonHelper, beforeDispatch); }
   catch { throw Error('CLI result unknown; inspect saved status, never retry automatically'); }
   return projectAgentCliResult(result, exact);
 }
@@ -81,20 +93,20 @@ export async function createSshRuntime(settings) {
   const auditRedact = defaultRedact;
   return {
     registry, classify: classifyCommand, auditRedact,
-    async executeCommand(profile, command) {
-      const result = await (await registry.getOrCreate(profile)).exec(command);
+    async executeCommand(profile, command, beforeDispatch = async () => {}) {
+      const result = await withDispatchGuard(await registry.getOrCreate(profile), beforeDispatch).exec(command);
       return commandOutcome(result, auditRedact);
     },
-    executePythonSource: (plan, verify) => executePythonSource(registry, plan, verify),
-    executeAgentCli: (plan, verify) => executeAgentCli(registry, plan, verify),
+    executePythonSource: (plan, verify, beforeDispatch) => executePythonSource(registry, plan, verify, beforeDispatch),
+    executeAgentCli: (plan, verify, beforeDispatch) => executeAgentCli(registry, plan, verify, beforeDispatch),
   };
 }
 
 /** Connections expose a narrow transport contract, never vendor profile objects. */
 export function createSshTransport(registry) {
   return {
-    async connect(profile) {
-      const connection = await registry.getOrCreate(profile);
+    async connect(profile, { beforeDispatch } = {}) {
+      const connection = withDispatchGuard(await registry.getOrCreate(profile), beforeDispatch);
       const idleTimeoutMs = connection.profile.transferTimeoutMs;
       return {
         call(command, payload) { return connection.exec(command, { stdin: JSON.stringify(payload), timeoutMs: idleTimeoutMs }); },

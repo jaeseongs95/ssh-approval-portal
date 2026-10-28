@@ -43,8 +43,8 @@ import {agentCliProviders,AGENT_CLI_CONTRACT} from './src/domain/agent-cli.mjs';
 
 // Preserve the original injectable createApplication callback at the composition boundary.
 // Concrete runtime executors already return the neutral outcome accepted by use cases.
-const commandExecutor = execute => async (profile, command) => {
-  const value = await execute(profile, command);
+const commandExecutor = execute => async (profile, command, beforeDispatch) => {
+  const value = await execute(profile, command, beforeDispatch);
   if (value && typeof value.failed === 'boolean' && Array.isArray(value.texts)) return value;
   return { failed: Boolean(value?.isError), texts: (value?.content ?? []).filter(x => x.type === 'text').map(x => x.text),
     ...(value?.structuredContent === undefined ? {} : { data: value.structuredContent }) };
@@ -103,10 +103,23 @@ export async function createApplication({ registry, classify, executeCommand, ex
     const checkedRegistry = { getOrCreate(profile) { definition.verify(); return registry.getOrCreate(profile); } };
     const transfers = createTransferExecutor(checkedRegistry, targetStore, { readProfile, writeProfile });
     const binding = (profile, command, executionId) => ({ executionId, targetId: definition.id, targetRevision: definition.revision, profile, operationDigest: hash(command) });
+    const requireDispatch = async id => {
+      const operation = id ? queue.get(id)?.operation : undefined;
+      const before = commandState?.policy(), rule = before?.targets.find(rule => rule.targetId === definition.id && rule.targetRevision === definition.revision && rule.profile === writeProfile);
+      if (rule?.testServer === true || queue.get(id)?.decision?.reasonCode === 'test_server_bypass') {
+        await testServerMode.require();
+        definition.verify();
+        const current = commandState.policy(), job = queue.get(id);
+        if (current.revision !== before.revision || (job && job.decision?.policyRevision !== current.revision)) throw Error('Test server policy changed');
+        if (operation?.kind === 'command') queue.beforeCommandStart(job);
+        else if (operation?.kind === 'upload') queue.beforeUploadStart(job);
+        else if (operation?.kind === 'download') queue.beforeDownloadStart(job);
+      }
+    };
     const checkedExecute = async (profile, command, id = randomBytes(24).toString('hex')) => {
       definition.verify();
       const reservation = outputs.reserve(binding(profile, command, id));
-      try { return outputs.finish(reservation, await execute(profile, command)); }
+      try { return outputs.finish(reservation, await execute(profile, command, () => requireDispatch(id))); }
       catch (error) { outputs.abandon(reservation); throw error; }
     };
     const targetAudit = event => audit({ ...event, ...identity });
@@ -119,23 +132,14 @@ export async function createApplication({ registry, classify, executeCommand, ex
       try { return outputs.finish(reservation, await executePythonSource(plan, () => {
         definition.verify(); automation.sourcePlan(id); queue.beforeCommandStart(queue.get(id));
         return { targetId: definition.id, targetRevision: definition.revision, profile: writeProfile };
-      })); } catch (error) { outputs.abandon(reservation); throw error; }
+      }, () => requireDispatch(id))); } catch (error) { outputs.abandon(reservation); throw error; }
     };
     const queue = new ApprovalQueue({ classify, target, profile: writeProfile, audit: targetAudit, identity, claimExecution,
       externalBusy: () => (commands?.reading() ?? false) || cliProbes.size > 0 || claimExecution.busy(),
       executeOperation: async (operation, id) => {
-        const before = commandState?.policy(), rule = before?.targets.find(rule => rule.targetId === definition.id && rule.targetRevision === definition.revision && rule.profile === writeProfile);
-        if (rule?.testServer === true || queue.get(id)?.decision?.reasonCode === 'test_server_bypass') {
-          await testServerMode.require();
-          definition.verify();
-          const current = commandState.policy(), job = queue.get(id);
-          if (current.revision !== before.revision || job?.decision?.policyRevision !== current.revision) throw Error('Test server policy changed');
-          if (operation.kind === 'command') queue.beforeCommandStart(job);
-          else if (operation.kind === 'upload') queue.beforeUploadStart(job);
-          else queue.beforeDownloadStart(job);
-        }
-        return operation.agentCliContract === AGENT_CLI_CONTRACT ? cli.execute(id) : operation.kind === 'command' ? operation.sourceContract ? checkedSourceExecute(operation, id) : checkedExecute(writeProfile, operation.command, id)
-          : operation.kind === 'upload' ? transfers.upload(operation) : transfers.download(operation);
+        await requireDispatch(id);
+        return operation.agentCliContract === AGENT_CLI_CONTRACT ? cli.execute(id, () => requireDispatch(id)) : operation.kind === 'command' ? operation.sourceContract ? checkedSourceExecute(operation, id) : checkedExecute(writeProfile, operation.command, id)
+          : operation.kind === 'upload' ? transfers.upload(operation, () => requireDispatch(id)) : transfers.download(operation, () => requireDispatch(id));
       },
       onTerminal: job => { try { cli?.onTerminal(job); automation?.onTerminal(job); } finally { files?.onTerminal(job); } },
     });
@@ -155,7 +159,7 @@ export async function createApplication({ registry, classify, executeCommand, ex
       const task=Promise.resolve().then(async()=>{
         const rule=commandState?.policy().targets.find(rule=>rule.targetId===definition.id&&rule.targetRevision===definition.revision&&rule.profile===writeProfile);
         if(rule?.testServer===true)await testServerMode.require();
-        return executeAgentCli(plan,()=>{definition.verify();checkCliPolicy(plan);if(queue.maintenance)throw Error('CLI maintenance in progress');return cliBinding();});}).finally(()=>{
+        return executeAgentCli(plan,()=>{definition.verify();checkCliPolicy(plan);if(queue.maintenance)throw Error('CLI maintenance in progress');return cliBinding();}, () => requireDispatch());}).finally(()=>{
         cliProbes.delete(task);try{targetAudit({action:'cli-probe-finished',id,profile:writeProfile,targetId:definition.id});}finally{release();}
       });
       cliProbes.add(task);return task;

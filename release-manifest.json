@@ -30,8 +30,8 @@
     },
     {
       "path": "app.mjs",
-      "size": 26007,
-      "sha256": "5a764c522ff82da1ab4df40925aef6e91831c293c1c7a122c27a3e9ea44ecc4a"
+      "size": 26376,
+      "sha256": "c22e9ee549b19c1d6c4d2d6b1535b0fba8b07d6bf89a2c76f274fd5903d5b6da"
     },
     {
       "path": "bridge.mjs",
@@ -625,13 +625,13 @@
     },
     {
       "path": "src/adapters/ssh/transfers.mjs",
-      "size": 3888,
-      "sha256": "153c8cab0ded7964eadb842178c74745a90b869703a417f471a8391120cd9c92"
+      "size": 3960,
+      "sha256": "7ef48c8a8a9b7be968ffbd4ca733f19c31792231ccb8a031025947276f974699"
     },
     {
       "path": "src/adapters/ssh/vendor.mjs",
-      "size": 6359,
-      "sha256": "ccfff50f9717f156113cf709e27fa275156dc6447506ab841f041f26937145cb"
+      "size": 7258,
+      "sha256": "48b64061f2a7b96a549552749830f12a3c2363973024844fbf35cbc336dac031"
     },
     {
       "path": "src/adapters/storage/agent-cli-state.mjs",
@@ -680,8 +680,8 @@
     },
     {
       "path": "src/application/agent-cli.mjs",
-      "size": 9886,
-      "sha256": "e8b05554cb8b4737b14cb69ed2e225f80cf363bf741209dc4fa8a625fc31dc9b"
+      "size": 9916,
+      "sha256": "adffc0a6d4b1434ffe5411188f995975d68e626cbcae74f825ca3bc8a7518a79"
     },
     {
       "path": "src/application/automation-metrics.mjs",
@@ -825,8 +825,8 @@
     },
     {
       "path": "test/agent-cli-delivery.test.mjs",
-      "size": 21230,
-      "sha256": "d2893a5c139a1e084014c052560faa45ff25e9c433da30ff5ac57ad324fe7ba8"
+      "size": 24549,
+      "sha256": "036de36667852b99a368dd7cfe8b474f2a64c23dd2f9029d4cdbfb3d04ff02ed"
     },
     {
       "path": "test/agent-cli-history.test.mjs",
@@ -835,8 +835,8 @@
     },
     {
       "path": "test/agent-cli-http.test.mjs",
-      "size": 30219,
-      "sha256": "1412b36e9910056c94b03ecfd12216ca68485bee6bb1625f35286a46090ad966"
+      "size": 31535,
+      "sha256": "93d9965a855ecdb42aa2d55c800da347691d161a96eb00a30c269291211ace41"
     },
     {
       "path": "test/agent-cli-releases.test.mjs",
@@ -1000,8 +1000,8 @@
     },
     {
       "path": "test/command-automation.test.mjs",
-      "size": 48275,
-      "sha256": "4f0891be3c93a991920d454bc2df031bd7855602697d445f6b1e44a6b57b8b7e"
+      "size": 49919,
+      "sha256": "1734c388ff42cb9a9038306538cd9ecb764110578cf2d1bdddc962fe534d5b96"
     },
     {
       "path": "test/command-lifecycle.test.mjs",

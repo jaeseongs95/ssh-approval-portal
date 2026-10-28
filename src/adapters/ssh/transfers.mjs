@@ -16,12 +16,12 @@ export class Transfers {
     if (!data || typeof data !== 'object' || data.error) throw Error('Remote helper refused operation');
     return data;
   }
-  async upload(op) {
+  async upload(op, beforeDispatch) {
     const item = this.store.get(op.artifactId);
     const binding = fileTargetBinding(op);
     if (binding ? item.fileTargetBound !== true || item.targetId !== binding.targetId || item.targetRevision !== binding.targetRevision : item.fileTargetBound === true) throw Error('Upload target does not match frozen operation');
     if (item.sha256 !== op.sha256 || item.size !== op.size || item.remotePath !== op.remotePath || item.overwrite !== op.overwrite || item.elevate !== op.elevate) throw Error('Upload does not match frozen operation');
-    const session = await this.transport.connect(this.writeProfile);
+    const session = await this.transport.connect(this.writeProfile, { beforeDispatch });
     const fd = await this.store.verified(item.id);
     const staged = { ...op, artifactId: item.id };
     try {
@@ -34,7 +34,7 @@ export class Transfers {
       finally { await this.call(session, 'cleanup', { ...staged, elevate: false }).catch(() => {}); }
     }
   }
-  async download(op) {
+  async download(op, beforeDispatch) {
     remotePath(op.remotePath);
     const binding = fileTargetBinding(op);
     const item = this.store.reserveDownload({ fileName: posix.basename(op.remotePath), remotePath: op.remotePath, elevate: op.elevate,
@@ -42,7 +42,7 @@ export class Transfers {
     let session;
     const staged = { ...op, artifactId: item.id };
     try {
-      session = await this.transport.connect(op.elevate ? this.writeProfile : this.readProfile);
+      session = await this.transport.connect(op.elevate ? this.writeProfile : this.readProfile, { beforeDispatch });
       const metadata = await this.call(session, 'snapshot', staged);
       const ready = await this.store.receiveDownload(item.id, metadata, destination => session.download(`${this.remoteStage}/${item.id}.part`, destination, { maxBytes: this.store.maxBytes }));
       return { failed: false, texts: ['Server file ready. It has not been saved to your device or delivered to the agent. Use the file card or the administrator page to save it.'], data: { artifactId: ready.id, fileName: ready.fileName, size: ready.size, sha256: ready.sha256 } };

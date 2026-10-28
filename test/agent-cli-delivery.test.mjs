@@ -7,7 +7,7 @@ import {userInfo} from 'node:os';
 import {join} from 'node:path';
 import ssh2 from 'ssh2';
 import {SSHConnection} from 'ssh-mcp/build/ssh/connection.js';
-import {executeAgentCli,executePythonSource} from '../src/adapters/ssh/vendor.mjs';
+import {executeAgentCli,executePythonSource,createSshTransport,withDispatchGuard} from '../src/adapters/ssh/vendor.mjs';
 import {prepareAgentCliPlan} from '../src/adapters/ssh/agent-cli.mjs';
 import {preparePythonSource} from '../src/adapters/ssh/python-source.mjs';
 import {validateAgentRelease} from '../src/domain/agent-cli.mjs';
@@ -180,4 +180,51 @@ test('CLI-LOGIN delivery accepts only the fixed helper and discards vendor priva
   for(const change of [{provider:'other',state:'signed_in'},{provider,state:'completed'}]){f.connection.exec=async()=>({exitCode:0,stdout:JSON.stringify(change),stderr:''});await assert.rejects(()=>executeAgentCli(f.registry,p,verify));}
   for(const changed of [{...p,stdin:p.stdin+'# changed'},{...p,agentCli:{...p.agentCli,provider:'other'}},{...p,manifest:{...p.manifest,argvJson:JSON.stringify([provider,'login'])}}]){const g=fake(p);await assert.rejects(()=>executeAgentCli(g.registry,changed,verify));assert.equal(g.acquisitions,0);}
  }
+});
+
+// Component boundary: real pinned exec/SFTP lifecycle, synthetic SSH client only.
+// Requirement: async revocation after acquisition/connect/retry opens no new channel.
+for (const port of ['source','cli','command','helper','upload','download']) {
+ for (const revokeAt of ['registry','connect','retry']) {
+  test(`DISPATCH-GUARD ${port} awaits authority after ${revokeAt}`, async () => {
+   const profile={name:binding.profile,tty:false,readOnly:false,timeout:2000,transferTimeoutMs:2000,maxOutputBytes:4096};
+   let allowed=true,getClients=0,opens=0,checks=0;
+   const client={
+    exec(_command,_options,callback){opens++;allowed=false;callback(Error('Synthetic channel refusal'));},
+    sftp(callback){opens++;allowed=false;callback(Error('Synthetic channel refusal'));},
+   };
+   const connection=new SSHConnection(profile,{},new Map(),'strict');
+   connection.connect=async()=>{connection.client=client;connection.connected=true;if(revokeAt==='connect')allowed=false;};
+   connection.getClient=()=>{getClients++;return client;};
+   const originalEnsure=connection.ensureConnected,originalExec=connection.exec;
+   const registry={getProfile:()=>profile,async getOrCreate(){
+    if(revokeAt==='registry'){await connection.ensureConnected();allowed=false;}
+    return connection;
+   }};
+   const beforeDispatch=async()=>{await Promise.resolve();checks++;if(!allowed)throw Error('Synthetic authority revoked');};
+   let pending;
+   if(port==='source')pending=executePythonSource(registry,preparePythonSource({...binding,source:'pass\n',cwd:'/'}),verify,beforeDispatch);
+   else if(port==='cli')pending=executeAgentCli(registry,plan(),verify,beforeDispatch);
+   else if(port==='command')pending=(async()=>withDispatchGuard(await registry.getOrCreate(),beforeDispatch).exec('id'))();
+   else {
+    const transport=await createSshTransport(registry).connect(binding.profile,{beforeDispatch});
+    pending=port==='helper'?transport.call('id',{}):port==='upload'?transport.upload(null,'/tmp/file',{maxBytes:1}):transport.download('/tmp/file',null,{maxBytes:1});
+   }
+   await assert.rejects(pending);
+   assert.ok(checks>0,'Async authority hook must run');
+   assert.equal(getClients,revokeAt==='retry'?1:0,'Revoked authority must never reach getClient');
+   assert.equal(opens,revokeAt==='retry'?1:0,'Only the refused channel before revocation may open');
+   assert.equal(connection.ensureConnected,originalEnsure,'Shared connection methods stay unchanged');
+   assert.equal(connection.exec,originalExec);
+  });
+ }
+}
+
+test('DISPATCH-GUARD source retains sync binding verification after async authority check',async()=>{
+ const profile={name:binding.profile,tty:false,readOnly:false,timeout:2000,maxOutputBytes:4096};
+ const connection=new SSHConnection(profile,{},new Map(),'strict');let revision=binding.targetRevision,getClients=0;
+ connection.ensureConnected=async()=>{};connection.getClient=()=>{getClients++;throw Error('Must not obtain client');};
+ const registry={getProfile:()=>profile,async getOrCreate(){return connection;}};
+ await assert.rejects(executePythonSource(registry,preparePythonSource({...binding,source:'pass\n',cwd:'/'}),()=>({...binding,targetRevision:revision}),async()=>{await Promise.resolve();revision='e'.repeat(64);}));
+ assert.equal(getClients,0);
 });

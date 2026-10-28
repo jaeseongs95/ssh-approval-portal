@@ -596,3 +596,25 @@ test('production portal without a server secret refuses a test bypass policy reg
  assert.equal((await f.api('/api/command-policy/review',proposal)).status,409);
  await f.policy({commands:[],externalDisclosure:false});assert.equal((await f.run('sudo id')).state,'pending');assert.equal(f.executions.length,0);
 });
+
+
+test('test server dispatch hook rejects secret revocation after adapter admission and never replays',async t=>{
+ for(const sourceMode of [false,true])await t.test(sourceMode?'source':'command',async t=>{
+  let value='2'.repeat(64),effects=0,admissions=0;
+  const dispatch=async(_first,_second,beforeDispatch)=>{admissions++;value=undefined;await beforeDispatch();effects++;return {failed:false,texts:['fixture']};};
+  const f=await fixture(t,{secretResolver:{resolve:async()=>value},...(sourceMode?{executePythonSource:dispatch}:{executeCommand:dispatch})});
+  await f.policy({testServer:true,commands:[],externalDisclosure:false});
+  const args={source:"print('fixture')",cwd:'/tmp',context:'',requestKey:'test-secret-dispatch-hook-01'};
+  const run=()=>sourceMode?f.app.targets.commands.runSource(args):f.app.targets.commands.run('sudo id',undefined,args.requestKey,'');
+  const submitted=await run();await f.app.targets.drain();
+  const job=f.app.queue.get(submitted.job.id);assert.ok(['failed','unknown'].includes(job.state));assert.equal(effects,0);assert.equal(admissions,1);
+  assert.equal((await run()).job.id,job.id);await f.app.targets.drain();assert.equal(admissions,1);assert.equal(effects,0);
+ });
+});
+
+
+test('test server dispatch guard permits a valid read without a queue job',async t=>{
+ let effects=0;
+ const f=await fixture(t,{executeCommand:async(_profile,_command,beforeDispatch)=>{await beforeDispatch();effects++;return {failed:false,texts:['fixture-host']};}});
+ await f.policy({testServer:true});const result=await f.app.targets.commands.read('hostname');assert.equal(result.failed,false);assert.equal(effects,1);
+});
