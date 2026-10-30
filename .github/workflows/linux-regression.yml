@@ -59,3 +59,13 @@ jobs:
               python3 -B "$test"
             fi
           done
+
+  capacity-env:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: 배포 ENV 실제 POSIX 임시파일 검증
+        run: sudo python3 -X utf8 -B test/capacity-env/test_env_change.py -v
