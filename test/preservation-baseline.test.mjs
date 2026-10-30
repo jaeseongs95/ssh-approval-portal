@@ -26,7 +26,7 @@ async function fixture({unavailable = true} = {}) {
   };
   const post = (action, headers = {}, token = owner) => fetch(`http://127.0.0.1:${app.adminHttp.address().port}/api/maintenance/${action}`, {
     method:'POST', headers:{Authorization:'Bearer test-admin', Origin:env.BRIDGE_ADMIN_ORIGIN, 'X-Maintenance-Owner':token, ...headers}});
-  const restart = async () => { await app.close(); app = undefined; await open(); };
+  const restart = async (afterStop = async () => {}) => { await app.close(); app = undefined; await afterStop(); await open(); };
   await open();
   assert.equal((await post('reserve')).status, 200);
   assert.equal((await post('preservation/capture')).status, 200);
@@ -73,15 +73,36 @@ test('baseline PASS still cannot grant strict release, nor can strict PASS grant
 });
 
 test('failed or unknown-mode recompare revokes earlier same-instance verification', async () => {
-  for (const failure of ['payload','contract']) {
-    const f = await fixture();
+  for (const mode of ['strict','baseline']) for (const failure of ['payload','contract']) {
+    const f = await fixture({unavailable:mode === 'baseline'}), headers = mode === 'baseline' ? baseline : {};
     try {
-      assert.equal((await f.post('preservation/compare', baseline)).status, 200);
+      assert.equal((await f.post('preservation/compare', headers)).status, 200);
       if (failure === 'payload') await f.corrupt();
-      const response = await f.post('preservation/compare', failure === 'payload' ? baseline : {'X-Maintenance-Preservation-Contract':'unknown'});
+      const response = await f.post('preservation/compare', failure === 'payload' ? headers : {'X-Maintenance-Preservation-Contract':'unknown'});
       assert.equal(response.status, 409);
       assert.equal((await f.post('release', {...baseline,...verified})).status, 409);
       assert.equal((await f.post('release', verified)).status, 409); assert.equal(f.maintenance(), true);
+    } finally { await f.close(); }
+  }
+});
+
+test('a newly added ready or unavailable output is not evidence of unchanged baseline state', async () => {
+  for (const ready of [true,false]) {
+    const f = await fixture();
+    try {
+      await f.restart(async () => {
+        const outputs = new CommandOutputs(f.root);
+        try {
+          const item = outputs.reserve({executionId:'3'.repeat(48)});
+          if (ready) outputs.finish(item,{failed:false,texts:['NEW_PRIVATE_PAYLOAD']}); else outputs.abandon(item);
+        } finally { outputs.close(); }
+      });
+      const response = await f.post('preservation/compare', baseline), report = await response.json();
+      assert.equal(response.status,200); assert.equal(report.status,'PARTIAL');
+      assert.equal(report.outputsAdded,1); assert.equal(report.baselinePreserved,false);
+      assert.ok(!JSON.stringify(report).includes('NEW_PRIVATE_PAYLOAD'));
+      assert.equal((await f.post('release',{...baseline,...verified})).status,409);
+      assert.equal(f.maintenance(),true);
     } finally { await f.close(); }
   }
 });
@@ -138,10 +159,13 @@ test('baseline client requires explicit server capability, exact contract and un
     comparison={...valid};assert.notEqual((await run('compare')).code,0, 'strict compare never accepts baseline PARTIAL');
     support=true;
     const accepted=await run('compare-baseline');assert.equal(accepted.code,0);assert.match(accepted.output,/complete payload preservation was not verified/);assert.ok(!accepted.output.includes(owner));
+    const summary=JSON.parse(accepted.output.split('\n').find(line=>line.startsWith('{')));
+    assert.deepEqual(summary,valid);
     assert.equal(calls.at(-1).contract,contract);
     for (const override of [{comparisonContract:'other'},{baselinePreserved:undefined},{baselinePreserved:'true'},
       {expiredOutputsRemoved:1},{outputsAdded:1},{outputsChecked:2},{status:'unknown'},{outputPayloadsVerified:-1}]) {
-      comparison={...valid,...override};assert.notEqual((await run('compare-baseline')).code,0);
+      comparison={...valid,...override};const rejected=await run('compare-baseline');assert.notEqual(rejected.code,0);
+      assert.doesNotMatch(rejected.output,/confirmed|\{"/);
     }
     comparison={...valid};releaseContract=false;
     assert.notEqual((await run('release-baseline-verified')).code,0);
