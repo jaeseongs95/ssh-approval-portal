@@ -10,6 +10,7 @@ import {CommandOutputs} from '../src/adapters/storage/command-output.mjs';
 import {prepareAgentCliPlan} from '../src/adapters/ssh/agent-cli.mjs';
 import {createAgentCliService} from '../src/application/agent-cli.mjs';
 import {validateAgentRelease} from '../src/domain/agent-cli.mjs';
+import {dispatchFailureDetails} from '../src/domain/dispatch-failure.mjs';
 
 const revision='a'.repeat(64),installationRevision='b'.repeat(64);
 function release(provider='codex'){
@@ -144,6 +145,12 @@ test('changed queued operation or profile cannot consume the private execution p
  const f=fixture(t),job=f.service.submit(f.body(await f.preview())),raw=f.queue.jobs.get(job.id),original=raw.operation;
  raw.operation=Object.freeze({...original,agentCliAction:'update'});await assert.rejects(()=>f.queue.approve(job.id));raw.operation=original;
  raw.profile='foreign';await assert.rejects(()=>f.queue.approve(job.id));assert.equal(f.calls.execute.length,0);
+});
+
+test('CLI-DISPATCH arbitrary policy callback failures are unknown at the policy guard, never confirmed denial',async t=>{
+ const f=fixture(t),job=f.service.submit(f.body(await f.preview()));f.flags.denied=true;
+ assert.throws(()=>f.queue.start(job.id),error=>{assert.deepEqual(dispatchFailureDetails(error),{dispatchFailureReason:'unknown',dispatchFailureStage:'policy_guard'});return true;});
+ assert.equal(f.calls.execute.length,0);assert.equal(f.queue.get(job.id).state,'pending');
 });
 test('false catalog provider, release digest or extended lifetime never becomes a preview',async t=>{
  const f=fixture(t);

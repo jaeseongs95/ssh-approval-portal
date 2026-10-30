@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { APPROVAL_EXPIRES_MS } from '../contracts/ports.mjs';
 import { hash, validateCommand } from './validation.mjs';
 import { callerContext } from './execution-context.mjs';
+import { dispatchStep, dispatchRefusal, dispatchFailureDetails } from './dispatch-failure.mjs';
 
 const COMMAND_AUTHORITY = Symbol('server-command-policy');
 const UPLOAD_AUTHORITY = Symbol('server-upload-policy');
@@ -94,7 +95,7 @@ export class ApprovalQueue {
     if (this.get(id).state !== 'evaluating') throw Error('Request is not evaluating');
     job.state = state;
     if (state !== 'pending') job.finishedAt = this.now();
-    try { job.persist?.(this.public(job)); } finally { if (state !== 'pending') { try { this.onTerminal(job); } finally { this.notifyRequest(job); } } }
+    try { dispatchStep('evaluation_persistence', () => job.persist?.(this.public(job)), 'persistence_failed'); } finally { if (state !== 'pending') { try { this.onTerminal(job); } finally { this.notifyRequest(job); } } }
   }
   startCommand(id) {
     const job = this.jobs.get(id);
@@ -110,38 +111,39 @@ export class ApprovalQueue {
     if (this.jobs.get(id)?.operation.kind !== 'download') throw Error('Download policy authority required');
     return this.start(id, false, DOWNLOAD_AUTHORITY);
   }
-  rejectAutomaticDispatch(id) {
+  rejectAutomaticDispatch(id, error) {
     const job = this.jobs.get(id);
     if (!job || this.get(id).state !== 'pending' || job.decision?.reasonCode !== 'test_server_bypass') return false;
     job.state = 'failed'; job.finishedAt = this.now();
-    job.decision = { ...job.decision, dispatchFailure: 'not_dispatched' };
+    const details = dispatchFailureDetails(error);
+    job.decision = { ...job.decision, dispatchFailure: 'not_dispatched', ...details };
     job.result = { failed: true, texts: ['Automatic execution rejected before dispatch; operation was not executed.'] };
-    try { job.persist?.(this.public(job)); this.audit({ action: 'automatic-dispatch-rejected', id, reasonCode: 'not_dispatched' }); }
+    try { job.persist?.(this.public(job)); this.audit({ action: 'automatic-dispatch-rejected', id, reasonCode: 'not_dispatched', ...details }); }
     finally { try { this.onTerminal(job); } finally { this.notifyRequest(job); } }
     return true;
   }
   start(id, automatic = false, authority) {
-    if (this.maintenance) throw Error('Maintenance in progress');
+    if (this.maintenance) dispatchRefusal('maintenance', 'maintenance', 'Maintenance in progress');
     const job = this.jobs.get(id);
-    if (!job || this.get(id).state !== 'pending') throw Error('Request is not pending');
-    if (automatic) throw Error('Server policy authority required');
+    if (!job || this.get(id).state !== 'pending') dispatchRefusal('request_state', 'request_state', 'Request is not pending');
+    if (automatic) dispatchRefusal('authority', 'authority', 'Server policy authority required');
     // Source requests use the exact private-plan guard; the fixed quoted receiver
     // contains newlines that the legacy string-command boundary rightly rejects.
-    if (job.operation.kind === 'command' && !job.operation.sourceContract) validateCommand(job.operation.command, this.classify);
-    if (job.operation.sourceContract && !this.beforeCommandStart) throw Error('Source plan verification required');
-    if (job.operation.kind === 'command') this.beforeCommandStart?.(this.public(job));
+    if (job.operation.kind === 'command' && !job.operation.sourceContract) dispatchStep('command_validation', () => validateCommand(job.operation.command, this.classify), 'invalid_command');
+    if (job.operation.sourceContract && !this.beforeCommandStart) dispatchRefusal('private_plan', 'source_plan', 'Source plan verification required');
+    if (job.operation.kind === 'command') dispatchStep('command_guard', () => this.beforeCommandStart?.(this.public(job)));
     if (authority === UPLOAD_AUTHORITY || authority === DOWNLOAD_AUTHORITY) {
-      const decision = (authority === UPLOAD_AUTHORITY ? this.beforeUploadStart : this.beforeDownloadStart)?.(this.public(job));
-      if (!decision || decision.decision !== 'execute') throw Error('File policy authority required');
-      this.setDecision(id, decision);
+      const decision = dispatchStep('file_guard', () => (authority === UPLOAD_AUTHORITY ? this.beforeUploadStart : this.beforeDownloadStart)?.(this.public(job)));
+      if (!decision || decision.decision !== 'execute') dispatchRefusal('authority', 'file_guard', 'File policy authority required');
+      dispatchStep('decision_persistence', () => this.setDecision(id, decision), 'persistence_failed');
     }
-    if (this.busy()) throw Error('A request is already executing');
-    const release = this.claimExecution();
+    if (dispatchStep('busy_check', () => this.busy())) dispatchRefusal('busy', 'busy_check', 'A request is already executing');
+    const release = dispatchStep('execution_claim', () => this.claimExecution(), 'claim_failed');
     const policyAuthority = authority === COMMAND_AUTHORITY || authority === UPLOAD_AUTHORITY || authority === DOWNLOAD_AUTHORITY;
     const approvalMode = policyAuthority || automatic ? 'automatic' : 'owner';
     try {
-      this.audit({ action: policyAuthority ? 'policy-execution-started' : automatic ? 'read-started' : 'approved', ...this.public(job), approvalMode });
-      job.approvalMode = approvalMode; job.state = 'running'; job.persist?.(this.public(job));
+      dispatchStep('start_audit', () => this.audit({ action: policyAuthority ? 'policy-execution-started' : automatic ? 'read-started' : 'approved', ...this.public(job), approvalMode }), 'audit_failed');
+      job.approvalMode = approvalMode; job.state = 'running'; dispatchStep('start_persistence', () => job.persist?.(this.public(job)), 'persistence_failed');
     } catch (error) {
       delete job.approvalMode;
       try { if (job.state === 'running') { job.state = 'unknown'; job.finishedAt = this.now(); try { this.onTerminal(job); } finally { this.notifyRequest(job); } } }

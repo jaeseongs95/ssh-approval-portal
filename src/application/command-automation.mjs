@@ -2,6 +2,7 @@ import { safetyFailureDetails } from '../domain/safety.mjs';
 import { commandLineNames } from '../domain/command-line.mjs';
 import { inspectCommand, commandDigest, validatedRisk, deniedCommand, explicitUserApproval, AUTOMATION_QUESTION_VERSION, AUTOMATION_QUESTION, AUTOMATION_PROMPT_REVISION, AUTOMATION_PROMPT_SHA256, SAFETY_PROBABILITY_BASIS } from '../domain/command-policy.mjs';
 import { assessmentContext, callerContext, sensitiveText, credentialText } from '../domain/execution-context.mjs';
+import { dispatchStep, dispatchRefusal, dispatchFailureDetails } from '../domain/dispatch-failure.mjs';
 
 /** Owner-recorded approval is evaluator input; execution authority remains a separate port. */
 export function createCommandAutomation({ queue, state, definition, classify, evaluators, audit, prepareSource, sourceBudget = { bytes: 0, count: 0 }, maxCalls = 100, budget = { used: 0 }, now = () => Date.now() }) {
@@ -9,7 +10,7 @@ export function createCommandAutomation({ queue, state, definition, classify, ev
   const sources = new Map();
   const sourcePlan = id => {
     const job = queue.get(id), plan = sources.get(id);
-    if (!job || !['pending', 'evaluating', 'running'].includes(job.state) || !plan || job.operation.sourcePlanDigest !== plan.planDigest) throw Error('Source unavailable; never reconstruct or replay');
+    if (!job || !['pending', 'evaluating', 'running'].includes(job.state) || !plan || job.operation.sourcePlanDigest !== plan.planDigest) dispatchRefusal('private_plan', 'source_plan', 'Source unavailable; never reconstruct or replay');
     return plan;
   };
   const sourceDenied = (plan, rule) => deniedCommand(plan.command + '\n' + plan.stdin + '\n' + plan.manifest.argvJson, rule);
@@ -18,19 +19,19 @@ export function createCommandAutomation({ queue, state, definition, classify, ev
     : rule.deniedCommands.length ? 'source_command_policy_review' : undefined;
   const ruleFor = policy => policy.targets.find(rule => rule.targetId === definition.id && rule.targetRevision === definition.revision && rule.profile === definition.writeProfile);
   queue.beforeCommandStart = job => {
-    definition.verify();
+    dispatchStep('target_guard', () => definition.verify(), 'target_changed');
     const policy = state.policy();
-    if (!ruleFor(policy)?.testServer && deniedCommand(job.command, ruleFor(policy))) throw Error('Command denied by current policy');
-    if (job.decision?.decision === 'execute' && policy.revision !== job.decision.policyRevision) throw Error('Command policy changed');
+    if (!ruleFor(policy)?.testServer && deniedCommand(job.command, ruleFor(policy))) dispatchRefusal('policy_denied', 'policy_guard', 'Command denied by current policy');
+    if (job.decision?.decision === 'execute' && policy.revision !== job.decision.policyRevision) dispatchRefusal('policy_changed', 'policy_guard', 'Command policy changed');
     if (job.operation.sourceContract) {
       const plan = sourcePlan(job.id), rule = ruleFor(policy);
-      if (!rule?.testServer && sourceDenied(plan, rule)) throw Error('Source denied by current policy');
-      if (!rule?.testServer && job.decision?.decision === 'execute' && sourceReview(rule)) throw Error('Source policy changed');
+      if (!rule?.testServer && sourceDenied(plan, rule)) dispatchRefusal('policy_denied', 'policy_guard', 'Source denied by current policy');
+      if (!rule?.testServer && job.decision?.decision === 'execute' && sourceReview(rule)) dispatchRefusal('policy_changed', 'policy_guard', 'Source policy changed');
     }
   };
   const decision = (job, data) => {
-    queue.setDecision(job.id, data);
-    audit({ action: 'command-decision', id: job.id, decision: data });
+    dispatchStep('decision_persistence', () => queue.setDecision(job.id, data), 'persistence_failed');
+    dispatchStep('decision_audit', () => audit({ action: 'command-decision', id: job.id, decision: data }), 'audit_failed');
   };
   async function assess(command, rule, context, policyRevision, plan) {
     if (!rule?.externalDisclosure) return { reasonCode: 'disclosure_not_enabled' };
@@ -145,13 +146,14 @@ export function createCommandAutomation({ queue, state, definition, classify, ev
         decision(job, { ...base, ...result, decision: automatic ? 'execute' : 'review' });
         queue.finishEvaluation(job.id);
         if (automatic) queue.startCommand(job.id);
-      })().catch(() => {
+      })().catch(error => {
+        const details = dispatchFailureDetails(error);
         if (queue.get(job.id)?.state === 'evaluating') {
-          try { decision(job, { ...queue.get(job.id)?.decision, policyRevision: policy.revision, decision: 'review', reasonCode: 'evaluation_failed' }); queue.finishEvaluation(job.id); }
+          try { decision(job, { ...queue.get(job.id)?.decision, policyRevision: policy.revision, decision: 'review', reasonCode: 'evaluation_failed', ...details }); queue.finishEvaluation(job.id); }
           catch { queue.abortEvaluation(job.id); }
         } else if (queue.get(job.id)?.state === 'pending') {
-          if (queue.rejectAutomaticDispatch(job.id)) return;
-          try { decision(job, { ...queue.get(job.id)?.decision, policyRevision: policy.revision, decision: 'review', reasonCode: 'execution_busy' }); } catch { queue.abortEvaluation(job.id); }
+          if (queue.rejectAutomaticDispatch(job.id, error)) return;
+          try { decision(job, { ...queue.get(job.id)?.decision, policyRevision: policy.revision, decision: 'review', reasonCode: details.dispatchFailureReason === 'busy' ? 'execution_busy' : 'execution_start_failed', ...details }); } catch { queue.abortEvaluation(job.id); }
         }
       }).finally(() => tasks.delete(job.id));
       tasks.set(job.id, task);

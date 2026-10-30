@@ -5,6 +5,7 @@ import { hash } from '../src/domain/validation.mjs';
 import { Tickets } from '../src/adapters/security/tickets.mjs';
 import { writeAll } from '../src/adapters/audit/jsonl.mjs';
 import { createCommandService } from '../src/application/commands.mjs';
+import { decisionText } from '../ui/src/decision.js';
 const classify = command => ({ class: command.startsWith('cat ') ? 'read-only' : command.startsWith('sudo ') ? 'privileged' : 'destructive' });
 test('all non-read classes reserve exactly one execution after audit, shared by web and UI', async () => {
   let finish, executions = 0; const events = [];
@@ -54,4 +55,57 @@ test('late completed downloads remain addressable for a full hour after completi
   now = job.expiresAt + 300000; complete({ failed: false, texts: [], data: { artifactId: 'synthetic' } }); await q.wait(job.id);
   now = job.expiresAt + 3600001; q.reap(); assert.equal(q.get(job.id).state, 'completed');
   now = job.expiresAt + 300000 + 3600001; q.reap(); assert.equal(q.get(job.id), null);
+});
+
+test('DISPATCH-01 new failures retain only fixed cause/stage, never exception properties, and release claims once', async t => {
+  const hostile = new Proxy({}, { get() { assert.fail('exception properties must not be read'); } });
+  const cases = [
+    ['busy', 'busy_check', q => { q.externalBusy = () => true; }],
+    ['unknown', 'busy_check', q => { q.externalBusy = () => { throw hostile; }; }],
+    ['claim_failed', 'execution_claim', q => { q.claimExecution = () => { throw hostile; }; }],
+    ['audit_failed', 'start_audit', q => { q.audit = () => { throw hostile; }; }],
+    ['unknown', 'command_guard', q => { q.beforeCommandStart = () => { throw hostile; }; }],
+    ['maintenance', 'maintenance', q => { q.maintenance = true; }],
+  ];
+  for (const [reason, stage, change] of cases) await t.test(reason + '/' + stage, async () => {
+    let effects = 0, claims = 0, releases = 0, terminals = 0; const events = [], saves = [];
+    const q = new ApprovalQueue({ classify, profile:'fixture', target:'fixture', audit:e=>events.push(e), onTerminal:()=>terminals++, claimExecution:()=>{claims++;return ()=>releases++;}, executeOperation:async()=>{effects++;return {failed:false,texts:[]};} });
+    const job = q.submit('sudo id'); q.setDecision(job.id,{decision:'execute',reasonCode:'test_server_bypass'});q.track(job.id, value=>saves.push(value));
+    change(q); let error;try{q.startCommand(job.id);assert.fail('must reject');}catch(value){error=value;}
+    const waiter = q.waitForRequest(job.id,{until:'completion'});
+    const audit = q.audit;q.audit=e=>events.push(e);assert.equal(q.rejectAutomaticDispatch(job.id,error),true);q.audit=audit;
+    const current = q.get(job.id); assert.equal(current.state,'failed');assert.equal(current.decision.dispatchFailure,'not_dispatched');
+    assert.equal(current.decision.dispatchFailureReason,reason);assert.equal(current.decision.dispatchFailureStage,stage);
+    assert.equal((await waiter).job.decision.dispatchFailureReason,reason);
+    assert.equal(saves.at(-1).decision.dispatchFailureStage,stage);assert.equal(events.at(-1).dispatchFailureReason,reason);
+    assert.equal(effects,0);assert.equal(terminals,1);assert.equal(releases,claims);assert.equal(q.active,null);
+    assert.equal(q.rejectAutomaticDispatch(job.id,hostile),false);assert.equal(terminals,1);assert.equal(releases,claims);
+    assert.ok(!JSON.stringify(current).includes('SYNTHETIC_PRIVATE'));
+    const restored = new ApprovalQueue({classify,profile:'fixture',target:'fixture',executeOperation:async()=>assert.fail('no replay')});restored.restore(current,()=>{});
+    assert.deepEqual(restored.get(job.id),current);assert.throws(()=>restored.startCommand(job.id));
+    assert.ok(decisionText(current.decision,true).length>0);
+  });
+});
+
+test('DISPATCH-02 persistence ambiguity and remote failures never become not_dispatched, claims and source release remain once', async () => {
+  for(const point of ['start_persistence','execute']){
+    let releases=0,terminals=0,effects=0;
+    const q=new ApprovalQueue({classify,profile:'fixture',target:'fixture',claimExecution:()=>()=>releases++,onTerminal:()=>terminals++,executeOperation:async()=>{effects++;throw Error('SYNTHETIC_PRIVATE_AFTER_RUNNING');}});
+    const job=q.submitOperation({kind:'command',command:'sudo id',sourceContract:'python-source-v1'});q.beforeCommandStart=()=>{};q.setDecision(job.id,{decision:'execute',reasonCode:'test_server_bypass'});
+    if(point==='start_persistence')q.track(job.id,value=>{if(value.state==='running')throw Error('SYNTHETIC_PRIVATE_PERSIST');});
+    if(point==='start_persistence')assert.throws(()=>q.startCommand(job.id));else{q.startCommand(job.id);await q.wait(job.id);}
+    const current=q.get(job.id);assert.equal(current.state,'unknown');assert.equal(current.decision.dispatchFailure,undefined);assert.equal(q.rejectAutomaticDispatch(job.id),false);
+    assert.equal(releases,1);assert.equal(terminals,1);assert.equal(effects,point==='execute'?1:0);assert.ok(!JSON.stringify(current).includes('SYNTHETIC_PRIVATE'));
+  }
+});
+
+test('DISPATCH-03 old not_dispatched records remain byte-identical and forged/unknown cause text is never reflected', () => {
+  const q=new ApprovalQueue({classify,profile:'fixture',target:'fixture',now:()=>100,executeOperation:async()=>assert.fail('no replay')});
+  const old={...q.submit('sudo id'),state:'failed',finishedAt:123,decision:{decision:'execute',reasonCode:'test_server_bypass',dispatchFailure:'not_dispatched'}};
+  let writes=0;q.restore(old,()=>writes++);const before=JSON.stringify(q.get(old.id));q.rejectAutomaticDispatch(old.id);q.listAll();q.reap();
+  assert.equal(JSON.stringify(q.get(old.id)),before);assert.equal(writes,0);assert.equal(old.decision.dispatchFailureReason,undefined);
+  const fallback=decisionText(old.decision,true);assert.equal(decisionText({...old.decision,dispatchFailureReason:'SYNTHETIC_PRIVATE'},true),fallback);
+  assert.equal(decisionText({...old.decision,dispatchFailureReason:'toString'},true),fallback);
+  assert.match(decisionText({...old.decision,dispatchFailureReason:'busy'},true),/다른 작업/);
+  assert.match(decisionText({...old.decision,dispatchFailureReason:'audit_failed'},true),/감사 기록/);
 });

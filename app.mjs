@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
+import { dispatchStep, dispatchRefusal } from './src/domain/dispatch-failure.mjs';
 import { ApprovalQueue } from './src/domain/approval-queue.mjs';
 import { createCommandService } from './src/application/commands.mjs';
 import { createFileService } from './src/application/files.mjs';
@@ -147,9 +148,9 @@ export async function createApplication({ registry, classify, executeCommand, ex
       ...(executePythonSource ? { prepareSource: preparePythonSource } : {}), sourceBudget, maxCalls: settings.jevMaxCalls, budget: automationBudget });
     const cliBinding = () => ({targetId:definition.id,targetRevision:definition.revision,profile:writeProfile});
     const checkCliPolicy = plan => {
-      definition.verify();
+      dispatchStep('target_guard', () => definition.verify(), 'target_changed');
       const rule = commandState?.policy().targets.find(rule => rule.targetId === definition.id && rule.targetRevision === definition.revision && rule.profile === writeProfile);
-      if (!rule?.testServer && deniedCommand(plan.command+'\n'+plan.stdin+'\n'+plan.manifest.argvJson,rule)) throw Error('CLI operation denied by current policy');
+      if (!rule?.testServer && deniedCommand(plan.command+'\n'+plan.stdin+'\n'+plan.manifest.argvJson,rule)) dispatchRefusal('policy_denied', 'policy_guard', 'CLI operation denied by current policy');
     };
     const checkedCliProbe = plan => {
       definition.verify();checkCliPolicy(plan);
@@ -177,15 +178,15 @@ export async function createApplication({ registry, classify, executeCommand, ex
       queue.beforeCommandStart=job=>cli.isJob(job)?cli.beforeStart(job):originalGuard?.(job);
     }
     queue.beforeUploadStart = job => {
-      definition.verify();
+      dispatchStep('target_guard', () => definition.verify(), 'target_changed');
       const policy = commandState?.policy(), rule = policy?.targets.find(rule => rule.targetId === definition.id && rule.targetRevision === definition.revision && rule.profile === writeProfile);
-      if (rule?.testServer !== true && (rule?.automaticUploads !== true || job.operation.elevate || job.operation.overwrite)) throw Error('Automatic uploads not enabled by the user');
+      if (rule?.testServer !== true && (rule?.automaticUploads !== true || job.operation.elevate || job.operation.overwrite)) dispatchRefusal('policy_denied', 'policy_guard', 'Automatic uploads not enabled by the user');
       return { decision: 'execute', reasonCode: rule?.testServer === true ? 'test_server_bypass' : 'upload_policy', policyRevision: policy.revision, targetRevision: definition.revision };
     };
     queue.beforeDownloadStart = job => {
-      definition.verify();
+      dispatchStep('target_guard', () => definition.verify(), 'target_changed');
       const policy = commandState?.policy(), rule = policy?.targets.find(rule => rule.targetId === definition.id && rule.targetRevision === definition.revision && rule.profile === writeProfile);
-      if (rule?.testServer !== true && (rule?.automaticDownloads !== true || (job.operation.elevate && rule.automaticSudo !== true))) throw Error('Automatic download not enabled by the user');
+      if (rule?.testServer !== true && (rule?.automaticDownloads !== true || (job.operation.elevate && rule.automaticSudo !== true))) dispatchRefusal('policy_denied', 'policy_guard', 'Automatic download not enabled by the user');
       return { decision: 'execute', reasonCode: rule?.testServer === true ? 'test_server_bypass' : 'download_policy', policyRevision: policy.revision, targetRevision: definition.revision };
     };
     commands = createCommandService({ queue, classify, executeCommand: checkedExecute, audit: targetAudit, target, readProfile, claimExecution, automation });

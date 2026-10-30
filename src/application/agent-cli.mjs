@@ -1,5 +1,6 @@
 import {agentCliIntent,agentCliProvider,validateAgentRelease,AGENT_CLI_CONTRACT} from '../domain/agent-cli.mjs';
 import {hash as sha256} from '../domain/validation.mjs';
+import {dispatchStep,dispatchRefusal} from '../domain/dispatch-failure.mjs';
 
 const fields=['targetId','targetRevision','profile','provider','action','releaseDigest','expectedInstallationRevision','requestKey'];
 const loginReasons=['unsafe_path','invalid_installation','timeout','output_limit','unexpected_response','check_failed'];
@@ -29,15 +30,15 @@ export function createAgentCliService({queue,journal,resolveTarget,readInstallat
  const reap=()=>{for(const [key,value] of previews)if(now()>=value.expiresAt)previews.delete(key);};
  const isJob=job=>job?.operation?.agentCliContract===AGENT_CLI_CONTRACT;
  const beforeStart=job=>{
-  open();
+  dispatchStep('cli_guard',open);
   const entry=executions.get(job?.id);
-  if(!isJob(job)||!entry||!['pending','running'].includes(job.state)||JSON.stringify(job.operation)!==entry.operationJson||job.profile!==entry.binding.profile)throw Error('CLI private execution plan unavailable; never reconstruct or replay');
-  verifyBinding(entry.binding);
-  if(now()>=entry.intent.expiresAt)throw Error('CLI plan expired');
-  checkPolicy(entry.plan,entry.binding);
+  if(!isJob(job)||!entry||!['pending','running'].includes(job.state)||JSON.stringify(job.operation)!==entry.operationJson||job.profile!==entry.binding.profile)dispatchRefusal('private_plan','cli_guard','CLI private execution plan unavailable; never reconstruct or replay');
+  dispatchStep('target_guard',()=>verifyBinding(entry.binding),'target_changed');
+  if(now()>=entry.intent.expiresAt)dispatchRefusal('plan_expired','cli_guard','CLI plan expired');
+  dispatchStep('policy_guard',()=>checkPolicy(entry.plan,entry.binding));
   if(job.decision?.reasonCode==='test_server_bypass'){
    const current=automaticDecision();
-   if(current?.reasonCode!=='test_server_bypass'||current.policyRevision!==job.decision.policyRevision)throw Error('CLI automatic policy changed');
+   if(current?.reasonCode!=='test_server_bypass'||current.policyRevision!==job.decision.policyRevision)dispatchRefusal('policy_changed','policy_guard','CLI automatic policy changed');
   }
   return entry;
  };
@@ -102,7 +103,7 @@ export function createAgentCliService({queue,journal,resolveTarget,readInstallat
    const decision=automaticDecision();
    if(decision){
     queue.setDecision(job.id,decision);
-    try{queue.startCommand(job.id);}catch{if(!queue.rejectAutomaticDispatch(job.id))throw Error('CLI automatic dispatch unavailable');}
+    try{queue.startCommand(job.id);}catch(error){if(!queue.rejectAutomaticDispatch(job.id,error))throw Error('CLI automatic dispatch unavailable');}
    }
    return queue.get(job.id);
   },

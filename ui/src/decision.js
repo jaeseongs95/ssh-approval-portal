@@ -26,6 +26,7 @@ const reasons = {
   evaluation_unavailable: ['평가 불가 — 사용자 승인 필요', 'Assessment unavailable — owner approval required'],
   evaluation_failed: ['평가 처리 실패 — 사용자 확인 필요', 'Assessment failed — owner review required'],
   execution_busy: ['자동 실행 보류 — 사용자 확인 필요', 'Automatic dispatch deferred — owner review required'],
+  execution_start_failed: ['실행 시작 조건 확인에 실패해 사용자 확인이 필요합니다.', 'Execution start checks failed; owner review is required.'],
   budget_exhausted: ['평가 한도 도달 — 사용자 승인 필요', 'Assessment limit reached — owner approval required'],
 };
 const reviewReasons = {
@@ -63,8 +64,26 @@ const recordedReasons = {
 const labels = { low_risk: ['낮은 위험', 'Low risk'], high_risk: ['높은 위험', 'High risk'], uncertain: ['판단 불가', 'Uncertain'] };
 const binaryLabels = { low_risk: ['안전', 'Safe'], high_risk: ['위험', 'Risk'] };
 const labelsFor = assessment => assessment?.probabilities && !Object.hasOwn(assessment.probabilities, 'uncertain') ? binaryLabels : labels;
+const dispatchReasons = {
+  maintenance: ['유지보수 중이어서 실행하지 않았습니다.', 'Maintenance prevented execution.'],
+  request_state: ['요청이 실행 가능한 대기 상태가 아니었습니다.', 'The request was not pending.'],
+  authority: ['실행 권한을 확인하지 못했습니다.', 'Execution authority was not verified.'],
+  invalid_command: ['명령 입력 검증을 통과하지 못했습니다.', 'Command validation failed.'],
+  private_plan: ['원본 실행 계획을 확인하지 못했습니다. 원문을 복원하거나 재실행하지 않았습니다.', 'The private execution plan was unavailable; nothing was reconstructed or replayed.'],
+  target_changed: ['대상 설정이 변경됐거나 검증되지 않았습니다.', 'The target changed or could not be verified.'],
+  policy_changed: ['실행 전에 정책이 변경됐습니다.', 'The execution policy changed.'],
+  policy_denied: ['현재 정책에서 실행을 허용하지 않았습니다.', 'The current policy did not allow execution.'],
+  plan_expired: ['실행 계획의 유효기간이 지났습니다.', 'The execution plan expired.'],
+  busy: ['다른 작업이 실행 중이어서 시작하지 않았습니다.', 'Another operation was executing.'],
+  claim_failed: ['실행 자원 확보에 실패했습니다.', 'The execution claim failed.'],
+  audit_failed: ['실행 시작 감사 기록을 남기지 못했습니다.', 'The execution admission audit failed.'],
+  persistence_failed: ['실행 시작 상태를 저장하지 못했습니다.', 'The execution admission state could not be saved.'],
+};
 export function decisionText(decision, korean) {
-  if (decision.dispatchFailure === 'not_dispatched') return korean ? '실행 조건을 충족하지 못해 실행 전에 거부됐습니다. 개별 승인 대기가 아닙니다.' : 'Rejected before execution; the operation was not dispatched and is not awaiting owner approval.';
+  if (decision.dispatchFailure === 'not_dispatched') {
+    const detail = Object.hasOwn(dispatchReasons, decision.dispatchFailureReason) ? dispatchReasons[decision.dispatchFailureReason][korean ? 0 : 1] : undefined;
+    return (detail ? detail + ' ' : '') + (korean ? '실행 조건을 충족하지 못해 실행 전에 거부됐습니다. 개별 승인 대기가 아닙니다.' : 'Rejected before execution; the operation was not dispatched and is not awaiting owner approval.');
+  }
   if (decision.decisionRuleVersion === 'command-explanation-v1' && reviewReasons[decision.reviewReason]) {
     const label = labelsFor(decision.assessment)[decision.assessment?.label]?.[korean ? 0 : 1];
     return reviewReasons[decision.reviewReason][korean ? 0 : 1] + (label && !['high_risk', 'uncertain'].includes(decision.reviewReason) ? (korean ? ' · AI 분류: ' : ' · AI classification: ') + label : '');

@@ -345,7 +345,7 @@ test('test server source busy rejection releases the private plan without owner 
  const f=await fixture(t);await f.policy({testServer:true});
  const q=f.app.targets.select('default').queue, busy=q.externalBusy;q.externalBusy=()=>true;
  const args={requestKey:'test-source-busy-key-0001',context:''};const job=await f.run(args);
- assert.equal(job.state,'failed');assert.equal(job.decision.dispatchFailure,'not_dispatched');assert.equal(f.executions.length,0);
+ assert.equal(job.state,'failed');assert.equal(job.decision.dispatchFailure,'not_dispatched');assert.equal(job.decision.dispatchFailureReason,'busy');assert.equal(job.decision.dispatchFailureStage,'busy_check');assert.equal(job.decision.dispatchFailureReason,'busy');assert.equal(job.decision.dispatchFailureStage,'busy_check');assert.equal(f.executions.length,0);
  assert.throws(()=>f.app.targets.commands.source(job.id));q.externalBusy=busy;
  assert.equal((await f.run(args)).id,job.id);assert.equal(f.executions.length,0);
 });

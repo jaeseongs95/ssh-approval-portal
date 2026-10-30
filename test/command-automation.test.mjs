@@ -268,7 +268,7 @@ test('concurrent duplicate key observes the same evaluating job and does not eva
 test('execution admission audit failure cannot dispatch a preapproved command', async t => {
   const f = await fixture(t, { audit: event => { if (event.action === 'policy-execution-started') throw Error('audit unavailable'); } });
   await f.policy({}); const job = await f.run('sudo id');
-  assert.equal(job.state, 'pending'); assert.equal(job.decision.reasonCode, 'execution_busy'); assert.equal(f.executions.length, 0);
+  assert.equal(job.state, 'pending'); assert.equal(job.decision.reasonCode, 'execution_start_failed'); assert.equal(job.decision.dispatchFailureReason, 'audit_failed'); assert.equal(job.decision.dispatchFailureStage, 'start_audit'); assert.equal(f.executions.length, 0);
   assert.equal(job.approvalMode, undefined);
 });
 
@@ -277,7 +277,7 @@ test('an evaluated command retains observed usage when execution admission fails
     audit: event => { if (event.action === 'policy-execution-started') throw Error('synthetic audit unavailable'); } });
   await f.policy({ commands: [], modelExecution: true, thresholds: { jev: threshold('jev-1.14.0') } });
   const job = await f.run('sudo id');
-  assert.equal(job.state, 'pending'); assert.equal(job.decision.reasonCode, 'execution_busy');
+  assert.equal(job.state, 'pending'); assert.equal(job.decision.reasonCode, 'execution_start_failed'); assert.equal(job.decision.dispatchFailureReason, 'audit_failed'); assert.equal(job.decision.dispatchFailureStage, 'start_audit');
   assert.equal(job.decision.decision, 'review'); assert.equal(job.approvalMode, undefined);
   assert.equal(job.decision.assessment.inputTokens, 17); assert.equal(job.decision.assessment.outputTokens, 3);
   assert.equal(f.executions.length, 0);
@@ -565,7 +565,7 @@ test('test server busy rejection is terminal and never becomes owner approval or
  const f = await fixture(t); await f.policy({ commands: [], testServer: true, externalDisclosure: false });
  const queue=f.app.targets.select('default').queue, externalBusy=queue.externalBusy; queue.externalBusy=()=>true;
  const job=await f.run('sudo id','test-server-busy-key-0001','');
- assert.equal(job.state,'failed'); assert.equal(job.decision.dispatchFailure,'not_dispatched'); assert.equal(job.approvalMode,undefined);
+ assert.equal(job.state,'failed'); assert.equal(job.decision.dispatchFailure,'not_dispatched');assert.equal(job.decision.dispatchFailureReason,'busy');assert.equal(job.decision.dispatchFailureStage,'busy_check');assert.equal(job.decision.dispatchFailureReason,'busy');assert.equal(job.decision.dispatchFailureStage,'busy_check'); assert.equal(job.approvalMode,undefined);
  assert.equal(f.executions.length,0);queue.externalBusy=externalBusy;
  assert.equal((await f.run('sudo id','test-server-busy-key-0001','')).id,job.id);assert.equal(f.executions.length,0);
  assert.throws(()=>queue.start(job.id),/not pending/);

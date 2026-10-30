@@ -9,7 +9,7 @@ export function createFileService({ store, queue, transfers, maxConcurrent = 2, 
     const job = queue.submitOperation({ kind: 'upload', artifactId: artifact.id, remotePath: artifact.remotePath,
       fileName: artifact.fileName, size: artifact.size, sha256: artifact.sha256, overwrite: artifact.overwrite, elevate: artifact.elevate,
       ...(artifact.fileTargetBound === true ? fileTargetFields(artifact) : {}) }, artifact.elevate ? 'privileged' : 'safe');
-    try { queue.startUpload(job.id); } catch { if (!queue.rejectAutomaticDispatch(job.id)) { /* Normal policy keeps the owner request. */ } }
+    try { queue.startUpload(job.id); } catch (error) { if (!queue.rejectAutomaticDispatch(job.id, error)) { /* Normal policy keeps the owner request. */ } }
     return queue.get(job.id);
   };
   return {
@@ -42,7 +42,7 @@ export function createFileService({ store, queue, transfers, maxConcurrent = 2, 
     requestDownload({ remotePath: path, elevate = false }, binding) {
       remotePath(path); guard();
       const job = queue.submitOperation({ kind: 'download', remotePath: path, elevate, ...fileTargetFields(binding) }, elevate ? 'privileged' : 'read-only');
-      try { queue.startDownload(job.id); } catch { if (!queue.rejectAutomaticDispatch(job.id)) { /* Normal policy keeps the owner request; never auto-retry. */ } }
+      try { queue.startDownload(job.id); } catch (error) { if (!queue.rejectAutomaticDispatch(job.id, error)) { /* Normal policy keeps the owner request; never auto-retry. */ } }
       return queue.get(job.id);
     },
     async beginUpload(meta, binding) { guard(); return store.begin({ ...meta, ...(binding ? { ...binding, fileTargetBound: true } : {}) }); },

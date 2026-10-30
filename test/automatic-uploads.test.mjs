@@ -64,7 +64,7 @@ test('busy execution stays pending and never retries automatically when a slot b
 }));
 
 test('execution audit failure grants no upload and is not silently retried',async()=>fixture(async f=>{
- await f.set(true);const job=await f.upload();assert.equal(job.state,'pending');assert.equal(job.approvalMode,undefined);assert.equal(f.effects.length,0);assert.throws(()=>f.app.targets.select('alpha').queue.startUpload(job.id),/audit failure/);assert.equal(f.effects.length,0);f.app.queue.deny(job.id);
+ await f.set(true);const job=await f.upload();assert.equal(job.state,'pending');assert.equal(job.approvalMode,undefined);assert.equal(f.effects.length,0);assert.throws(()=>f.app.targets.select('alpha').queue.startUpload(job.id),/Dispatch unavailable/);assert.equal(f.effects.length,0);f.app.queue.deny(job.id);
 },{auditFails:e=>e.action==='policy-execution-started'}));
 
 test('global automation off and blocked file source cannot cause automatic transmission',async()=>{
@@ -86,6 +86,6 @@ test('test server bypass covers elevated overwrite uploads only on the reviewed 
 
 test('test server upload slot rejection is terminal rather than owner pending',async()=>fixture(async f=>{
  await f.set(false,'alpha',{testServer:true});const q=f.app.targets.select('alpha').queue,busy=q.externalBusy;q.externalBusy=()=>true;
- const job=await f.upload('alpha',{overwrite:true,elevate:true});assert.equal(job.state,'failed');assert.equal(job.decision.dispatchFailure,'not_dispatched');
+ const job=await f.upload('alpha',{overwrite:true,elevate:true});assert.equal(job.state,'failed');assert.equal(job.decision.dispatchFailure,'not_dispatched');assert.equal(job.decision.dispatchFailureReason,'busy');assert.equal(job.decision.dispatchFailureStage,'busy_check');assert.equal(job.decision.dispatchFailureReason,'busy');assert.equal(job.decision.dispatchFailureStage,'busy_check');
  q.externalBusy=busy;assert.throws(()=>q.start(job.id),/not pending/);assert.equal(f.effects.length,0);
 }));
