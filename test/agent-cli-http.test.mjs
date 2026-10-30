@@ -251,7 +251,7 @@ test('test server CLI slot rejection is terminal and replay cannot start the ins
  const review=await f.api('/api/command-policy/review',{method:'POST',body:proposal});assert.equal(review.status,200);
  assert.equal((await f.api('/api/command-policy',{method:'POST',body:{...proposal,reviewToken:review.body.reviewToken,acknowledged:true}})).status,200);
  const p=await f.preview(),q=f.app.targets.select('default').queue,busy=q.externalBusy;q.externalBusy=()=>true;
- const job=await f.submit(p);assert.equal(job.state,'failed');assert.equal(job.decision.dispatchFailure,'not_dispatched');assert.equal(job.decision.dispatchFailureReason,'busy');assert.equal(job.decision.dispatchFailureStage,'busy_check');assert.equal(job.decision.dispatchFailureReason,'busy');assert.equal(job.decision.dispatchFailureStage,'busy_check');
+ const job=await f.submit(p);assert.equal(job.state,'failed');assert.equal(job.decision.dispatchFailure,'not_dispatched');assert.equal(job.decision.dispatchFailureReason,'busy');assert.equal(job.decision.dispatchFailureStage,'busy_check');
  q.externalBusy=busy;const before=f.calls.length;assert.equal((await f.submit(p)).id,job.id);assert.equal(f.calls.length,before);assert.throws(()=>q.start(job.id),/not pending/);
 });
 

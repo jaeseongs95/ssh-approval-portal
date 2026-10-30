@@ -86,6 +86,6 @@ test('test server bypass covers elevated overwrite uploads only on the reviewed 
 
 test('test server upload slot rejection is terminal rather than owner pending',async()=>fixture(async f=>{
  await f.set(false,'alpha',{testServer:true});const q=f.app.targets.select('alpha').queue,busy=q.externalBusy;q.externalBusy=()=>true;
- const job=await f.upload('alpha',{overwrite:true,elevate:true});assert.equal(job.state,'failed');assert.equal(job.decision.dispatchFailure,'not_dispatched');assert.equal(job.decision.dispatchFailureReason,'busy');assert.equal(job.decision.dispatchFailureStage,'busy_check');assert.equal(job.decision.dispatchFailureReason,'busy');assert.equal(job.decision.dispatchFailureStage,'busy_check');
+ const job=await f.upload('alpha',{overwrite:true,elevate:true});assert.equal(job.state,'failed');assert.equal(job.decision.dispatchFailure,'not_dispatched');assert.equal(job.decision.dispatchFailureReason,'busy');assert.equal(job.decision.dispatchFailureStage,'busy_check');
  q.externalBusy=busy;assert.throws(()=>q.start(job.id),/not pending/);assert.equal(f.effects.length,0);
 }));
