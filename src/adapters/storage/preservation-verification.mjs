@@ -8,6 +8,16 @@ const rowHash = row => hash(JSON.stringify(row));
 const terminal = new Set(['completed', 'failed', 'denied', 'expired', 'unknown']);
 const idPattern = /^[a-f0-9]{48}$/;
 const maxPayload = 16 * 1024 * 1024;
+export const BASELINE_PRESERVATION_CONTRACT = 'baseline-preservation-v1';
+export const PRESERVATION_COUNTERS = ['commandRequestsChecked', 'cliRequestsChecked', 'outputsChecked', 'outputPayloadsVerified', 'outputsUnavailable', 'expiredOutputsRemoved'];
+
+export function baselinePreservationAccepted(report) {
+  return report?.comparisonContract === BASELINE_PRESERVATION_CONTRACT && report.baselinePreserved === true
+    && PRESERVATION_COUNTERS.every(key => Number.isSafeInteger(report[key]) && report[key] >= 0)
+    && report.outputsAdded === 0 && report.expiredOutputsRemoved === 0
+    && report.outputsChecked === report.outputPayloadsVerified + report.outputsUnavailable
+    && report.status === (report.outputsUnavailable ? 'PARTIAL' : 'PASS');
+}
 
 function payloadHash(root, id, expectedSize) {
   if (!idPattern.test(id) || !Number.isSafeInteger(expectedSize) || expectedSize < 0 || expectedSize > maxPayload) throw Error('Invalid output payload');
@@ -63,7 +73,8 @@ export function capturePreservationSnapshot({commandState, cliState, outputs, no
 /** Strictly compare old rows; new rows are counted, never treated as old data. */
 export function comparePreservationSnapshots(before, after) {
   if (before?.version !== 1 || after?.version !== 1 || !Number.isSafeInteger(before.observedAt) || !Number.isSafeInteger(after.observedAt) || after.observedAt < before.observedAt) throw Error('Invalid preservation snapshots');
-  const report = {status: 'PASS', commandRequestsChecked: 0, cliRequestsChecked: 0, outputsChecked: 0, outputPayloadsVerified: 0, outputsUnavailable: 0, expiredOutputsRemoved: 0};
+  const report = {status: 'PASS', commandRequestsChecked: 0, cliRequestsChecked: 0, outputsChecked: 0, outputPayloadsVerified: 0, outputsUnavailable: 0, expiredOutputsRemoved: 0,
+    comparisonContract: BASELINE_PRESERVATION_CONTRACT, baselinePreserved: false, outputsAdded: 0};
   for (const [name, counter] of [['command', 'commandRequestsChecked'], ['cli', 'cliRequestsChecked']]) {
     const old = before[name], current = after[name];
     if (old && !current) throw Error('Journal presence changed');
@@ -86,5 +97,8 @@ export function comparePreservationSnapshots(before, after) {
     report.outputsChecked++;
   }
   if (report.outputsUnavailable || report.expiredOutputsRemoved) report.status = 'PARTIAL';
+  report.outputsAdded = Object.keys(after.output.rows).filter(id => !Object.hasOwn(before.output.rows, id)).length;
+  // Unavailable baseline bodies stay unavailable; this is not a claim of full payload availability.
+  report.baselinePreserved = report.expiredOutputsRemoved === 0 && report.outputsAdded === 0;
   return report;
 }

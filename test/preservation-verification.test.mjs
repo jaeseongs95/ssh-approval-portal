@@ -6,7 +6,7 @@ import {join} from 'node:path';
 import {createCommandState} from '../src/adapters/storage/command-state.mjs';
 import {createAgentCliState} from '../src/adapters/storage/agent-cli-state.mjs';
 import {CommandOutputs} from '../src/adapters/storage/command-output.mjs';
-import {capturePreservationSnapshot, comparePreservationSnapshots} from '../src/adapters/storage/preservation-verification.mjs';
+import {capturePreservationSnapshot, comparePreservationSnapshots, baselinePreservationAccepted} from '../src/adapters/storage/preservation-verification.mjs';
 
 test('real journals compare old rows and payload after restart, allowing expiry and new requests', t => {
   const root = mkdtempSync(join(tmpdir(), 'preservation-')); t.after(() => rmSync(root, {recursive: true, force: true}));
@@ -24,7 +24,8 @@ test('real journals compare old rows and payload after restart, allowing expiry 
   commandState.close(); cliState.close(); outputs.close();
   commandState = createCommandState(root); cliState = createAgentCliState(root); outputs = new CommandOutputs(root, options);
   let after = capture();
-  assert.deepEqual(comparePreservationSnapshots(before, after), {status:'PASS', commandRequestsChecked:1, cliRequestsChecked:1, outputsChecked:1, outputPayloadsVerified:1, outputsUnavailable:0, expiredOutputsRemoved:0});
+  assert.deepEqual(comparePreservationSnapshots(before, after), {status:'PASS', commandRequestsChecked:1, cliRequestsChecked:1, outputsChecked:1, outputPayloadsVerified:1, outputsUnavailable:0, expiredOutputsRemoved:0,
+    comparisonContract:'baseline-preservation-v1', baselinePreserved:true, outputsAdded:0});
   assert.ok(!JSON.stringify(comparePreservationSnapshots(before, after)).includes('private output'));
   commandState.insert({...job,id:'e'.repeat(48)}, 'new-request-key', 'f'.repeat(64));
   after = capture(); assert.equal(comparePreservationSnapshots(before, after).status, 'PASS');
@@ -51,6 +52,39 @@ test('real journals compare old rows and payload after restart, allowing expiry 
   const partial = comparePreservationSnapshots(unavailable, capture());
   assert.equal(partial.status, 'PARTIAL'); assert.equal(partial.outputsUnavailable, 1);
   commandState.close(); cliState.close(); outputs.close();
+});
+
+test('baseline preservation distinguishes unchanged unavailable bodies from expiry, additions and actual loss', () => {
+  const digest = 'a'.repeat(64), ready = '1'.repeat(48), unavailable = '2'.repeat(48);
+  const before = {version:1, observedAt:1000, command:{schema:digest, policy:digest, requests:{[ready]:digest}}, cli:null,
+    output:{schema:digest, rows:{[ready]:{row:digest, payload:digest, expiresAt:1100}, [unavailable]:{row:digest, payload:null, expiresAt:1100}}}};
+  const result = comparePreservationSnapshots(before, structuredClone(before));
+  assert.equal(result.status, 'PARTIAL'); assert.equal(result.outputsUnavailable, 1);
+  assert.equal(result.baselinePreserved, true); assert.equal(baselinePreservationAccepted(result), true);
+  for (const change of [
+    after => { after.output.rows[ready].payload = null; },
+    after => { after.output.rows[ready].payload = 'b'.repeat(64); },
+    after => { after.output.rows[unavailable].row = 'b'.repeat(64); },
+    after => { after.output.rows[unavailable].payload = digest; },
+    after => { delete after.output.rows[ready]; },
+    after => { after.output.schema = 'b'.repeat(64); },
+    after => { after.command.policy = 'b'.repeat(64); },
+    after => { after.command.schema = 'b'.repeat(64); },
+    after => { delete after.command.requests[ready]; },
+  ]) {
+    const after = structuredClone(before); change(after);
+    assert.throws(() => comparePreservationSnapshots(before, after));
+  }
+  const expired = structuredClone(before); expired.observedAt = 1200; delete expired.output.rows[ready];
+  const partial = comparePreservationSnapshots(before, expired);
+  assert.equal(partial.status, 'PARTIAL'); assert.equal(partial.expiredOutputsRemoved, 1);
+  assert.equal(partial.baselinePreserved, false); assert.equal(baselinePreservationAccepted(partial), false);
+  const added = structuredClone(before); added.output.rows['3'.repeat(48)] = {row:digest, payload:digest, expiresAt:1100};
+  const unknown = comparePreservationSnapshots(before, added);
+  assert.equal(unknown.status, 'PARTIAL'); assert.equal(unknown.outputsAdded, 1);
+  assert.equal(unknown.baselinePreserved, false); assert.equal(baselinePreservationAccepted(unknown), false);
+  for (const malformed of [{baselinePreserved:'true'}, {comparisonContract:'other'}, {outputsChecked:3}, {status:'PASS'}, {outputsAdded:1}, {expiredOutputsRemoved:1}])
+    assert.equal(baselinePreservationAccepted({...result, ...malformed}), false);
 });
 
 test('capture rejects in-flight state; policy or journal deletion cannot pass comparison', () => {

@@ -25,7 +25,7 @@ import { createVaultSecretStore } from './src/adapters/secrets/vault-kv.mjs';
 import { createCommandState } from './src/adapters/storage/command-state.mjs';
 import { openDormantCommandState } from './src/adapters/storage/offline-preservation.mjs';
 import { createMaintenanceState } from './src/adapters/storage/maintenance-state.mjs';
-import { capturePreservationSnapshot, comparePreservationSnapshots } from './src/adapters/storage/preservation-verification.mjs';
+import { capturePreservationSnapshot, comparePreservationSnapshots, BASELINE_PRESERVATION_CONTRACT, baselinePreservationAccepted } from './src/adapters/storage/preservation-verification.mjs';
 import { createCommandAutomation } from './src/application/command-automation.mjs';
 import { AUTOMATION_QUESTION, AUTOMATION_QUESTION_VERSION, COMMAND_SET_QUESTION, deniedCommand } from './src/domain/command-policy.mjs';
 import { createCommandPolicyReview } from './src/application/command-policy-review.mjs';
@@ -289,13 +289,24 @@ export async function createApplication({ registry, classify, executeCommand, ex
       if (prior) { if (prior.instance !== preservationInstance) throw Error('Preservation baseline already belongs to an earlier instance'); return; }
       maintenanceState.saveBaseline(owner, { instance: preservationInstance, snapshot: capturePreservationSnapshot({ commandState: commandState ?? dormantCommandState, cliState, outputs }) });
     },
-    compare(owner) {
+    compare(owner, contract) {
+      // A failed new comparison must never leave an earlier release authorization alive.
+      lifecycle.invalidateComparison(owner);
+      if (contract !== undefined && contract !== BASELINE_PRESERVATION_CONTRACT) throw Error('Unsupported preservation contract');
       if (!maintenanceState.owns(owner) || !queue.maintenance || queue.busy() || queue.listAll().some(job => ['pending', 'evaluating', 'running'].includes(job.state)) || commands.busy() || files.busy() || store.hasActiveWork()) throw Error('Preservation boundary unavailable');
       const baseline = maintenanceState.baseline(owner);
       if (!baseline || baseline.instance === preservationInstance) throw Error('A new service instance is required');
       const result = comparePreservationSnapshots(baseline.snapshot, capturePreservationSnapshot({ commandState: commandState ?? dormantCommandState, cliState, outputs }));
-      if (result.status === 'PASS') lifecycle.markCompared(owner);
+      if (contract === BASELINE_PRESERVATION_CONTRACT ? baselinePreservationAccepted(result) : result.status === 'PASS') lifecycle.markCompared(owner, contract ? 'baseline' : 'strict');
       return result;
+    },
+    releaseVerified(owner, contract) {
+      if (contract !== undefined && contract !== BASELINE_PRESERVATION_CONTRACT) { lifecycle.invalidateComparison(owner); throw Error('Unsupported preservation contract'); }
+      const mode = contract ? 'baseline' : 'strict';
+      // Reconcile a lost release reply only within the same instance and verification mode.
+      if (lifecycle.requireCompared(owner, mode) === 'released') return;
+      preservation.compare(owner, contract);
+      lifecycle.release(owner, true, mode);
     },
   };
   const environmentEditor = createEnvironmentEditor({ lifecycle, audit, ...(environmentTransport ? { transport: environmentTransport } : {}) });

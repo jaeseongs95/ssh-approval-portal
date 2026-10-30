@@ -6,6 +6,7 @@ import { authenticated } from '../security/tickets.mjs';
 import { createMcpAdapter } from '../mcp/server.mjs';
 import { createCapabilities } from '../presentation/capabilities.mjs';
 import { presentJob } from '../presentation/results.mjs';
+import { BASELINE_PRESERVATION_CONTRACT } from '../storage/preservation-verification.mjs';
 
 const json = (res, status, value) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }); res.end(JSON.stringify(value)); };
 
@@ -137,11 +138,16 @@ export function createProtocolAdapters({ queue, commands, files, store, lifecycl
       const single = /^\/api\/([a-f0-9]{48})$/.exec(url.pathname);
       if (req.method === 'GET' && single) { const job = queue.get(single[1]); return json(res, 200, job ? presentJob(job) : { error: 'Unknown request' }); }
       if (url.pathname === '/api/maintenance/preservation/capture') { preservation.capture(req.headers['x-maintenance-owner']); return json(res, 200, { captured: true, ownership: 'durable-v1' }); }
-      if (url.pathname === '/api/maintenance/preservation/compare') return json(res, 200, { ...preservation.compare(req.headers['x-maintenance-owner']), ownership: 'durable-v1' });
-      if (url.pathname === '/api/maintenance/capabilities') return json(res, 200, { ownership: 'durable-v1' });
+      if (url.pathname === '/api/maintenance/preservation/compare') return json(res, 200, { ...preservation.compare(req.headers['x-maintenance-owner'], req.headers['x-maintenance-preservation-contract']), ownership: 'durable-v1' });
+      if (url.pathname === '/api/maintenance/capabilities') return json(res, 200, { ownership: 'durable-v1', baselineComparison: BASELINE_PRESERVATION_CONTRACT });
       if (url.pathname === '/api/maintenance/reserve') { lifecycle.reserve(req.headers['x-maintenance-owner']); return json(res, 200, { reserved: true, ownership: 'durable-v1' }); }
       if (url.pathname === '/api/maintenance/status') return json(res, 200, { status: lifecycle.status(req.headers['x-maintenance-owner']), ownership: 'durable-v1' });
-      if (url.pathname === '/api/maintenance/release') { const required = req.headers['x-maintenance-compare-required']; if (required !== undefined && required !== '1') throw Error('Invalid comparison requirement'); lifecycle.release(req.headers['x-maintenance-owner'], required === '1'); return json(res, 200, { released: true, ownership: 'durable-v1' }); }
+      if (url.pathname === '/api/maintenance/release') {
+        const required = req.headers['x-maintenance-compare-required'], contract = req.headers['x-maintenance-preservation-contract'], owner = req.headers['x-maintenance-owner'];
+        if (required !== undefined && required !== '1' || contract !== undefined && required !== '1') throw Error('Invalid comparison requirement');
+        if (required === '1') preservation.releaseVerified(owner, contract); else lifecycle.release(owner);
+        return json(res, 200, { released: true, ownership: 'durable-v1', ...(contract ? { comparisonContract: BASELINE_PRESERVATION_CONTRACT } : {}) });
+      }
       const action = /^\/api\/([a-f0-9]{48})\/(approve|deny|download)$/.exec(url.pathname);
       if (!action) return json(res, 404, { error: 'Not found' });
       if (action[2] === 'download') return json(res, 200, { downloadUrl: capabilities.downloadLink(queue.get(action[1])) });
