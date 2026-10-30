@@ -58,7 +58,18 @@ class Files(unittest.TestCase):
         self.assertEqual(target.read_bytes(), b'old')
         link = self.root / 'link'
         link.symlink_to(target)
-        with self.assertRaises(OSError): helper.handle({'id': self.ident, 'action': 'snapshot', 'remotePath': str(link)})
+        parent, leaf = helper.parent_fd(str(link))
+        try:
+            with self.assertRaises(OSError) as source_error:
+                os.open(leaf, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+            self.assertEqual(source_error.exception.errno, errno.ELOOP)
+        finally:
+            os.close(parent)
+        with self.assertRaises(helper.FileOperationError) as refused:
+            helper.handle({'id': self.ident, 'action': 'snapshot', 'remotePath': str(link)})
+        self.assertEqual(refused.exception.code, 'UNSAFE_PATH')
+        self.assertTrue(link.is_symlink())
+        self.assertEqual(target.read_bytes(), b'old')
         with self.assertRaises(ValueError): helper.handle({**request, 'remotePath': str(self.root / '..' / 'escape')})
 
     def failure(self, request, code):
