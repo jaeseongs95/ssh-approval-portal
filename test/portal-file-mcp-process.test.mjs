@@ -53,7 +53,7 @@ test('actual process crash after effect but before handle never creates replacem
  assert.equal((await f.effects()).filter(x=>x.effect==='upload').length,1);await b.close();
 });
 
-test('production stdio entry uses verified TLS and actual owner app for fixed binary and empty PC roundtrips',{timeout:60000},async t=>{
+test('production stdio entry uses verified TLS and actual owner app for fixed roundtrips and selected binary/empty uploads',{timeout:60000},async t=>{
  const run=promisify(execFile),openssl=process.env.OWNER_CLI_TEST_OPENSSL??(process.platform==='win32'?'C:/Program Files/Git/usr/bin/openssl.exe':'openssl');
  await run(openssl,['version'],{timeout:10000,windowsHide:true}); // Required here; missing prerequisite is not a passing skip.
  const root=await mkdtemp(join(tmpdir(),'opaque-mcp-http-')),journal=join(root,'journal'),cert=join(root,'cert.pem'),key=join(root,'key.pem'),manifestPath=join(root,'manifest.json');
@@ -116,4 +116,57 @@ test('production stdio entry uses verified TLS and actual owner app for fixed bi
  assert.deepEqual(effects,['upload','download','upload','download']);assert.equal(edgeCalls.filter(x=>x.path.endsWith('/approve')||x.path.endsWith('/deny')).length,0);
  assert.equal(edgeCalls.filter(x=>x.path==='/api/files/uploads'&&x.method==='POST').length,2);assert.equal(edgeCalls.filter(x=>x.path==='/api/files/downloads'&&x.method==='POST').length,2);assert.equal(stderr.includes(token),false);
  await client.close();client=undefined;assert.equal(stderr.includes('PRIVATE-'),false);
+
+ // The explicit agent mode selects files that were never present in the fixed manifest.
+ const agentJournal=join(root,'agent-journal');await mkdir(agentJournal,{mode:0o700});
+ const selectedPairs=[];
+ for(const [i,bytes]of [Buffer.alloc(CHUNK_BYTES+13),Buffer.alloc(0)].entries()){
+  for(let n=0;n<bytes.length;n++)bytes[n]=(n*7)%251;
+  const source=join(root,'새 선택 파일 '+i+'.bin'),remotePath='/tmp/agent-selected-native-'+i+'.bin';await writeFile(source,bytes);
+  selectedPairs.push({capabilityId:String(i+5).repeat(48),source,remotePath,bytes,sha256:createHash('sha256').update(bytes).digest('hex')});
+ }
+ let agentStderr='';
+ async function connectAgent(){
+  const transport=new StdioClientTransport({command:process.execPath,args:[join(repository,'scripts/portal-file-mcp.mjs'),'--agent-uploads','--origin',origin,'--journal',agentJournal,'--cloudflared',process.execPath],cwd:root,env:{NODE_EXTRA_CA_CERTS:cert},stderr:'pipe'});
+  transport.stderr.on('data',b=>{agentStderr+=b;});
+  client=new Client({name:'owned-agent-production-stdio-test',version:'1.0.0'});await client.connect(transport);
+  const tools=(await client.listTools()).tools;
+  assert.deepEqual(tools.map(tool=>tool.name).sort(),['file_capabilities','file_status','file_upload','file_upload_resume','file_upload_select'].sort());
+  assert.equal(tools.every(tool=>tool.inputSchema.additionalProperties===false),true);
+ }
+ async function callAgent(name,args){
+  const result=await client.callTool({name,arguments:args},undefined,{timeout:15000});assert.equal(result.isError,undefined,JSON.stringify(result));
+  const encoded=JSON.stringify(result);assert.equal(encoded.includes(token),false);
+  for(const pair of selectedPairs){
+   for(let forbidden of [pair.source,pair.remotePath])for(let layer=0;layer<3;layer++){assert.equal(encoded.includes(forbidden),false);forbidden=JSON.stringify(forbidden).slice(1,-1);}
+   if(pair.bytes.length)assert.equal(encoded.includes(pair.bytes.toString('base64')),false);
+  }
+  return result.structuredContent;
+ }
+ await connectAgent();
+ for(const [i,pair]of selectedPairs.entries()){
+  const before=edgeCalls.filter(x=>x.path==='/api/files/uploads'&&x.method==='POST').length;
+  const selection={capabilityId:pair.capabilityId,localPath:pair.source,remotePath:pair.remotePath,target:target.id};
+  const selected=await callAgent('file_upload_select',selection);
+  assert.equal(selected.state,'available');assert.equal(selected.size,pair.bytes.length);assert.equal(selected.sha256,pair.sha256);
+  assert.equal(edgeCalls.filter(x=>x.path==='/api/files/uploads'&&x.method==='POST').length,before);assert.equal(remote.has(pair.remotePath),false);
+  assert.equal((await callAgent('file_capabilities',{})).capabilities.some(cap=>cap.capabilityId===pair.capabilityId),true);
+  const uploaded=await callAgent('file_upload',{capabilityId:pair.capabilityId});assert.equal(uploaded.state,'pending');assert.equal(remote.has(pair.remotePath),false);
+  assert.equal(edgeCalls.filter(x=>x.path==='/api/files/uploads'&&x.method==='POST').length,before+1);
+  const approved=await(await owner('/api/'+uploaded.requestId+'/approve',{})).json();assert.equal(approved.state,'completed');
+  assert.deepEqual(remote.get(pair.remotePath),pair.bytes);assert.equal(createHash('sha256').update(remote.get(pair.remotePath)).digest('hex'),pair.sha256);
+  assert.equal((await callAgent('file_status',{capabilityId:pair.capabilityId})).state,'completed');
+  assert.equal((await callAgent('file_upload',{capabilityId:pair.capabilityId})).requestId,uploaded.requestId);
+  await client.close();client=undefined;await connectAgent();
+  assert.equal((await callAgent('file_upload_select',selection)).sha256,pair.sha256);
+  const observed=await callAgent('file_upload',{capabilityId:pair.capabilityId});assert.equal(observed.state,'completed');assert.equal(observed.requestId,uploaded.requestId);
+  assert.equal(edgeCalls.filter(x=>x.path==='/api/files/uploads'&&x.method==='POST').length,before+1);
+  assert.equal(effects.filter(effect=>effect==='upload').length,3+i);
+ }
+ assert.deepEqual(effects,['upload','download','upload','download','upload','upload']);
+ assert.equal(edgeCalls.filter(x=>x.path==='/api/files/uploads'&&x.method==='POST').length,4);
+ assert.equal(edgeCalls.filter(x=>x.path==='/api/files/downloads'&&x.method==='POST').length,2);
+ assert.equal(edgeCalls.filter(x=>x.path.endsWith('/approve')||x.path.endsWith('/deny')).length,0);
+ await client.close();client=undefined;assert.equal(agentStderr.includes(token),false);
+ for(const pair of selectedPairs)assert.equal(agentStderr.includes(pair.source),false);
 });

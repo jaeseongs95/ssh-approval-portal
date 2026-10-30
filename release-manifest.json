@@ -1,6 +1,6 @@
 {
   "version": "1.6.4",
-  "status": "release",
+  "status": "candidate-pending-live-host-verification",
   "runtime": "Node.js 24",
   "files": [
     {
@@ -115,8 +115,8 @@
     },
     {
       "path": "docs/agent-upload.ko.md",
-      "size": 19599,
-      "sha256": "1fcfbbd19ed28ce7a9e4816c634883c880f42bb46ddf5aa71c8d47eb5ac00b05"
+      "size": 22166,
+      "sha256": "f24bba11c8425a7cc5f1beaa2320092d4dbee6706d72e3dccae3bf0ab2b4bb8c"
     },
     {
       "path": "docs/aik-ags-provisional.ko.md",
@@ -415,8 +415,8 @@
     },
     {
       "path": "scripts/portal-file-mcp.mjs",
-      "size": 5059,
-      "sha256": "264f8c2305ce0106c9c7dc4b922a04af190c28e82191bbaa82d28f912c96fa6f"
+      "size": 6473,
+      "sha256": "3b1f4188b755d5dcf415af04fe1c6c4dbbb856aff942206739d0443cd743c3e8"
     },
     {
       "path": "scripts/portal.py",
@@ -494,9 +494,14 @@
       "sha256": "f554981d303dcbe83fa20122a6034596e49bbb399ed8228bf02af3d63dbcb7c1"
     },
     {
+      "path": "src/adapters/cli/agent-file-forwarder.mjs",
+      "size": 5940,
+      "sha256": "74c6af433c00e49a7f2e62175661aa1275f88e65ed3cf32193674972bb200bc2"
+    },
+    {
       "path": "src/adapters/cli/file-forwarder.mjs",
-      "size": 15045,
-      "sha256": "f6b59cbe0f14c48992bdedd4f160759e711e91e99d524d55abd23bdbf457b436"
+      "size": 15052,
+      "sha256": "00ce7e5371819386261b0cab4ad356d88cfcccb459a94b819ae3b5b39e61051f"
     },
     {
       "path": "src/adapters/cli/local-files.mjs",
@@ -852,6 +857,21 @@
       "path": "test/agent-cli.test.mjs",
       "size": 6197,
       "sha256": "dbeaf0f2c5d07fcc4bf1b3cbfc77ff1f364347b473ca1303e0dd92cfd5991b3b"
+    },
+    {
+      "path": "test/agent-file-forwarder.test.mjs",
+      "size": 13499,
+      "sha256": "6692845f0eb8c0ed6e78a093aa45265b6b3ebc7621b045abe4c96b3703029121"
+    },
+    {
+      "path": "test/agent-file-mcp-process.test.mjs",
+      "size": 6238,
+      "sha256": "ade4d699fc4989586fa1263472818e8ed9f4b8cfe6495c3065fb14c3181e0dbc"
+    },
+    {
+      "path": "test/agent-file-mcp.fixture.mjs",
+      "size": 2839,
+      "sha256": "de0e75c76bfe9a4c61dd52d08588136b92bc0f69d69f7c8a6633196f0d5790a4"
     },
     {
       "path": "test/agent-upload.test.mjs",
@@ -1360,8 +1380,8 @@
     },
     {
       "path": "test/portal-file-mcp-process.test.mjs",
-      "size": 13345,
-      "sha256": "f228a884db547b3866608793804cf40324b8bf5de2f79228032d586cf602aa66"
+      "size": 17966,
+      "sha256": "59520dda121163ceb1a2a1bbb15653861e826356cec244cddcdc93b0652bcf80"
     },
     {
       "path": "test/portal-file-mcp.fixture.mjs",
