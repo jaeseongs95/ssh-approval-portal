@@ -1,0 +1,186 @@
+"""실패 상태를 확인한 담당자만 별도 제출하는 한 번의 코드·ENV 복구."""
+import hashlib
+import importlib.util
+import json
+import os
+from pathlib import Path
+import re
+import socket
+import sqlite3
+import stat
+import time
+
+ROOT = Path('/var/lib/ssh-mcp/maintenance-jobs/test-request-capacity-20261030-r1')
+UNIT = 'test-request-capacity-20261030-r1.service'
+
+
+def private(path):
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(fd, 'rb') as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_gid != 0 or stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1:
+            raise RuntimeError('private recovery file metadata mismatch')
+        return stream.read()
+
+
+def service_state(run, name):
+    raw = run(['/usr/bin/systemctl', 'show', name, '-p', 'LoadState', '-p', 'ActiveState', '-p', 'SubState', '-p', 'MainPID', '-p', 'InvocationID'])
+    state = dict(line.split('=', 1) for line in raw.splitlines() if '=' in line)
+    required = ('LoadState', 'ActiveState', 'SubState', 'MainPID', 'InvocationID')
+    if any(key not in state for key in required) or state['LoadState'] != 'loaded' or not state['MainPID'].isdigit():
+        raise RuntimeError('unidentified service state')
+    alive = state['ActiveState'] == 'active' and state['SubState'] == 'running' and int(state['MainPID']) > 0 and re.fullmatch('[a-f0-9]{32}', state['InvocationID'])
+    stopped = (state['ActiveState'], state['SubState']) in (('failed', 'failed'), ('inactive', 'dead')) and int(state['MainPID']) == 0 and (state['InvocationID'] == '' or re.fullmatch('[a-f0-9]{32}', state['InvocationID']))
+    if not (alive or stopped):
+        raise RuntimeError('unidentified or changing service state')
+    return state
+
+
+def offline_reserved(scope, owner):
+    # HTTP가 없는 확정 정지 상태에서만 기존 durable reservation을 읽는다.
+    spec = importlib.util.spec_from_file_location('recovery_settings', scope['NEW'] / 'scripts/settings_contract.py')
+    settings = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(settings)
+    root = Path(settings.read_env(scope['ENV']).get('BRIDGE_TRANSFER_ROOT', '/var/lib/ssh-mcp/transfers'))
+    path = root / 'maintenance.sqlite'
+    if not root.is_absolute() or root.is_symlink():
+        raise RuntimeError('unsafe maintenance state directory')
+    before = path.lstat()
+    if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1 or before.st_mode & 0o077 or before.st_uid != root.stat().st_uid:
+        raise RuntimeError('unsafe maintenance state')
+    connection = sqlite3.connect(path.as_uri() + '?mode=ro', uri=True, timeout=2)
+    try:
+        row = connection.execute('SELECT owner_hash,baseline FROM reservation WHERE id=1').fetchone()
+        if row is None or row[0] != hashlib.sha256(owner.encode('ascii')).hexdigest() or not row[1] or len(row[1].encode('utf-8')) > 4 * 1024 * 1024:
+            raise RuntimeError('offline maintenance ownership or baseline mismatch')
+        baseline = json.loads(row[1])
+        if baseline.get('snapshot', {}).get('version') != 1:
+            raise RuntimeError('offline maintenance baseline invalid')
+    finally:
+        connection.close()
+    after = path.lstat()
+    identity = lambda info: (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns, info.st_mode, info.st_uid, info.st_gid, info.st_nlink)
+    if identity(before) != identity(after):
+        raise RuntimeError('maintenance state drifted')
+
+
+def main():
+    if os.geteuid() != 0 or socket.gethostname() != 'ip-172-26-6-103':
+        raise RuntimeError('root or hostname mismatch')
+    st = ROOT.lstat()
+    if not stat.S_ISDIR(st.st_mode) or st.st_uid != 0 or st.st_gid != 0 or stat.S_IMODE(st.st_mode) != 0o700:
+        raise RuntimeError('private job directory metadata mismatch')
+    cfg_raw = private(ROOT / 'config.json')
+    if hashlib.sha256(cfg_raw).hexdigest() != '<CONFIG_SHA>':
+        raise RuntimeError('fixed config mismatch')
+    cfg = json.loads(cfg_raw)
+    if any('<' in str(value) for value in cfg.values()):
+        raise RuntimeError('미고정 입력: 복구 실행 금지')
+    act = private(ROOT / 'activate.py')
+    if hashlib.sha256(act).hexdigest() != '<ACTIVATE_SHA>':
+        raise RuntimeError('fixed activation runner mismatch')
+    scope = {'__name__': 'recovery_activation', '__file__': str(ROOT / 'activate.py')}
+    exec(compile(act, str(ROOT / 'activate.py'), 'exec'), scope)
+    owner = private(ROOT / 'owner').decode('ascii')
+    if not re.fullmatch('[a-f0-9]{64}', owner):
+        raise RuntimeError('invalid retained owner')
+    receipt = json.loads(private(ROOT / 'receipt.json'))
+    if receipt.get('status') != 'NEEDS_REVIEW' or receipt.get('phase') not in ('env', 'activate', 'restart', 'compare', 'release-verified'):
+        raise RuntimeError('상태가 알려진 전환 실패에만 사용; 원격 작업 종료를 먼저 확인')
+    spec = importlib.util.spec_from_file_location('update_release', scope['SRC'] / 'scripts/update_release.py')
+    updater = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(updater)
+    with updater.installer_lock('/var/lib/ssh-mcp/.portal-install.lock'):
+        old, new, active = scope['OLD'], scope['NEW'], scope['ACTIVE']
+        run, node = scope['run'], scope['NODE']
+        job_state = service_state(run, UNIT)
+        if int(job_state['MainPID']) != 0 or job_state['ActiveState'] not in ('inactive', 'failed'):
+            raise RuntimeError('original activation is active or unknown')
+        prior_service = service_state(run, 'ssh-approval-bridge.service')
+        if not active.is_symlink() or os.readlink(active) not in (str(old), str(new)):
+            raise RuntimeError('unexpected active link')
+        for release, key in ((old, 'old_manifest'), (new, 'new_manifest')):
+            if scope['sha256'](release / 'release-manifest.json') != cfg[key]:
+                raise RuntimeError('release manifest drifted')
+            run([node, str(release / 'scripts/verify.mjs'), str(release)])
+        if prior_service['ActiveState'] == 'active':
+            if run([node, str(new / 'scripts/maintenance.mjs'), 'status'], stdin=owner).strip() != 'reserved':
+                raise RuntimeError('예약 소유 상태가 불명확하거나 해제됨: 자동 복구 금지')
+        else:
+            offline_reserved(scope, owner)
+        before = private(ROOT / 'env.before')
+        if hashlib.sha256(before).hexdigest() != cfg['env_sha']:
+            raise RuntimeError('old ENV backup mismatch')
+        after = scope['capacity_bytes'](before)
+        managed_before = {key: tuple(value) if value is not None else None for key, value in json.loads(private(ROOT / 'managed.before.json')).items()}
+        current = scope['snap_managed']()
+        env = str(scope['ENV'])
+        if any(current[key] != value for key, value in managed_before.items() if key != env):
+            raise RuntimeError('unrelated managed files changed')
+        raw = scope['read_env']()
+        expected_env = managed_before[env] if raw == before else (hashlib.sha256(after).hexdigest(), *managed_before[env][1:]) if raw == after else None
+        if expected_env is None or current[env] != expected_env:
+            raise RuntimeError('ENV contains another change; no overwrite')
+        if service_state(run, UNIT) != job_state or service_state(run, 'ssh-approval-bridge.service') != prior_service:
+            raise RuntimeError('service state changed before recovery claim')
+        fd = os.open(ROOT / 'recovery.claim', os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        os.close(fd)
+        phase = 'restore-env'
+        try:
+            if raw != before:
+                scope['replace_env'](after, before, expected_env)
+            def unchanged():
+                if scope['snap_managed']() != managed_before:
+                    raise RuntimeError('managed state changed during recovery')
+            phase = 'restore-code'
+            if os.readlink(active) == str(new):
+                updater.activate_release(active, new, old, unchanged)
+            unchanged()
+            previous = prior_service['InvocationID']
+            phase = 'restart-old'
+            run(['/usr/bin/systemctl', 'restart', 'ssh-approval-bridge.service'])
+            recovered = None
+            for _ in range(30):
+                try:
+                    instance = scope['instance_id']()
+                    if instance != previous:
+                        scope['health'](True, cfg['old_version'])
+                        recovered = instance
+                        break
+                except Exception:
+                    pass
+                time.sleep(1)
+            if not recovered:
+                raise RuntimeError('old release not healthy in maintenance mode')
+            phase = 'compare-old'
+            output = run([node, str(new / 'scripts/maintenance.mjs'), 'compare'], stdin=owner)
+            lines = output.strip().splitlines()
+            if len(lines) != 2 or lines[1] != 'Maintenance compare confirmed':
+                raise RuntimeError('strict old comparison not confirmed')
+            comparison = json.loads(lines[0])
+            if comparison.get('outputsUnavailable') != 0 or comparison.get('expiredOutputsRemoved') != 0:
+                raise RuntimeError('strict old comparison incomplete')
+            unchanged()
+            if scope['instance_id']() != recovered:
+                raise RuntimeError('instance changed before verified release')
+            phase = 'release-verified-old'
+            run([node, str(new / 'scripts/maintenance.mjs'), 'release-verified'], stdin=owner)
+            scope['health'](False, cfg['old_version'])
+            unchanged()
+            if scope['instance_id']() != recovered or os.readlink(active) != str(old):
+                raise RuntimeError('recovered instance or active link changed')
+            result = {'status': 'ROLLED_BACK_VERIFIED', 'phase': 'done', 'oldRelease': str(old), 'instance': recovered, 'comparison': comparison, 'envSha256': cfg['env_sha']}
+        except Exception as error:
+            result = {'status': 'RECOVERY_NEEDS_REVIEW', 'phase': phase, 'errorType': type(error).__name__, 'error': str(error) if type(error) is RuntimeError else None}
+            raise
+        finally:
+            fd = os.open(ROOT / 'recovery-receipt.json', os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(fd, 'w', encoding='utf-8') as stream:
+                json.dump(result, stream)
+                stream.write('\n')
+                stream.flush()
+                os.fsync(stream.fileno())
+
+
+if __name__ == '__main__':
+    main()

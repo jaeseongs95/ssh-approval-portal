@@ -69,3 +69,5 @@ jobs:
           persist-credentials: false
       - name: 배포 ENV 실제 POSIX 임시파일 검증
         run: sudo python3 -X utf8 -B test/capacity-env/test_env_change.py -v
+      - name: 복구 실행기 실제 임시 ENV와 읽기전용 SQLite 검증
+        run: sudo python3 -X utf8 -B test/capacity-env/test_recovery.py -v
