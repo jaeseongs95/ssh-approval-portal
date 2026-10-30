@@ -38,6 +38,7 @@ FIELDS = {
     'BRIDGE_UPLOAD_SOURCE_HOSTS': ('업로드 허용 도메인', 'text'),
     'BRIDGE_TRANSFER_MAX_BYTES': ('파일당 최대 바이트', 'number'),
     'BRIDGE_TRANSFER_BUDGET_BYTES': ('전송 보관 총 바이트', 'number'),
+    'BRIDGE_REQUEST_CAPACITY': ('대상별 요청 보관 개수 한도 (100~1000)', 'number'),
     'BRIDGE_COMMAND_AUTOMATION': ('명령 자동승인 설정 활성화', 'boolean'),
     'BRIDGE_JEV_ENABLED': ('Jev 평가 사용', 'boolean'),
     'BRIDGE_JEV_MAX_CALLS': ('Jev 호출 한도', 'number'),

@@ -1,6 +1,6 @@
 {
   "version": "1.6.4",
-  "status": "release",
+  "status": "candidate-pending-live-host-verification",
   "runtime": "Node.js 24",
   "files": [
     {
@@ -30,8 +30,8 @@
     },
     {
       "path": "app.mjs",
-      "size": 26526,
-      "sha256": "be1b862e3e077492b85cb1b3734683a7e0044db0b236dee1891c9eb7e2751dd3"
+      "size": 26569,
+      "sha256": "b0ef999452e341ba5763ae37f5b4f929cefd01fd5d7b58bec8b775f587c9e8ec"
     },
     {
       "path": "bridge.mjs",
@@ -40,8 +40,8 @@
     },
     {
       "path": "config/bridge.env.example",
-      "size": 2345,
-      "sha256": "2c1548feebaa68eaffd38975f72f1946a397b14e3424a22861dd52de149493fa"
+      "size": 2613,
+      "sha256": "44b1e3cedf137d2dea77b9a02aa433eb9d17a535e977dae50ed91cd965076664"
     },
     {
       "path": "config/config.example.toml",
@@ -55,8 +55,8 @@
     },
     {
       "path": "config/settings-contract.json",
-      "size": 6317,
-      "sha256": "830684562ff9883d8e96841c29278da4eff05c1af45d3399ae780e30e62b1509"
+      "size": 6382,
+      "sha256": "b6aa3055b5b9618f44399cfb0bb2a62243202c209074b101cb29f0322452b3ec"
     },
     {
       "path": "config/ssh-approval-bridge.service",
@@ -160,8 +160,8 @@
     },
     {
       "path": "docs/environment-editor.md",
-      "size": 3184,
-      "sha256": "617f2e625641cce28247348d04c95654376d673dfb1fce9b673b8cd6d20334a4"
+      "size": 3918,
+      "sha256": "d945d8509725e9d315414707975ea39f97de698b7022705d0825e025b3edffe4"
     },
     {
       "path": "docs/install-workflow.ko.md",
@@ -215,8 +215,8 @@
     },
     {
       "path": "helper/environment-helper.py",
-      "size": 16100,
-      "sha256": "b690956816519a87dcd7fadcb87e17479557961a2edf245f74a706a16da01581"
+      "size": 16195,
+      "sha256": "35f7ec988fcf2027067826496a1e8880c5e1fc8d73736f0b2a8bec06ff4dee51"
     },
     {
       "path": "helper/file-helper.py",
@@ -520,8 +520,8 @@
     },
     {
       "path": "src/adapters/config/settings.mjs",
-      "size": 5351,
-      "sha256": "318c34427167acf91f946034fcad117013ff5b5531a3beeb05b0f01e2c2ba7dd"
+      "size": 5702,
+      "sha256": "e21c0bf3e3b461d7506f7e5474c772688d881219cd861f61ccb788c63febfdc1"
     },
     {
       "path": "src/adapters/config/targets.mjs",
@@ -755,8 +755,8 @@
     },
     {
       "path": "src/domain/approval-queue.mjs",
-      "size": 13401,
-      "sha256": "dd7b30a4c65fa507a6084afa957ebdc8681a64ac399723b1813644c80de2a1f4"
+      "size": 13623,
+      "sha256": "ad564fe70c0848c82cbcfef2ead02e244a871dd77405aee2b8470d7efe4ad025"
     },
     {
       "path": "src/domain/automation-risk-question.json",
@@ -1290,8 +1290,8 @@
     },
     {
       "path": "test/multi-target.test.mjs",
-      "size": 14312,
-      "sha256": "10a9ea489eac09c1f14273612084b51349a06ebfaf6432ea15b892d08201f25e"
+      "size": 14416,
+      "sha256": "5253d741b5ac14e5c8d38a7a7f2297f23610fd536f2eb5d0742a43d2da48006b"
     },
     {
       "path": "test/non-cloudflare-container-test.sh",
@@ -1392,6 +1392,11 @@
       "path": "test/release-version.test.mjs",
       "size": 2224,
       "sha256": "9a6f5b472fdd55b4033a0e9095c6215f23cd57f59cad4fd98a10da2863b5d789"
+    },
+    {
+      "path": "test/request-capacity.test.mjs",
+      "size": 5986,
+      "sha256": "8d077c76fb779c18867466990968afa685d13deecd55b967dab7ce0707745c58"
     },
     {
       "path": "test/request-safety-http.test.mjs",

@@ -134,7 +134,7 @@ export async function createApplication({ registry, classify, executeCommand, ex
         return { targetId: definition.id, targetRevision: definition.revision, profile: writeProfile };
       }, () => requireDispatch(id))); } catch (error) { outputs.abandon(reservation); throw error; }
     };
-    const queue = new ApprovalQueue({ classify, target, profile: writeProfile, audit: targetAudit, identity, claimExecution,
+    const queue = new ApprovalQueue({ classify, target, profile: writeProfile, requestCapacity: settings.requestCapacity, audit: targetAudit, identity, claimExecution,
       externalBusy: () => (commands?.reading() ?? false) || cliProbes.size > 0 || claimExecution.busy(),
       executeOperation: async (operation, id) => {
         await requireDispatch(id);

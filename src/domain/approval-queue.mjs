@@ -13,12 +13,13 @@ const DOWNLOAD_AUTHORITY = Symbol('server-download-policy');
 /** Approval policy and in-process execution claims; transports and durable audit are injected. */
 export class ApprovalQueue {
   /**
-   * @param {{classify:(command:string)=>{class:string}, executeOperation:(operation:Object,id:string)=>Promise<OperationOutcome>, profile:string, target:string, audit?:(event:Object)=>void, now?:()=>number, idFactory?:()=>string, onTerminal?:(job:Object)=>void, externalBusy?:()=>boolean}} ports
+   * @param {{classify:(command:string)=>{class:string}, executeOperation:(operation:Object,id:string)=>Promise<OperationOutcome>, profile:string, target:string, requestCapacity?:number, audit?:(event:Object)=>void, now?:()=>number, idFactory?:()=>string, onTerminal?:(job:Object)=>void, externalBusy?:()=>boolean}} ports
    * audit is synchronous and may throw: a failed admission record never authorizes execution.
    */
-  constructor({ classify, executeOperation, profile, target, audit = () => {}, now = () => Date.now(), idFactory = () => randomBytes(24).toString('hex'), onTerminal = () => {}, externalBusy = () => false, identity, claimExecution = () => () => {} }) {
+  constructor({ classify, executeOperation, profile, target, requestCapacity = 100, audit = () => {}, now = () => Date.now(), idFactory = () => randomBytes(24).toString('hex'), onTerminal = () => {}, externalBusy = () => false, identity, claimExecution = () => () => {} }) {
     if (typeof profile !== 'string' || !profile) throw Error('Approval profile is required');
-    Object.assign(this, { classify, executeOperation, profile, target, audit, now, idFactory, onTerminal, externalBusy });
+    if (!Number.isSafeInteger(requestCapacity) || requestCapacity < 100 || requestCapacity > 1000) throw Error('Invalid request capacity');
+    Object.assign(this, { classify, executeOperation, profile, target, requestCapacity, audit, now, idFactory, onTerminal, externalBusy });
     this.identity = identity && Object.freeze({ ...identity }); this.claimExecution = claimExecution;
     this.jobs = new Map(); this.active = null; this.maintenance = false;
     this.requestWaiters = new Set();
@@ -31,7 +32,7 @@ export class ApprovalQueue {
   submitOperation(operation, commandClass = 'privileged', { expiresAt } = {}) {
     if (this.maintenance) throw Error('Maintenance in progress');
     this.reap();
-    if (this.jobs.size >= 100) throw Error('Queue full');
+    if (this.jobs.size >= this.requestCapacity) throw Error('Queue full');
     // Operations contain flat primitives; retain no caller-owned mutable object.
     const op = Object.freeze({ ...operation });
     const createdAt = this.now();

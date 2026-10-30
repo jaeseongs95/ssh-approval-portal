@@ -18,7 +18,7 @@ async function fixture(options={}) {
   const root=await mkdtemp(join(tmpdir(),'ssh-multi-')),calls=[],events=[];
   const entries=['alpha','beta','gamma','offline'].map(id=>({id,displayName:`이름 ${id}`,readProfile:`${id}-read`,writeProfile:`${id}-write`,credentialRevision:options.credentialRevision??'v1',enabled:id!=='offline'}));
   const profiles=new Map(entries.flatMap(entry=>[entry.readProfile,entry.writeProfile].map(name=>[name,{name,host:`${entry.id}.example.test`,port:22,user:'synthetic',readOnly:name.endsWith('-read'),trustedHostKey:'SHA256:'+entry.id}])));
-  const env={BRIDGE_MCP_TOKEN:'fixture-mcp',BRIDGE_ADMIN_TOKEN:'fixture-admin',BRIDGE_ADMIN_ORIGIN:'https://admin.example.test',BRIDGE_UI_TICKET_KEY:'b'.repeat(64),BRIDGE_UI_ENABLED:'true',BRIDGE_TARGETS:JSON.stringify(entries),BRIDGE_TRANSFER_MAX_BYTES:'64',BRIDGE_TRANSFER_BUDGET_BYTES:'128',...(options.noDefault?{}:{BRIDGE_DEFAULT_TARGET:'alpha'})};
+  const env={BRIDGE_MCP_TOKEN:'fixture-mcp',BRIDGE_ADMIN_TOKEN:'fixture-admin',BRIDGE_ADMIN_ORIGIN:'https://admin.example.test',BRIDGE_UI_TICKET_KEY:'b'.repeat(64),BRIDGE_UI_ENABLED:'true',BRIDGE_TARGETS:JSON.stringify(entries),BRIDGE_TRANSFER_MAX_BYTES:'64',BRIDGE_TRANSFER_BUDGET_BYTES:'128',...(options.requestCapacity?{BRIDGE_REQUEST_CAPACITY:options.requestCapacity}:{}),...(options.noDefault?{}:{BRIDGE_DEFAULT_TARGET:'alpha'})};
   let closed=false;
   const app=await createApplication({registry:{getProfile:name=>profiles.get(name),closeAll:async()=>{closed=true;}},classify:command=>({class:command==='id'?'read-only':'privileged'}),
     executeCommand:async(profile,command)=>{calls.push({profile,command});return options.execute?options.execute(profile,command):{failed:false,texts:[profile]};},audit:event=>{if(options.auditFails?.(event))throw Error('synthetic audit failure');events.push(event);},transferRoot:root,env,uiHtml:'<html>fixture</html>',uploadSource:options.source});
@@ -79,7 +79,7 @@ test('file bootstrap, staged bytes, approval tickets and cleanup remain target-o
 });
 
 test('global execution slots, per-target serialization, audit failures, configuration fencing and shutdown drain',async()=>{
- const gate=deferred();const f=await fixture({execute:async()=>{await gate.promise;return {failed:false,texts:['done']};}});try {
+ const gate=deferred();const f=await fixture({requestCapacity:'101',execute:async()=>{await gate.promise;return {failed:false,texts:['done']};}});try {
   const a=f.app.targets.commands.read('id','alpha'),b=f.app.targets.commands.read('id','beta');await until(()=>f.calls.length===2);
   await assert.rejects(f.app.targets.commands.read('id','alpha'));await assert.rejects(f.app.targets.commands.read('id','gamma'));assert.equal(f.calls.length,2);
   const download=f.app.targets.files.requestDownload({target:'gamma',remotePath:'/tmp/read.bin',elevate:false});assert.equal(download.state,'pending');assert.ok(f.app.queue.list().some(j=>j.id===download.id),'A deferred download is visible for owner review');assert.throws(()=>f.app.queue.start(download.id));f.app.queue.deny(download.id);

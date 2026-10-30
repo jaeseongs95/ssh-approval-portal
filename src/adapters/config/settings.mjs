@@ -45,6 +45,8 @@ export function parseSettings(env) {
   if (!/^[A-Za-z0-9_-]*$/.test(prefix)) throw Error('Invalid UI namespace');
   const maxBytes = Number(value('BRIDGE_TRANSFER_MAX_BYTES')), budget = Number(value('BRIDGE_TRANSFER_BUDGET_BYTES'));
   if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0 || maxBytes > MAX_BYTES || !Number.isSafeInteger(budget) || budget < maxBytes) throw Error('Invalid staging limits');
+  const rawRequestCapacity = value('BRIDGE_REQUEST_CAPACITY'), requestCapacity = Number(rawRequestCapacity);
+  if (typeof rawRequestCapacity !== 'string' || !/^[1-9][0-9]*$/.test(rawRequestCapacity) || !Number.isSafeInteger(requestCapacity) || requestCapacity < 100 || requestCapacity > 1000) throw Error('Invalid request capacity');
   if (!['true', 'false'].includes(value('BRIDGE_JEV_ENABLED'))) throw Error('Invalid Jev switch');
   if (!['true', 'false'].includes(value('BRIDGE_COMMAND_AUTOMATION'))) throw Error('Invalid command automation switch');
   const jevMaxCalls = Number(value('BRIDGE_JEV_MAX_CALLS'));
@@ -58,7 +60,7 @@ export function parseSettings(env) {
   if (vaultOrigin) validateOrigin(vaultOrigin);
   if (typeof vaultMount !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(vaultMount)) throw Error('Configure a flat Vault mount');
   if (typeof vaultTokenRef !== 'string' || (vaultTokenRef && parseSecretReference(vaultTokenRef).provider !== 'local-file')) throw Error('Configure a local-file Vault token reference');
-  return Object.freeze({ mcpToken, adminToken, adminOrigin,
+  return Object.freeze({ mcpToken, adminToken, adminOrigin, requestCapacity,
     targets: parseTargets(value('BRIDGE_TARGETS'), value('BRIDGE_DEFAULT_TARGET')),
     jevEnabled: value('BRIDGE_JEV_ENABLED') === 'true', jevMaxCalls,
     commandAutomation: value('BRIDGE_COMMAND_AUTOMATION') === 'true',
