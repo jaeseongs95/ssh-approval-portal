@@ -109,8 +109,8 @@ const sourceRefusals = new Map([
 export const refused = error => {
   const source = sourceRefusals.get(error?.code);
   if (source) return { isError: true,
-    content: [{ type: 'text', text: `${error.code}: ${source.text} 요청은 등록되지 않았습니다.` }],
-    structuredContent: { error_code: error.code, inputField: source.inputField, ruleId: source.ruleId, stage: 'source_admission', requestSubmitted: false } };
+    content: [{ type: 'text', text: JSON.stringify({ error_code: error.code, inputField: source.inputField, ruleId: source.ruleId,
+      stage: 'source_admission', requestSubmitted: false, message: `${source.text} 요청은 등록되지 않았습니다.` }) }] };
   return { isError: true, content: [{ type: 'text', text: contextRefusals.has(error?.code)
     ? `${error.code}: ${contextRefusals.get(error.code)} No command was submitted.`
     : 'Request refused or failed. Check authentication, state, limits and permissions.' }] };
