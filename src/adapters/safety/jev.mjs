@@ -32,12 +32,12 @@ export function createJevAssessor({ apiKey, fetchImpl = globalThis.fetch, timeou
       try { return await Promise.race([request, new Promise((_, reject) => { timer = setTimeout(() => { controller.abort(); if (reader) void reader.cancel().catch(() => {}); reject(Error('Models unavailable')); }, 5000); })]); }
       finally { clearTimeout(timer); controller.abort(); }
     },
-    async assess(input) {
+    async assess(input, { sourcePlan } = {}) {
       if (typeof apiKey !== 'string' || !apiKey.trim()) return unavailable('not_configured');
       if (admission.busy) return unavailable('busy');
       let state;
       try {
-        state = safetyInput(input);
+        state = safetyInput(input, { sourcePlan: inputKind === 'execution' ? sourcePlan : undefined });
         if (inputKind === 'execution') {
           const approval = explicitUserApproval(state.command, input.preapprovedCommands);
           if (!input.userApproval || Object.keys(input.userApproval).length !== 4

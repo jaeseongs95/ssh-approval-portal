@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
+import { PYTHON_SOURCE_MAX_BYTES } from '../../contracts/ports.mjs';
+export { PYTHON_SOURCE_MAX_BYTES } from '../../contracts/ports.mjs';
 
 export const PYTHON_SOURCE_CONTRACT = 'python-source-v1';
-export const PYTHON_SOURCE_MAX_BYTES = 16_384;
 export const PYTHON_HELPER_MAX_BYTES = 65_536;
 const digest = value => createHash('sha256').update(value).digest('hex');
 const quote = value => `'${value.replaceAll("'", "'\\''")}'`;

@@ -169,13 +169,40 @@ test('SOURCE-PRODUCT-08 transport ambiguity is unknown and stable request key ne
   assert.equal((await f.run(args)).id, job.id); await f.restart(); assert.equal((await f.run(args)).state, 'unknown'); assert.equal(calls, 1);
 });
 
-test('SOURCE-PRODUCT-09 reject sensitive code/arguments/cwd before admission and do not silently truncate oversized evidence', async t => {
+test('SOURCE-PRODUCT-09 reject credentials/arguments/cwd before admission and keep bounded source evidence complete', async t => {
   const f = await fixture(t); await f.policy({});
-  for (const changes of [{ source: "x='Bearer synthetic-only'\n" }, { argv: ['api_key=synthetic'] }, { cwd: '/tmp/.env' }]) await assert.rejects(f.run(changes), /Sensitive/);
+  for (const changes of [{ source: "x='Bearer synthetic-only'\n" }, { source: "api_key='synthetic-only'\n" }, { argv: ['api_key=synthetic'] }, { argv: ['.env'] }, { cwd: '/tmp/.env' }]) await assert.rejects(f.run(changes), /Sensitive/);
   assert.equal(f.app.queue.listAll().length, 0);
   const job = await f.run({ source: '# ' + 'x'.repeat(15500) + '\npass\n' });
-  assert.equal(job.state, 'pending'); assert.equal(job.decision.reasonCode, 'source_evidence_too_large'); assert.equal(f.inputs.length, 0); assert.equal(f.executions.length, 0);
-  assert.equal((await f.api('/api/' + job.id + '/source')).body.source.length, 15508);
+  assert.equal(job.state, 'completed'); assert.equal(f.inputs.length, 1); assert.equal(f.executions.length, 1);
+  assert.equal(JSON.parse(f.inputs[0].context).submittedSource.source.length, 15508);
+  const held = await f.run({ context: '"'.repeat(8192) });
+  assert.equal(held.state, 'pending'); assert.equal(held.decision.reasonCode, 'source_evidence_too_large');
+  assert.equal(f.inputs.length, 1); assert.equal((await f.api('/api/' + held.id + '/source')).body.source, source);
+  await assert.rejects(f.run({ source: 'x'.repeat(16385) }), /Invalid Python source/);
+});
+
+test('SOURCE-PRODUCT-15 sensitive-path guard lists in a 12712-byte source reach the exact bound evaluator and executor', async t => {
+  const prefix = "# SYNTHETIC_ADMISSION_BODY_15 .env /etc/shadow /home/operator/.ssh/id_ed25519 /secrets/service\n# ";
+  const suffix = '\npass\n';
+  const submitted = prefix + '가'.repeat(447) + 'x'.repeat(11818 - prefix.length - 447 - suffix.length) + suffix;
+  const situation = 'Synthetic bounded source evidence. ' + 'x'.repeat(1277 - 'Synthetic bounded source evidence. '.length);
+  assert.equal(submitted.length, 11818); assert.equal(Buffer.byteLength(submitted), 12712); assert.equal(situation.length, 1277);
+  let wire, calls = 0;
+  const evaluator = createJevAssessor({ apiKey:'synthetic-only', question:AUTOMATION_QUESTION, questionVersion:'ssh-command-risk-v5', inputKind:'execution', fetchImpl:async (_url, options) => {
+    calls++; wire = JSON.parse(options.body);
+    return new Response(JSON.stringify({model:low.model, answers:{risk:{type:'choice',choice:low.label,confidence:low.confidence,probabilities:low.probabilities}},usage:{input_tokens:11,output_tokens:3}}), {headers:{'content-type':'application/json'}});
+  }});
+  const f = await fixture(t, {riskEvaluators:{jev:evaluator}}); await f.policy({});
+  const job = await f.run({source:submitted,context:situation,requestKey:'source-full-admission-15'});
+  assert.equal(job.state,'completed'); assert.equal(calls,1); assert.equal(f.executions.length,1);
+  assert.ok(wire.state.context.length > 12288);
+  assert.equal(JSON.parse(wire.state.context).submittedSource.source,submitted);
+  assert.equal(JSON.parse(wire.state.context).callerSituation,situation);
+  assert.equal(f.executions[0].stdin,submitted);
+  assert.doesNotMatch(JSON.stringify([job,f.events,(await f.api('/api/requests')).body]),/SYNTHETIC_ADMISSION_BODY_15/);
+  assert.equal((await readFile(join(f.root,'command-automation.sqlite'))).includes(Buffer.from('SYNTHETIC_ADMISSION_BODY_15')),false);
+  assert.equal((await f.api('/api/'+job.id+'/source')).status,409);
 });
 
 test('SOURCE-PRODUCT-10 denial/expiry release the shared byte budget; absent runtime capability fails before admission', async t => {

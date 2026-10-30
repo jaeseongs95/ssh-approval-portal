@@ -1,7 +1,7 @@
 import { safetyFailureDetails } from '../domain/safety.mjs';
 import { commandLineNames } from '../domain/command-line.mjs';
 import { inspectCommand, commandDigest, validatedRisk, deniedCommand, explicitUserApproval, AUTOMATION_QUESTION_VERSION, AUTOMATION_QUESTION, AUTOMATION_PROMPT_REVISION, AUTOMATION_PROMPT_SHA256, SAFETY_PROBABILITY_BASIS } from '../domain/command-policy.mjs';
-import { assessmentContext, callerContext, sensitiveText } from '../domain/execution-context.mjs';
+import { assessmentContext, callerContext, sensitiveText, credentialText } from '../domain/execution-context.mjs';
 
 /** Owner-recorded approval is evaluator input; execution authority remains a separate port. */
 export function createCommandAutomation({ queue, state, definition, classify, evaluators, audit, prepareSource, sourceBudget = { bytes: 0, count: 0 }, maxCalls = 100, budget = { used: 0 }, now = () => Date.now() }) {
@@ -67,7 +67,7 @@ export function createCommandAutomation({ queue, state, definition, classify, ev
           if (budget.used >= maxCalls) { exhausted = true; return null; }
           budget.used++;
           evaluation = { purpose: 'execution', promptRevision: AUTOMATION_PROMPT_REVISION, promptSha256: AUTOMATION_PROMPT_SHA256, assessedAt: startedAt, callerContextProvided: Boolean(context), modelCalled: true };
-          return evaluator.assess(structuredClone(input), { signal: controller.signal, question: AUTOMATION_QUESTION, questionVersion: AUTOMATION_QUESTION_VERSION });
+          return evaluator.assess(structuredClone(input), { signal: controller.signal, question: AUTOMATION_QUESTION, questionVersion: AUTOMATION_QUESTION_VERSION, ...(plan ? { sourcePlan: plan } : {}) });
         }),
         new Promise(resolve => { timer = setTimeout(() => { controller.abort(); resolve({ status: 'unavailable', reason: 'timeout' }); }, 10000); })]); }
       catch { raw = { status: 'unavailable', reason: 'request_failed' }; } finally { clearTimeout(timer); }
@@ -161,7 +161,7 @@ export function createCommandAutomation({ queue, state, definition, classify, ev
     run,
     runSource({ source, argv, cwd, elevate, requestKey, context, displayContext }) {
       if (!prepareSource) throw Error('Source execution unavailable');
-      if (sensitiveText(source) || sensitiveText(JSON.stringify(argv ?? [])) || sensitiveText(cwd)) throw Error('Sensitive source input refused');
+      if (credentialText(source) || sensitiveText(JSON.stringify(argv ?? [])) || sensitiveText(cwd)) throw Error('Sensitive source input refused');
       definition.verify();
       const plan = prepareSource({ source, argv, cwd, elevate, targetId: definition.id, targetRevision: definition.revision, profile: definition.writeProfile });
       return run(plan.command, requestKey, context, displayContext, plan);
