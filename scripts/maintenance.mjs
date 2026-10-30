@@ -31,13 +31,17 @@ try {
   if (comparing) {
     const keys = PRESERVATION_COUNTERS;
     if (keys.some(key => !Number.isSafeInteger(body[key]) || body[key] < 0)) throw Error('Invalid preservation summary');
-    console.log(JSON.stringify(Object.fromEntries(keys.map(key => [key, body[key]]))));
     if (body.outputsUnavailable || body.expiredOutputsRemoved) console.error('Some output payloads were unavailable or expired; complete payload preservation was not verified.');
   }
   const valid = comparing ? baselineMode ? baselinePreservationAccepted(body) : body.status === 'PASS' && body.outputsUnavailable === 0 && body.expiredOutputsRemoved === 0
     : body[{ reserve: 'reserved', release: 'released', 'release-verified': 'released', 'release-baseline-verified': 'released', capture: 'captured' }[action]] === true
       && (!baselineMode || body.comparisonContract === BASELINE_PRESERVATION_CONTRACT);
   if (!valid) throw Error('Maintenance request did not pass');
+  if (comparing) {
+    const summary = Object.fromEntries(PRESERVATION_COUNTERS.map(key => [key, body[key]]));
+    if (baselineMode) Object.assign(summary, {status:body.status, comparisonContract:BASELINE_PRESERVATION_CONTRACT, baselinePreserved:true, outputsAdded:0});
+    console.log(JSON.stringify(summary));
+  }
   console.log('Maintenance ' + action + ' confirmed');
 } catch {
   console.error('Maintenance refused or response unknown. Retain the owner token for recovery; check the current service and reservation before retrying. Legacy services require a separately controlled offline update.');
