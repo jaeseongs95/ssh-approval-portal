@@ -19,8 +19,16 @@ const refusals = {
 };
 function expected(field) {
   const { code, ruleId, text } = refusals[field];
-  return { isError: true, content: [{ type: 'text', text: `${code}: ${text} 요청은 등록되지 않았습니다.` }],
-    structuredContent: { error_code: code, inputField: field, ruleId, stage: 'source_admission', requestSubmitted: false } };
+  return { isError: true, content: [{ type: 'text', text: JSON.stringify({ error_code: code, inputField: field, ruleId,
+    stage: 'source_admission', requestSubmitted: false, message: `${text} 요청은 등록되지 않았습니다.` }) }] };
+}
+function assertRefusal(reply, field) {
+  assert.deepEqual(reply, expected(field));
+  assert.equal(reply.structuredContent, undefined, '오류는 정상 작업 출력 스키마를 사용하면 안 됩니다');
+  assert.deepEqual(JSON.parse(reply.content[0].text), {
+    error_code: refusals[field].code, inputField: field, ruleId: refusals[field].ruleId,
+    stage: 'source_admission', requestSubmitted: false, message: `${refusals[field].text} 요청은 등록되지 않았습니다.`,
+  });
 }
 
 async function fixture(t, testServer = false) {
@@ -52,6 +60,8 @@ async function fixture(t, testServer = false) {
   await api('/api/command-policy', { ...proposal, reviewToken: review.reviewToken, acknowledged: true });
   await new Promise(resolve => app.mcpHttp.listen(0, '127.0.0.1', resolve));
   await client.connect(new StreamableHTTPClientTransport(new URL('http://127.0.0.1:' + app.mcpHttp.address().port + '/mcp'), { requestInit: { headers: { Authorization: 'Bearer fixture-mcp' } } }));
+  const tools = await client.listTools();
+  assert.ok(tools.tools.find(tool => tool.name === 'run-python-source')?.outputSchema, '표준 SDK의 출력 스키마 캐시를 먼저 채웁니다');
   const call = (changes = {}) => client.callTool({ name: 'run-python-source', arguments: { ...defaults, ...changes } });
   const noAdmission = async () => {
     await app.targets.drain();
@@ -75,7 +85,7 @@ test('SOURCE-REFUSAL-01 실제 MCP는 가짜 인증정보와 공개 합성값을
   ];
   for (const [name, submitted] of cases) await t.test(name, async () => {
     const reply = await f.call({ source: submitted });
-    assert.deepEqual(reply, expected('source'));
+    assertRefusal(reply, 'source');
     assert.equal(JSON.stringify([reply, f.events]).includes(submitted), false);
     assert.doesNotMatch(JSON.stringify([reply, f.events]), /FAKE_CREDENTIAL_CANARY|synthetic-only|PRIVATE KEY/);
     await f.noAdmission();
@@ -94,7 +104,7 @@ test('SOURCE-REFUSAL-02 인수와 작업 경로의 인증정보·민감 경로 �
   ];
   for (const [index, [field, changes]] of cases.entries()) await t.test(String(index), async () => {
     const reply = await f.call(changes);
-    assert.deepEqual(reply, expected(field));
+    assertRefusal(reply, field);
     assert.doesNotMatch(JSON.stringify([reply, f.events]), /FAKE_ARGUMENT_CANARY|FAKE_WORKDIR_CANARY|\.env|\/etc\/shadow|\/secrets\//);
     await f.noAdmission();
   });
@@ -110,7 +120,7 @@ test('SOURCE-REFUSAL-03 내부 오류 코드는 기존 메시지와 source→arg
     await assert.rejects(Promise.resolve().then(() => f.app.targets.commands.runSource({ ...defaults, ...changes })), error => {
       assert.equal(error.message, 'Sensitive source input refused'); assert.equal(error.code, refusals[field].code); return true;
     });
-    assert.deepEqual(await f.call(changes), expected(field));
+    assertRefusal(await f.call(changes), field);
     await f.noAdmission();
   }
 });
@@ -118,7 +128,7 @@ test('SOURCE-REFUSAL-03 내부 오류 코드는 기존 메시지와 source→arg
 test('SOURCE-REFUSAL-04 TEST 우회도 세 입력 거부를 건너뛰지 않는다', async t => {
   const f = await fixture(t, true);
   for (const [field, changes] of [['source', { source: "secret='FAKE_TEST_CANARY'" }], ['argv', { argv: ['.env'] }], ['cwd', { cwd: '/secrets/fixture' }]]) {
-    assert.deepEqual(await f.call({ ...changes, context: '', elevate: true }), expected(field));
+    assertRefusal(await f.call({ ...changes, context: '', elevate: true }), field);
     await f.noAdmission();
   }
   const reply = await f.call({ context: '' });
@@ -156,7 +166,7 @@ test('SOURCE-REFUSAL-06 기존 context 사유와 일반 예외 비반사를 유�
     }
     for (const field of Object.keys(refusals)) {
       f.app.targets.commands.runSource = () => { throw Object.assign(Error('FAKE_EXCEPTION_CANARY'), { code: refusals[field].code, cause: 'FAKE_CAUSE_CANARY', details: 'FAKE_DETAILS_CANARY' }); };
-      assert.deepEqual(await f.call(), expected(field));
+      assertRefusal(await f.call(), field);
     }
   } finally { f.app.targets.commands.runSource = original; }
   await f.noAdmission();
