@@ -101,6 +101,17 @@ const contextRefusals = new Map([
   ['COMMAND_CONTEXT_TOO_LARGE', 'Command context exceeds the 8192-character limit.'],
   ['COMMAND_CONTEXT_CONTAINS_SECRET', 'Command context contains credential material or a credential assignment. Do not include secret values.'],
 ]);
-export const refused = error => ({ isError: true, content: [{ type: 'text', text: contextRefusals.has(error?.code)
-  ? `${error.code}: ${contextRefusals.get(error.code)} No command was submitted.`
-  : 'Request refused or failed. Check authentication, state, limits and permissions.' }] });
+const sourceRefusals = new Map([
+  ['SOURCE_CREDENTIAL_MATERIAL', { inputField: 'source', ruleId: 'credential-material-v1', text: '제출 원문이 인증정보 입력 금지 규칙에 일치합니다.' }],
+  ['SOURCE_ARGUMENTS_SENSITIVE', { inputField: 'argv', ruleId: 'sensitive-input-v1', text: '제출 인수가 민감 입력 금지 규칙에 일치합니다.' }],
+  ['SOURCE_WORKDIR_SENSITIVE', { inputField: 'cwd', ruleId: 'sensitive-input-v1', text: '작업 경로가 민감 입력 금지 규칙에 일치합니다.' }],
+]);
+export const refused = error => {
+  const source = sourceRefusals.get(error?.code);
+  if (source) return { isError: true,
+    content: [{ type: 'text', text: `${error.code}: ${source.text} 요청은 등록되지 않았습니다.` }],
+    structuredContent: { error_code: error.code, inputField: source.inputField, ruleId: source.ruleId, stage: 'source_admission', requestSubmitted: false } };
+  return { isError: true, content: [{ type: 'text', text: contextRefusals.has(error?.code)
+    ? `${error.code}: ${contextRefusals.get(error.code)} No command was submitted.`
+    : 'Request refused or failed. Check authentication, state, limits and permissions.' }] };
+};

@@ -163,7 +163,9 @@ export function createCommandAutomation({ queue, state, definition, classify, ev
     run,
     runSource({ source, argv, cwd, elevate, requestKey, context, displayContext }) {
       if (!prepareSource) throw Error('Source execution unavailable');
-      if (credentialText(source) || sensitiveText(JSON.stringify(argv ?? [])) || sensitiveText(cwd)) throw Error('Sensitive source input refused');
+      if (credentialText(source)) throw Object.assign(Error('Sensitive source input refused'), { code: 'SOURCE_CREDENTIAL_MATERIAL' });
+      if (sensitiveText(JSON.stringify(argv ?? []))) throw Object.assign(Error('Sensitive source input refused'), { code: 'SOURCE_ARGUMENTS_SENSITIVE' });
+      if (sensitiveText(cwd)) throw Object.assign(Error('Sensitive source input refused'), { code: 'SOURCE_WORKDIR_SENSITIVE' });
       definition.verify();
       const plan = prepareSource({ source, argv, cwd, elevate, targetId: definition.id, targetRevision: definition.revision, profile: definition.writeProfile });
       return run(plan.command, requestKey, context, displayContext, plan);
