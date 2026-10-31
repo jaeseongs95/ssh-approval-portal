@@ -42,7 +42,13 @@ test('read audit failures preserve fail-closed admission and release the claim a
     let executions = 0; const events = [];
     const { commands } = commandFixture({ audit: event => { events.push(event.action); if (event.action === failedAction) throw Error('audit unavailable'); },
       executeCommand: async () => { executions++; if (failedAction === 'read-failed') throw Error('transport unavailable'); return outcome; } });
-    await assert.rejects(commands.read('cat /tmp/a'), /audit unavailable/);
+    await assert.rejects(commands.read('cat /tmp/a'), error => {
+      assert.equal(error.code, failedAction === 'read-started' ? 'READ_COMMAND_NOT_STARTED' : 'READ_COMMAND_EXECUTION_UNKNOWN');
+      assert.equal(error.message, failedAction === 'read-started'
+        ? 'Read command was not started; check the protected server diagnostics.'
+        : 'Read command completion could not be confirmed; check the protected server diagnostics.');
+      assert.equal(error.message.includes('audit unavailable'), false); return true;
+    });
     assert.equal(executions, failedAction === 'read-started' ? 0 : 1);
     assert.equal(commands.busy(), false);
     assert.equal(events.at(-1), failedAction);
