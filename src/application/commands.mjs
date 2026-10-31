@@ -1,6 +1,8 @@
 import { validateCommand } from '../domain/validation.mjs';
 import { callerContext } from '../domain/execution-context.mjs';
 
+const readFailure = (code, message) => Object.assign(Error(message), { code });
+
 /** @typedef {import('../contracts/ports.mjs').OperationOutcome} OperationOutcome */
 /**
  * Read commands use the read profile without approval. All other classes become jobs.
@@ -12,10 +14,16 @@ export function createCommandService({ queue, classify, executeCommand, audit, t
   let activeReads = 0;
   const idleWaiters = [];
   const read = async command => {
-    if (queue.maintenance || queue.busy()) throw Error('Maintenance or another operation is in progress');
-    if (validateCommand(command, classify).class !== 'read-only') throw Error('Approval required');
-    const release = claimExecution();
-    try { audit({ action: 'read-started', command, profile: readProfile, target }); } catch (error) { release(); throw error; }
+    if (queue.maintenance || queue.busy()) throw readFailure('READ_COMMAND_BUSY', 'Maintenance or another operation is in progress');
+    if (validateCommand(command, classify).class !== 'read-only') throw readFailure('READ_COMMAND_REQUIRES_APPROVAL', 'Approval required');
+    let release;
+    try {
+      release = claimExecution();
+      audit({ action: 'read-started', command, profile: readProfile, target });
+    } catch {
+      release?.();
+      throw readFailure('READ_COMMAND_NOT_STARTED', 'Read command was not started; check the protected server diagnostics.');
+    }
     // Claim before the first await; queue.externalBusy consults busy().
     activeReads++;
     let outcome;
@@ -23,12 +31,13 @@ export function createCommandService({ queue, classify, executeCommand, audit, t
       outcome = await executeCommand(readProfile, command);
     } catch {
       outcome = { failed: true, texts: ['Operation failed; check the protected server diagnostics.'] };
-      // Preserve the protocol's generic refusal for transport exceptions.
-      throw Error('Operation failed; check the protected server diagnostics.');
+      // Entering the executor is not proof of remote dispatch or non-execution.
+      throw readFailure('READ_COMMAND_EXECUTION_UNKNOWN', 'Operation failed; check the protected server diagnostics.');
     } finally {
       activeReads--;
       // AP-02: an executor rejection still records a terminal failure, without raw errors.
       try { audit({ action: outcome?.failed ? 'read-failed' : 'read-completed', profile: readProfile, target }); }
+      catch { throw readFailure('READ_COMMAND_EXECUTION_UNKNOWN', 'Read command completion could not be confirmed; check the protected server diagnostics.'); }
       finally { release(); if (!activeReads) for (const resolve of idleWaiters.splice(0)) resolve(); }
     }
     return outcome;

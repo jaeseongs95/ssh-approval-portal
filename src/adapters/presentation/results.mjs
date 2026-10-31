@@ -106,11 +106,22 @@ const sourceRefusals = new Map([
   ['SOURCE_ARGUMENTS_SENSITIVE', { inputField: 'argv', ruleId: 'sensitive-input-v1', text: '제출 인수가 민감 입력 금지 규칙에 일치합니다.' }],
   ['SOURCE_WORKDIR_SENSITIVE', { inputField: 'cwd', ruleId: 'sensitive-input-v1', text: '작업 경로가 민감 입력 금지 규칙에 일치합니다.' }],
 ]);
+const readRefusals = new Map([
+  ['READ_COMMAND_BUSY', { executionAttempted: false, message: '유지보수 또는 다른 작업이 진행 중이어서 읽기 명령을 시작하지 않았습니다. 자동으로 재제출하지 마세요.' }],
+  ['READ_COMMAND_REQUIRES_APPROVAL', { executionAttempted: false, message: '이 명령은 읽기 전용 허용 범위 밖이어서 실행하지 않았습니다. 세미콜론으로 연결한 복합 명령도 해당할 수 있습니다. 기존 작업 권한을 확인한 뒤 정확한 명령을 run-command로 제출해 서버 정책과 필요한 승인을 받으세요. 자동 전환하거나 명령을 나누어 제한을 우회하지 마세요.' }],
+  ['READ_COMMAND_NOT_STARTED', { executionAttempted: false, message: '실행 자원 확보 또는 시작 감사 기록에 실패해 읽기 명령을 시작하지 않았습니다. 보호된 서버 진단을 확인하고 자동으로 재제출하지 마세요.' }],
+  ['READ_COMMAND_EXECUTION_UNKNOWN', { executionAttempted: true, message: '읽기 실행기를 호출했지만 오류가 발생해 원격 실행 여부나 완료를 확정할 수 없습니다. 명령을 다시 실행하거나 다른 도구로 재제출하지 말고 보호된 서버 진단을 확인하세요.' }],
+]);
 export const refused = error => {
   const source = sourceRefusals.get(error?.code);
   if (source) return { isError: true,
     content: [{ type: 'text', text: JSON.stringify({ error_code: error.code, inputField: source.inputField, ruleId: source.ruleId,
       stage: 'source_admission', requestSubmitted: false, message: `${source.text} 요청은 등록되지 않았습니다.` }) }] };
+  const read = readRefusals.get(error?.code);
+  if (read) return { isError: true,
+    content: [{ type: 'text', text: JSON.stringify({ error_code: error.code,
+      stage: read.executionAttempted ? 'read_execution' : 'read_admission', executionAttempted: read.executionAttempted,
+      requestSubmitted: false, message: read.message }) }] };
   return { isError: true, content: [{ type: 'text', text: contextRefusals.has(error?.code)
     ? `${error.code}: ${contextRefusals.get(error.code)} No command was submitted.`
     : 'Request refused or failed. Check authentication, state, limits and permissions.' }] };
