@@ -65,7 +65,7 @@ For PC uploads, choose a file in the card and set its destination path, overwrit
 
 The single-file limit is 64 MiB, and the default staging budget is 512 MiB. Set `BRIDGE_TRANSFER_MAX_BYTES` to no more than 64 MiB and `BRIDGE_TRANSFER_BUDGET_BYTES` to at least the single-file limit. Directories, links, and device files are rejected. Send a folder as a ZIP file; the server does not automatically extract it or execute uploaded files. File snapshots and downloads do not mask their bytes. Download links expire after 10 minutes and are single-use; request a new link in the card if saving fails.
 
-An overwrite is not reported as complete if the existing file's ownership, mode, or extended attributes cannot be preserved. New files use mode 0600; sudo uploads are owned by root. Changes to the request, file, or server, expiry, and requests lost on restart require a new approval. Connection failures and operations with an uncertain publication result are not retried automatically.
+For Linux targets, an overwrite is not reported as complete if the existing file's ownership, mode, or extended attributes cannot be preserved. New Linux files use mode 0600; sudo uploads are owned by root. Windows overwrites copy the previous file's DACL, but do not guarantee preservation of its owner, audit ACL, timestamps, or other extended metadata. See the [Windows transfer limits](docs/windows-targets.ko.md). Changes to the request, file, or server, expiry, and requests lost on restart require a new approval. Connection failures and operations with an uncertain publication result are not retried automatically.
 
 ## Native installation and updates
 
