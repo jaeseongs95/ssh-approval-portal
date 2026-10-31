@@ -14,7 +14,7 @@ CONFIG_FILES = ['bridge.env.example', 'config.example.toml', 'docker.example.env
                 'ssh-approval-bridge.service', 'settings-contract.json', 'ssh-approval-env.socket', 'ssh-approval-env@.service']
 SOURCE_TYPES = {
     'src': {'.mjs', '.json'},
-    'scripts': {'.mjs', '.py', '.sh'},
+    'scripts': {'.mjs', '.py', '.sh', '.ps1', '.cs'},
     'helper': {'.py'},
     'vendor': {'.tgz'},
     'test': {'.mjs', '.js', '.py', '.sh', '.ps1', '.md', '.json', '.html', '.Dockerfile'},

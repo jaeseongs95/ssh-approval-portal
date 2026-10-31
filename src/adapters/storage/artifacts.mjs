@@ -4,13 +4,13 @@ import { constants } from 'node:fs';
 import { join } from 'node:path';
 import { Writable } from 'node:stream';
 import { finished } from 'node:stream/promises';
-import { idValid, remotePath, hash } from '../../domain/validation.mjs';
+import { idValid, anyRemotePath, hash } from '../../domain/validation.mjs';
 import { CHUNK_BYTES, MAX_BYTES, EXPIRES_MS } from '../../contracts/ports.mjs';
 
 export { CHUNK_BYTES, MAX_BYTES } from '../../contracts/ports.mjs';
 const validHash = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 const validateUpload = meta => {
-  remotePath(meta.remotePath);
+  anyRemotePath(meta.remotePath);
   if (typeof meta.fileName !== 'string' || !meta.fileName || meta.fileName.length > 255 || /[\x00-\x1f\x7f/\\]/.test(meta.fileName)) throw Error('Invalid filename');
 };
 const ownership = meta => meta.targetId === undefined ? {} : { targetId: meta.targetId, targetRevision: meta.targetRevision,

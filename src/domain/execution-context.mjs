@@ -36,7 +36,7 @@ export function callerContext(value = '') {
 
 export function assessmentContext(context, facts, purpose = 'Assess this exact SSH command before execution', sourcePlan) {
   const serverFacts = {};
-  for (const key of ['targetId', 'targetDisplayName', 'targetRevision', 'profile', 'sshTarget', 'commandClass', 'policyRevision', 'requestState', 'externalDisclosure', 'modelExecution', 'fallback']) {
+  for (const key of ['targetId', 'targetDisplayName', 'targetRevision', 'profile', 'sshTarget', 'commandClass', 'policyRevision', 'requestState', 'externalDisclosure', 'modelExecution', 'fallback', 'targetPlatform', 'commandLanguage']) {
     const value = facts[key];
     if (value === undefined) continue;
     if (value !== null && !['string', 'number', 'boolean'].includes(typeof value)) throw Error('Invalid server context');

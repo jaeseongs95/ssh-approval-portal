@@ -15,9 +15,10 @@ export function parseTargets(value, defaultTarget) {
   if (!Array.isArray(entries) || !entries.length || entries.length > 32) throw Error('Configure 1 to 32 targets');
   const ids = new Set(), profiles = new Set();
   const targets = entries.map(entry => {
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry) || Object.keys(entry).some(key => !['id', 'displayName', 'readProfile', 'writeProfile', 'credentialRevision', 'enabled'].includes(key)) ||
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry) || Object.keys(entry).some(key => !['id', 'displayName', 'readProfile', 'writeProfile', 'credentialRevision', 'enabled', 'platform'].includes(key)) ||
         !alias(entry.id) || ids.has(entry.id) || !label(entry.displayName) || !alias(entry.readProfile) || !alias(entry.writeProfile) ||
-        entry.readProfile === entry.writeProfile || !alias(entry.credentialRevision) || (entry.enabled !== undefined && typeof entry.enabled !== 'boolean')) throw Error('Invalid or duplicate target configuration');
+        entry.readProfile === entry.writeProfile || !alias(entry.credentialRevision) || (entry.enabled !== undefined && typeof entry.enabled !== 'boolean') ||
+        (entry.platform !== undefined && !['linux', 'windows'].includes(entry.platform))) throw Error('Invalid or duplicate target configuration');
     for (const profile of [entry.readProfile, entry.writeProfile]) {
       if (profiles.has(profile)) throw Error('SSH profiles cannot be shared by targets');
       profiles.add(profile);
@@ -35,6 +36,7 @@ export function resolveTargets(settings, registry) {
   const hosts = new Set(), pins = new Set();
   return entries.map(entry => {
     const reader = registry.getProfile(entry.readProfile), writer = registry.getProfile(entry.writeProfile);
+    if (entry.platform === 'windows' && (reader.workdir || writer.workdir)) throw Error('Windows targets cannot use a POSIX profile workdir');
     const shared = explicit ? ['host', 'port', 'user', 'trustedHostKey', 'via', 'auth', 'keyRef', 'keychainEntry'] : ['host', 'port', 'user'];
     if (!reader.readOnly || writer.readOnly || shared.some(key => reader[key] !== writer[key])) throw Error('Expected matching writable and read-only SSH targets');
     const host = `${writer.host}:${writer.port}`, target = `${writer.user}@${host}`;

@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { validateOrigin } from '../config/settings.mjs';
 import { validateLocalPath } from './local-files.mjs';
-import { remotePath } from '../../domain/validation.mjs';
+import { anyRemotePath } from '../../domain/validation.mjs';
 import { MAX_BYTES } from '../../contracts/ports.mjs';
 
 const fail = code => Object.assign(new Error(code), { code });
@@ -26,7 +26,7 @@ export function validateFileManifest(value) {
     const seen = new Set();
     const capabilities = parsed.capabilities.map(item => {
       if (seen.has(item.id)) throw Error(); seen.add(item.id);
-      remotePath(item.remotePath); validateLocalPath(item.direction === 'upload' ? item.source : item.destination);
+      anyRemotePath(item.remotePath); validateLocalPath(item.direction === 'upload' ? item.source : item.destination);
       return Object.freeze(item);
     });
     return Object.freeze({ version: 1, origin: parsed.origin, capabilities: Object.freeze(capabilities) });

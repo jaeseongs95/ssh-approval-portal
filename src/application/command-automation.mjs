@@ -3,9 +3,12 @@ import { commandLineNames } from '../domain/command-line.mjs';
 import { inspectCommand, commandDigest, validatedRisk, deniedCommand, explicitUserApproval, AUTOMATION_QUESTION_VERSION, AUTOMATION_QUESTION, AUTOMATION_PROMPT_REVISION, AUTOMATION_PROMPT_SHA256, SAFETY_PROBABILITY_BASIS } from '../domain/command-policy.mjs';
 import { assessmentContext, callerContext, sensitiveText, credentialText } from '../domain/execution-context.mjs';
 import { dispatchStep, dispatchRefusal, dispatchFailureDetails } from '../domain/dispatch-failure.mjs';
+import { platformOf, deniedForTarget, requireTargetCapability } from '../domain/target-platform.mjs';
 
 /** Owner-recorded approval is evaluator input; execution authority remains a separate port. */
 export function createCommandAutomation({ queue, state, definition, classify, evaluators, audit, prepareSource, sourceBudget = { bytes: 0, count: 0 }, maxCalls = 100, budget = { used: 0 }, now = () => Date.now() }) {
+  const windows = platformOf(definition) === 'windows';
+  const isDenied = (command, rule) => deniedForTarget(definition, command, rule, deniedCommand);
   const tasks = new Map();
   const sources = new Map();
   const sourcePlan = id => {
@@ -21,7 +24,7 @@ export function createCommandAutomation({ queue, state, definition, classify, ev
   queue.beforeCommandStart = job => {
     dispatchStep('target_guard', () => definition.verify(), 'target_changed');
     const policy = state.policy();
-    if (!ruleFor(policy)?.testServer && deniedCommand(job.command, ruleFor(policy))) dispatchRefusal('policy_denied', 'policy_guard', 'Command denied by current policy');
+    if (!ruleFor(policy)?.testServer && isDenied(job.command, ruleFor(policy))) dispatchRefusal('policy_denied', 'policy_guard', 'Command denied by current policy');
     if (job.decision?.decision === 'execute' && policy.revision !== job.decision.policyRevision) dispatchRefusal('policy_changed', 'policy_guard', 'Command policy changed');
     if (job.operation.sourceContract) {
       const plan = sourcePlan(job.id), rule = ruleFor(policy);
@@ -41,11 +44,14 @@ export function createCommandAutomation({ queue, state, definition, classify, ev
     try { detailedContext = assessmentContext(context, { targetId: definition.id, targetDisplayName: definition.displayName,
         targetRevision: definition.revision, profile: definition.writeProfile, sshTarget: definition.target,
         commandClass: classify(command).class, policyRevision, externalDisclosure: rule.externalDisclosure,
-        modelExecution: rule.modelExecution, fallback: rule.fallback }, undefined, plan); }
+        modelExecution: rule.modelExecution, fallback: rule.fallback,
+        ...(windows ? { targetPlatform: 'windows', commandLanguage: 'windows-powershell-5.1' } : {}) }, undefined, plan); }
     catch (error) { if (plan) return { reasonCode: 'source_evidence_too_large' }; throw error; }
-    const approved = plan ? [] : [...rule.commands.filter(name => name !== 'sudo'), ...(rule.automaticSudo === true ? ['sudo'] : [])];
+    const approved = plan || windows ? [] : [...rule.commands.filter(name => name !== 'sudo'), ...(rule.automaticSudo === true ? ['sudo'] : [])];
     const input = { command, target: definition.id, environment: definition.displayName, context: detailedContext,
-      preapprovedCommands: approved, userApproval: explicitUserApproval(command, approved) };
+      preapprovedCommands: approved, userApproval: windows
+        ? { explicit: false, statement: 'POSIX command-name approval does not apply to Windows PowerShell.', scope: 'command-name', commandName: null }
+        : explicitUserApproval(command, approved) };
     const attempts = [];
     let evaluation;
     const provenance = () => evaluation ? { evaluation: { ...evaluation, latencyMs: Math.max(0, now() - evaluation.assessedAt) } } : {};
@@ -128,14 +134,14 @@ export function createCommandAutomation({ queue, state, definition, classify, ev
         const line = commandLineNames(command);
         const base = { policyRevision: policy.revision, targetRevision: definition.revision };
         let result;
-        if (!rule?.testServer && (plan ? sourceDenied(plan, rule) : deniedCommand(command, rule))) {
+        if (!rule?.testServer && (plan ? sourceDenied(plan, rule) : isDenied(command, rule))) {
           decision(job, { ...base, decision: 'deny', reasonCode: 'policy_denied' }); queue.finishEvaluation(job.id, 'denied');
           return;
         }
         if (rule?.testServer === true) result = { reasonCode: 'test_server_bypass' };
         else if (plan && sourceReview(rule)) result = { reasonCode: sourceReview(rule) };
-        else if (!plan && line.usesSudo && rule?.automaticSudo !== true) result = { reasonCode: 'sudo_not_enabled' };
-        else if (!plan && line.complete && rule && line.names.every(name => name === 'sudo' ? rule.automaticSudo === true : rule.commands.includes(name))) result = { reasonCode: 'command_set', commandNames: line.names };
+        else if (!plan && !windows && line.usesSudo && rule?.automaticSudo !== true) result = { reasonCode: 'sudo_not_enabled' };
+        else if (!plan && !windows && line.complete && rule && line.names.every(name => name === 'sudo' ? rule.automaticSudo === true : rule.commands.includes(name))) result = { reasonCode: 'command_set', commandNames: line.names };
         else result = await assess(command, rule, context, policy.revision, plan);
         // No await between freshness check, decision record and execution claim.
         definition.verify();
@@ -162,6 +168,7 @@ export function createCommandAutomation({ queue, state, definition, classify, ev
   return {
     run,
     runSource({ source, argv, cwd, elevate, requestKey, context, displayContext }) {
+      requireTargetCapability(definition, 'pythonSource');
       if (!prepareSource) throw Error('Source execution unavailable');
       if (credentialText(source)) throw Object.assign(Error('Sensitive source input refused'), { code: 'SOURCE_CREDENTIAL_MATERIAL' });
       if (sensitiveText(JSON.stringify(argv ?? []))) throw Object.assign(Error('Sensitive source input refused'), { code: 'SOURCE_ARGUMENTS_SENSITIVE' });

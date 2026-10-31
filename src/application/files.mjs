@@ -1,11 +1,17 @@
-import { remotePath } from '../domain/validation.mjs';
+import { remotePath, windowsRemotePath } from '../domain/validation.mjs';
 import { fileTargetFields } from '../domain/file-target-binding.mjs';
 
 /** File use cases know metadata and ports; bytes never become host protocol objects. */
-export function createFileService({ store, queue, transfers, maxConcurrent = 2, now = () => Date.now(), claimImport = () => () => {} }) {
+export function createFileService({ store, queue, transfers, platform = 'linux', maxConcurrent = 2, now = () => Date.now(), claimImport = () => () => {} }) {
+  if (!['linux', 'windows'].includes(platform)) throw Error('Unsupported remote platform');
+  const validate = (path, elevate) => {
+    (platform === 'windows' ? windowsRemotePath : remotePath)(path);
+    if (platform === 'windows' && elevate) throw Error('Elevated Windows file transfers are not supported');
+  };
   const shutdown = new AbortController(), imports = new Set();
   const guard = () => { if (shutdown.signal.aborted || queue.maintenance) throw Error('Maintenance or file service closed'); };
   const submitUpload = artifact => {
+    validate(artifact.remotePath, artifact.elevate);
     const job = queue.submitOperation({ kind: 'upload', artifactId: artifact.id, remotePath: artifact.remotePath,
       fileName: artifact.fileName, size: artifact.size, sha256: artifact.sha256, overwrite: artifact.overwrite, elevate: artifact.elevate,
       ...(artifact.fileTargetBound === true ? fileTargetFields(artifact) : {}) }, artifact.elevate ? 'privileged' : 'safe');
@@ -14,7 +20,7 @@ export function createFileService({ store, queue, transfers, maxConcurrent = 2, 
   };
   return {
     async requestUpload({ source, fileName, remotePath: path, overwrite = false, elevate = false }, { signal, binding, verifyTarget } = {}) {
-      remotePath(path); guard(); signal?.throwIfAborted();
+      validate(path, elevate); guard(); signal?.throwIfAborted();
       if (binding) {
         fileTargetFields(binding);
         if (typeof verifyTarget !== 'function') throw Error('Bound file target verifier unavailable');
@@ -40,12 +46,12 @@ export function createFileService({ store, queue, transfers, maxConcurrent = 2, 
       try { return await work; } finally { imports.delete(work); release(); }
     },
     requestDownload({ remotePath: path, elevate = false }, binding) {
-      remotePath(path); guard();
+      validate(path, elevate); guard();
       const job = queue.submitOperation({ kind: 'download', remotePath: path, elevate, ...fileTargetFields(binding) }, elevate ? 'privileged' : 'read-only');
       try { queue.startDownload(job.id); } catch (error) { if (!queue.rejectAutomaticDispatch(job.id, error)) { /* Normal policy keeps the owner request; never auto-retry. */ } }
       return queue.get(job.id);
     },
-    async beginUpload(meta, binding) { guard(); return store.begin({ ...meta, ...(binding ? { ...binding, fileTargetBound: true } : {}) }); },
+    async beginUpload(meta, binding) { validate(meta.remotePath, meta.elevate); guard(); return store.begin({ ...meta, ...(binding ? { ...binding, fileTargetBound: true } : {}) }); },
     async appendUpload({ id, sequence, bytes }) { guard(); return store.append(id, sequence, bytes); },
     async finishUpload(id, verifyTarget) {
       guard(); const artifact = await store.finish(id);

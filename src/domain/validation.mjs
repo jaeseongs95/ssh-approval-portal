@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { posix, win32 } from 'node:path';
 import { COMMAND_MAX_BYTES, utf8WithinLimit } from '../contracts/ports.mjs';
 
 const HIDDEN = /[\u0000-\u001f\u007f-\u009f\u061c\u200b\u200e\u200f\u2028-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/;
@@ -16,4 +17,22 @@ export function validateCommand(command, classify, safeOnly = false) {
 export function remotePath(path) {
   if (typeof path !== 'string' || !path.startsWith('/') || path === '/' || path.length > 4096 || path !== path.trim() || HIDDEN.test(path) || path.split('/').some(p => p === '..' || p === '.')) throw Error('Use an absolute regular-file path without dot segments or hidden characters');
   return path;
+}
+
+export function windowsRemotePath(path) {
+  if (typeof path !== 'string' || !/^[A-Za-z]:[\\/]/.test(path) || path.length > 4096 || path !== path.trim() || HIDDEN.test(path)) throw Error('Use an absolute Windows regular-file path');
+  const segments = path.slice(3).split(/[\\/]/);
+  if (segments.some(part => !part || part === '.' || part === '..' || /[<>:"|?*]/.test(part) || /[ .]$/.test(part) || /^(?:CON|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³])(?:\.|$)/i.test(part))) throw Error('Use a Windows regular-file path without reserved names or unsafe segments');
+  return path;
+}
+
+/** Clients and the shared artifact store accept either target's path syntax. */
+export function anyRemotePath(path) {
+  return typeof path === 'string' && /^[A-Za-z]:/.test(path) ? windowsRemotePath(path) : remotePath(path);
+}
+
+export function remoteBasename(path, platform = 'linux') {
+  if (!['linux', 'windows'].includes(platform)) throw Error('Unsupported remote platform');
+  (platform === 'windows' ? windowsRemotePath : remotePath)(path);
+  return (platform === 'windows' ? win32 : posix).basename(path);
 }

@@ -2,7 +2,7 @@ import { withUploadSnapshot, saveDownload } from './local-files.mjs';
 import { CHUNK_BYTES, OUTPUT_PAGE_BYTES, MAX_BYTES } from '../../contracts/ports.mjs';
 import { createHash } from 'node:crypto';
 import { validateOrigin } from '../config/settings.mjs';
-import { remotePath as validateRemotePath } from '../../domain/validation.mjs';
+import { anyRemotePath as validateRemotePath } from '../../domain/validation.mjs';
 
 const fail = (code, details = {}) => Object.assign(new Error(code), { code, ...details });
 const identifier = value => { if (typeof value !== 'string' || !/^[a-f0-9]{48}$/.test(value)) throw fail('INVALID_REQUEST_ID'); return value; };

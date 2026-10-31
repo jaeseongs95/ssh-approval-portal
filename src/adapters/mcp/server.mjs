@@ -1,8 +1,8 @@
 import metadata from '../../../package.json' with { type: 'json' };
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { posix } from 'node:path';
-import { hash, remotePath } from '../../domain/validation.mjs';
+import { hash, remotePath, windowsRemotePath, remoteBasename } from '../../domain/validation.mjs';
+import { platformOf } from '../../domain/target-platform.mjs';
 import { COMMAND_MAX_BYTES, COMMAND_REQUEST_MAX_BYTES, utf8WithinLimit, CHUNK_BYTES } from '../../contracts/ports.mjs';
 import { CALLER_CONTEXT_LIMIT, commandRequest } from '../../domain/execution-context.mjs';
 import { OUTPUT_PAGE_BYTES } from '../../contracts/ports.mjs';
@@ -27,7 +27,9 @@ export function createMcpAdapter({ queue, commands, files, settings, capabilitie
     const server = new McpServer({ name: 'SSH Approval Portal', version: metadata.version }, { maxToolInputElements: 64 });
     server.registerResource('SSH approval card', URI, { mimeType: 'text/html;profile=mcp-app' }, async () => ({ contents: [{ uri: URI, mimeType: 'text/html;profile=mcp-app', text: uiHtml, _meta: { ui: { csp: { connectDomains: [], resourceDomains: [] }, prefersBorder: true } } }] }));
     const tool = (name, schema, outputSchema, handler, { ui = false, appOnly = false, description = name, readOnly = false, meta, openWorld = false } = {}) => server.registerTool(name, {
-      description, inputSchema: schema, outputSchema, annotations: { readOnlyHint: readOnly, destructiveHint: !readOnly, ...(openWorld ? { openWorldHint: true } : {}) },
+      description: description + (['list-targets', 'read-command', 'run-command', 'run-python-source', 'request-safe-command', 'request-upload', 'request-download', 'show-file-transfer'].includes(name)
+        ? ' Check list-targets platform/capabilities first. Windows targets execute PowerShell 5.1 with a fixed UTF-16LE encoded launcher, limited to 8000 launcher characters; oversize is refused before admission, never split to evade it. POSIX command-name approval does not apply to Windows. Windows file paths require a drive-qualified absolute path; UNC, device, ADS and reparse paths are refused. Windows targets do not support python-source-v1, managed agent CLI operations or elevated file transfers, even in test mode.' : ''),
+      inputSchema: schema, outputSchema, annotations: { readOnlyHint: readOnly, destructiveHint: !readOnly, ...(openWorld ? { openWorldHint: true } : {}) },
       _meta: (ui || appOnly || meta) ? { ...meta, ...((ui || appOnly) ? { ui: { ...(ui ? { resourceUri: URI } : {}), visibility: appOnly ? ['app'] : ['model', 'app'] } } : {}) } : undefined,
     }, async (args, extra) => {
       try { return await handler(args, { ...extra, signal: AbortSignal.any([shutdownSignal, requestSignal, extra?.signal].filter(Boolean)) }); }
@@ -70,7 +72,7 @@ export function createMcpAdapter({ queue, commands, files, settings, capabilitie
       file: z.object({ download_url: z.string().min(1).max(16384), file_id: z.string().min(1).max(1024), mime_type: z.string().max(255).optional(), file_name: z.string().max(255).optional() }).strict(),
       remotePath: z.string().max(4096), overwrite: z.boolean().default(false), elevate: z.boolean().default(false),
     }, outputSchemas.upload, async ({ target, file, remotePath: path, overwrite, elevate }, { signal }) => {
-      const result = await files.requestUpload({ target, source: bindFileSource(file.download_url), fileName: file.file_name ?? posix.basename(path), remotePath: path, overwrite, elevate }, { signal });
+      const result = await files.requestUpload({ target, source: bindFileSource(file.download_url), fileName: file.file_name ?? remoteBasename(path, platformOf(targets?.select(target))), remotePath: path, overwrite, elevate }, { signal });
       if (result.type === 'source-unavailable') return sourceUnavailable(result.sourceHost);
       if (result.type !== 'job') throw Error('Invalid upload result');
       return { ...jobResult(result.job), _meta: { sshApproval: capabilities.view(result.job) } };
@@ -82,7 +84,9 @@ export function createMcpAdapter({ queue, commands, files, settings, capabilitie
       return { ...jobResult(job), _meta: { sshApproval: capabilities.view(job) } };
     }, { ui: true, readOnly: true });
     tool('show-file-transfer', { target, direction: z.enum(['upload', 'download']), remotePath: z.string().max(4096), elevate: z.boolean().default(false), overwrite: z.boolean().default(false) }, outputSchemas.transfer, args => {
-      remotePath(args.remotePath);
+      const selectedPlatform = platformOf(targets?.select(args.target));
+      (selectedPlatform === 'windows' ? windowsRemotePath : remotePath)(args.remotePath);
+      if (selectedPlatform === 'windows' && args.elevate) throw Error('Windows elevated file transfer is unsupported');
       args = targets?.canonicalTransfer(args) ?? args;
       const selected = targets?.select(args.target);
       return { ...publicResult({ transfer: args, uiEnabled: settings.uiEnabled, maxBytes: settings.maxBytes }, outputSchemas.transfer), _meta: { sshApproval: { bridgeDisplayName: settings.bridgeDisplayName, targetDisplayName: selected?.displayName ?? settings.targetDisplayName, ...(selected ? { targetId: selected.id, targetRevision: selected.revision, targets: targets.list().targets } : {}), uiEnabled: settings.uiEnabled, namespace: settings.prefix, maxBytes: settings.maxBytes, chunkBytes: CHUNK_BYTES, webUrl: settings.adminOrigin, ...(settings.uiEnabled ? { bootstrapTicket: capabilities.bootstrap(args) } : {}) } } };

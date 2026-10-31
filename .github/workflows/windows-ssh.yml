@@ -1,0 +1,34 @@
+name: Windows SSH integration
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/windows-ssh-targets-20261101]
+
+permissions:
+  contents: read
+
+jobs:
+  windows-ssh:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.21.0'
+      - run: npm ci --ignore-scripts
+      - name: Windows 경로와 명령 회귀 시험
+        shell: pwsh
+        run: node --test test/windows-target.test.mjs test/windows-file-contracts.test.mjs
+      - name: Windows PowerShell 파일 보조프로그램 시험
+        shell: pwsh
+        run: ./test/windows-file-helper.tests.ps1 -PowerShellExe powershell.exe
+      - name: PowerShell 7 파일 보조프로그램 시험
+        shell: pwsh
+        run: ./test/windows-file-helper.tests.ps1 -PowerShellExe pwsh.exe
+      - name: 실제 Windows OpenSSH와 파일 왕복 시험
+        shell: pwsh
+        run: ./test/windows-ssh-ci.ps1

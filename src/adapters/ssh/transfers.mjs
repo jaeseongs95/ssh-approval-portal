@@ -1,5 +1,4 @@
-import { posix } from 'node:path';
-import { remotePath } from '../../domain/validation.mjs';
+import { remotePath, windowsRemotePath, remoteBasename } from '../../domain/validation.mjs';
 import { fileTargetBinding } from '../../domain/file-target-binding.mjs';
 import { createSshTransport } from './vendor.mjs';
 
@@ -26,12 +25,23 @@ function fileFailure(error) {
 }
 
 export class Transfers {
-  constructor(registry, store, { helper = '/usr/local/libexec/ssh-approval-file-helper', remoteStage = '/var/lib/ssh-approval-transfer/incoming', readProfile = 'aws-readonly', writeProfile = 'aws-local', transport = createSshTransport(registry) } = {}) {
-    if (!/^\/[A-Za-z0-9_./-]+$/.test(helper) || !/^\/[A-Za-z0-9_./-]+$/.test(remoteStage)) throw Error('Invalid installed helper paths');
-    Object.assign(this, { store, helper, remoteStage, readProfile, writeProfile, transport });
+  constructor(registry, store, { platform = 'linux', helper = platform === 'windows' ? 'C:/ProgramData/ssh-approval-portal/windows-file-helper.ps1' : '/usr/local/libexec/ssh-approval-file-helper', remoteStage = platform === 'windows' ? 'C:/ProgramData/ssh-approval-transfer/incoming' : '/var/lib/ssh-approval-transfer/incoming', readProfile = 'aws-readonly', writeProfile = 'aws-local', transport = createSshTransport(registry) } = {}) {
+    if (!['linux', 'windows'].includes(platform)) throw Error('Unsupported remote platform');
+    if (platform === 'windows') {
+      windowsRemotePath(helper); windowsRemotePath(remoteStage);
+      // These paths enter a command line or SFTP; keep configuration shell-neutral.
+      if (![helper, remoteStage].every(path => /^[A-Za-z]:[\\/][A-Za-z0-9_./\\ -]+$/.test(path))) throw Error('Invalid installed helper paths');
+      remoteStage = remoteStage.replaceAll('\\', '/');
+    } else if (!/^\/[A-Za-z0-9_./-]+$/.test(helper) || !/^\/[A-Za-z0-9_./-]+$/.test(remoteStage)) throw Error('Invalid installed helper paths');
+    Object.assign(this, { store, helper, remoteStage, readProfile, writeProfile, transport, platform });
+  }
+  validate(op) {
+    (this.platform === 'windows' ? windowsRemotePath : remotePath)(op.remotePath);
+    if (this.platform === 'windows' && op.elevate) throw Error('Elevated Windows file transfers are not supported');
   }
   async call(session, action, op) {
-    const command = `${op.elevate ? 'sudo -n ' : ''}${this.helper}`;
+    if (this.platform === 'windows' && op.elevate) throw Error('Elevated Windows file transfers are not supported');
+    const command = this.platform === 'windows' ? `powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "${this.helper}"` : `${op.elevate ? 'sudo -n ' : ''}${this.helper}`;
     const result = await session.call(command, { action, id: op.artifactId, remotePath: op.remotePath, overwrite: op.overwrite, sha256: op.sha256, size: op.size, maxBytes: this.store.maxBytes });
     let data;
     try { data = JSON.parse(result.stdout); } catch { throw new RemoteFileError(); }
@@ -43,6 +53,7 @@ export class Transfers {
     return data;
   }
   async upload(op, beforeDispatch) {
+    this.validate(op);
     const item = this.store.get(op.artifactId);
     const binding = fileTargetBinding(op);
     if (binding ? item.fileTargetBound !== true || item.targetId !== binding.targetId || item.targetRevision !== binding.targetRevision : item.fileTargetBound === true) throw Error('Upload target does not match frozen operation');
@@ -63,9 +74,9 @@ export class Transfers {
     }
   }
   async download(op, beforeDispatch) {
-    remotePath(op.remotePath);
+    this.validate(op);
     const binding = fileTargetBinding(op);
-    const item = this.store.reserveDownload({ fileName: posix.basename(op.remotePath), remotePath: op.remotePath, elevate: op.elevate,
+    const item = this.store.reserveDownload({ fileName: remoteBasename(op.remotePath, this.platform), remotePath: op.remotePath, elevate: op.elevate,
       ...(binding ? { ...binding, fileTargetBound: true } : {}) });
     let session;
     const staged = { ...op, artifactId: item.id };

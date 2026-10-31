@@ -1,4 +1,5 @@
 import { fileTargetFields } from '../domain/file-target-binding.mjs';
+import { platformOf, targetCapabilities } from '../domain/target-platform.mjs';
 
 /** Single-process synchronous claims; callers release in finally, with no hidden waiting queue. */
 export function createClaims(limit) {
@@ -73,7 +74,8 @@ export function createTargetRouter(runtimes, { defaultTarget, legacy, store, aud
   };
   return {
     legacy, select, jobOwner, artifactOwner, queue,
-    list: () => ({ targets: runtimes.map(({ id, displayName, enabled, revision }) => ({ id, displayName, enabled, revision, isDefault: id === defaultTarget })), defaultTarget: defaultTarget ?? null }),
+    list: () => ({ targets: runtimes.map(runtime => ({ id: runtime.id, displayName: runtime.displayName, enabled: runtime.enabled, revision: runtime.revision, isDefault: runtime.id === defaultTarget,
+      platform: platformOf(runtime), capabilities: targetCapabilities(runtime) })), defaultTarget: defaultTarget ?? null }),
     canonicalTransfer(args) { const runtime = select(args.target); return legacy && args.target === undefined ? args : { ...args, target: runtime.id }; },
     commands: { read: (command, target) => select(target).commands.read(command), run: (command, target, requestKey, context, displayContext) => select(target).commands.run(command, requestKey, context, displayContext),
       runSource: (args, target) => select(target).commands.runSource(args), source: id => { const runtime = jobOwner(id); select(runtime.id).verify(); return runtime.commands.source(id); },
