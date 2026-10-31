@@ -1,12 +1,12 @@
 {
-  "version": "1.6.4",
-  "status": "candidate-pending-live-host-verification",
+  "version": "1.6.6",
+  "status": "release",
   "runtime": "Node.js 24",
   "files": [
     {
       "path": ".dockerignore",
-      "size": 225,
-      "sha256": "fbf06845c0bd0a38e5ed5f3fdf825bd5e27dd2d84008c60824ff69f6c5357590"
+      "size": 251,
+      "sha256": "24cbc851af1ca6d65c1c4a1d2278fb6340fb157b33189f1812e48633de340c5e"
     },
     {
       "path": "LICENSE",
@@ -16,12 +16,12 @@
     {
       "path": "README.ko.md",
       "size": 21638,
-      "sha256": "7fe8fb696392ff84e6a45dcf6ca13f9802532f2f7eed2f6076944edad342dc07"
+      "sha256": "cb225f11d3808cfe417fb70c3c9b649424e0038695cf1c6b1ccaa8d4dd17789b"
     },
     {
       "path": "README.md",
-      "size": 19918,
-      "sha256": "26a2f42f994e8d8d76beb7ddaf845613c70b4185ca8c291caad2bf1cac79bf35"
+      "size": 20080,
+      "sha256": "6e502ca706829baff24ee03047e5d280acf28e501035ac5c83965984445a8796"
     },
     {
       "path": "THIRD_PARTY_NOTICES.json",
@@ -30,8 +30,8 @@
     },
     {
       "path": "app.mjs",
-      "size": 26569,
-      "sha256": "b0ef999452e341ba5763ae37f5b4f929cefd01fd5d7b58bec8b775f587c9e8ec"
+      "size": 28960,
+      "sha256": "20a07d138fa65b672cf1617f65d9d1ac364224305a35848bbad2a35f300e5e72"
     },
     {
       "path": "bridge.mjs",
@@ -51,7 +51,7 @@
     {
       "path": "config/docker.example.env",
       "size": 73,
-      "sha256": "b64a0c4f2b527d323629edb20ab4291cc52583c3cbb8d5f467acae5212641ecf"
+      "sha256": "f57fb571fbafbadee7d7fa31d83cf371de6f5dac3f28798656ae42e53e676560"
     },
     {
       "path": "config/settings-contract.json",
@@ -86,12 +86,12 @@
     {
       "path": "docker/Dockerfile",
       "size": 1594,
-      "sha256": "c73e81967f0444065b943574d35045be482dabb9dfcf4a33d77b0040ad87950d"
+      "sha256": "ce3cf701649840a8c29546adcee3dc34dc8ad8d6ee096d561786417771254d93"
     },
     {
       "path": "docker/compose.yaml",
       "size": 1128,
-      "sha256": "3eaccf9b78e6289bdaad7d4ab69f377f5f45fef39a8a8bed8d4cea08b11776f9"
+      "sha256": "26379f558a3c886175126c9348bc901482dd214ca394e0a578fe8cfa8b03190f"
     },
     {
       "path": "docs/admin-login.en.md",
@@ -145,8 +145,8 @@
     },
     {
       "path": "docs/command-automation.ko.md",
-      "size": 27585,
-      "sha256": "532040a58c61320754bc222db51d0f3ce13bfd50e2004787490129a92f27937e"
+      "size": 29198,
+      "sha256": "0e9d257e36383bd1d85f7c0a56811421b0ebfc8bfeeacc877727f99efbcf087f"
     },
     {
       "path": "docs/command-line-import.ko.md",
@@ -190,8 +190,8 @@
     },
     {
       "path": "docs/multi-targets.ko.md",
-      "size": 8345,
-      "sha256": "0d2b6b0d3151c6d255df5dbfc4f71ac956c065f09e01d002dfef1f0a3fb8dfb8"
+      "size": 9072,
+      "sha256": "6b684a848a1a96bc9860a58b894eaf56b97e1a45260df886ac3fb0c5bf86ce90"
     },
     {
       "path": "docs/non-cloudflare-https.ko.md",
@@ -214,24 +214,29 @@
       "sha256": "4cc512791092d3bbb1ce989dbdec066c3a30ddd4f252e38bccdbd98f76bc7922"
     },
     {
+      "path": "docs/windows-targets.ko.md",
+      "size": 10615,
+      "sha256": "397c70f203e2a85cb4e14239281b4b525ad1b2fc9e907be1114aeb4a12ec2558"
+    },
+    {
       "path": "helper/environment-helper.py",
       "size": 16195,
       "sha256": "35f7ec988fcf2027067826496a1e8880c5e1fc8d73736f0b2a8bec06ff4dee51"
     },
     {
       "path": "helper/file-helper.py",
-      "size": 8611,
-      "sha256": "dd5844be42f9b11e24b56327f4407ef3702d38f00f53f3f211490dea78ff2a2d"
+      "size": 10612,
+      "sha256": "4e6bac28577c6178cbb43e44ec87c17c9466fd42303b6b8c715bef02b956d6a0"
     },
     {
       "path": "package-lock.json",
       "size": 100104,
-      "sha256": "aee3f8220141b960dc6300a700a2fc3e17002ff151189a6955801419e80e763e"
+      "sha256": "15f53f0142861823710901711346539fbbeeb051995df2814cfe1edadd67b979"
     },
     {
       "path": "package.json",
       "size": 740,
-      "sha256": "9d4ec4dafe08c9b38a02f3632aa8fc8735f7a03a10299730a8ea962b7a01ed8e"
+      "sha256": "b55d82b6b4f565b1830ba6f0321aa0d8ab40ef528282aa3ffe8a96fa91817d6e"
     },
     {
       "path": "scripts/admin-access-config.mjs",
@@ -359,6 +364,11 @@
       "sha256": "42a80da51f4f66ad1729427c76e69fe02c7851626d439b3dd80d5ef3263bed62"
     },
     {
+      "path": "scripts/install-windows-helper.ps1",
+      "size": 5373,
+      "sha256": "136997943352f66f99b7e735aabdb558761d0f27b0a58f33ceb8b0f4c7d9d2d1"
+    },
+    {
       "path": "scripts/install.sh",
       "size": 10249,
       "sha256": "13c826ae74a5f2dc8baacfae949fc3b8e6a39f5c216ade5c3352793c5fe46efb"
@@ -380,8 +390,8 @@
     },
     {
       "path": "scripts/maintenance.mjs",
-      "size": 3124,
-      "sha256": "b54acb38b89c777e5752aa4bc00d7df4fc913b68ca331076ddfb504c50b28d77"
+      "size": 4043,
+      "sha256": "aaa0fdc52bd5fce07895326861c19767ceb317fc84e4a5d7c62aaea43a5597f8"
     },
     {
       "path": "scripts/manage-agent-cli.py",
@@ -405,8 +415,8 @@
     },
     {
       "path": "scripts/package.py",
-      "size": 5726,
-      "sha256": "d46015a53a6157d85cfa99e9dc4b11194291eea9f0495186b5f61b58af8c7ae0"
+      "size": 5741,
+      "sha256": "6d08e32c396f4d8234f7c82f97667f3514f9ea4ff12de9d3d45052a60fd7222a"
     },
     {
       "path": "scripts/portal-client.mjs",
@@ -480,8 +490,18 @@
     },
     {
       "path": "scripts/verify.mjs",
-      "size": 2490,
-      "sha256": "7ca17a4a95f2b9dc9c5cddbfc2c20cb11cecb2b6dcb0d61e676ae77334033fa6"
+      "size": 2597,
+      "sha256": "8d678860049cb43ae66f45c08d04d32d32ff6960504c9c3edac83078231687dd"
+    },
+    {
+      "path": "scripts/windows-file-helper.ps1",
+      "size": 4463,
+      "sha256": "c29bd88e4a52e6ffb4fe4ddefdc3458bcf9381c123bf074744b20b44dcad61f1"
+    },
+    {
+      "path": "scripts/windows-file-native.cs",
+      "size": 23226,
+      "sha256": "e6116fb08d69e80c4c58bfea4c550e599fca5bb8df53486a11cc8c1a3f01f8a1"
     },
     {
       "path": "src/adapters/aik/ssh-tool.mjs",
@@ -495,8 +515,8 @@
     },
     {
       "path": "src/adapters/cli/file-forwarder.mjs",
-      "size": 15045,
-      "sha256": "f6b59cbe0f14c48992bdedd4f160759e711e91e99d524d55abd23bdbf457b436"
+      "size": 15051,
+      "sha256": "f7616f517ce19309ce12cec79e2527f7d49bf0d2616dc4402e6aefb1b4d0baf0"
     },
     {
       "path": "src/adapters/cli/local-files.mjs",
@@ -505,8 +525,8 @@
     },
     {
       "path": "src/adapters/cli/portal-client.mjs",
-      "size": 18425,
-      "sha256": "1e6d0b83f30029c6715c1d6aae2f3181e5cbbcf227622975038a0c163574ff20"
+      "size": 18428,
+      "sha256": "261a8cc017fd505ea907b9aa61d28e74a589a76ddb4460e68a9ca28f9d5978cf"
     },
     {
       "path": "src/adapters/config/environment-editor.mjs",
@@ -525,8 +545,8 @@
     },
     {
       "path": "src/adapters/config/targets.mjs",
-      "size": 3962,
-      "sha256": "e187f8be7d78b4ff448f05446c60156132f49f8a884ab0459815e948dd132331"
+      "size": 4209,
+      "sha256": "2fefb9f2ca55b8bc9f7fab5d7ef8ecce25a905f73dd08c180c144deeefb9352e"
     },
     {
       "path": "src/adapters/config/upload-hosts.mjs",
@@ -540,13 +560,13 @@
     },
     {
       "path": "src/adapters/http/protocol.mjs",
-      "size": 16252,
-      "sha256": "3a0fb7a61dfce055bd8399e2a206161d1500999420e5864534749bd52011dc67"
+      "size": 16742,
+      "sha256": "0c6c7db7fb9bba728ac09f16d8f653a5b6b5b6acaec352ffd87ea43839fca9c4"
     },
     {
       "path": "src/adapters/mcp/server.mjs",
-      "size": 22474,
-      "sha256": "5c134d899e48f7559659a20b22d0a7c27e143103f92973da5f0202909ec65dcb"
+      "size": 24293,
+      "sha256": "17f8efdede5122943895e744628ebdd93c84ceea81024f8dbf5322450ce17b3e"
     },
     {
       "path": "src/adapters/presentation/capabilities.mjs",
@@ -555,8 +575,8 @@
     },
     {
       "path": "src/adapters/presentation/results.mjs",
-      "size": 8688,
-      "sha256": "fc19f1a17ed74538b2f2b01a099cde2f2b311b08358a3df330ba05c3f7b24c8b"
+      "size": 11506,
+      "sha256": "59c8292cf9c8793b71883153201dfc839d66f9e70f73f40b4d6ad4515f96f710"
     },
     {
       "path": "src/adapters/releases/agent-cli.mjs",
@@ -565,8 +585,8 @@
     },
     {
       "path": "src/adapters/safety/jev.mjs",
-      "size": 7099,
-      "sha256": "253d322ff8af798e05f9de9a85f45b0b4ecf289808e9f02b022a7185d6550c0e"
+      "size": 7188,
+      "sha256": "326c738a593cf48e6e6187df025f4f001f8b09f5a9f42f566d10112bed323624"
     },
     {
       "path": "src/adapters/secrets/hidden-input.mjs",
@@ -620,13 +640,13 @@
     },
     {
       "path": "src/adapters/ssh/python-source.mjs",
-      "size": 4340,
-      "sha256": "4b6424741e1537c67d22eaa0fc0d34906ed2e515de82c561ab7e8b174488f986"
+      "size": 4431,
+      "sha256": "66a07a3bd9ab86eafa758121c637e2d8264802be8331c8969bb938be0d8c4291"
     },
     {
       "path": "src/adapters/ssh/transfers.mjs",
-      "size": 3960,
-      "sha256": "7ef48c8a8a9b7be968ffbd4ca733f19c31792231ccb8a031025947276f974699"
+      "size": 7683,
+      "sha256": "00432c11e5a58f28c344a09d0644dc1e45a7379d07b4ee8452afec7053cf3470"
     },
     {
       "path": "src/adapters/ssh/vendor.mjs",
@@ -640,8 +660,8 @@
     },
     {
       "path": "src/adapters/storage/artifacts.mjs",
-      "size": 10968,
-      "sha256": "e76e63f97c4226f931609fc1cc2829ff94b0ce1dcdef89fcae738d5d2302903f"
+      "size": 10974,
+      "sha256": "d08428e2ecdaf6a25e832d3ee72319134571438aa69b8a8b813669edce774ac8"
     },
     {
       "path": "src/adapters/storage/command-output.mjs",
@@ -665,8 +685,8 @@
     },
     {
       "path": "src/adapters/storage/preservation-verification.mjs",
-      "size": 5677,
-      "sha256": "bf9a24283a2376aa6d5fd6c8b7ac5777c2cf63183805c369c6ef6dd2161d6ff0"
+      "size": 6839,
+      "sha256": "71be04b4ad8d8c613c22177507a2f653f1c3e1b16abedc09de284700bbb11774"
     },
     {
       "path": "src/adapters/storage/scoped-artifacts.mjs",
@@ -680,8 +700,8 @@
     },
     {
       "path": "src/application/agent-cli.mjs",
-      "size": 10314,
-      "sha256": "f74a2c720a1e646f685a143268bf2bbbffcdb23c3221f15b78e87ae9f4964f0f"
+      "size": 10609,
+      "sha256": "a56a6cd0e4d589e4ccf56c2f7924c779ac6830a20fac44f4bbb2001112c17c25"
     },
     {
       "path": "src/application/automation-metrics.mjs",
@@ -690,8 +710,8 @@
     },
     {
       "path": "src/application/command-automation.mjs",
-      "size": 14023,
-      "sha256": "88a14c4055bc28403863afb072eae164a598250c098941fddf44587eda3d222e"
+      "size": 15596,
+      "sha256": "3a04a691d610df28771c0c92476197b5221377c5a937ca0bad0e91e82b098e15"
     },
     {
       "path": "src/application/command-policy-review.mjs",
@@ -700,18 +720,18 @@
     },
     {
       "path": "src/application/commands.mjs",
-      "size": 3434,
-      "sha256": "d246cea26760832ecf8adda62daf0e06de1b1c9be8c7d331ea29ad30ea79ec74"
+      "size": 3928,
+      "sha256": "c3e157bfc2bf5265e3f024c86e4c6758fbab1fde000da8bd1153a3c9cb9e96a6"
     },
     {
       "path": "src/application/files.mjs",
-      "size": 4014,
-      "sha256": "118e8c180d7230c9d67fafb90d7694219d8a12cb6ec3bfaf08009c0866422678"
+      "size": 4506,
+      "sha256": "792e81dba453053fbbdf2a8acf7aadba8d39fecd178886694d31a99f0602e7de"
     },
     {
       "path": "src/application/lifecycle.mjs",
-      "size": 2884,
-      "sha256": "c3be1c43f32e7b3a77ff36f8e14b9a3156a895842b9812a3848509ed69b49ebb"
+      "size": 3610,
+      "sha256": "4f5404724a98ab3b6aa9388afb763e4ffadd3018099b0fe9a944c3b85cf464f7"
     },
     {
       "path": "src/application/model-catalog.mjs",
@@ -735,8 +755,8 @@
     },
     {
       "path": "src/application/target-router.mjs",
-      "size": 6465,
-      "sha256": "8576fe7f200e3522963ed9ebbd2b0e0aa7866959d0feba4d713f21605b8876d7"
+      "size": 6668,
+      "sha256": "313ce87a5cfaf3c122545a10235592bbee743a4c3c4abc29eb4538f8a9d4d4c2"
     },
     {
       "path": "src/application/test-server-mode.mjs",
@@ -745,8 +765,8 @@
     },
     {
       "path": "src/contracts/ports.mjs",
-      "size": 3842,
-      "sha256": "b50d81eb7588d89cc24c104869f5f9d2a59265254e004929146faf3d523350df"
+      "size": 3889,
+      "sha256": "2b1bfa67ca89bee4c49d4081643ca60fc7f1f39503de38dc13c246694781a928"
     },
     {
       "path": "src/domain/agent-cli.mjs",
@@ -755,8 +775,8 @@
     },
     {
       "path": "src/domain/approval-queue.mjs",
-      "size": 13623,
-      "sha256": "ad564fe70c0848c82cbcfef2ead02e244a871dd77405aee2b8470d7efe4ad025"
+      "size": 14464,
+      "sha256": "93aaebb8467fbd530a732ed5d4e23191b471287f59de0a6b35b329387d802d74"
     },
     {
       "path": "src/domain/automation-risk-question.json",
@@ -779,9 +799,14 @@
       "sha256": "85dd68f81a5e6416000b18a52bde0fc57269e8610c84e27f5bad0381fab2be59"
     },
     {
+      "path": "src/domain/dispatch-failure.mjs",
+      "size": 1727,
+      "sha256": "6a9c517b628100fdf326db8252c9b4d1b56eedd70b35805733353b5cb2d0eecd"
+    },
+    {
       "path": "src/domain/execution-context.mjs",
-      "size": 5091,
-      "sha256": "221472ca27a108ba137464a7d838f83ab6144fb7742aa3a00ac3ffd43116b016"
+      "size": 6604,
+      "sha256": "fbeb366e17e5dc4393b7026da46cb939a3c30191ea858df1d89b8289b376206c"
     },
     {
       "path": "src/domain/file-target-binding.mjs",
@@ -790,13 +815,18 @@
     },
     {
       "path": "src/domain/safety.mjs",
-      "size": 5803,
-      "sha256": "cbbdd5a4eb42c99383dce124e81376009d4575855a5be4cce68036bf69deaaa4"
+      "size": 5861,
+      "sha256": "6b0b525b5d5cdd1d9af2112a759ec26b2af588e7bf779c3934a031165a2d7ec4"
+    },
+    {
+      "path": "src/domain/target-platform.mjs",
+      "size": 3314,
+      "sha256": "4288b7a2196f38a72b8a42b7d4c5edd22074c9f2d1d67c44bae68d334490dc8a"
     },
     {
       "path": "src/domain/validation.mjs",
-      "size": 1173,
-      "sha256": "11bb2f623214689ab16f37eb5474b9b00e2eccd7403dcd5120376987cb475198"
+      "size": 2293,
+      "sha256": "fe08c70af1db8166bb60fc507c56dc87b2bc11471374a48aece32e85ef3ec18b"
     },
     {
       "path": "test/Dockerfile",
@@ -835,8 +865,8 @@
     },
     {
       "path": "test/agent-cli-http.test.mjs",
-      "size": 32684,
-      "sha256": "9a4aff39f0f3e0952ae78edd88a479706bc1b147f899d67c51a9180f6e37f3e1"
+      "size": 32801,
+      "sha256": "e6b0dcf645dc4d8b0dd483d5f7c65f249748581de07943838134dcb322d568df"
     },
     {
       "path": "test/agent-cli-releases.test.mjs",
@@ -845,8 +875,8 @@
     },
     {
       "path": "test/agent-cli-service.test.mjs",
-      "size": 17170,
-      "sha256": "154d8dc54d807d4be3c35e591717a5fe16a1fbc0c3590e2b08066d1e03fcca40"
+      "size": 17735,
+      "sha256": "011cfe7c987d265644de3ca5951f37181a686ae26457d8f656c17bd8234f053f"
     },
     {
       "path": "test/agent-cli.test.mjs",
@@ -890,13 +920,13 @@
     },
     {
       "path": "test/automatic-downloads.test.mjs",
-      "size": 9007,
-      "sha256": "8d164f51859fe1a29f66e5fc983dfccb06f5cfd615fc571f35e8e1da82dab83d"
+      "size": 9124,
+      "sha256": "5e2948aab2e76fb452cf6ba71dfa280516d6502ac5b38a6e24c110e7f9e28481"
     },
     {
       "path": "test/automatic-uploads.test.mjs",
-      "size": 11097,
-      "sha256": "b71b32586b982a882c45c33d91a79b89bdb3512d20f65ba008629e6ce92a2554"
+      "size": 11221,
+      "sha256": "8140a0d118da32f845535488a7e9c8f00a9a49b4937f657d696148ca3fe34cf9"
     },
     {
       "path": "test/automation-metrics.test.mjs",
@@ -940,8 +970,8 @@
     },
     {
       "path": "test/browser/command-line-import.test.mjs",
-      "size": 19669,
-      "sha256": "06f560e1b35141ddcbe1cd260640fa7a36e666331652f08fdc00a85009ecc684"
+      "size": 19702,
+      "sha256": "efccf892790a480cef2ff289fcbf3726e1aa13e6750d967c7171daf79e05f79b"
     },
     {
       "path": "test/browser/command-output.test.mjs",
@@ -989,6 +1019,11 @@
       "sha256": "7faa50b7f31d0934167507a9a8633abbd27d66a50349ab6b85a022f61bcfbc0b"
     },
     {
+      "path": "test/browser/windows-targets.test.mjs",
+      "size": 7599,
+      "sha256": "bce928bad8ca927cc583fef9d34fa00b0b2fd5b5753a43ab45a6bfeead081bf5"
+    },
+    {
       "path": "test/cli-entrypoint.test.mjs",
       "size": 3322,
       "sha256": "9508e0b81e82b8a9f5bbf4418157f71775e9ee3109c43f9d3555036bc54c5628"
@@ -1005,13 +1040,13 @@
     },
     {
       "path": "test/command-automation.test.mjs",
-      "size": 49919,
-      "sha256": "1734c388ff42cb9a9038306538cd9ecb764110578cf2d1bdddc962fe534d5b96"
+      "size": 50312,
+      "sha256": "89a33849821a64a5548b7a00e7a1ddf928b72e4b65c87bd8a9309f1e3f496c52"
     },
     {
       "path": "test/command-lifecycle.test.mjs",
-      "size": 10390,
-      "sha256": "1e82bcf5605cb3e7ca6304d8f72948b799b96014eb73ee3896e256e4c12d87e0"
+      "size": 10851,
+      "sha256": "2775546f5c42acd01565e938eca41aff750e6c753c8f4afaf4428315c39cb025"
     },
     {
       "path": "test/command-limits.test.mjs",
@@ -1100,8 +1135,8 @@
     },
     {
       "path": "test/core.test.mjs",
-      "size": 4870,
-      "sha256": "106675cafc616fdbf693b81be84d7e5bb313be886f3d3cc098bdc8dd8599429f"
+      "size": 10137,
+      "sha256": "c20412e5f6ce6d38715c6747aa7a27bd7e5d11c44804f5ef8c88d4919d79bcc1"
     },
     {
       "path": "test/delivery-fixture.py",
@@ -1112,6 +1147,11 @@
       "path": "test/delivery-runtime.mjs",
       "size": 793,
       "sha256": "6a4ffbca1f201f20b726ed9f2da08b4e7330583234d883366a63ccdb1117509a"
+    },
+    {
+      "path": "test/dispatch-failure.test.mjs",
+      "size": 4985,
+      "sha256": "0619a0f1ce7f38d807e6502e5565d476bbad1ebf3feae853cd350540f6c7c0d4"
     },
     {
       "path": "test/docker-runtime.ps1",
@@ -1150,8 +1190,8 @@
     },
     {
       "path": "test/execution-context.test.mjs",
-      "size": 6428,
-      "sha256": "356c15f2841d06d45108479631de2eec2a32f223f2aededf68c016edf785e1f9"
+      "size": 9179,
+      "sha256": "eda8235c195297b05be3397f682b2d7ec1bfcce5717787024f28af1c4c81d872"
     },
     {
       "path": "test/file-contracts.test.mjs",
@@ -1369,14 +1409,19 @@
       "sha256": "36a663dc3fae0c92f38b9bee580802defb49dca439b78c3576b39a1e454c8263"
     },
     {
+      "path": "test/preservation-baseline.test.mjs",
+      "size": 11773,
+      "sha256": "c8b69d492d6171659caac3aaeff716bbf035cad9f4e142ef723bddde82b4e938"
+    },
+    {
       "path": "test/preservation-integration.test.mjs",
       "size": 7877,
       "sha256": "c9203b2f5c3244abfed02194059a5a56b1fbd61cd5e6e52a38e418545dcfc4be"
     },
     {
       "path": "test/preservation-verification.test.mjs",
-      "size": 4901,
-      "sha256": "8066d0ce30000a488387ff894e5270d37902b92922926787d6f2c559a4c015a1"
+      "size": 7483,
+      "sha256": "e92eb44f8bc5ce7b06f8b097e6710f63bfcc87604ea95dc80a2fcd2e7b642ddd"
     },
     {
       "path": "test/python-source-ssh.test.mjs",
@@ -1387,6 +1432,11 @@
       "path": "test/python-source.test.mjs",
       "size": 8110,
       "sha256": "d2f4acd78f5efb432b96dadf82b22eedfa2c86a13866992e68e951c8b793bb7a"
+    },
+    {
+      "path": "test/read-command-refusals.test.mjs",
+      "size": 13520,
+      "sha256": "c1596d5f36e8a2cd92c8862a5890121b8b948c60ff2eaee6399ef37d4600c2e8"
     },
     {
       "path": "test/release-version.test.mjs",
@@ -1485,8 +1535,13 @@
     },
     {
       "path": "test/source-automation.test.mjs",
-      "size": 27940,
-      "sha256": "d7272afe85fad11f264de63530ae280292ac248b6125f75b1ea7fb059bc9e628"
+      "size": 30456,
+      "sha256": "5c00b7f40c8f199faffff2f8ab037889e053c3dd169144361ed6ac81d6c2608a"
+    },
+    {
+      "path": "test/source-input-refusals.test.mjs",
+      "size": 11558,
+      "sha256": "3865b79045d70c8e7348ecfa940be157c72968dfdd8e4687d96fb2379c69a3f6"
     },
     {
       "path": "test/source-linux-runtime.mjs",
@@ -1575,8 +1630,8 @@
     },
     {
       "path": "test/test_helper.py",
-      "size": 3283,
-      "sha256": "ebbb781d2bc5f9edc63f79048c0880a7fc495df7dec5c7eff11ae315ec281c6b"
+      "size": 9178,
+      "sha256": "55f0f2746c77572467c50596d742d5f9ee134d30db7af43e61a282dc8988f4c3"
     },
     {
       "path": "test/test_node_runtime.py",
@@ -1600,8 +1655,8 @@
     },
     {
       "path": "test/test_package.py",
-      "size": 14723,
-      "sha256": "d2def5eb09c42e76e2b2bd153751a77e4e53ecc577c9f2e592d0967dcd25ed64"
+      "size": 15633,
+      "sha256": "0cba0bd36fc92ec0d0c12e12aafd7a3ef2054c25f2d222e74b5ade4bbcf5f206"
     },
     {
       "path": "test/test_portal_setup.py",
@@ -1630,8 +1685,8 @@
     },
     {
       "path": "test/transfer-failure.test.mjs",
-      "size": 6567,
-      "sha256": "84959303ae4272e3387e67cea911951aadbd7435ab63a5240c947b30f4bb62a9"
+      "size": 11751,
+      "sha256": "f0ed298dab3d479d519cadee636c4f29f48690bd82f3cfe17ed2c5d274caaab5"
     },
     {
       "path": "test/ui-bundle.test.mjs",
@@ -1669,6 +1724,31 @@
       "sha256": "abbc79380912721af05fc2c1d7715166ed7d7ee66f283fb63acc7eb34eac4909"
     },
     {
+      "path": "test/windows-file-contracts.test.mjs",
+      "size": 10838,
+      "sha256": "effd0a3c4aaa28629b5c22d85f404a0921e2354207ad813537c4d067e78626c3"
+    },
+    {
+      "path": "test/windows-file-helper.tests.ps1",
+      "size": 16591,
+      "sha256": "2f15db62ec893547ceb571b6f89a00fd32d4b53ada6d9ba1939791afa30feb68"
+    },
+    {
+      "path": "test/windows-ssh-ci.ps1",
+      "size": 15321,
+      "sha256": "48fa0cbe03d3c10d11d1929de938074b5d9b85ba3475a2e52e20a3ea8dd903ec"
+    },
+    {
+      "path": "test/windows-ssh-integration.test.mjs",
+      "size": 13018,
+      "sha256": "d636251683993dcc342786fbe69c2ab053bb0cbea096a3bd004dd78add63ef62"
+    },
+    {
+      "path": "test/windows-target.test.mjs",
+      "size": 15067,
+      "sha256": "ff93901d4eb9d4b783c686f189c8058e96063017487d228d8a9ba38ee07d22dc"
+    },
+    {
       "path": "ui/build.mjs",
       "size": 918,
       "sha256": "f3a1b7ff965091485882cb8408f36f78e5d8cad44de82f9cdc23fc610bb1b24d"
@@ -1685,8 +1765,8 @@
     },
     {
       "path": "ui/dist/card.html",
-      "size": 537176,
-      "sha256": "43dcc4b1d62d877aefe2dd7cd0e90af810d290e32bab80d1372958c3d21639a4"
+      "size": 539775,
+      "sha256": "94074a0fed13e5d281d1d4194825668102c27d1bd9d0ba299ce775c76fd0f6cc"
     },
     {
       "path": "ui/package-lock.json",
@@ -1705,8 +1785,8 @@
     },
     {
       "path": "ui/src/decision.js",
-      "size": 15108,
-      "sha256": "fd89af3ff43bbc4c5cddf7b10c1b598aa3230bd9c0e4c730043554b668a9ad79"
+      "size": 17105,
+      "sha256": "da92b5c377c541299248160560a07c42c27e4b0874e3e1e432f46ccce27b42e7"
     },
     {
       "path": "ui/src/host.js",
@@ -1740,8 +1820,8 @@
     },
     {
       "path": "web/dist/app.js",
-      "size": 250742,
-      "sha256": "f456c68c1bbeeb8f93f79cb4638abf21c4bd016826b8bf7ae3d6e33c169af47f"
+      "size": 262690,
+      "sha256": "857618bc8cce25c83114afef017ec4d077ddecf6366888c29dd7f7630a9caf63"
     },
     {
       "path": "web/index.html",
@@ -1750,8 +1830,8 @@
     },
     {
       "path": "web/src/agent-cli.js",
-      "size": 23681,
-      "sha256": "f7b83a4fea31ee9c2baaa0e11f08d9dea943b3f3164888e4c5a3b76277c16087"
+      "size": 24642,
+      "sha256": "177f05d490288dedfcb2fd111463e8e592ed2515e6bff7598429d60f61ec2ad6"
     },
     {
       "path": "web/src/appearance.js",
@@ -1765,8 +1845,8 @@
     },
     {
       "path": "web/src/command-policy.js",
-      "size": 52260,
-      "sha256": "2b8d1cf3f60b992b796d8ce2b092232de84f52cf91236fd668dcf829170e0f32"
+      "size": 55847,
+      "sha256": "11a35441600377ea5d1fe3c5ead47c810f4a750302d15791c057ff346ddb2c5c"
     },
     {
       "path": "web/src/command-workspace.js",
@@ -1815,13 +1895,13 @@
     },
     {
       "path": "web/src/ui-text.js",
-      "size": 46186,
-      "sha256": "ce7377ef5abb9eba3a153d7152521e7d9212c5a093ae782145aaff2374303f8c"
+      "size": 48780,
+      "sha256": "31df133a0291e017ff48ebbfbe2d278fccfbaf59497c66e3b5aaa8ad2fe5e69c"
     },
     {
       "path": "web/src/view.js",
-      "size": 27023,
-      "sha256": "8b5517195a92324f57fcb4a1df7fb96850a3acaf8498b1d7c4f5291621027104"
+      "size": 27413,
+      "sha256": "6e7f0e03ea95625c186b9b98043210f633659f2c5e2e6f3beddfe6d9fc1734cc"
     }
   ]
 }
