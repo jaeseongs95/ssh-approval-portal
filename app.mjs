@@ -41,12 +41,12 @@ import {createAgentCliService} from './src/application/agent-cli.mjs';
 import {createAgentReleaseCatalog} from './src/adapters/releases/agent-cli.mjs';
 import {prepareAgentCliPlan,prepareAgentCliStatus} from './src/adapters/ssh/agent-cli.mjs';
 import {agentCliProviders,AGENT_CLI_CONTRACT} from './src/domain/agent-cli.mjs';
-import {platformOf, targetCapabilities, classifyForTarget, wrapWindowsCommand, requireTargetCapability} from './src/domain/target-platform.mjs';
+import {platformOf, targetCapabilities, classifyForTarget, prepareWindowsCommand, requireTargetCapability} from './src/domain/target-platform.mjs';
 
 // Preserve the original injectable createApplication callback at the composition boundary.
 // Concrete runtime executors already return the neutral outcome accepted by use cases.
-const commandExecutor = execute => async (profile, command, beforeDispatch) => {
-  const value = await execute(profile, command, beforeDispatch);
+const commandExecutor = execute => async (profile, command, beforeDispatch, options) => {
+  const value = await execute(profile, command, beforeDispatch, options);
   if (value && typeof value.failed === 'boolean' && Array.isArray(value.texts)) return value;
   return { failed: Boolean(value?.isError), texts: (value?.content ?? []).filter(x => x.type === 'text').map(x => x.text),
     ...(value?.structuredContent === undefined ? {} : { data: value.structuredContent }) };
@@ -121,9 +121,9 @@ export async function createApplication({ registry, classify, executeCommand, ex
     };
     const checkedExecute = async (profile, command, id = randomBytes(24).toString('hex')) => {
       definition.verify();
-      const dispatchedCommand = platform === 'windows' ? wrapWindowsCommand(command) : command;
+      const dispatch = platform === 'windows' ? prepareWindowsCommand(command, { workdir: definition.workdir }) : { command };
       const reservation = outputs.reserve(binding(profile, command, id));
-      try { return outputs.finish(reservation, await execute(profile, dispatchedCommand, () => requireDispatch(id))); }
+      try { return outputs.finish(reservation, await execute(profile, dispatch.command, () => requireDispatch(id), dispatch.stdin === undefined ? undefined : { stdin: dispatch.stdin })); }
       catch (error) { outputs.abandon(reservation); throw error; }
     };
     const targetAudit = event => audit({ ...event, ...identity });
@@ -143,7 +143,7 @@ export async function createApplication({ registry, classify, executeCommand, ex
       externalBusy: () => (commands?.reading() ?? false) || cliProbes.size > 0 || claimExecution.busy(),
       executeOperation: async (operation, id) => {
         if (operation.agentCliContract) requireTargetCapability(definition, 'agentCli');
-        if (operation.sourceContract) requireTargetCapability(definition, 'pythonSource');
+        if (operation.sourceContract && !operation.agentCliContract) requireTargetCapability(definition, 'pythonSource');
         await requireDispatch(id);
         return operation.agentCliContract === AGENT_CLI_CONTRACT ? cli.execute(id, () => requireDispatch(id)) : operation.kind === 'command' ? operation.sourceContract ? checkedSourceExecute(operation, id) : checkedExecute(writeProfile, operation.command, id)
           : operation.kind === 'upload' ? transfers.upload(operation, () => requireDispatch(id)) : transfers.download(operation, () => requireDispatch(id));
@@ -151,8 +151,8 @@ export async function createApplication({ registry, classify, executeCommand, ex
       onTerminal: job => { try { cli?.onTerminal(job); automation?.onTerminal(job); } finally { files?.onTerminal(job); } },
     });
     automation = commandState && createCommandAutomation({ queue, state: commandState, definition, classify: targetClassify, evaluators, audit: targetAudit,
-      ...(executePythonSource && platform !== 'windows' ? { prepareSource: preparePythonSource } : {}), sourceBudget, maxCalls: settings.jevMaxCalls, budget: automationBudget });
-    const cliBinding = () => ({targetId:definition.id,targetRevision:definition.revision,profile:writeProfile});
+      ...(executePythonSource ? { prepareSource: preparePythonSource } : {}), sourceBudget, maxCalls: settings.jevMaxCalls, budget: automationBudget });
+    const cliBinding = () => ({targetId:definition.id,targetRevision:definition.revision,profile:writeProfile,...(platform === 'windows' ? {platform} : {})});
     const checkCliPolicy = plan => {
       dispatchStep('target_guard', () => definition.verify(), 'target_changed');
       requireTargetCapability(definition, 'agentCli');
@@ -172,7 +172,7 @@ export async function createApplication({ registry, classify, executeCommand, ex
       });
       cliProbes.add(task);return task;
     };
-    if(cliState && platform !== 'windows'){
+    if(cliState){
       cli=createAgentCliService({queue,journal:cliState,resolveTarget:id=>id===definition.id?definition:null,
         readLoginState:async(provider,binding)=>(await checkedCliProbe(prepareAgentCliPlan({action:'login-status',provider,binding}))).data?.agentCli,
         readInstallation:async(provider,binding)=>(await checkedCliProbe(prepareAgentCliPlan({action:'inspect',provider,binding}))).data?.agentCli,
@@ -252,7 +252,7 @@ export async function createApplication({ registry, classify, executeCommand, ex
     submit:body=>{const runtime=targets.select(body?.request?.targetId);requireTargetCapability(runtime,'agentCli');if(!runtime.cli)throw Error('CLI unavailable');return runtime.cli.submit(body);},
     request:id=>{const {job,remoteStatus}=cliRequest(id);return {job,remoteStatus};},
     start:body=>{const {runtime,job}=cliRequest(oneId(body));return job.state==='pending'?runtime.queue.start(job.id):job;},
-    reconcile:async body=>{const {runtime,job}=cliRequest(oneId(body));const binding={targetId:runtime.id,targetRevision:runtime.revision,profile:runtime.writeProfile};
+    reconcile:async body=>{const {runtime,job}=cliRequest(oneId(body));const binding={targetId:runtime.id,targetRevision:runtime.revision,profile:runtime.writeProfile,...(platformOf(runtime)==='windows'?{platform:'windows'}:{})};
       const result=await runtime.cliProbe(prepareAgentCliStatus(job.operation,binding));return {requestId:job.id,remoteStatus:cliState.recordRemote(job.id,result.data?.agentCli)};},
   };
   const ordinarySource=commands.source;
@@ -269,7 +269,7 @@ export async function createApplication({ registry, classify, executeCommand, ex
     validateTargets(value) {
       for (const rule of value.targets) {
         const runtime = targets.select(rule.targetId); runtime.verify();
-        if (rule.targetRevision !== runtime.revision || rule.profile !== runtime.writeProfile) throw Error('Stale command policy target');
+        if (rule.targetRevision !== runtime.revision || rule.profile !== runtime.writeProfile || (rule.platform ?? 'linux') !== platformOf(runtime)) throw Error('Stale command policy target');
       }
     },
   });

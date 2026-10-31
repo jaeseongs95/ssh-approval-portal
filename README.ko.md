@@ -1,8 +1,10 @@
-# SSH Approval Portal 1.6.6
+# SSH Approval Portal 1.6.7
 
 [English](README.md) · [관리자 로그인](docs/admin-login.ko.md) · [에이전트 파일 업로드](docs/agent-upload.ko.md) · [구조와 호환성](docs/architecture.ko.md)
 
 SSH 명령과 파일 전송을 사용자가 확인하고 승인할 수 있는 MCP 서버입니다. ChatGPT·Claude의 MCP Apps 카드와 웹 관리자 화면을 함께 제공합니다. 중계기 하나에 SSH 대상을 최대 32개 등록할 수 있습니다. 통합 관리자 화면에서 전체 요청을 확인하고 서버별로 좁혀 개별 요청을 처리합니다. [대상 설정 안내](docs/multi-targets.ko.md)를 참고하세요.
+
+Windows SSH 대상의 PowerShell 명령·이름 정책·파일 전송·Python 코드 제출·서버 CLI 등록 방법은 [Windows 대상 등록](docs/windows-targets.ko.md)을 확인하세요. Python과 Node.js/npm은 기능별 사전 준비가 필요합니다. 중계기 자체의 Windows 호스팅은 후속 릴리스 범위입니다.
 
 Jev는 사전승인 목록 밖의 명령을 평가하는 보조 도구입니다. 사용자 설정에 따라 자동승인하거나 사용자 확인을 요청합니다. 별도의 [합성 평가 도구](docs/jev-observation.ko.md)도 제공합니다.
 
@@ -63,15 +65,15 @@ PC 파일은 카드에서 고르고 목적지 경로·덮어쓰기·sudo를 지�
 
 파일 하나의 한도는 64 MiB, 임시 저장 총량의 기본값은 512 MiB입니다. `BRIDGE_TRANSFER_MAX_BYTES`는 64 MiB 이하로, `BRIDGE_TRANSFER_BUDGET_BYTES`는 파일 한도 이상으로 조절할 수 있습니다. 디렉터리·링크·장치 파일은 거부합니다. 폴더는 ZIP으로 전송하며 서버에서 자동으로 압축을 풀거나 파일을 실행하지 않습니다. 파일 스냅샷과 다운로드는 바이트를 마스킹하지 않습니다. 다운로드 링크는 10분·1회용이며 저장에 실패하면 카드에서 재발급합니다.
 
-Linux 대상은 기존 파일의 소유권·모드·확장 속성을 보존할 수 없는 경우 덮어쓰기를 완료로 보고하지 않습니다. 새 Linux 파일의 모드는 0600이며 sudo 업로드는 root 소유입니다. Windows 덮어쓰기는 기존 파일의 DACL을 복사하지만 소유자·감사 ACL·시간 정보·기타 확장 메타데이터 보존은 보장하지 않습니다. [Windows 전송 제약](docs/windows-targets.ko.md)을 확인하세요. 요청·파일·서버 변경, 만료 또는 재시작으로 유실된 요청에는 새 승인이 필요합니다. 연결 실패나 최종 반영 결과가 불명확한 작업은 자동으로 다시 실행하지 않습니다.
+Linux 대상은 기존 파일의 소유권·모드·확장 속성을 보존할 수 없는 경우 덮어쓰기를 완료로 보고하지 않습니다. 새 Linux 파일의 모드는 0600이며 sudo 업로드는 root 소유입니다. Windows 덮어쓰기는 기존 파일의 소유자·DACL·생성·접근·수정 시간을 보존하며 감사 접근 제어 목록(SACL)·대체 데이터 스트림(ADS)·기타 확장 메타데이터의 완전한 보존은 보장하지 않습니다. [Windows 전송 제약](docs/windows-targets.ko.md)을 확인하세요. 요청·파일·서버 변경, 만료 또는 재시작으로 유실된 요청에는 새 승인이 필요합니다. 연결 실패나 최종 반영 결과가 불명확한 작업은 자동으로 다시 실행하지 않습니다.
 
 ## 네이티브 설치와 업데이트
 
 이전 릴리스는 Ubuntu 22.04/24.04 x86_64에서 검증했습니다. ARM64 설치 경로는 남아 있지만 검증은 후속 고도화로 보류했습니다. 인터넷 연결과 서버 관리자 터미널이 필요합니다. 런타임은 Node 24.2 이상, 25 미만을 요구합니다. Node 24는 전용 경로에 설치하며 시스템 Node를 교체하지 않습니다.
 
 ```sh
-tar -xzf ssh-approval-portal-1.6.6.tar.gz
-cd ssh-approval-portal-1.6.6
+tar -xzf ssh-approval-portal-1.6.7.tar.gz
+cd ssh-approval-portal-1.6.7
 sudo bash scripts/install.sh --admin-origin https://ssh-approve.example.com --grant-sudo-all
 ```
 

@@ -2,11 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, writeFile, access, readdir } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { join, win32 } from 'node:path';
+import { join, dirname, win32 } from 'node:path';
 import { createSshRuntime, createSshTransport } from '../src/adapters/ssh/vendor.mjs';
 import { Artifacts } from '../src/adapters/storage/artifacts.mjs';
 import { createTransferExecutor } from '../src/adapters/ssh/transfers.mjs';
 import { ApprovalQueue } from '../src/domain/approval-queue.mjs';
+import { prepareAgentCliPlan } from '../src/adapters/ssh/agent-cli.mjs';
+import { buildWindowsCliFixtureScript } from './windows-agent-cli-fixture.mjs';
 
 // 시험 계획: 실제 sshd/키/고정 호스트 키/비관리자 계정/SFTP/설치된 보조프로그램을
 // 통과한다. 바이트 비교는 입력 원본과 직접 비교하며 구현의 결과를 기대값으로 쓰지 않는다.
@@ -22,7 +24,7 @@ test('실제 Windows SSH 명령·승인·파일 전송 경계', {
   assert.equal(process.platform, 'win32');
   assert.equal(process.env.GITHUB_ACTIONS, 'true');
   const fixture = JSON.parse(await readFile(fixturePath, 'utf8'));
-  const { wrapWindowsCommand } = await import('../src/domain/target-platform.mjs');
+  const { wrapWindowsCommand, prepareWindowsCommand } = await import('../src/domain/target-platform.mjs');
   const runtime = await createSshRuntime({ BRIDGE_CONFIG_PATH: fixture.configPath, BRIDGE_HOST_KEY_MODE: 'strict' });
   const transport = createSshTransport(runtime.registry);
   const store = new Artifacts(fixture.artifactRoot, { maxBytes: 1_048_576, budget: 8_388_608 });
@@ -58,8 +60,8 @@ test('실제 Windows SSH 명령·승인·파일 전송 경계', {
       t.diagnostic(JSON.stringify({ 진단: label, 단계: phase, 경과밀리초: Date.now() - started, 오류: error.message }));
     }
   };
-  const uploadOperation = async (name, bytes, overwrite = false) => {
-    const meta = { fileName: name, remotePath: remote(name), size: bytes.length, sha256: digest(bytes), overwrite, elevate: false };
+  const uploadOperation = async (name, bytes, overwrite = false, elevate = false) => {
+    const meta = { fileName: name, remotePath: remote(name), size: bytes.length, sha256: digest(bytes), overwrite, elevate };
     const item = await store.begin(meta);
     for (let offset = 0, sequence = 0; offset < bytes.length; offset += 262_144, sequence++) {
       await store.append(item.id, sequence, bytes.subarray(offset, offset + 262_144));
@@ -125,6 +127,54 @@ test('실제 Windows SSH 명령·승인·파일 전송 경계', {
       assert.ok(Date.now() - started < 15_000, '시간초과가 실행 시간을 제한하지 못함');
     });
 
+    await t.test('32KiB 한글 명령은 표준입력으로 전달하고 작업 폴더를 함께 적용한다', async () => {
+      const prefix = `[Console]::Write('한글 작업 폴더:'+[IO.Directory]::GetCurrentDirectory());#`;
+      const remaining = 32_768 - Buffer.byteLength(prefix);
+      const raw = prefix + '한'.repeat(Math.floor(remaining / 3)) + 'x'.repeat(remaining % 3);
+      assert.equal(Buffer.byteLength(raw), 32_768);
+      const prepared = prepareWindowsCommand(raw, { workdir: fixture.fileRoot });
+      assert.ok(prepared.command.length < 8000);
+      const result = await connection.exec(prepared.command, { stdin: prepared.stdin });
+      assert.equal(result.exitCode, 0, result.stderr);
+      assert.equal(result.stdout, '한글 작업 폴더:' + fixture.fileRoot);
+    });
+
+    await t.test('명령 수신기는 입력 손상·추가·잘림을 거부하고 EOF 전에는 실행하지 않는다', async () => {
+      const marker = remote('command-eof-marker.txt');
+      const raw = `[IO.File]::WriteAllText('${marker}', 'once');[Console]::Write('EOF 완료')`;
+      const prepared = prepareWindowsCommand(raw);
+      const exact = Buffer.from(prepared.stdin), changed = Buffer.from(exact);
+      changed[0] ^= 1;
+      for (const stdin of [changed, exact.subarray(0, exact.length - 1), Buffer.concat([exact, Buffer.from('x')])]) {
+        const result = await connection.exec(prepared.command, { stdin });
+        assert.equal(result.exitCode, 125);
+        await absent(marker);
+      }
+      await connection.ensureConnected();
+      const channel = await new Promise((resolve, reject) => connection.getClient().exec(prepared.command,
+        (error, stream) => error ? reject(error) : resolve(stream)));
+      const finished = new Promise((resolve, reject) => {
+        channel.on('error', reject);
+        channel.resume(); channel.stderr.resume();
+        channel.on('close', (code, signal) => resolve({ code, signal }));
+      });
+      finished.catch(() => {});
+      let deadline;
+      const bounded = Promise.race([finished, new Promise((_, reject) => {
+        deadline = setTimeout(() => reject(Error('명령 EOF 수신기 응답 시간초과')), 60_000);
+      })]);
+      bounded.catch(() => {});
+      try {
+        channel.write(exact);
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        await absent(marker);
+        channel.end();
+        const result = await bounded;
+        assert.equal(result.code, 0); assert.ok(!result.signal);
+        assert.equal(await readFile(marker, 'utf8'), 'once');
+      } finally { clearTimeout(deadline); channel.end(); channel.close(); }
+    });
+
     await t.test('대기·거부 요청은 파일을 만들지 않고 승인 요청은 정확한 바이트를 왕복한다', async () => {
       const bytes = Buffer.alloc(262_161);
       for (let i = 0; i < bytes.length; i++) bytes[i] = i % 256;
@@ -160,6 +210,57 @@ test('실제 Windows SSH 명령·승인·파일 전송 경계', {
       assert.deepEqual(await readFile(op.remotePath), Buffer.alloc(0));
       assert.equal((await transfers.upload(await uploadOperation('empty.bin', Buffer.from('승인된 교체'), true))).failed, false);
       assert.deepEqual(await readFile(op.remotePath), Buffer.from('승인된 교체'));
+    });
+
+    await t.test('파일 권한 상승은 비관리자에서 전송 전에 거부하고 관리자 토큰에서 왕복한다', async () => {
+      const denied = await uploadOperation('nonadmin-elevated.bin', Buffer.from('거부'), false, true);
+      const result = await transfers.upload(denied);
+      assert.equal(result.failed, true);
+      assert.equal(result.data.errorCode, 'PERMISSION_DENIED');
+      await absent(denied.remotePath);
+      assert.deepEqual(await readdir(fixture.stageRoot), []);
+      const admin = await createSshRuntime({ BRIDGE_CONFIG_PATH: fixture.adminConfigPath, BRIDGE_HOST_KEY_MODE: 'strict' });
+      try {
+        const adminStore = new Artifacts(join(fixture.artifactRoot, 'admin'), { maxBytes: 1_048_576, budget: 2_097_152 });
+        await adminStore.init();
+        const adminTransfers = createTransferExecutor(admin.registry, adminStore, {
+          platform: 'windows', helper: fixture.adminHelper, remoteStage: fixture.adminStageRoot,
+          readProfile: 'admin-read', writeProfile: 'admin-write',
+        });
+        const bytes = Buffer.from([0, 255, 128, 32, 13, 10]);
+        const meta = { fileName: 'admin-elevated.bin', remotePath: win32.join(fixture.adminFileRoot, 'admin-elevated.bin'),
+          size: bytes.length, sha256: digest(bytes), overwrite: false, elevate: true };
+        const item = await adminStore.begin(meta);
+        await adminStore.append(item.id, 0, bytes); await adminStore.finish(item.id);
+        const uploaded = await adminTransfers.upload({ kind: 'upload', artifactId: item.id, ...meta });
+        assert.equal(uploaded.failed, false, JSON.stringify(uploaded.data));
+        assert.deepEqual(await readFile(meta.remotePath), bytes);
+        const downloaded = await adminTransfers.download({ kind: 'download', remotePath: meta.remotePath, elevate: true });
+        assert.equal(downloaded.failed, false, JSON.stringify(downloaded.data));
+        assert.equal(downloaded.data.sha256, digest(bytes));
+        assert.deepEqual(await readFile(join(fixture.artifactRoot, 'admin', downloaded.data.artifactId + '.part')), bytes);
+      } finally { await admin.registry.closeAll(); }
+    });
+
+    await t.test('고정 CLI 관리자는 실제 SSH에서 inspect와 로그인 상태를 반환한다', async () => {
+      const binding = { targetId: 'windows-cli', targetRevision: 'e'.repeat(64), profile: 'windows-write', platform: 'windows' };
+      const inspect = await runtime.executeAgentCli(prepareAgentCliPlan({ action: 'inspect', provider: 'codex', binding }), () => binding);
+      assert.equal(inspect.failed, false);
+      assert.equal(inspect.data.agentCli.action, 'inspect');
+      assert.equal(typeof inspect.data.agentCli.installed, 'boolean');
+      const login = await runtime.executeAgentCli(prepareAgentCliPlan({ action: 'login-status', provider: 'codex', binding }), () => binding);
+      assert.equal(login.failed, false);
+      assert.ok(['signed_in', 'signed_out', 'not_installed', 'unavailable'].includes(login.data.agentCli.state));
+    });
+
+    await t.test('고정 가짜 공급망으로 실제 SSH CLI 설치·갱신·보존·상태·실패 제한을 검증한다', async () => {
+      const scriptPath = remote('cli-supply-fixture.ps1');
+      const nodeDirectory = dirname(process.execPath).replaceAll("'", "''");
+      await writeFile(scriptPath, `$env:PATH = '${nodeDirectory};' + $env:PATH\n${buildWindowsCliFixtureScript()}`, 'utf8');
+      const result = await connection.exec(`powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "${scriptPath}"`, { timeoutMs: 120_000 });
+      assert.equal(result.exitCode, 0, result.stderr);
+      assert.equal(result.stdout.trim(), 'ok');
+      assert.equal(result.stderr, '');
     });
 
     await t.test('보조프로그램은 위험 경로·상태 변경·크기 초과를 거부한다', async () => {

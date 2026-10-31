@@ -12,7 +12,7 @@ const en = {
   '요청을 찾을 수 없습니다. 재시작으로 유실됐을 수 있습니다.': 'Request not found. It may have been lost after a restart.',
   '요청 정보': 'Request details', '요청': 'Request', '승인 만료': 'Approval expires', '실행할 명령': 'Command to execute', '파일 전송 내용': 'File transfer details',
   '방향': 'Direction', 'PC → 서버': 'PC → Server', '서버 → PC': 'Server → PC', '파일명': 'File name', '서버 경로': 'Remote path', '크기': 'Size', '바이트': 'bytes',
-  'sudo 사용': 'Use sudo', '예': 'Yes', '아니요': 'No', '덮어쓰기': 'Overwrite', '실행 결과': 'Execution result', '파일 전송에 실패했습니다.': 'File transfer failed.',
+  'sudo 사용': 'Use sudo', '관리자 토큰 확인': 'Verify administrator token', ' 관리자 토큰으로 전송': ' Transfer using administrator token', '예': 'Yes', '아니요': 'No', '덮어쓰기': 'Overwrite', '실행 결과': 'Execution result', '파일 전송에 실패했습니다.': 'File transfer failed.',
   '승인·실행': 'Approve and run', '거부': 'Deny', '파일 저장': 'Save file', '파일 저장 링크를 받지 못했습니다.': 'No file download link was received.',
   '저장 취소 또는 미지원': 'Save cancelled or unsupported', '웹 승인 화면에서 파일을 저장하세요.': 'Save the file from the web approval page.',
   '브라우저에서 로그인 후 파일을 저장하세요. 저장된 파일은 기기에서 확인해 주세요.': 'Sign in and save the file in your browser. Check the saved file on your device.',

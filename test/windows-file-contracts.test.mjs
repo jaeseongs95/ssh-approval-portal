@@ -79,7 +79,7 @@ test('공유 저장소는 두 대상 문법을 받아들이고 메타데이터�
   } finally { await rm(root, { recursive: true }); }
 });
 
-test('파일 서비스는 대상 문법과 Windows 승격을 부작용 전에 검사한다', async () => {
+test('파일 서비스는 대상 문법을 검사하고 Windows 관리자 토큰 요청을 보존한다', async () => {
   const effects = [];
   const store = { begin: async meta => { effects.push('begin'); return meta; } };
   const queue = { submitOperation: op => { effects.push('submit'); return { id: 'job', operation: op }; },
@@ -87,7 +87,7 @@ test('파일 서비스는 대상 문법과 Windows 승격을 부작용 전에 �
   const windows = createFileService({ store, queue, platform: 'windows' });
   const linux = createFileService({ store, queue });
   const source = { inspect: () => { effects.push('inspect'); return { allowed: false }; } };
-  for (const [service, remotePath, elevate] of [[windows, path, true], [windows, '/tmp/file', false], [linux, path, false]]) {
+  for (const [service, remotePath, elevate] of [[windows, '/tmp/file', false], [linux, path, false]]) {
     await assert.rejects(service.beginUpload({ ...metadata(remotePath), elevate }));
     await assert.rejects(service.requestUpload({ source, ...metadata(remotePath), elevate }));
     assert.throws(() => service.requestDownload({ remotePath, elevate }));
@@ -97,7 +97,10 @@ test('파일 서비스는 대상 문법과 Windows 승격을 부작용 전에 �
   const begun = await windows.beginUpload(metadata(), binding);
   assert.equal(begun.fileTargetBound, true); assert.equal(begun.targetRevision, revision);
   assert.equal(windows.requestDownload({ remotePath: path, elevate: false }, binding).id, 'job');
-  assert.deepEqual(effects, ['begin', 'submit']);
+  const elevated = await windows.beginUpload({ ...metadata(), elevate: true }, binding);
+  assert.equal(elevated.elevate, true);
+  assert.equal(windows.requestDownload({ remotePath: path, elevate: true }, binding).operation.elevate, true);
+  assert.deepEqual(effects, ['begin', 'submit', 'begin', 'submit']);
   await windows.close(); await linux.close();
 });
 
@@ -139,12 +142,12 @@ test('Windows 전송은 고정 명령과 JSON으로 바이트를 왕복하고 �
   } finally { await rm(root, { recursive: true }); }
 });
 
-test('Windows 전송은 승격·대상 문법·실행 경로 삽입을 연결 전에 거부한다', async () => {
+test('Windows 전송은 대상 문법·실행 경로 삽입을 연결 전에 거부한다', async () => {
   const effects = [];
   const store = { get: () => effects.push('get'), reserveDownload: () => effects.push('reserve') };
   const transport = { connect: async () => effects.push('connect') };
   const transfers = new Transfers(null, store, { platform: 'windows', transport });
-  for (const op of [{ remotePath: path, elevate: true }, { remotePath: '/tmp/file', elevate: false }]) {
+  for (const op of [{ remotePath: '/tmp/file', elevate: false }]) {
     await assert.rejects(transfers.upload(op)); await assert.rejects(transfers.download(op));
   }
   assert.deepEqual(effects, []);
@@ -154,4 +157,41 @@ test('Windows 전송은 승격·대상 문법·실행 경로 삽입을 연결 �
   const spaced = new Transfers(null, store, { platform: 'windows', transport, helper: 'C:\\Program Files\\portal\\helper.ps1', remoteStage: 'C:\\ProgramData\\portal\\incoming' });
   assert.equal(spaced.remoteStage, 'C:/ProgramData/portal/incoming');
   assert.throws(() => new Transfers(null, store, { platform: 'unknown', transport }));
+});
+
+test('Windows 관리자 토큰 확인을 업로드 전에 요구하고 승인된 특권 의도를 유지한다', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'windows-elevated-'));
+  try {
+    const store = new Artifacts(root, { maxBytes: 32, budget: 128 }); await store.init();
+    const item = await store.begin({ ...metadata(), elevate: true });
+    await store.append(item.id, 0, bytes); await store.finish(item.id);
+    const calls = [], profiles = [];
+    let authorized = false, uploads = 0;
+    const session = {
+      async call(command, payload) {
+        calls.push({ command, payload });
+        if (payload.action === 'authorize') return authorized
+          ? { exitCode: 0, stdout: JSON.stringify({ authorized: true, elevated: true }) }
+          : { exitCode: 1, stdout: JSON.stringify({ errorCode: 'PERMISSION_DENIED' }) };
+        return { exitCode: 0, stdout: JSON.stringify(payload.action === 'snapshot' ? { size: bytes.length, sha256: hash(bytes) } : { published: true }) };
+      },
+      async upload(stream) { uploads++; for await (const chunk of stream) assert.deepEqual(chunk, bytes); },
+      async download(path, destination) { destination.end(bytes); },
+    };
+    const transfers = new Transfers(null, store, { platform: 'windows', readProfile: 'reader', writeProfile: 'writer',
+      transport: { connect: async profile => { profiles.push(profile); return session; } } });
+    const op = { ...metadata(), elevate: true, artifactId: item.id };
+    await assert.rejects(transfers.upload({ ...op, elevate: false }), /frozen/);
+    const refused = await transfers.upload(op);
+    assert.equal(refused.data.errorCode, 'PERMISSION_DENIED'); assert.equal(uploads, 0);
+    assert.deepEqual(calls.map(x => x.payload.action), ['authorize']);
+    authorized = true; calls.length = 0;
+    assert.equal((await transfers.upload(op)).failed, false);
+    assert.deepEqual(calls.map(x => x.payload.action), ['authorize', 'publish', 'cleanup']);
+    assert.deepEqual(calls.map(x => x.payload.elevate), [true, true, false]);
+    assert.equal((await transfers.download({ remotePath: path, elevate: true })).failed, false);
+    assert.equal(calls[3].payload.action, 'snapshot'); assert.equal(calls[3].payload.elevate, true);
+    assert.deepEqual(profiles, ['writer', 'writer', 'writer']);
+    for (const call of calls) assert.doesNotMatch(call.command, /runas|Start-Process|sudo/);
+  } finally { await rm(root, { recursive: true }); }
 });

@@ -5,6 +5,19 @@ import {agentCliProvider,validateAgentRelease,AGENT_CLI_CONTRACT} from '../../do
 
 const source=readFileSync(new URL('../../../scripts/manage-agent-cli.py',import.meta.url),'utf8');
 const loginSource=readFileSync(new URL('../../../scripts/check-agent-cli-login.py',import.meta.url),'utf8');
+const windowsSource=readFileSync(new URL('../../../scripts/manage-agent-cli-windows.ps1',import.meta.url),'utf8');
+const windowsContract='agent-cli-powershell-v1';
+const sha256=value=>createHash('sha256').update(value).digest('hex');
+function prepareWindowsHelper({argv,binding}){
+ if(!/^[a-z][a-z0-9_-]{0,31}$/.test(binding?.targetId??'')||!/^[a-f0-9]{64}$/.test(binding?.targetRevision??'')||!/^[A-Za-z0-9_][A-Za-z0-9_.+-]{0,79}$/.test(binding?.profile??''))throw Error('Invalid CLI target binding');
+ const sourceBytes=Buffer.byteLength(windowsSource),sourceSha256=sha256(windowsSource);
+ if(sourceBytes>65536)throw Error('Windows CLI helper exceeds transport limit');
+ const argumentsLiteral=argv.map(value=>`'${value.replaceAll("'","''")}'`).join(',');
+ const receiver=`$ErrorActionPreference='Stop';[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);$inputStream=[Console]::OpenStandardInput();$b=[Array]::CreateInstance([byte],${sourceBytes+1});$n=0;while($n -lt $b.Length){$r=$inputStream.Read($b,$n,$b.Length-$n);if($r -eq 0){break};$n+=$r};if($n -ne ${sourceBytes}){exit 125};$hash=[Security.Cryptography.SHA256]::Create();try{$h=([BitConverter]::ToString($hash.ComputeHash($b,0,$n))).Replace('-','').ToLowerInvariant()}finally{$hash.Dispose()};if($h -cne '${sourceSha256}'){exit 125};$s=[Text.UTF8Encoding]::new($false,$true).GetString($b,0,$n);[IO.Directory]::SetCurrentDirectory('C:\\');& ([scriptblock]::Create($s)) -CliArguments ([string[]]@(${argumentsLiteral}))`;
+ const manifest=Object.freeze({contract:windowsContract,interpreter:'powershell.exe',startupFlags:'-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass',receiverSha256:sha256(receiver),sourceSha256,sourceBytes,argvJson:JSON.stringify(argv),cwd:'C:/',elevate:false,targetId:binding.targetId,targetRevision:binding.targetRevision,profile:binding.profile,environmentRevision:sha256('windows-cli-clean-environment-v1'),environmentPolicy:'windows-cli-clean-environment-v1'});
+ const args=Object.freeze(['-NoLogo','-NoProfile','-NonInteractive','-WindowStyle','Hidden','-ExecutionPolicy','Bypass','-EncodedCommand',Buffer.from(receiver,'utf16le').toString('base64')]);
+ return Object.freeze({manifest,planDigest:sha256(JSON.stringify(manifest)),command:['powershell.exe',...args].join(' '),args,stdin:windowsSource});
+}
 const id=value=>typeof value==='string'&&/^[a-f0-9]{48}$/.test(value);
 const hex=value=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
 const stable=value=>typeof value==='string'&&/^(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$/.test(value);
@@ -33,23 +46,33 @@ export function prepareAgentCliPlan({action,provider,binding,release,expectedIns
   args=action==='login-status'?[action,provider]:[action,provider,'','','','',operationId??''];
   if(action==='status')intentDigest=expectedIntentDigest;
  }
- const plan=preparePythonHelper({source:action==='login-status'?loginSource:source,argv:action==='login-status'?[provider]:args,cwd:'/',elevate:false,targetId:binding?.targetId,targetRevision:binding?.targetRevision,profile:binding?.profile});
- return Object.freeze({...plan,agentCli:Object.freeze({contract:AGENT_CLI_CONTRACT,action,provider,...(operationId===undefined?{}:{operationId}),...(intentDigest===undefined?{}:{intentDigest})})});
+ const windows=binding?.platform==='windows';
+ if(binding?.platform!==undefined&&!['linux','windows'].includes(binding.platform))throw Error('Unsupported CLI target platform');
+ const plan=windows?prepareWindowsHelper({argv:action==='login-status'?[action,provider,'','','','','']:args,binding}):preparePythonHelper({source:action==='login-status'?loginSource:source,argv:action==='login-status'?[provider]:args,cwd:'/',elevate:false,targetId:binding?.targetId,targetRevision:binding?.targetRevision,profile:binding?.profile});
+ return Object.freeze({...plan,agentCli:Object.freeze({contract:AGENT_CLI_CONTRACT,action,provider,...(windows?{platform:'windows'}:{}),...(operationId===undefined?{}:{operationId}),...(intentDigest===undefined?{}:{intentDigest})})});
 }
 
 /** Recreate from the fixed helper; a caller-prepared generic Python plan is insufficient. */
 export function validateAgentCliPlan(plan){
  if(!record(plan?.manifest)||!record(plan.agentCli))throw Error('Invalid CLI delivery plan');
  let args;try{args=JSON.parse(plan.manifest.argvJson);}catch{throw Error('Invalid CLI delivery plan');}
+ const windows=plan.manifest.contract===windowsContract;
+ const binding={targetId:plan.manifest.targetId,targetRevision:plan.manifest.targetRevision,profile:plan.manifest.profile,...(windows?{platform:'windows'}:{})};
  if(plan.agentCli.action==='login-status'){
+  if(windows){
+   if(!Array.isArray(args)||args.length!==7||args[0]!=='login-status'||args.slice(2).some(value=>value!==''))throw Error('Invalid CLI delivery plan');
+   const exact=prepareAgentCliPlan({action:'login-status',provider:args[1],binding});
+   if(['stdin','command','planDigest','manifest','args','agentCli'].some(key=>JSON.stringify(plan[key])!==JSON.stringify(exact[key])))throw Error('CLI delivery plan changed');
+   return exact;
+  }
   if(!Array.isArray(args)||args.length!==1)throw Error('Invalid CLI delivery plan');
-  const exact=prepareAgentCliPlan({action:'login-status',provider:args[0],binding:{targetId:plan.manifest.targetId,targetRevision:plan.manifest.targetRevision,profile:plan.manifest.profile}});
+  const exact=prepareAgentCliPlan({action:'login-status',provider:args[0],binding});
   if(['stdin','command','planDigest','manifest','args','agentCli'].some(key=>JSON.stringify(plan[key])!==JSON.stringify(exact[key])))throw Error('CLI delivery plan changed');
   return exact;
  }
  if(!Array.isArray(args)||args.length!==7||args.some(arg=>typeof arg!=='string'))throw Error('Invalid CLI delivery plan');
  const [action,provider,version,integrity,expected,expires,operationId]=args;
- const entry=agentCliProvider(provider),binding={targetId:plan.manifest.targetId,targetRevision:plan.manifest.targetRevision,profile:plan.manifest.profile};
+ const entry=agentCliProvider(provider);
  let exact;
  if(['install','update'].includes(action)){
   const release=validateAgentRelease(provider,{name:entry.packageName,version,dist:{tarball:'https://registry.npmjs.org/'+entry.packageName+'/-/'+entry.packageName.split('/')[1]+'-'+version+'.tgz',integrity}});
@@ -64,7 +87,7 @@ export function validateAgentCliPlan(plan){
 
 /** Derive only a readonly receipt lookup from public persisted fields, never installation authority. */
 export function prepareAgentCliStatus(operation,binding){
- if(operation?.agentCliContract!==AGENT_CLI_CONTRACT||operation.agentCliTargetId!==binding.targetId||operation.agentCliTargetRevision!==binding.targetRevision||operation.agentCliProfile!==binding.profile||operation.sourceElevate!==false||operation.sourceCwd!=='/'||typeof operation.sourceArgvJson!=='string'||Buffer.byteLength(operation.sourceArgvJson)>4096)throw Error('CLI status binding changed');
+ if(operation?.agentCliContract!==AGENT_CLI_CONTRACT||operation.agentCliTargetId!==binding.targetId||operation.agentCliTargetRevision!==binding.targetRevision||operation.agentCliProfile!==binding.profile||operation.sourceElevate!==false||operation.sourceCwd!==(binding.platform==='windows'?'C:/':'/')||(binding.platform==='windows'&&operation.sourceContract!==windowsContract)||typeof operation.sourceArgvJson!=='string'||Buffer.byteLength(operation.sourceArgvJson)>4096)throw Error('CLI status binding changed');
  let args;try{args=JSON.parse(operation.sourceArgvJson);}catch{throw Error('Invalid CLI saved arguments');}
  if(!Array.isArray(args)||args.length!==7||args.some(value=>typeof value!=='string')||!['install','update'].includes(args[0])||args[0]!==operation.agentCliAction||args[1]!==operation.agentCliProvider||args[6]!==operation.agentCliOperationId||!hex(args[4])||!Number.isSafeInteger(Number(args[5]))||Number(args[5])<=0||String(Number(args[5]))!==args[5])throw Error('Invalid CLI saved arguments');
  const entry=agentCliProvider(args[1]);validateAgentRelease(args[1],{name:entry.packageName,version:args[2],dist:{tarball:'https://registry.npmjs.org/'+entry.packageName+'/-/'+entry.packageName.split('/')[1]+'-'+args[2]+'.tgz',integrity:args[3]}});
@@ -86,7 +109,7 @@ export function projectAgentCliResult(result,plan){
   if(value.provider!==provider||typeof value.installed!=='boolean'||typeof value.managed!=='boolean'||value.login!=='not_checked'||!hex(value.installationRevision)||!(value.version===null||stable(value.version)))refuse();
   if(value.managed){if(!value.installed||!stable(value.version)||typeof value.active!=='string'||!new RegExp('^versions/'+value.version.replaceAll('.','\\.')+'-[a-f0-9]{16}$').test(value.active))refuse();}
   else if(!value.installed){if(value.version!==null||value.active!==null)refuse();}
-  else if(typeof value.active!=='string'||!value.active.startsWith('/')||!value.active.endsWith('/'+agentCliProvider(provider).command)||value.active.length>512||/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(value.active))refuse();
+  else if(typeof value.active!=='string'||(plan.agentCli.platform==='windows'?!/^[A-Za-z]:\/(?:[^<>:"|?*\\]+\/)*[^<>:"|?*\\]+\.(?:exe|[cm]?js)$/i.test(value.active):!value.active.startsWith('/')||!value.active.endsWith('/'+agentCliProvider(provider).command))||value.active.length>512||/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(value.active))refuse();
   data={...data,installed:value.installed,managed:value.managed,version:value.version,active:value.active,installationRevision:value.installationRevision};
  }else{
   if(value.operationId!==operationId)refuse();

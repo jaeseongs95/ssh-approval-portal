@@ -58,8 +58,8 @@ export async function fixtureServer(root) {
         text = await readFile(resolve(root, '.' + url.pathname), 'utf8');
       } else if (url.pathname === '/src/contracts/ports.mjs') {
         text = await readFile(resolve(root, 'src/contracts/ports.mjs'), 'utf8');
-      } else if (url.pathname === '/src/domain/command-line.mjs') {
-        text = await readFile(resolve(root, 'src/domain/command-line.mjs'), 'utf8');
+      } else if (['/src/domain/command-line.mjs', '/src/domain/windows-command-line.mjs'].includes(url.pathname)) {
+        text = await readFile(resolve(root, '.' + url.pathname), 'utf8');
       } else if (url.pathname === '/src/domain/command-risks.json') {
         text = await readFile(resolve(root, 'src/domain/command-risks.json'), 'utf8'); type = 'application/json';
       } else if (['/', '/settings', '/history', '/fixture/web'].includes(url.pathname)) {

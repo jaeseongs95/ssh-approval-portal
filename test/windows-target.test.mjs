@@ -9,7 +9,7 @@ import { parseTargets, resolveTargets } from '../src/adapters/config/targets.mjs
 import { classifyForTarget, platformOf, targetCapabilities, wrapWindowsCommand } from '../src/domain/target-platform.mjs';
 
 // 시험 계획: WIN-CONFIG는 기존 revision 보존, WIN-ENCODE는 OB-IDENTITY/OB-BOUND,
-// WIN-POLICY는 승인 경계, WIN-CAPABILITY는 TEST를 포함한 비지원 거부를 검사한다.
+// WIN-POLICY는 승인 경계, WIN-CAPABILITY는 TEST를 포함한 명시적 인터프리터 조건을 검사한다.
 // 실제 app·큐·저장소·관리자 API를 사용하고 SSH·평가자만 합성 포트로 대체한다.
 // 실제 PowerShell 구문 실행, helper 파일 시스템 경합과 OB-ACK 장애 주입은 별도 Windows CI 범위다.
 const windows = { platform: 'windows' };
@@ -115,8 +115,8 @@ async function fixture(t, { automation = false } = {}) {
   const app = await createApplication({ registry: registryFor(profiles), transferRoot: root, env,
     classify: () => ({ class: 'read-only' }), audit: event => events.push(event), uiHtml: '<html>합성 시험</html>',
     secretResolver: { resolve: async () => '1'.repeat(64) },
-    executeCommand: async (profile, command, beforeDispatch) => {
-      await beforeDispatch(); executions.push({ profile, command }); return { failed: false, texts: ['synthetic-outcome'] };
+    executeCommand: async (profile, command, beforeDispatch, options) => {
+      await beforeDispatch(); executions.push({ profile, command, stdin: typeof options === 'string' ? options : options?.stdin }); return { failed: false, texts: ['synthetic-outcome'] };
     },
     executePythonSource: async () => { unsupported.push('source'); throw Error('비지원 경로가 실행되었습니다'); },
     executeAgentCli: async () => { unsupported.push('agent-cli'); throw Error('비지원 경로가 실행되었습니다'); },
@@ -135,8 +135,8 @@ async function fixture(t, { automation = false } = {}) {
   };
   const policy = async changes => {
     const current = (await api('/api/command-policy')).body, binding = current.bindings[0];
-    const rule = { targetId: binding.targetId, targetRevision: binding.targetRevision, profile: binding.profile,
-      commands: ['Write-Output'], deniedCommands: [], automaticSudo: false, externalDisclosure: true,
+    const rule = { targetId: binding.targetId, targetRevision: binding.targetRevision, profile: binding.profile, platform: 'windows',
+      commands: [], deniedCommands: [], automaticSudo: false, externalDisclosure: true,
       modelExecution: false, fallback: null, thresholds: {}, ...changes };
     const proposal = { expectedRevision: current.revision, policy: { targets: [rule] } };
     const review = await api('/api/command-policy/review', proposal);
@@ -165,7 +165,8 @@ test('WIN-APP safe 명령은 소유자 승인을 거치고 원문·출력 수명
   assert.equal(completed.command, raw);
   assert.equal(completed.result.output.state, 'ready');
   assert.equal(f.executions[0].profile, entry.writeProfile);
-  assert.equal(encodedScript(f.executions[0].command).includes(raw), true);
+  assert.equal(f.executions[0].stdin, raw);
+  assert.equal(encodedScript(f.executions[0].command).includes(raw), false);
   assert.ok(f.events.some(event => event.action === 'approved' && event.command === raw));
   const output = await f.api('/api/outputs/' + completed.result.output.id);
   assert.equal(output.status, 200);
@@ -174,47 +175,51 @@ test('WIN-APP safe 명령은 소유자 승인을 거치고 원문·출력 수명
   const read = await f.app.targets.commands.read('Microsoft.PowerShell.Utility\\Get-Date', entry.id);
   assert.equal(read.failed, false);
   assert.equal(f.executions[1].profile, entry.readProfile);
-  assert.equal(encodedScript(f.executions[1].command).includes('Microsoft.PowerShell.Utility\\Get-Date'), true);
+  assert.equal(f.executions[1].stdin, 'Microsoft.PowerShell.Utility\\Get-Date');
   const admitted = f.app.queue.listAll().length;
-  for (const raw of ['x'.repeat(4000), 'x\ny', 'x\u202ey']) await assert.rejects(f.run(raw));
+  for (const raw of ['x'.repeat(32769), 'x\ny', 'x\u202ey']) await assert.rejects(f.run(raw));
   assert.equal(f.app.queue.listAll().length, admitted);
   assert.equal(f.executions.length, 2);
 });
 
-test('WIN-POLICY 이름 사전승인과 명시승인을 무효화하고 플랫폼 문맥·대소문자 거부를 적용한다', async t => {
+test('WIN-POLICY 불명확한 이름은 전체 평가하고 리터럴 이름 승인·플랫폼 문맥·대소문자 거부를 적용한다', async t => {
   const f = await fixture(t, { automation: true });
-  await f.policy({ commands: ['Write-Output'] });
+  await f.policy({ commands: ['whoami.exe'] });
   const raw = 'Write-Output "synthetic"', job = await f.run(raw);
   assert.equal(job.state, 'pending');
   assert.equal(job.decision.reasonCode, 'observation_only');
   assert.equal(f.executions.length, 0);
   assert.equal(f.inputs.length, 1);
   assert.equal(f.inputs[0].command, raw);
-  assert.deepEqual(f.inputs[0].preapprovedCommands, []);
   assert.equal(f.inputs[0].userApproval.explicit, false);
   const facts = JSON.parse(f.inputs[0].context).serverFacts;
   assert.equal(facts.targetPlatform, 'windows');
   assert.equal(facts.commandLanguage, 'windows-powershell-5.1');
   assert.equal(facts.targetRevision, job.targetRevision);
-  await f.policy({ commands: ['Remove-Item'], deniedCommands: ['Remove-Item'] });
+  await f.policy({ commands: ['WHOAMI.EXE'] });
+  const approved = await f.run('whoami.exe /user');
+  assert.equal(approved.state, 'completed');
+  assert.equal(approved.decision.reasonCode, 'command_set');
+  assert.equal(f.inputs.length, 1);
+  await f.policy({ commands: ['Microsoft.PowerShell.Management\\Remove-Item'], deniedCommands: ['Microsoft.PowerShell.Management\\Remove-Item'] });
   for (const raw of ['rEmOvE-iTeM C:\\synthetic\\never', 'Microsoft.PowerShell.Management\\REMOVE-ITEM C:\\synthetic\\never']) {
     const denied = await f.run(raw);
     assert.equal(denied.state, 'denied');
     assert.equal(denied.decision.reasonCode, 'policy_denied');
   }
   assert.equal(f.inputs.length, 1);
-  assert.equal(f.executions.length, 0);
+  assert.equal(f.executions.length, 1);
 });
 
-test('WIN-CAPABILITY source·agent CLI 비지원은 TEST에서도 동일하며 지원 행렬과 일치한다', async t => {
+test('WIN-CAPABILITY Windows CLI·이름승인·승격파일을 표시하고 source는 명시적 Python 없이 TEST에서도 거부한다', async t => {
   const f = await fixture(t, { automation: true });
   const listed = (await f.api('/api/targets')).body.targets[0];
   assert.equal(listed.platform, 'windows');
   assert.deepEqual(listed.capabilities, { commandShell: 'windows-powershell-5.1', fileTransfer: true,
-    elevatedFileTransfer: false, pythonSource: false, agentCli: false, commandNameApproval: false });
+    elevatedFileTransfer: true, pythonSource: false, agentCli: true, commandNameApproval: true });
   const cli = (await f.api('/api/agent-cli')).body.bindings[0];
   assert.equal(cli.platform, 'windows');
-  assert.equal(cli.supported, false);
+  assert.equal(cli.supported, true);
   for (const testServer of [false, true]) {
     await f.policy({ testServer, commands: [], externalDisclosure: false });
     if (testServer) {
@@ -224,12 +229,7 @@ test('WIN-CAPABILITY source·agent CLI 비지원은 TEST에서도 동일하며 �
     }
     const before = f.app.queue.listAll().length;
     assert.throws(() => f.app.targets.commands.runSource({ source: 'print(1)', cwd: '/tmp' }, entry.id), { code: 'TARGET_CAPABILITY_UNSUPPORTED' });
-    for (const [action, body] of [
-      ['login-status', { targetId: entry.id, provider: 'codex' }],
-      ['preview', { targetId: entry.id, provider: 'codex', action: 'install' }],
-      ['submit', { request: { targetId: entry.id } }],
-    ]) assert.equal((await f.api('/api/agent-cli/' + action, body)).status, 409, action);
-    await assert.rejects(f.run('x'.repeat(4000)), { code: 'WINDOWS_COMMAND_TOO_LARGE' });
+    await assert.rejects(f.run('x'.repeat(32769)));
     assert.equal(f.app.queue.listAll().length, before);
   }
   assert.deepEqual(f.unsupported, []);

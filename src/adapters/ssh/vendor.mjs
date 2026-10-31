@@ -37,7 +37,7 @@ async function executeSourcePlan(registry, plan, verify, options = {}, prepare =
   if (typeof verify !== 'function' || !plan?.manifest) throw Error('Source target verification required');
   const submitted = plan.manifest;
   const exact = prepare({ source: plan.stdin, argv: JSON.parse(submitted.argvJson), cwd: submitted.cwd, elevate: submitted.elevate,
-    targetId: submitted.targetId, targetRevision: submitted.targetRevision, profile: submitted.profile, environmentRevision: submitted.environmentRevision });
+    targetId: submitted.targetId, targetRevision: submitted.targetRevision, profile: submitted.profile, environmentRevision: submitted.environmentRevision, ...(submitted.platform === 'windows' ? { platform: 'windows', pythonExecutable: submitted.interpreter } : {}) });
   if (exact.command !== plan.command || exact.planDigest !== plan.planDigest
     || JSON.stringify(exact.manifest) !== JSON.stringify(submitted) || JSON.stringify(exact.args) !== JSON.stringify(plan.args)) throw Error('Source execution plan changed');
   const m = exact.manifest;
@@ -79,7 +79,8 @@ export async function executeAgentCli(registry, plan, verify, beforeDispatch = a
   const exact = validateAgentCliPlan(plan);
   const timeoutMs = ['install','update'].includes(exact.agentCli.action) ? 930000 : 30000;
   let result;
-  try { result = await executeSourcePlan(registry, exact, verify, { timeoutMs }, preparePythonHelper, beforeDispatch); }
+  const prepare = exact.manifest.contract === 'agent-cli-powershell-v1' ? () => validateAgentCliPlan(exact) : preparePythonHelper;
+  try { result = await executeSourcePlan(registry, exact, verify, { timeoutMs }, prepare, beforeDispatch); }
   catch { throw Error('CLI result unknown; inspect saved status, never retry automatically'); }
   return projectAgentCliResult(result, exact);
 }
@@ -93,8 +94,9 @@ export async function createSshRuntime(settings) {
   const auditRedact = defaultRedact;
   return {
     registry, classify: classifyCommand, auditRedact,
-    async executeCommand(profile, command, beforeDispatch = async () => {}) {
-      const result = await withDispatchGuard(await registry.getOrCreate(profile), beforeDispatch).exec(command);
+    async executeCommand(profile, command, beforeDispatch = async () => {}, options = {}) {
+      if (Object.keys(options).some(key => key !== 'stdin') || options.stdin !== undefined && typeof options.stdin !== 'string') throw Error('Invalid command transport options');
+      const result = await withDispatchGuard(await registry.getOrCreate(profile), beforeDispatch).exec(command, options);
       return commandOutcome(result, auditRedact);
     },
     executePythonSource: (plan, verify, beforeDispatch) => executePythonSource(registry, plan, verify, beforeDispatch),

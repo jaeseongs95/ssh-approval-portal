@@ -19,7 +19,13 @@ try {
     } catch { throw 'INVALID_REQUEST' }
     if ($null -eq $request -or $request -isnot [pscustomobject] -or
         $request.id -isnot [string] -or $request.id -cnotmatch '^[a-f0-9]{48}$' -or
-        $request.action -cnotin @('publish', 'snapshot', 'cleanup')) { throw 'INVALID_REQUEST' }
+        $request.action -cnotin @('publish', 'snapshot', 'cleanup', 'authorize')) { throw 'INVALID_REQUEST' }
+    $elevate = $false
+    if ($null -ne $request.PSObject.Properties['elevate']) {
+        if ($request.elevate -isnot [bool]) { throw 'INVALID_REQUEST' }
+        $elevate = $request.elevate
+    }
+    if ($request.action -eq 'authorize' -and !$elevate) { throw 'INVALID_REQUEST' }
     $maximum = 67108864L
     if ($null -ne $request.PSObject.Properties['maxBytes']) {
         if (($request.maxBytes -isnot [int] -and $request.maxBytes -isnot [long]) -or
@@ -43,7 +49,12 @@ try {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     if ($identity.User.Value -ne $config.accountSid) { throw 'PERMISSION_DENIED' }
     Add-Type -Path (Join-Path $PSScriptRoot 'windows-file-native.cs') -ErrorAction Stop | Out-Null
+    if ($elevate) { [SshApproval.WindowsFiles]::RequireAdministrator() }
     $installLease = [SshApproval.WindowsFiles]::PinTrustedDirectory($PSScriptRoot, $config.accountSid, $config.installerSid, $false)
+    if ($request.action -eq 'authorize') {
+        [Console]::Out.WriteLine('{"authorized":true,"elevated":true}')
+        exit 0
+    }
     $result = [SshApproval.WindowsFiles]::Execute($request.action, $request.id, $request.remotePath,
         $request.sha256, $size, $maximum, $overwrite, $config.fileRoot, $config.stageRoot, $config.accountSid, $config.installerSid)
     [Console]::Out.WriteLine(($result | ConvertTo-Json -Compress -Depth 4))
@@ -59,7 +70,7 @@ try {
         if ($failure.PSObject.Properties['Code'] -and $failure.Code -cin $codes) {
             $code = $failure.Code
             if ($failure.PSObject.Properties['NativeStep'] -and $failure.NativeStep -cin @('native', 'create_directory',
-                'inspect', 'open', 'filesystem', 'final_path', 'read_security', 'remove', 'rename_replace', 'rename_new', 'write_security') -and
+                'inspect', 'open', 'filesystem', 'final_path', 'read_security', 'remove', 'rename_replace', 'rename_new', 'write_security', 'write_times') -and
                 $failure.NativeError -is [int] -and $failure.NativeError -gt 0) {
                 $nativeStep = $failure.NativeStep
                 $nativeError = $failure.NativeError

@@ -19,9 +19,11 @@ $fixtureId = [Guid]::NewGuid().ToString('N')
 $fixtureRoot = Join-Path $env:ProgramData ('ags-windows-ci-' + $fixtureId)
 $clientRoot = Join-Path $fixtureRoot 'client'
 $accountName = 'agsci' + $fixtureId.Substring(0, 12)
+$adminName = 'agsad' + $fixtureId.Substring(0, 12)
 $taskName = 'AGS-Windows-SSH-' + $fixtureId
 $registeredTask = $false
 $createdUser = $false
+$createdAdmin = $false
 $testsPassed = $false
 $utf8 = [Text.UTF8Encoding]::new($false)
 $sshd = Join-Path $env:WINDIR 'System32/OpenSSH/sshd.exe'
@@ -80,17 +82,17 @@ function Set-FixtureAcl([string] $Path, [string] $AccountSid, [string] $Rights =
     $acl.SetOwner($owner)
     Set-Acl -LiteralPath $Path -AclObject $acl
 }
-function New-ProfileConfig([string] $KeyPath, [string] $HostPin, [int] $Port) {
+function New-ProfileConfig([string] $KeyPath, [string] $HostPin, [int] $Port, [string] $UserName = $accountName, [string] $ProfilePrefix = 'windows') {
     $quotedKey = ConvertTo-Json -InputObject $KeyPath -Compress
     $profiles = foreach ($mode in @('read', 'write')) {
         $readOnly = if ($mode -eq 'read') { 'true' } else { 'false' }
         $role = if ($mode -eq 'read') { 'viewer' } else { 'operator' }
 @"
 [[profiles]]
-name = "windows-$mode"
+name = "$ProfilePrefix-$mode"
 host = "127.0.0.1"
 port = $Port
-user = "$accountName"
+user = "$UserName"
 auth = "key"
 keyRef = $quotedKey
 trustedHostKey = "$HostPin"
@@ -102,7 +104,24 @@ tty = false
 transferTimeoutMs = 10000
 "@
     }
-    return "[defaults]`ndefaultProfile = `"windows-write`"`ncommandTimeoutMs = 60000`n`n" + ($profiles -join "`n")
+    return "[defaults]`ndefaultProfile = `"$ProfilePrefix-write`"`ncommandTimeoutMs = 60000`n`n" + ($profiles -join "`n")
+}
+function Install-FixtureHelper([string] $Sid, [string] $Prefix = '') {
+    $installer = Join-Path $PSScriptRoot '../scripts/install-windows-helper.ps1'
+    $installOutput = Join-Path $clientRoot ($Prefix + 'install-result.json')
+    $installError = Join-Path $clientRoot ($Prefix + 'install-error.txt')
+    $installRoot = Join-Path $fixtureRoot ($Prefix + 'installed-helper')
+    $fileRoot = Join-Path $fixtureRoot ($Prefix + 'approved-files')
+    $stageRoot = Join-Path $fixtureRoot ($Prefix + 'incoming')
+    $installProcess = Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -Wait -PassThru `
+        -ArgumentList @('-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File',
+            ('"' + $installer + '"'), '-AccountSid', $Sid, '-FileRoot', ('"' + $fileRoot + '"'),
+            '-InstallRoot', ('"' + $installRoot + '"'), '-StageRoot', ('"' + $stageRoot + '"')) `
+        -RedirectStandardOutput $installOutput -RedirectStandardError $installError
+    $installed = [IO.File]::ReadAllText($installOutput, $utf8) | ConvertFrom-Json
+    if ($installProcess.ExitCode -ne 0) { throw ('파일 보조프로그램 설치 실패: ' + $installed.errorCode) }
+    if ($installed.installed -ne $true) { throw '파일 보조프로그램 설치 결과가 유효하지 않습니다.' }
+    return $installed
 }
 
 try {
@@ -121,6 +140,12 @@ try {
     $password = $null
     $accountSid = $user.SID.Value
     Add-LocalGroupMember -SID ([Security.Principal.SecurityIdentifier]::new('S-1-5-32-545')) -Member $accountName
+    $adminPassword = [Guid]::NewGuid().ToString('N') + 'aA1!'
+    $adminUser = New-LocalUser -Name $adminName -Password (ConvertTo-SecureString $adminPassword -AsPlainText -Force) -AccountNeverExpires -PasswordNeverExpires
+    $createdAdmin = $true
+    $adminPassword = $null
+    $adminSid = $adminUser.SID.Value
+    Add-LocalGroupMember -SID ([Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')) -Member $adminName
     Set-FixtureAcl $fixtureRoot $accountSid
     New-Item -ItemType Directory -Path $clientRoot | Out-Null
     Set-FixtureAcl $clientRoot ''
@@ -147,20 +172,12 @@ try {
     if (-not $wrongFingerprint) { throw '거부 시험용 키 지문을 계산하지 못했습니다.' }
     $wrongHostPin = $Matches[0]
 
-    $installRoot = Join-Path $fixtureRoot 'installed-helper'
-    $fileRoot = Join-Path $fixtureRoot 'approved-files'
-    $stageRoot = Join-Path $fixtureRoot 'incoming'
-    $installer = Join-Path $PSScriptRoot '../scripts/install-windows-helper.ps1'
-    $installOutput = Join-Path $clientRoot 'install-result.json'
-    $installError = Join-Path $clientRoot 'install-error.txt'
-    $installProcess = Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -Wait -PassThru `
-        -ArgumentList @('-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File',
-            ('"' + $installer + '"'), '-AccountSid', $accountSid, '-FileRoot', ('"' + $fileRoot + '"'),
-            '-InstallRoot', ('"' + $installRoot + '"'), '-StageRoot', ('"' + $stageRoot + '"')) `
-        -RedirectStandardOutput $installOutput -RedirectStandardError $installError
-    $installed = [IO.File]::ReadAllText($installOutput, $utf8) | ConvertFrom-Json
-    if ($installProcess.ExitCode -ne 0) { throw ('파일 보조프로그램 설치 실패: ' + $installed.errorCode) }
-    if ($installed.installed -ne $true) { throw '파일 보조프로그램 설치 결과가 유효하지 않습니다.' }
+    $installed = Install-FixtureHelper $accountSid
+    $fileRoot = $installed.fileRoot
+    $stageRoot = $installed.stageRoot
+    $adminInstalled = Install-FixtureHelper $adminSid 'admin-'
+    $pythonExecutable = (Get-Command python.exe -CommandType Application -ErrorAction Stop).Source
+    $env:SOLID_PYTHON = $pythonExecutable
     $outsideRoot = Join-Path $fixtureRoot 'outside'
     New-Item -ItemType Directory -Path $outsideRoot | Out-Null
     Set-FixtureAcl $outsideRoot $accountSid 'Modify'
@@ -209,7 +226,7 @@ PasswordAuthentication no
 KbdInteractiveAuthentication no
 AuthenticationMethods publickey
 PermitEmptyPasswords no
-AllowUsers $accountName
+AllowUsers $accountName $adminName
 StrictModes yes
 AllowTcpForwarding no
 AllowAgentForwarding no
@@ -249,10 +266,12 @@ Subsystem sftp $sftpPath
     $configPath = Join-Path $clientRoot 'profiles.toml'
     $wrongClientConfig = Join-Path $clientRoot 'wrong-client.toml'
     $wrongHostConfig = Join-Path $clientRoot 'wrong-host.toml'
+    $adminConfigPath = Join-Path $clientRoot 'admin-profiles.toml'
     Write-Utf8 $configPath (New-ProfileConfig $clientKey $hostPin $port)
     Write-Utf8 $wrongClientConfig (New-ProfileConfig $wrongKey $hostPin $port)
     Write-Utf8 $wrongHostConfig (New-ProfileConfig $clientKey $wrongHostPin $port)
-    foreach ($path in @($configPath, $wrongClientConfig, $wrongHostConfig)) { Set-FixtureAcl $path '' }
+    Write-Utf8 $adminConfigPath (New-ProfileConfig $clientKey $hostPin $port $adminName 'admin')
+    foreach ($path in @($configPath, $wrongClientConfig, $wrongHostConfig, $adminConfigPath)) { Set-FixtureAcl $path '' }
     $fixturePath = Join-Path $clientRoot 'fixture.json'
     $artifactRoot = Join-Path $clientRoot 'artifacts'
     Write-Utf8 $fixturePath (@{
@@ -260,15 +279,19 @@ Subsystem sftp $sftpPath
         helper = $installed.helper; stageRoot = $installed.stageRoot; fileRoot = $installed.fileRoot
         artifactRoot = $artifactRoot; outsideFile = $outsideFile
         modulesRoot = $modulesRoot; moduleMarkers = $moduleMarkers
+        pythonExecutable = $pythonExecutable
+        adminConfigPath = $adminConfigPath; adminHelper = $adminInstalled.helper
+        adminFileRoot = $adminInstalled.fileRoot; adminStageRoot = $adminInstalled.stageRoot
     } | ConvertTo-Json -Compress)
     Set-FixtureAcl $fixturePath ''
     $env:AGS_WINDOWS_SSH_FIXTURE = $fixturePath
-    & node --test (Join-Path $PSScriptRoot 'windows-ssh-integration.test.mjs')
+    & node --test (Join-Path $PSScriptRoot 'windows-ssh-integration.test.mjs') (Join-Path $PSScriptRoot 'windows-python-source.test.mjs')
     Assert-Exit '실제 Windows SSH 통합 시험'
     $testsPassed = $true
     Write-Output '실제 Windows OpenSSH 통합 시험 통과'
 } finally {
     Remove-Item Env:AGS_WINDOWS_SSH_FIXTURE -ErrorAction SilentlyContinue
+    Remove-Item Env:SOLID_PYTHON -ErrorAction SilentlyContinue
     if ($registeredTask) {
         Stop-ScheduledTask -TaskName $taskName -ErrorAction Continue
         # 예약 작업의 잔존 자식도 해당 격리 설정 경로를 기준으로만 정리한다.
@@ -282,6 +305,7 @@ Subsystem sftp $sftpPath
         Write-ServerLogTail
     }
     if ($createdUser) { Remove-LocalUser -Name $accountName -ErrorAction Continue }
+    if ($createdAdmin) { Remove-LocalUser -Name $adminName -ErrorAction Continue }
     if (Test-Path -LiteralPath $fixtureRoot) {
         $resolved = [IO.Path]::GetFullPath($fixtureRoot)
         $expected = [IO.Path]::GetFullPath((Join-Path $env:ProgramData ('ags-windows-ci-' + $fixtureId)))

@@ -34,7 +34,7 @@ export function createAgentCliPanel({document,api,isSignedOut,canLoad,storage,ra
  let capabilities,preview,job,remoteStatus,historyCursor,busy=false,uncertain=false,generation=0,timer,closed=false;
  const active=()=>!closed&&!isSignedOut()&&document.body.dataset.page==='settings';
  const binding=()=>capabilities?.bindings?.find(b=>b.targetId===target.value&&b.enabled===true);
- const supported=()=>Boolean(binding())&&binding().supported!==false&&binding().platform!=='windows';
+ const supported=()=>Boolean(binding())&&binding().supported!==false;
  const hint=()=>hints.find(h=>h.targetId===target.value&&h.provider===provider.value);
  const persist=h=>{hints=hints.filter(v=>v.targetId!==h.targetId||v.provider!==h.provider);hints.push(h);hints=hints.slice(-64);try{storage?.setItem(storageKey,JSON.stringify(hints));}catch{/* local restoration may be unavailable */}};
  const clearTimer=()=>{cancel(timer);timer=undefined;};
@@ -55,8 +55,16 @@ export function createAgentCliPanel({document,api,isSignedOut,canLoad,storage,ra
   const b=binding();identity.textContent=b?[b.displayName,b.targetId,b.platform==='windows'?'Windows':b.platform==='linux'?'Linux':'',b.sshTarget,b.profile].filter(Boolean).join(' · '):'';
   if(b&&!supported()){uncertain=false;message.textContent=t('이 대상에서는 서버 CLI 설치·로그인 상태 진단을 지원하지 않습니다. 일반 명령과 파일 전송은 사용할 수 있습니다.','Server CLI installation and login diagnostics are unavailable on this target. General commands and file transfers remain available.');loginState.textContent=t('로그인 상태: 지원하지 않는 대상','Login status: Unsupported target');}
   const user=/^([A-Za-z_][A-Za-z0-9_.-]{0,63})@/.exec(b?.sshTarget??'')?.[1];
-  loginAccount.textContent=b&&supported()?t('로그인할 SSH 계정: ','SSH account for login: ')+b.sshTarget+(user?t(' · 다른 계정이면 먼저 실행: ',' · From another account run first: ')+'sudo -iu '+user:''):'';
-  loginCommand.textContent=supported()?`PATH="/opt/ssh-approval/node/bin:$PATH" "$HOME/.local/share/ssh-approval-cli/${provider.value}/current/bin/${provider.value}"`+(provider.value==='codex'?' login --device-auth':'')+'\n'+t('기존 외부 설치를 사용하는 경우에는 그 설치의 실행 경로를 사용하세요.','For an existing external installation, use that installation’s executable path.') : '';lock();
+  loginAccount.textContent=b&&supported()?t('로그인할 SSH 계정: ','SSH account for login: ')+b.sshTarget+(b.platform==='windows'?t(' · 설치·업데이트에는 Node.js 22 이상과 npm이 필요합니다. 로그인은 같은 Windows 계정에서 진행하세요.',' · Installation and updates require Node.js 22+ and npm. Log in as the same Windows account.') : user?t(' · 다른 계정이면 먼저 실행: ',' · From another account run first: ')+'sudo -iu '+user:''):'';
+  const p=provider.value, packagePath=p==='codex'?'@openai\\codex':'@anthropic-ai\\claude-code';
+  loginCommand.textContent=!supported()?'':b.platform==='windows'?`$root = Join-Path $env:USERPROFILE '.ssh-approval-cli\\${p}'
+$active = (Get-Content -LiteralPath (Join-Path $root 'current.json') -Raw | ConvertFrom-Json).active
+$packageRoot = Join-Path (Join-Path $root $active) 'node_modules\\${packagePath}'
+$package = Get-Content -LiteralPath (Join-Path $packageRoot 'package.json') -Raw | ConvertFrom-Json
+$bin = if ($package.bin -is [string]) { $package.bin } else { $package.bin.${p} }
+$executable = Join-Path $packageRoot $bin
+if ($executable.EndsWith('.exe')) { & $executable ${p==='codex'?'login':'auth login'} } else { & node.exe $executable ${p==='codex'?'login':'auth login'} }
+`+t('관리 설치용 안내입니다. 기존 외부 설치는 확인한 실행 파일 경로를 사용하세요.','For a managed installation. Use the verified executable path for an existing external installation.') : `PATH="/opt/ssh-approval/node/bin:$PATH" "$HOME/.local/share/ssh-approval-cli/${p}/current/bin/${p}"`+(p==='codex'?' login --device-auth':'')+'\n'+t('기존 외부 설치를 사용하는 경우에는 그 설치의 실행 경로를 사용하세요.','For an existing external installation, use that installation’s executable path.');lock();
  }
  function validateJob(value){const b=binding(),op=value?.operation;if(!validId(value?.id)||!b||op?.agentCliContract!=='agent-cli-install-v1'||op.agentCliProvider!==provider.value||op.agentCliTargetId!==b.targetId||op.agentCliTargetRevision!==b.targetRevision||op.agentCliProfile!==b.profile||!['pending','running','completed','failed','unknown','expired','denied','evaluating'].includes(value.state))throw Error(t('요청의 대상 정보가 현재 선택과 다릅니다.','The request does not match the current target binding.'));return value;}
  function displayJob(value,status){job=validateJob(value);remoteStatus=status;preview=undefined;ack.checked=false;uncertain=false;
@@ -116,7 +124,7 @@ export function createAgentCliPanel({document,api,isSignedOut,canLoad,storage,ra
  for(const n of [target,provider])n.onchange=()=>{scope();if(supported()&&hint()&&!busy)restore();};
  async function load(){if(capabilities||busy||!active()||!canLoad())return;await run(async current=>{const value=await api('/api/agent-cli');if(!current())return;
   if(typeof value?.available!=='boolean'||!Array.isArray(value.bindings)||value.bindings.some(b=>!validTarget(b.targetId)||typeof b.targetRevision!=='string'||typeof b.profile!=='string'))throw Error('Invalid CLI capabilities');
-  capabilities=value;target.replaceChildren();const items=value.bindings.filter(b=>b.enabled===true);if(items.length!==1){const option=el('option',t('서버 선택','Choose a server'));option.value='';target.append(option);}for(const b of items){const option=el('option',b.displayName+' · '+b.targetId+(b.platform?' · '+(b.platform==='windows'?'Windows':'Linux'):'')+(b.supported===false||b.platform==='windows'?t(' · 지원하지 않음',' · Unsupported'):''));option.value=b.targetId;target.append(option);}scope();if(!value.available)message.textContent=t('이 서버는 CLI 설치 연결을 제공하지 않습니다.','CLI installation is unavailable on this bridge.');
+  capabilities=value;target.replaceChildren();const items=value.bindings.filter(b=>b.enabled===true);if(items.length!==1){const option=el('option',t('서버 선택','Choose a server'));option.value='';target.append(option);}for(const b of items){const option=el('option',b.displayName+' · '+b.targetId+(b.platform?' · '+(b.platform==='windows'?'Windows':'Linux'):'')+(b.supported===false?t(' · 지원하지 않음',' · Unsupported'):''));option.value=b.targetId;target.append(option);}scope();if(!value.available)message.textContent=t('이 서버는 CLI 설치 연결을 제공하지 않습니다.','CLI installation is unavailable on this bridge.');
  });if(supported()&&hint()&&!busy)await restore();}
  let page=document.body.dataset.page;
  document.addEventListener('admin-scope-change',()=>{const next=document.body.dataset.page;if(next===page)return;page=next;scope();if(active())load();});

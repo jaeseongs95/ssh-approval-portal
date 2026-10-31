@@ -73,7 +73,7 @@ function Describe-Result($result) {
         'UNSAFE_PATH', 'STAGING_UNAVAILABLE', 'FILE_CHANGED', 'FILE_TOO_LARGE', 'INVALID_REQUEST', 'OPERATION_FAILED')) { $code = $result.data.errorCode }
     $step = 'none'
     if ($result.data.nativeStep -cin @('native', 'create_directory', 'inspect', 'open', 'filesystem', 'final_path', 'read_security',
-        'remove', 'rename_replace', 'rename_new', 'write_security')) { $step = $result.data.nativeStep }
+        'remove', 'rename_replace', 'rename_new', 'write_security', 'write_times')) { $step = $result.data.nativeStep }
     $number = 0
     if ($result.data.nativeError -is [int] -and $result.data.nativeError -gt 0) { $number = $result.data.nativeError }
     return ('exit=' + [int]$result.exitCode + '; code=' + $code + '; step=' + $step + '; native=' + $number)
@@ -90,6 +90,52 @@ try {
     if ([string]::IsNullOrWhiteSpace($fixtureParent) -or !(Test-Path -LiteralPath $fixtureParent -PathType Container)) { throw 'fixture parent must exist' }
     $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
     Add-Type -Path (Join-Path $PSScriptRoot '../scripts/windows-file-native.cs') -ErrorAction Stop | Out-Null
+    # A deny-only Administrators SID exercises the same guard as a filtered SSH token.
+    # No account, credential, policy or machine setting is created or modified.
+    Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Security.Principal;
+public static class RestrictedAdministratorTest {
+    [StructLayout(LayoutKind.Sequential)]
+    struct SidAndAttributes { public IntPtr Sid; public uint Attributes; }
+    [DllImport("advapi32.dll", SetLastError = true)]
+    static extern bool CreateRestrictedToken(IntPtr token, uint flags, uint disableCount, ref SidAndAttributes disable,
+        uint privilegeCount, IntPtr privileges, uint restrictCount, IntPtr restrict, out IntPtr result);
+    [DllImport("kernel32.dll")]
+    static extern bool CloseHandle(IntPtr handle);
+    public static WindowsImpersonationContext Impersonate() {
+        byte[] bytes = new byte[68];
+        SecurityIdentifier admin = new SecurityIdentifier("S-1-5-32-544");
+        admin.GetBinaryForm(bytes, 0);
+        GCHandle pin = GCHandle.Alloc(bytes, GCHandleType.Pinned);
+        IntPtr restricted = IntPtr.Zero;
+        try {
+            SidAndAttributes sid = new SidAndAttributes { Sid = pin.AddrOfPinnedObject(), Attributes = 0 };
+            using (WindowsIdentity current = WindowsIdentity.GetCurrent()) {
+                if (!CreateRestrictedToken(current.Token, 0, 1, ref sid, 0, IntPtr.Zero, 0, IntPtr.Zero, out restricted))
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+            return WindowsIdentity.Impersonate(restricted);
+        } finally { if (restricted != IntPtr.Zero) CloseHandle(restricted); pin.Free(); }
+    }
+}
+'@ | Out-Null
+    [SshApproval.WindowsFiles]::RequireAdministrator()
+    $restrictedContext = [RestrictedAdministratorTest]::Impersonate()
+    try {
+        $denied = $false
+        try { [SshApproval.WindowsFiles]::RequireAdministrator() }
+        catch {
+            $failure = $_.Exception
+            while ($null -ne $failure) {
+                if ($failure.PSObject.Properties['Code'] -and $failure.Code -ceq 'PERMISSION_DENIED') { $denied = $true; break }
+                $failure = $failure.InnerException
+            }
+        }
+        Assert-True $denied 'deny-only Administrators token cannot request elevation'
+    } finally { $restrictedContext.Dispose() }
     $fixtureSddl = 'D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;' + $sid + ')'
     [SshApproval.WindowsFiles]::CreatePrivateDirectory($WorkRoot, $fixtureSddl, $sid, $sid, $false)
     $fixtureCreated = $true
@@ -103,6 +149,11 @@ try {
     $installed = Invoke-Script $installer $arguments
     Assert-True ($installed.exitCode -eq 0 -and $installed.data.installed) 'new dedicated installation'
     $script:helper = $installed.data.helper
+    $authorization = Request 'authorize'
+    $authorization.elevate = $true
+    $authorized = Call $authorization
+    Assert-True ($authorized.exitCode -eq 0 -and $authorized.data.authorized -and $authorized.data.elevated) 'connected administrator token is authorized'
+    Assert-True (!(Test-Path -LiteralPath (Join-Path $script:stage ($authorization.id + '.part')))) 'authorization does not create a staged file'
     $reinstall = Invoke-Script $installer $arguments
     Assert-True ($reinstall.exitCode -eq 1 -and $reinstall.data.errorCode -eq 'DESTINATION_EXISTS') 'existing installation must be preserved'
     $unsafeParent = Join-Path $WorkRoot 'unsafe-parent'
@@ -142,10 +193,20 @@ try {
     Assert-True ([Convert]::ToBase64String([IO.File]::ReadAllBytes($script:target)) -ceq [Convert]::ToBase64String($script:bytes)) 'binary publish bytes'
     Refused $request 'DESTINATION_EXISTS'
     $request.overwrite = $true
+    [IO.File]::SetCreationTimeUtc($script:target, [DateTime]::new(2020, 1, 2, 3, 4, 5, [DateTimeKind]::Utc))
+    [IO.File]::SetLastAccessTimeUtc($script:target, [DateTime]::new(2021, 2, 3, 4, 5, 6, [DateTimeKind]::Utc))
+    [IO.File]::SetLastWriteTimeUtc($script:target, [DateTime]::new(2022, 3, 4, 5, 6, 7, [DateTimeKind]::Utc))
+    $times = @([IO.File]::GetCreationTimeUtc($script:target), [IO.File]::GetLastAccessTimeUtc($script:target), [IO.File]::GetLastWriteTimeUtc($script:target))
     $acl = (Get-Acl -LiteralPath $script:target).Sddl
+    $owner = (Get-Acl -LiteralPath $script:target).Owner
+    $request.elevate = $true
     $result = Call $request
     Assert-True ($result.exitCode -eq 0 -and $result.data.published) ('atomic overwrite; ' + (Describe-Result $result))
     Assert-True ((Get-Acl -LiteralPath $script:target).Sddl -ceq $acl) 'overwrite retains destination DACL'
+    Assert-True ((Get-Acl -LiteralPath $script:target).Owner -ceq $owner) 'overwrite retains destination owner'
+    Assert-True ([IO.File]::GetCreationTimeUtc($script:target) -eq $times[0] -and
+        [IO.File]::GetLastAccessTimeUtc($script:target) -eq $times[1] -and
+        [IO.File]::GetLastWriteTimeUtc($script:target) -eq $times[2]) 'overwrite retains creation access and write times after handle close'
     $reader = [IO.File]::Open($script:target, [IO.FileMode]::Open, [IO.FileAccess]::Read, ([IO.FileShare]::Read -bor [IO.FileShare]::Delete))
     try {
         $result = Call $request
@@ -155,6 +216,12 @@ try {
     $reader = [IO.File]::Open($script:target, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
     try { Refused $request 'PERMISSION_DENIED' } finally { $reader.Dispose() }
     Assert-True ([Convert]::ToBase64String([IO.File]::ReadAllBytes($script:target)) -ceq [Convert]::ToBase64String($script:bytes)) 'blocked overwrite preserves destination bytes'
+    $protectedAcl = Get-Acl -LiteralPath $script:target
+    $protectedAcl.SetAccessRuleProtection($true, $true)
+    Set-Acl -LiteralPath $script:target -AclObject $protectedAcl
+    $protectedSddl = (Get-Acl -LiteralPath $script:target).Sddl
+    $result = Call $request
+    Assert-True ($result.exitCode -eq 0 -and (Get-Acl -LiteralPath $script:target).Sddl -ceq $protectedSddl) 'overwrite retains protected destination DACL'
     $request.action = 'cleanup'
     $result = Call $request
     Assert-True ($result.exitCode -eq 0 -and $result.data.cleaned) 'cleanup staged data'
@@ -162,6 +229,7 @@ try {
     Assert-True ((Call $request).exitCode -eq 0) 'cleanup idempotent'
 
     $snapshot = Request 'snapshot'
+    $snapshot.elevate = $true
     $result = Call $snapshot
     Assert-True ($result.exitCode -eq 0 -and $result.data.sha256 -ceq $script:digest -and $result.data.size -eq $script:bytes.Length) 'snapshot metadata'
     Assert-True ([Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $script:stage ($snapshot.id + '.part')))) -ceq [Convert]::ToBase64String($script:bytes)) 'snapshot binary bytes'
@@ -206,6 +274,10 @@ try {
     $invalid = Request
     $invalid.overwrite = 'true'
     Refused $invalid 'INVALID_REQUEST'
+    $invalid = Request
+    $invalid.elevate = 'true'
+    Refused $invalid 'INVALID_REQUEST'
+    Refused (Request 'authorize') 'INVALID_REQUEST'
     $invalid = Request
     $invalid.maxBytes = 1.5
     Refused $invalid 'INVALID_REQUEST'

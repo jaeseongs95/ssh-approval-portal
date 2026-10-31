@@ -37,12 +37,11 @@ export class Transfers {
   }
   validate(op) {
     (this.platform === 'windows' ? windowsRemotePath : remotePath)(op.remotePath);
-    if (this.platform === 'windows' && op.elevate) throw Error('Elevated Windows file transfers are not supported');
   }
   async call(session, action, op) {
-    if (this.platform === 'windows' && op.elevate) throw Error('Elevated Windows file transfers are not supported');
     const command = this.platform === 'windows' ? `powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "${this.helper}"` : `${op.elevate ? 'sudo -n ' : ''}${this.helper}`;
-    const result = await session.call(command, { action, id: op.artifactId, remotePath: op.remotePath, overwrite: op.overwrite, sha256: op.sha256, size: op.size, maxBytes: this.store.maxBytes });
+    const result = await session.call(command, { action, id: op.artifactId, remotePath: op.remotePath, overwrite: op.overwrite, sha256: op.sha256, size: op.size, maxBytes: this.store.maxBytes,
+      ...(this.platform === 'windows' ? { elevate: op.elevate === true } : {}) });
     let data;
     try { data = JSON.parse(result.stdout); } catch { throw new RemoteFileError(); }
     if (result.exitCode !== 0 || result.signal) {
@@ -61,8 +60,15 @@ export class Transfers {
     const session = await this.transport.connect(this.writeProfile, { beforeDispatch });
     const fd = await this.store.verified(item.id);
     const staged = { ...op, artifactId: item.id };
+    let needsCleanup = false;
     try {
+      // Check the connected token before uploading bytes; publish checks it again.
+      if (this.platform === 'windows' && op.elevate) {
+        const authorization = await this.call(session, 'authorize', staged);
+        if (authorization.authorized !== true || authorization.elevated !== true) throw new RemoteFileError();
+      }
       // Approval has already reserved execution; the helper alone publishes the destination.
+      needsCleanup = true;
       await session.upload(fd.createReadStream({ start: 0, autoClose: false }), `${this.remoteStage}/${item.id}.part`, { maxBytes: this.store.maxBytes });
       const data = await this.call(session, 'publish', staged);
       return { failed: false, texts: ['Upload completed'], data };
@@ -70,7 +76,7 @@ export class Transfers {
       return fileFailure(error);
     } finally {
       try { await fd.close(); }
-      finally { await this.call(session, 'cleanup', { ...staged, elevate: false }).catch(() => {}); }
+      finally { if (needsCleanup) await this.call(session, 'cleanup', { ...staged, elevate: false }).catch(() => {}); }
     }
   }
   async download(op, beforeDispatch) {

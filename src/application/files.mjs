@@ -6,7 +6,6 @@ export function createFileService({ store, queue, transfers, platform = 'linux',
   if (!['linux', 'windows'].includes(platform)) throw Error('Unsupported remote platform');
   const validate = (path, elevate) => {
     (platform === 'windows' ? windowsRemotePath : remotePath)(path);
-    if (platform === 'windows' && elevate) throw Error('Elevated Windows file transfers are not supported');
   };
   const shutdown = new AbortController(), imports = new Set();
   const guard = () => { if (shutdown.signal.aborted || queue.maintenance) throw Error('Maintenance or file service closed'); };

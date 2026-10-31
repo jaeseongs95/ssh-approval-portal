@@ -2,6 +2,7 @@ import { commandLineNames } from './command-line.mjs';
 import executionQuestion from './automation-risk-question.json' with { type: 'json' };
 import { hash } from './validation.mjs';
 import { sensitiveText } from './execution-context.mjs';
+import { windowsPolicyName } from './windows-command-line.mjs';
 
 export const AUTOMATION_QUESTION_VERSION = 'ssh-command-risk-v5';
 export const SAFETY_PROBABILITY_BASIS = 'safety-probability-v1';
@@ -12,8 +13,10 @@ export const AUTOMATION_PROMPT_SHA256 = hash(JSON.stringify(AUTOMATION_QUESTION)
 
 const name = value => typeof value === 'string' && /^[A-Za-z0-9_][A-Za-z0-9_.+-]{0,79}$/.test(value);
 const executableName = command => /^\s*([A-Za-z0-9_][A-Za-z0-9_.+-]*)(?:\s|$)/.exec(command)?.[1] ?? null;
-export function approvedCommandNames(commands) {
-  if (!Array.isArray(commands) || commands.length > 128 || !commands.every(name) || new Set(commands).size !== commands.length) throw Error('Invalid approved command names');
+export function approvedCommandNames(commands, platform = 'linux') {
+  if (!['linux', 'windows'].includes(platform)) throw Error('Invalid command policy platform');
+  const normalized = Array.isArray(commands) ? commands.map(value => platform === 'windows' ? windowsPolicyName(value) : name(value) ? value : null) : [];
+  if (!Array.isArray(commands) || commands.length > 128 || normalized.some(value => value === null) || new Set(normalized).size !== commands.length) throw Error('Invalid approved command names');
   return [...commands];
 }
 export function explicitUserApproval(command, commands) {
@@ -33,10 +36,11 @@ export function validateCommandPolicy(value) {
   if (!keys(value, ['targets']) || !Array.isArray(value.targets) || value.targets.length > 32) throw Error('Invalid command policy');
   const seen = new Set();
   for (const rule of value.targets) {
-    if (!keys(rule, ['targetId', 'targetRevision', 'profile', 'commands', 'deniedCommands', 'externalDisclosure', 'modelExecution', 'automaticUploads', 'automaticDownloads', 'automaticSudo', 'sourceExecutionContract', 'testServer', 'fallback', 'thresholds'])
+    if (!keys(rule, ['targetId', 'targetRevision', 'profile', 'platform', 'commands', 'deniedCommands', 'externalDisclosure', 'modelExecution', 'automaticUploads', 'automaticDownloads', 'automaticSudo', 'sourceExecutionContract', 'testServer', 'fallback', 'thresholds'])
       || !/^[a-z][a-z0-9_-]{0,31}$/.test(rule.targetId) || seen.has(rule.targetId)
       || !/^[a-f0-9]{64}$/.test(rule.targetRevision) || !name(rule.profile)
-      || !['commands', 'deniedCommands'].every(key => Array.isArray(rule[key]) && rule[key].length <= 128 && rule[key].every(name) && new Set(rule[key]).size === rule[key].length)
+      || (rule.platform !== undefined && !['linux', 'windows'].includes(rule.platform))
+      || !['commands', 'deniedCommands'].every(key => Array.isArray(rule[key]) && rule[key].length <= 128 && rule[key].every(value => rule.platform === 'windows' ? windowsPolicyName(value) !== null : name(value)) && new Set(rule[key].map(value => rule.platform === 'windows' ? windowsPolicyName(value) : value)).size === rule[key].length)
       || typeof rule.externalDisclosure !== 'boolean' || typeof rule.modelExecution !== 'boolean'
       || (rule.automaticUploads !== undefined && typeof rule.automaticUploads !== 'boolean')
       || (rule.automaticDownloads !== undefined && typeof rule.automaticDownloads !== 'boolean')

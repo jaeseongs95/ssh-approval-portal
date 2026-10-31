@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 import { PYTHON_SOURCE_MAX_BYTES } from '../../contracts/ports.mjs';
+import { prepareWindowsPythonSource } from './windows-python-source.mjs';
+export { WINDOWS_PYTHON_SOURCE_ENVIRONMENT_REVISION } from './windows-python-source.mjs';
 export { PYTHON_SOURCE_MAX_BYTES } from '../../contracts/ports.mjs';
 
 export const PYTHON_SOURCE_CONTRACT = 'python-source-v1';
@@ -63,10 +65,14 @@ function buildPythonSource({ source, argv = [], cwd, elevate = false, targetId, 
  * Legacy command execution and command-name bypass do not consume this type.
  */
 export function preparePythonSource(options) {
+  if (options.platform === 'windows') return prepareWindowsPythonSource(options, PYTHON_SOURCE_MAX_BYTES);
+  if (options.platform !== undefined && options.platform !== 'linux') throw Error('Unsupported source platform');
   return buildPythonSource(options, PYTHON_SOURCE_MAX_BYTES);
 }
 
 /** Fixed server-owned helper transport: isolated from the 16KiB caller-submitted source boundary. */
 export function preparePythonHelper(options) {
+  if (options.platform === 'windows') return prepareWindowsPythonSource(options, PYTHON_HELPER_MAX_BYTES);
+  if (options.platform !== undefined && options.platform !== 'linux') throw Error('Unsupported source platform');
   return buildPythonSource(options, PYTHON_HELPER_MAX_BYTES);
 }

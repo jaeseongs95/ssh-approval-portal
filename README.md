@@ -1,10 +1,10 @@
-# SSH Approval Portal 1.6.6
+# SSH Approval Portal 1.6.7
 
 [한국어](README.ko.md) · [Administrator sign-in](docs/admin-login.en.md) · [Agent file uploads](docs/agent-upload.en.md) · [Architecture and compatibility](docs/architecture.en.md)
 
 An MCP server for reviewing and approving SSH commands and file transfers. It provides MCP Apps cards for ChatGPT and Claude alongside a web administrator interface. One bridge supports up to 32 registered SSH targets. The unified administrator screen shows requests across targets and lets the owner filter and act on each request. See [target configuration](docs/multi-targets.ko.md).
 
-Windows SSH 대상의 PowerShell 명령·파일 전송 등록 방법과 지원 제약은 [Windows 대상 등록](docs/windows-targets.ko.md)을 확인하세요.
+Windows SSH 대상의 PowerShell 명령·이름 정책·파일 전송·Python 코드 제출·서버 CLI 등록 방법은 [Windows 대상 등록](docs/windows-targets.ko.md)을 확인하세요. Python과 Node.js/npm은 기능별 사전 준비가 필요합니다. 중계기 자체의 Windows 호스팅은 후속 릴리스 범위입니다.
 
 Jev assists with commands outside the preapproved list. Owner settings determine whether its assessment can lead to automatic approval or requires owner review. A separate [synthetic evaluation tool](docs/jev-observation.ko.md) is also available.
 
@@ -65,15 +65,15 @@ For PC uploads, choose a file in the card and set its destination path, overwrit
 
 The single-file limit is 64 MiB, and the default staging budget is 512 MiB. Set `BRIDGE_TRANSFER_MAX_BYTES` to no more than 64 MiB and `BRIDGE_TRANSFER_BUDGET_BYTES` to at least the single-file limit. Directories, links, and device files are rejected. Send a folder as a ZIP file; the server does not automatically extract it or execute uploaded files. File snapshots and downloads do not mask their bytes. Download links expire after 10 minutes and are single-use; request a new link in the card if saving fails.
 
-For Linux targets, an overwrite is not reported as complete if the existing file's ownership, mode, or extended attributes cannot be preserved. New Linux files use mode 0600; sudo uploads are owned by root. Windows overwrites copy the previous file's DACL, but do not guarantee preservation of its owner, audit ACL, timestamps, or other extended metadata. See the [Windows transfer limits](docs/windows-targets.ko.md). Changes to the request, file, or server, expiry, and requests lost on restart require a new approval. Connection failures and operations with an uncertain publication result are not retried automatically.
+For Linux targets, an overwrite is not reported as complete if the existing file's ownership, mode, or extended attributes cannot be preserved. New Linux files use mode 0600; sudo uploads are owned by root. Windows overwrites preserve the previous file's owner, DACL, creation, access and modification timestamps; complete SACL, alternate data stream and other extended metadata preservation is not guaranteed. See the [Windows transfer limits](docs/windows-targets.ko.md). Changes to the request, file, or server, expiry, and requests lost on restart require a new approval. Connection failures and operations with an uncertain publication result are not retried automatically.
 
 ## Native installation and updates
 
 The previous release was validated for Ubuntu 22.04/24.04 on x86_64. The ARM64 installation path remains available, but validation is deferred to a later enhancement. An internet connection and an administrator terminal on the server are required. The runtime requires Node 24.2 or later within the 24.x series. Node 24 is installed in a dedicated path without replacing the system Node installation.
 
 ```sh
-tar -xzf ssh-approval-portal-1.6.6.tar.gz
-cd ssh-approval-portal-1.6.6
+tar -xzf ssh-approval-portal-1.6.7.tar.gz
+cd ssh-approval-portal-1.6.7
 sudo bash scripts/install.sh --admin-origin https://ssh-approve.example.com --grant-sudo-all
 ```
 

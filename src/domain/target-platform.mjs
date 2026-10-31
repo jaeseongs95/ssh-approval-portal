@@ -1,41 +1,78 @@
+import { createHash } from 'node:crypto';
+import { COMMAND_MAX_BYTES, utf8WithinLimit } from '../contracts/ports.mjs';
+import { commandLineNames } from './command-line.mjs';
+import { windowsCommandLineNames } from './windows-command-line.mjs';
+
 /** Platform selection is administrator-owned and bound by the target revision. */
 export const platformOf = target => target?.platform ?? 'linux';
 
 export function targetCapabilities(target) {
   const windows = platformOf(target) === 'windows';
   return Object.freeze({ commandShell: windows ? 'windows-powershell-5.1' : 'posix',
-    fileTransfer: true, elevatedFileTransfer: !windows, pythonSource: !windows, agentCli: !windows,
-    commandNameApproval: !windows });
+    fileTransfer: true, elevatedFileTransfer: true,
+    pythonSource: !windows || typeof target?.pythonExecutable === 'string' && Boolean(target.pythonExecutable.trim()),
+    agentCli: true, commandNameApproval: true });
 }
 
 const prefix = "[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false);$OutputEncoding=[Console]::OutputEncoding;$ErrorActionPreference='Stop';$global:LASTEXITCODE=0;try { & { ";
 // Finish PowerShell's object formatting before exit; otherwise PathInfo/table
 // output can still be queued when the process terminates.
-const suffix = "\n} | Microsoft.PowerShell.Core\\Out-Default;exit $LASTEXITCODE } catch { [Console]::Error.WriteLine($_.Exception.Message);exit 1 }";
-const readModule = command => /^(Microsoft\.PowerShell\.(?:Utility|Management))\\(?:Get-Date|Get-Location)$/i.exec(command.trim())?.[1];
+const suffix = "\n} | Microsoft.PowerShell.Core\\Out-Default;exit $LASTEXITCODE } catch { [Console]::Error.WriteLine('Windows command failed');exit 1 }";
+const readModule = command => /^Microsoft\.PowerShell\.Utility\\Get-Date$/i.test(command.trim()) ? 'Microsoft.PowerShell.Utility'
+  : /^Microsoft\.PowerShell\.Management\\Get-Location$/i.test(command.trim()) ? 'Microsoft.PowerShell.Management' : null;
+const importModule = (module, disableAutoLoad = true) => `${disableAutoLoad ? "$PSModuleAutoLoadingPreference='None';" : ''}Microsoft.PowerShell.Core\\Import-Module -Name ([IO.Path]::Combine($PSHOME,'Modules','${module}','${module}.psd1')) -Force -ErrorAction Stop;`;
+const launcher = script => {
+  const command = `powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -InputFormat Text -OutputFormat Text -EncodedCommand ${Buffer.from(script, 'utf16le').toString('base64')}`;
+  if (command.length > 8000) throw Object.assign(Error('Windows command exceeds the encoded shell limit'), { code: 'WINDOWS_COMMAND_TOO_LARGE' });
+  return command;
+};
+const validateWindowsCommand = command => {
+  if (!utf8WithinLimit(command, COMMAND_MAX_BYTES) || !command.trim() || /[\u0000-\u001f\u007f-\u009f\u061c\u200b\u200e\u200f\u2028-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/.test(command)) throw Error('Invalid Windows command');
+};
+function workingDirectoryPrelude(workdir) {
+  if (workdir === undefined) return '';
+  if (!utf8WithinLimit(workdir, 512) || !/^[a-z]:[\\/]/i.test(workdir) || /[\u0000-\u001f\u007f-\u009f\u061c\u200b\u200e\u200f\u2028-\u202e\u2060-\u2064\u2066-\u2069\ufeff<>"|?*]/.test(workdir)
+    || workdir.slice(2).includes(':') || workdir.split(/[\\/]/).slice(1).some(part => part === '.' || part === '..' || /[. ]$/.test(part))) throw Error('Invalid Windows working directory');
+  const literal = workdir.replaceAll("'", "''");
+  return `${importModule('Microsoft.PowerShell.Management', false)}$workdir='${literal}';Microsoft.PowerShell.Management\\Set-Location -LiteralPath $workdir -ErrorAction Stop;[IO.Directory]::SetCurrentDirectory($workdir);`;
+}
 
 export function wrapWindowsCommand(command) {
-  if (typeof command !== 'string' || !command.trim() || !command.isWellFormed() || /[\u0000-\u001f\u007f-\u009f]/.test(command)) throw Error('Invalid Windows command');
+  validateWindowsCommand(command);
   const module = readModule(command);
   // A qualified name still autoloads through user PSModulePath. Pin the two
   // read-only modules to the trusted PowerShell installation before execution.
-  const readPrelude = module ? `$PSModuleAutoLoadingPreference='None';Microsoft.PowerShell.Core\\Import-Module -Name ([IO.Path]::Combine($PSHOME,'Modules','${module}','${module}.psd1')) -Force -ErrorAction Stop;` : '';
-  const encoded = Buffer.from(prefix + readPrelude + command + suffix, 'utf16le').toString('base64');
-  const wrapped = `powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -InputFormat Text -OutputFormat Text -EncodedCommand ${encoded}`;
-  // Windows OpenSSH commonly starts cmd.exe: refuse before approval, never truncate.
-  if (wrapped.length > 8000) throw Object.assign(Error('Windows command exceeds the encoded shell limit'), { code: 'WINDOWS_COMMAND_TOO_LARGE' });
-  return wrapped;
+  return launcher(prefix + (module ? importModule(module) : '') + command + suffix);
+}
+
+/** The bounded receiver consumes exact UTF-8 bytes through EOF before compiling.
+ * The digest binds transport bytes, not safety or execution authority. The caller
+ * retains the raw command as its approval/output subject and sends stdin unchanged.
+ */
+export function prepareWindowsCommand(command, { workdir } = {}) {
+  validateWindowsCommand(command);
+  const bytes = Buffer.byteLength(command, 'utf8'), digest = createHash('sha256').update(command, 'utf8').digest('hex');
+  const module = readModule(command);
+  const prelude = workingDirectoryPrelude(workdir) + (module ? importModule(module) : '');
+  const receiver = `[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);$OutputEncoding=[Console]::OutputEncoding;$ErrorActionPreference='Stop';$global:LASTEXITCODE=0;$stage=125;try{`
+    + `$stream=[Console]::OpenStandardInput();$buffer=[Array]::CreateInstance([byte],${bytes + 1});$count=0;while($count -lt $buffer.Length){$read=$stream.Read($buffer,$count,$buffer.Length-$count);if($read -eq 0){break};$count+=$read};if($count -ne ${bytes}){exit 125};`
+    + `$hash=[Security.Cryptography.SHA256]::Create();try{$actual=[BitConverter]::ToString($hash.ComputeHash($buffer,0,$count)).Replace('-','').ToLowerInvariant()}finally{$hash.Dispose()};if($actual -ne '${digest}'){exit 125};`
+    + `$source=[Text.UTF8Encoding]::new($false,$true).GetString($buffer,0,$count);$stage=1;$code=[ScriptBlock]::Create($source);${prelude}& $code | Microsoft.PowerShell.Core\\Out-Default;exit $LASTEXITCODE`
+    + `}catch{[Console]::Error.WriteLine('Windows command failed');exit $stage}`;
+  return Object.freeze({ command: launcher(receiver), stdin: command });
 }
 
 export function classifyForTarget(target, classify) {
   if (platformOf(target) !== 'windows') return classify;
   return command => {
-    wrapWindowsCommand(command);
+    validateWindowsCommand(command);
     // Module qualification avoids aliases, profiles and PATH command substitution.
     const readOnly = /^(?:Microsoft\.PowerShell\.Utility\\Get-Date|Microsoft\.PowerShell\.Management\\Get-Location)$/i.test(command.trim());
     return { class: readOnly ? 'read-only' : 'safe' };
   };
 }
+
+export const commandNamesForTarget = (target, command) => platformOf(target) === 'windows' ? windowsCommandLineNames(command) : commandLineNames(command);
 
 export function requireTargetCapability(target, capability) {
   if (targetCapabilities(target)[capability] !== true) {
@@ -47,5 +84,5 @@ export function deniedForTarget(target, command, rule, fallback) {
   if (platformOf(target) !== 'windows') return fallback(command, rule);
   // This is a deny hint, not a PowerShell parser or proof that arbitrary code is safe.
   const words = command.toLowerCase().split(/[^a-z0-9_.+-]+/);
-  return Boolean(rule?.deniedCommands.some(name => words.includes(name.toLowerCase())));
+  return Boolean(rule?.deniedCommands.some(name => words.includes(name.toLowerCase().split(/[\\/]/).at(-1))));
 }

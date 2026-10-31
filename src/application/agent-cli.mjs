@@ -9,7 +9,7 @@ const exact=(value,keys)=>record(value)&&Object.keys(value).length===keys.length
 const id=value=>typeof value==='string'&&/^[a-f0-9]{48}$/.test(value);
 const hex=value=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
 const hash=value=>sha256(JSON.stringify(value));
-const snapshot=definition=>Object.freeze({targetId:definition.id,targetRevision:definition.revision,profile:definition.writeProfile,enabled:definition.enabled});
+const snapshot=definition=>Object.freeze({targetId:definition.id,targetRevision:definition.revision,profile:definition.writeProfile,enabled:definition.enabled,...(definition.platform==='windows'?{platform:'windows'}:{})});
 
 /** Internal use case. HTTP authentication and trusted inspection/SSH ports are mandatory at composition. */
 export function createAgentCliService({queue,journal,resolveTarget,readInstallation,readLoginState,catalog,preparePlan,executePlan,outputs,checkPolicy,automaticDecision=()=>undefined,now=Date.now,nonce}) {

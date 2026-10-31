@@ -9,7 +9,7 @@ BRIDGE_DEFAULT_TARGET=test
 
 각 프로필 쌍은 같은 host·port·user·인증 참조·경유 서버·`trustedHostKey`를 사용해야 합니다. 읽기 프로필은 `readOnly=true`, 쓰기 프로필은 `readOnly=false`로 설정합니다. 새 대상은 별도 경로에서 확인한 host key 지문을 두 프로필에 고정해야 하며, 서로 다른 대상이 같은 프로필·host/port·host key를 공유하면 시작을 거부합니다. 자격 자체는 SSH 설정과 기존 보호된 비밀 저장 경로에 둡니다. 키나 비밀번호를 교체하면 `credentialRevision`도 `v2`처럼 바꿉니다.
 
-대상의 `platform`은 `linux` 또는 `windows`이며 생략하면 기존 Linux 동작을 사용합니다. Windows는 `platform:"windows"`를 명시하고 프로필의 `workdir`를 생략합니다. Windows PowerShell 5.1 일반 명령과 파일 전송을 지원하며, 명령 이름 사전승인·권한 상승 전송·Python 코드 제출·서버 CLI 설치와 로그인 진단은 지원하지 않습니다. 키·SFTP·파일 도우미 준비와 보안 제약은 [Windows 대상 등록](windows-targets.ko.md)을 확인하세요.
+대상의 `platform`은 `linux` 또는 `windows`이며 생략하면 기존 Linux 동작을 사용합니다. Windows는 `platform:"windows"`를 명시하고 프로필의 `workdir` 대신 대상 등록의 Windows 절대 경로 `workdir`를 사용합니다. Windows PowerShell 5.1 일반 명령·파일 전송·명령 이름 정책·서버 CLI를 지원합니다. Python 코드 제출에는 대상의 `pythonExecutable` 절대 경로가 필요하며 권한 상승 작업은 기존 SSH 연결의 실제 관리자 토큰을 확인합니다. 키·SFTP·도우미·런타임 준비와 보안 제약은 [Windows 대상 등록](windows-targets.ko.md)을 확인하세요.
 
 ID·프로필 이름·자격 revision은 영문 소문자로 시작하는 1~32자의 소문자·숫자·`_`·`-` 조합입니다. 표시 이름은 80 UTF-16 코드 단위까지 허용하며 제어·서식 문자를 거부합니다. `enabled:false`인 등록은 목록에 표시되지만 선택하거나 실행할 수 없습니다. 표시 이름은 공개 정보로 취급합니다.
 

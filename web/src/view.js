@@ -78,6 +78,7 @@ export function createWebView({ document, i18n }) {
     if (job.operation?.sourceContract) {
       const op = job.operation;
       text(body, 'p', 'Python · ' + op.sourceContract + ' · ' + op.sourceBytes + ' bytes · SHA-256 ' + op.sourceSha256, 'target');
+      if (targetList.find(target => target.id === job.targetId)?.platform === 'windows') text(body, 'p', korean ? 'Windows의 관리자 등록 Python 경로로 격리 시작 옵션을 사용합니다. 지정 작업 폴더·인자·원문을 실행하며 권한 상승 요청은 기존 관리자 연결 토큰이 필요합니다.' : 'Uses the administrator-configured Windows Python executable with isolated startup flags, the specified working directory, arguments and source. Elevated execution requires the existing administrator connection token.', 'target');
       text(body, 'pre', JSON.stringify({ cwd: op.sourceCwd, argv: JSON.parse(op.sourceArgvJson), elevate: op.sourceElevate }, null, 2), 'command');
       if (waiting) {
         const button = text(body, 'button', korean ? '제출 코드 원문 보기' : 'View submitted source', 'secondary'), area = text(body, 'div', '');
@@ -108,7 +109,7 @@ export function createWebView({ document, i18n }) {
       policy.setAttribute('aria-describedby', targetContext.id); policy.onclick = () => policyAction?.(job.targetId ?? 'default');
     }
     const targetCapabilities = targetList.find(target => target.id === (job.targetId ?? 'default'));
-    if (document.body.dataset.commandAutomation === 'true' && targetCapabilities?.platform !== 'windows' && targetCapabilities?.capabilities?.commandNameApproval !== false && job.kind === 'command' && !job.operation?.sourceContract && !['pending', 'running', 'evaluating'].includes(job.state)) {
+    if (document.body.dataset.commandAutomation === 'true' && targetCapabilities?.capabilities?.commandNameApproval !== false && job.kind === 'command' && !job.operation?.sourceContract && !['pending', 'running', 'evaluating'].includes(job.state)) {
       const register = text(body, 'button', korean ? '이력의 명령 이름 등록' : 'Register names from this command', 'secondary'); register.type = 'button';
       const bound = [job.targetId, job.targetRevision, job.profile, job.command].every(value => typeof value === 'string' && value.length);
       register.disabled = !bound; register.setAttribute('aria-describedby', targetContext.id);

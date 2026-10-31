@@ -1,7 +1,11 @@
-import { hash } from '../../domain/validation.mjs';
+import { hash, windowsRemotePath } from '../../domain/validation.mjs';
 
 const alias = value => typeof value === 'string' && /^[a-z][a-z0-9_-]{0,31}$/.test(value);
 const label = value => typeof value === 'string' && value.trim() && value.length <= 80 && !/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(value);
+const windowsDirectory = value => {
+  if (typeof value !== 'string' || Buffer.byteLength(value) > 512) throw Error('Invalid Windows working directory');
+  if (!/^[A-Za-z]:[\\/]$/.test(value)) windowsRemotePath(value);
+};
 
 /** Administrator-owned startup configuration. Requests can select IDs, never SSH addresses. */
 export function parseTargets(value, defaultTarget) {
@@ -15,10 +19,18 @@ export function parseTargets(value, defaultTarget) {
   if (!Array.isArray(entries) || !entries.length || entries.length > 32) throw Error('Configure 1 to 32 targets');
   const ids = new Set(), profiles = new Set();
   const targets = entries.map(entry => {
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry) || Object.keys(entry).some(key => !['id', 'displayName', 'readProfile', 'writeProfile', 'credentialRevision', 'enabled', 'platform'].includes(key)) ||
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry) || Object.keys(entry).some(key => !['id', 'displayName', 'readProfile', 'writeProfile', 'credentialRevision', 'enabled', 'platform', 'workdir', 'pythonExecutable'].includes(key)) ||
         !alias(entry.id) || ids.has(entry.id) || !label(entry.displayName) || !alias(entry.readProfile) || !alias(entry.writeProfile) ||
         entry.readProfile === entry.writeProfile || !alias(entry.credentialRevision) || (entry.enabled !== undefined && typeof entry.enabled !== 'boolean') ||
         (entry.platform !== undefined && !['linux', 'windows'].includes(entry.platform))) throw Error('Invalid or duplicate target configuration');
+    if (entry.workdir !== undefined || entry.pythonExecutable !== undefined) {
+      if (entry.platform !== 'windows') throw Error('Windows runtime settings require a Windows target');
+      if (entry.workdir !== undefined) windowsDirectory(entry.workdir);
+      if (entry.pythonExecutable !== undefined) {
+        windowsDirectory(entry.pythonExecutable);
+        if (!/\.exe$/i.test(entry.pythonExecutable)) throw Error('Use an absolute Windows Python executable');
+      }
+    }
     for (const profile of [entry.readProfile, entry.writeProfile]) {
       if (profiles.has(profile)) throw Error('SSH profiles cannot be shared by targets');
       profiles.add(profile);
@@ -37,6 +49,7 @@ export function resolveTargets(settings, registry) {
   return entries.map(entry => {
     const reader = registry.getProfile(entry.readProfile), writer = registry.getProfile(entry.writeProfile);
     if (entry.platform === 'windows' && (reader.workdir || writer.workdir)) throw Error('Windows targets cannot use a POSIX profile workdir');
+    if (entry.platform === 'windows' && (reader.tty === true || writer.tty === true)) throw Error('Windows targets require non-TTY profiles');
     const shared = explicit ? ['host', 'port', 'user', 'trustedHostKey', 'via', 'auth', 'keyRef', 'keychainEntry'] : ['host', 'port', 'user'];
     if (!reader.readOnly || writer.readOnly || shared.some(key => reader[key] !== writer[key])) throw Error('Expected matching writable and read-only SSH targets');
     const host = `${writer.host}:${writer.port}`, target = `${writer.user}@${host}`;
