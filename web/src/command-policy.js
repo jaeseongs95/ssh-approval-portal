@@ -82,7 +82,7 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
   const examples = el('details', '', 'policy-details'); examples.append(el('summary', tr('언제 자동승인되나요?')));
   for (const text of [tr('ls와 pwd를 등록했다면: pwd && ls -la → Jev 없이 자동승인'), tr('uptime이 미등록이라면: pwd && uptime → 전체 명령줄을 Jev로 평가'), tr('금지 명령이 포함되면 자동승인보다 금지가 우선합니다.'), tr('sudo가 꺼져 있으면 sudo 요청은 개별 승인합니다. 켜도 내부 명령 등록 여부를 확인합니다.')]) examples.append(el('p', text, 'policy-help'));
   nameFields.append(examples);
-  const uploads = check(importantFields, tr('파일 자동업로드 허용'), tr('대상의 파일 전송 제한과 SSH 계정 권한 안에서 새 파일을 개별 승인 없이 저장합니다. 설정·인증·자동 실행 파일 생성에도 영향을 줍니다. 덮어쓰기·권한 상승 전송은 계속 승인받으며 파일 내용은 Jev가 검사하지 않습니다.'));
+  const uploads = check(importantFields, tr('파일 자동업로드 허용'), tr('폴더 제한 없이 SSH 계정이 쓸 수 있는 경로에 새 파일을 개별 승인 없이 저장합니다. 설정·인증·자동 실행 파일 생성에도 영향을 줍니다. 덮어쓰기·sudo 전송은 계속 승인받으며 파일 내용은 Jev가 검사하지 않습니다.'));
   const downloads = check(importantFields, tr('파일 자동다운로드 허용'), tr('SSH 계정이 읽을 수 있는 일반 파일을 개별 승인 없이 준비합니다. 개인정보·인증 파일도 포함될 수 있으며 파일 내용은 Jev가 검사하지 않습니다. sudo 다운로드는 sudo 자동승인도 함께 켜야 합니다. 파일 저장은 별도로 진행합니다.'));
 
   const sudo = check(importantFields, tr('sudo 자동승인 허용'), tr('기본값은 꺼짐입니다. 켜면 sudo 안에서 실행하는 명령까지 사전승인 목록과 비교합니다. 하나라도 미등록이면 전체 명령줄을 Jev로 평가하며, 끄면 sudo는 매번 개별 승인을 받습니다.'));
@@ -256,7 +256,7 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
     for (const [provider, inputs] of Object.entries(scores)) if (changed.has(provider)) summary.append(el('p', provider + tr(' 모델·기준: ') + (original?.thresholds[provider]?.model ?? tr('미설정')) + ' / ' + (original?.thresholds[provider] ? original.thresholds[provider].minLowRisk * 100 + '%' : tr('미설정')) + ' → ' + inputs.model.value + ' / ' + inputs.score.value + '%'));
     if ((fallback.value || null) !== (original?.fallback ?? null)) summary.append(el('p', tr('대체 평가자 변경: ') + (original?.fallback ?? tr('없음')) + ' → ' + (fallback.value || tr('없음'))));
     summary.append(el('p', tr('sudo 자동승인 ') + (!supports('elevatedFileTransfer') ? tr('이 대상에서는 지원하지 않습니다.') : sudo.checked ? tr('허용 · 내부 명령까지 등록 검사 · 권한 상승 포함') : tr('허용 안 함 · sudo마다 개별 승인'))));
-    summary.append(el('p', tr('파일 자동업로드 ') + (uploads.checked ? tr('허용 · 대상의 파일 전송 제한과 SSH 계정 권한 안에서 새 파일 저장 · 설정/인증/자동 실행 파일도 포함 · Jev 내용 검사 없음 · 덮어쓰기/sudo 제외') : tr('허용 안 함 · 전송마다 승인'))));
+    summary.append(el('p', tr('파일 자동업로드 ') + (uploads.checked ? supports('commandNameApproval') ? tr('허용 · 폴더 제한 없이 SSH 계정이 쓸 수 있는 경로에 새 파일 저장 · 설정/인증/자동 실행 파일도 포함 · Jev 내용 검사 없음 · 덮어쓰기/sudo 제외') : tr('허용 · 대상의 파일 전송 제한과 SSH 계정 권한 안에서 새 파일 저장 · 설정/인증/자동 실행 파일도 포함 · Jev 내용 검사 없음 · 덮어쓰기/sudo 제외') : tr('허용 안 함 · 전송마다 승인'))));
     summary.append(el('p', tr('파일 자동다운로드 ') + (downloads.checked ? tr('허용 · 읽을 수 있는 일반 파일 준비 · 개인정보/인증 파일 포함 가능 · Jev 내용 검사 없음 · sudo는 별도 허용 필요') : tr('허용 안 함 · 전송마다 승인'))));
   }
   function show() {
@@ -264,6 +264,7 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
     original = snapshot.targets.find(rule => rule.targetId === target.value);
     changed.clear(); converted.clear(); clearFieldErrors(); loadHint.hidden = true; invalidate(tr('설정을 확인하고 위험도 확인을 눌러주세요.'));
     const namedCommands = supports('commandNameApproval');
+    uploads.nextElementSibling.lastElementChild.textContent = namedCommands ? tr('폴더 제한 없이 SSH 계정이 쓸 수 있는 경로에 새 파일을 개별 승인 없이 저장합니다. 설정·인증·자동 실행 파일 생성에도 영향을 줍니다. 덮어쓰기·sudo 전송은 계속 승인받으며 파일 내용은 Jev가 검사하지 않습니다.') : tr('대상의 파일 전송 제한과 SSH 계정 권한 안에서 새 파일을 개별 승인 없이 저장합니다. 설정·인증·자동 실행 파일 생성에도 영향을 줍니다. 덮어쓰기·권한 상승 전송은 계속 승인받으며 파일 내용은 Jev가 검사하지 않습니다.');
     platformNotice.hidden = namedCommands;
     platformNotice.textContent = namedCommands ? '' : tr('Windows PowerShell 5.1 대상입니다. 일반 명령과 파일 전송을 지원합니다. 명령 이름 사전승인, sudo·권한 상승 전송, Python 코드 제출, 서버 CLI 설치·로그인 진단은 지원하지 않습니다. 일반 명령은 모델 평가 또는 소유자 승인 정책을 따르며, 테스트 서버 설정도 지원 범위를 넓히지 않습니다.');
     nameFields.hidden = !namedCommands; nameNotice.hidden = namedCommands;

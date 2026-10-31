@@ -34,7 +34,7 @@ function Write-Utf8([string] $Path, [string] $Text) {
 function Assert-Exit([string] $Operation) {
     if ($LASTEXITCODE -ne 0) { throw "$Operation 실패: 종료 코드 $LASTEXITCODE" }
 }
-function Set-FixtureAcl([string] $Path, [string] $AccountSid, [string] $Rights = 'ReadAndExecute') {
+function Set-FixtureAcl([string] $Path, [string] $AccountSid, [string] $Rights = 'ReadAndExecute', [switch] $MachineOnly) {
     $acl = [Security.AccessControl.DirectorySecurity]::new()
     if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
         $acl = [Security.AccessControl.FileSecurity]::new()
@@ -43,7 +43,9 @@ function Set-FixtureAcl([string] $Path, [string] $AccountSid, [string] $Rights =
     $inherit = if ($acl -is [Security.AccessControl.DirectorySecurity]) {
         [Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit'
     } else { [Security.AccessControl.InheritanceFlags]::None }
-    foreach ($sid in @($identity.User.Value, 'S-1-5-18', 'S-1-5-32-544') | Select-Object -Unique) {
+    $owners = @('S-1-5-18', 'S-1-5-32-544')
+    if (-not $MachineOnly) { $owners += $identity.User.Value }
+    foreach ($sid in $owners | Select-Object -Unique) {
         $rule = [Security.AccessControl.FileSystemAccessRule]::new(
             [Security.Principal.SecurityIdentifier]::new($sid), 'FullControl', $inherit, 'None', 'Allow')
         $acl.AddAccessRule($rule)
@@ -52,7 +54,8 @@ function Set-FixtureAcl([string] $Path, [string] $AccountSid, [string] $Rights =
         $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
             [Security.Principal.SecurityIdentifier]::new($AccountSid), $Rights, $inherit, 'None', 'Allow'))
     }
-    $acl.SetOwner($identity.User)
+    $owner = if ($MachineOnly) { [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544') } else { $identity.User }
+    $acl.SetOwner($owner)
     Set-Acl -LiteralPath $Path -AclObject $acl
 }
 function New-ProfileConfig([string] $KeyPath, [string] $HostPin, [int] $Port) {
@@ -108,9 +111,11 @@ try {
         Assert-Exit '일회용 키 생성'
         Set-FixtureAcl $keyPath ''
     }
+    # SYSTEM으로 실행되는 sshd의 호스트 키는 개별 runner 계정의 ACE도 허용하지 않는다.
+    Set-FixtureAcl $hostKey '' -MachineOnly
     $authorizedKeys = Join-Path $fixtureRoot 'authorized_keys'
     Write-Utf8 $authorizedKeys ([IO.File]::ReadAllText($clientKey + '.pub'))
-    Set-FixtureAcl $authorizedKeys $accountSid
+    Set-FixtureAcl $authorizedKeys $accountSid -MachineOnly
     $fingerprint = (& $keygen -lf ($hostKey + '.pub') -E sha256) -match 'SHA256:[A-Za-z0-9+/]+'
     Assert-Exit '호스트 키 지문 계산'
     if (-not $fingerprint) { throw '호스트 키 지문을 계산하지 못했습니다.' }
@@ -142,6 +147,28 @@ try {
     New-Item -ItemType Junction -Path (Join-Path $fileRoot 'junction') -Target $outsideRoot | Out-Null
     New-Item -ItemType SymbolicLink -Path (Join-Path $fileRoot 'symlink.bin') -Target $outsideFile | Out-Null
 
+    # 시스템/사용자 모듈 폴더를 건드리지 않고 이 exec 프로세스의 오염된 검색 경로만 합성한다.
+    $modulesRoot = Join-Path $fixtureRoot 'modules'
+    New-Item -ItemType Directory -Path $modulesRoot | Out-Null
+    Set-FixtureAcl $modulesRoot $accountSid
+    $moduleMarkers = @()
+    foreach ($module in @(
+        @{ name = 'Microsoft.PowerShell.Utility'; command = 'Get-Date'; marker = 'utility-autoload-marker.txt' },
+        @{ name = 'Microsoft.PowerShell.Management'; command = 'Get-Location'; marker = 'management-autoload-marker.txt' }
+    )) {
+        $moduleRoot = Join-Path $modulesRoot $module.name
+        New-Item -ItemType Directory -Path $moduleRoot | Out-Null
+        $markerPath = Join-Path $fileRoot $module.marker
+        $moduleMarkers += $markerPath
+        $body = "[IO.File]::WriteAllText('$markerPath', 'untrusted module loaded')`n" +
+            "function $($module.command) { 'untrusted module loaded' }`n" +
+            "Export-ModuleMember -Function '$($module.command)'`n"
+        Write-Utf8 (Join-Path $moduleRoot ($module.name + '.psm1')) $body
+        $manifest = "@{ RootModule = '$($module.name).psm1'; ModuleVersion = '1.0.0'; " +
+            "FunctionsToExport = @('$($module.command)'); CmdletsToExport = @(); AliasesToExport = @() }"
+        Write-Utf8 (Join-Path $moduleRoot ($module.name + '.psd1')) $manifest
+    }
+
     $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
     $listener.Start()
     $port = $listener.LocalEndpoint.Port
@@ -170,7 +197,7 @@ GatewayPorts no
 LogLevel VERBOSE
 Subsystem sftp $sftpPath
 "@
-    Set-FixtureAcl $serverConfig ''
+    Set-FixtureAcl $serverConfig '' -MachineOnly
     & $sshd -t -f $serverConfig
     Assert-Exit '격리 SSH 서버 설정 검사'
     # SSH 서버는 SYSTEM 권한이 필요하다. 기존 sshd 서비스나 기본 셸은 바꾸지 않는다.
@@ -183,7 +210,12 @@ Subsystem sftp $sftpPath
     $ready = $false
     for ($attempt = 0; $attempt -lt 100; $attempt++) {
         $socket = [Net.Sockets.TcpClient]::new()
-        try { $socket.Connect('127.0.0.1', $port); $ready = $true; break }
+        try {
+            if ($socket.ConnectAsync('127.0.0.1', $port).Wait(200) -and $socket.Connected) {
+                $ready = $true
+                break
+            }
+        }
         catch { Start-Sleep -Milliseconds 100 }
         finally { $socket.Dispose() }
     }
@@ -205,6 +237,7 @@ Subsystem sftp $sftpPath
         configPath = $configPath; wrongClientConfig = $wrongClientConfig; wrongHostConfig = $wrongHostConfig
         helper = $installed.helper; stageRoot = $installed.stageRoot; fileRoot = $installed.fileRoot
         artifactRoot = $artifactRoot; outsideFile = $outsideFile
+        modulesRoot = $modulesRoot; moduleMarkers = $moduleMarkers
     } | ConvertTo-Json -Compress)
     Set-FixtureAcl $fixturePath ''
     $env:AGS_WINDOWS_SSH_FIXTURE = $fixturePath

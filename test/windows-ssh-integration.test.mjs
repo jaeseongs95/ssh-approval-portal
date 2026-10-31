@@ -55,6 +55,19 @@ test('실제 Windows SSH 명령·승인·파일 전송 경계', {
       assert.equal(failed.stderr, '예상 실패');
     });
 
+    await t.test('정확한 기본 읽기 명령은 외부 모듈 검색 경로에 있는 동명 합성 모듈을 불러오지 않는다', async () => {
+      for (const command of ['Microsoft.PowerShell.Utility\\Get-Date', 'Microsoft.PowerShell.Management\\Get-Location']) {
+        const inner = wrapWindowsCommand(command);
+        // 외부 명령의 환경만 오염시킨다. 자식은 제품의 실제 기본 읽기 명령 런처다.
+        const outer = wrapWindowsCommand(`$env:PSModulePath = '${fixture.modulesRoot.replaceAll("'", "''")}'; ${inner}`);
+        const result = await runtime.executeCommand('windows-read', outer);
+        assert.equal(result.failed, false);
+        assert.ok(result.texts.join('').trim(), '기본 명령의 정상 출력이 없음');
+        assert.doesNotMatch(result.texts.join(''), /untrusted module loaded/);
+        for (const marker of fixture.moduleMarkers) await absent(marker);
+      }
+    });
+
     await t.test('연결 후 승인 검사 거부는 명령을 실행하지 않는다', async () => {
       const marker = remote('dispatch-refused.txt');
       await assert.rejects(runtime.executeCommand('windows-write', wrapWindowsCommand(`Set-Content -LiteralPath '${marker}' -Value '실행 금지'`), () => { throw Error('승인 만료'); }), /승인 만료/);

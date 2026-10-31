@@ -10,10 +10,15 @@ export function targetCapabilities(target) {
 
 const prefix = "[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false);$OutputEncoding=[Console]::OutputEncoding;$ErrorActionPreference='Stop';$global:LASTEXITCODE=0;try { & { ";
 const suffix = "\n};exit $LASTEXITCODE } catch { [Console]::Error.WriteLine($_.Exception.Message);exit 1 }";
+const readModule = command => /^(Microsoft\.PowerShell\.(?:Utility|Management))\\(?:Get-Date|Get-Location)$/i.exec(command.trim())?.[1];
 
 export function wrapWindowsCommand(command) {
   if (typeof command !== 'string' || !command.trim() || !command.isWellFormed() || /[\u0000-\u001f\u007f-\u009f]/.test(command)) throw Error('Invalid Windows command');
-  const encoded = Buffer.from(prefix + command + suffix, 'utf16le').toString('base64');
+  const module = readModule(command);
+  // A qualified name still autoloads through user PSModulePath. Pin the two
+  // read-only modules to the trusted PowerShell installation before execution.
+  const readPrelude = module ? `$PSModuleAutoLoadingPreference='None';Microsoft.PowerShell.Core\\Import-Module -Name ([IO.Path]::Combine($PSHOME,'Modules','${module}','${module}.psd1')) -Force -ErrorAction Stop;` : '';
+  const encoded = Buffer.from(prefix + readPrelude + command + suffix, 'utf16le').toString('base64');
   const wrapped = `powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -InputFormat Text -OutputFormat Text -EncodedCommand ${encoded}`;
   // Windows OpenSSH commonly starts cmd.exe: refuse before approval, never truncate.
   if (wrapped.length > 8000) throw Object.assign(Error('Windows command exceeds the encoded shell limit'), { code: 'WINDOWS_COMMAND_TOO_LARGE' });

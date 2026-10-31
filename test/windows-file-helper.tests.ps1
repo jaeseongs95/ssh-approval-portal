@@ -102,6 +102,32 @@ try {
     $script:helper = $installed.data.helper
     $reinstall = Invoke-Script $installer $arguments
     Assert-True ($reinstall.exitCode -eq 1 -and $reinstall.data.errorCode -eq 'DESTINATION_EXISTS') 'existing installation must be preserved'
+    $unsafeParent = Join-Path $WorkRoot 'unsafe-parent'
+    $null = [IO.Directory]::CreateDirectory($unsafeParent)
+    $unsafeAcl = Get-Acl -LiteralPath $unsafeParent
+    $users = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-545')
+    $unsafeAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($users,
+        [Security.AccessControl.FileSystemRights]::Modify, [Security.AccessControl.AccessControlType]::Allow))
+    Set-Acl -LiteralPath $unsafeParent -AclObject $unsafeAcl
+    $unsafeSddl = (Get-Acl -LiteralPath $unsafeParent).Sddl
+    $unsafeArguments = '-AccountSid "' + $sid + '" -FileRoot "' + (Join-Path $unsafeParent 'files') +
+        '" -InstallRoot "' + (Join-Path $unsafeParent 'helper') + '" -StageRoot "' + (Join-Path $unsafeParent 'incoming') + '"'
+    $refusedInstall = Invoke-Script $installer $unsafeArguments
+    Assert-True ($refusedInstall.exitCode -eq 1 -and $refusedInstall.data.errorCode -ceq 'PERMISSION_DENIED') 'Users Modify ancestor must reject installation'
+    Assert-True ((Get-Acl -LiteralPath $unsafeParent).Sddl -ceq $unsafeSddl) 'installer cannot change an unsafe parent ACL'
+    Assert-True (!(Test-Path -LiteralPath (Join-Path $unsafeParent 'helper'))) 'unsafe ancestry cannot create protected roots'
+    $attributeParent = Join-Path $WorkRoot 'attribute-parent'
+    $null = [IO.Directory]::CreateDirectory($attributeParent)
+    $attributeAcl = Get-Acl -LiteralPath $attributeParent
+    $attributeAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($users,
+        ([Security.AccessControl.FileSystemRights]::WriteAttributes -bor [Security.AccessControl.FileSystemRights]::CreateFiles),
+        [Security.AccessControl.AccessControlType]::Allow))
+    Set-Acl -LiteralPath $attributeParent -AclObject $attributeAcl
+    $attributeArguments = '-AccountSid "' + $sid + '" -FileRoot "' + (Join-Path $attributeParent 'files') +
+        '" -InstallRoot "' + (Join-Path $attributeParent 'helper') + '" -StageRoot "' + (Join-Path $attributeParent 'incoming') + '"'
+    $refusedAttributes = Invoke-Script $installer $attributeArguments
+    Assert-True ($refusedAttributes.exitCode -eq 1 -and $refusedAttributes.data.errorCode -ceq 'PERMISSION_DENIED') 'attribute-writable final parent must reject installation'
+    Assert-True (@(Get-ChildItem -LiteralPath $attributeParent -Force).Count -eq 0) 'attribute-writable empty parent remains unchanged'
     $script:bytes = [Text.Encoding]::UTF8.GetBytes("sensitive-marker`r`nUnicode: 한글`n")
     $sha = [Security.Cryptography.SHA256]::Create()
     try { $script:digest = [BitConverter]::ToString($sha.ComputeHash($script:bytes)).Replace('-', '').ToLowerInvariant() } finally { $sha.Dispose() }
@@ -182,6 +208,15 @@ try {
     Refused $invalid 'INVALID_REQUEST'
     $result = Invoke-Script $script:helper '' ('x' * 16385)
     Assert-True ($result.exitCode -eq 1 -and $result.data.errorCode -ceq 'INVALID_REQUEST') 'bounded input'
+
+    $originalParentAcl = Get-Acl -LiteralPath $WorkRoot
+    $weakenedParentAcl = Get-Acl -LiteralPath $WorkRoot
+    $weakenedParentAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($users,
+        [Security.AccessControl.FileSystemRights]::Modify, [Security.AccessControl.AccessControlType]::Allow))
+    try {
+        Set-Acl -LiteralPath $WorkRoot -AclObject $weakenedParentAcl
+        Refused (Request 'snapshot') 'PERMISSION_DENIED'
+    } finally { Set-Acl -LiteralPath $WorkRoot -AclObject $originalParentAcl }
 
     $outside = Join-Path $WorkRoot 'outside'
     $null = [IO.Directory]::CreateDirectory($outside)

@@ -8,6 +8,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+$leases = [Collections.Generic.List[IDisposable]]::new()
 try {
     [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -18,6 +19,7 @@ try {
     $null = $sid.Translate([Security.Principal.NTAccount])
     if ($sid.Value -notmatch '^S-1-5-21-[0-9-]+$') { throw 'INVALID_REQUEST' }
     $AccountSid = $sid.Value
+    $installerSid = $identity.User.Value
     Add-Type -Path (Join-Path $PSScriptRoot 'windows-file-native.cs') -ErrorAction Stop | Out-Null
     $InstallRoot = [SshApproval.WindowsFiles]::CheckedPath($InstallRoot)
     $StageRoot = [SshApproval.WindowsFiles]::CheckedPath($StageRoot)
@@ -37,19 +39,24 @@ try {
     $defaultParent = 'C:\ProgramData\ssh-approval-transfer'
     if ($StageRoot.Equals($defaultParent + '\incoming', [StringComparison]::OrdinalIgnoreCase) -and
         !(Test-Path -LiteralPath $defaultParent)) {
-        [SshApproval.WindowsFiles]::CreatePrivateDirectory($defaultParent, $read)
+        [SshApproval.WindowsFiles]::CreatePrivateDirectory($defaultParent, $read, $AccountSid, $installerSid, $false)
     }
     foreach ($path in $paths) {
         if (!(Test-Path -LiteralPath ([IO.Path]::GetDirectoryName($path)) -PathType Container)) { throw 'PARENT_NOT_FOUND' }
+        $trustAccount = !$path.Equals($InstallRoot, [StringComparison]::OrdinalIgnoreCase)
+        $leases.Add([SshApproval.WindowsFiles]::PinTrustedDirectory([IO.Path]::GetDirectoryName($path), $AccountSid, $installerSid, $trustAccount))
     }
-    [SshApproval.WindowsFiles]::CreatePrivateDirectory($InstallRoot, $read)
-    [SshApproval.WindowsFiles]::CreatePrivateDirectory($StageRoot, $modify)
-    [SshApproval.WindowsFiles]::CreatePrivateDirectory($FileRoot, $modify)
+    [SshApproval.WindowsFiles]::CreatePrivateDirectory($InstallRoot, $read, $AccountSid, $installerSid, $false)
+    $leases.Add([SshApproval.WindowsFiles]::PinTrustedDirectory($InstallRoot, $AccountSid, $installerSid, $false))
+    [SshApproval.WindowsFiles]::CreatePrivateDirectory($StageRoot, $modify, $AccountSid, $installerSid, $true)
+    $leases.Add([SshApproval.WindowsFiles]::PinTrustedDirectory($StageRoot, $AccountSid, $installerSid, $true))
+    [SshApproval.WindowsFiles]::CreatePrivateDirectory($FileRoot, $modify, $AccountSid, $installerSid, $true)
+    $leases.Add([SshApproval.WindowsFiles]::PinTrustedDirectory($FileRoot, $AccountSid, $installerSid, $true))
     # Creation above supplies the final ACL atomically; there is no permissive intermediate ACL.
     foreach ($name in @('windows-file-helper.ps1', 'windows-file-native.cs')) {
         [IO.File]::Copy((Join-Path $PSScriptRoot $name), (Join-Path $InstallRoot $name), $false)
     }
-    $config = @{ version = 1; accountSid = $AccountSid; fileRoot = $FileRoot; stageRoot = $StageRoot } | ConvertTo-Json -Compress
+    $config = @{ version = 1; accountSid = $AccountSid; installerSid = $installerSid; fileRoot = $FileRoot; stageRoot = $StageRoot } | ConvertTo-Json -Compress
     $configPath = Join-Path $InstallRoot 'windows-file-helper.config.json'
     $stream = [IO.File]::Open($configPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
     try {
@@ -71,4 +78,6 @@ try {
     }
     [Console]::Out.WriteLine('{"error":"Helper installation refused or failed","errorCode":"' + $code + '"}')
     exit 1
+} finally {
+    for ($i = $leases.Count - 1; $i -ge 0; $i--) { $leases[$i].Dispose() }
 }

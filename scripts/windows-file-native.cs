@@ -69,9 +69,10 @@ namespace SshApproval {
             return Char.ToUpperInvariant(value[0]) + value.Substring(1);
         }
         static bool Within(string path, string root) { return path.StartsWith(root + "\\", StringComparison.OrdinalIgnoreCase); }
-        public static void CreatePrivateDirectory(string path, string sddl) {
+        public static void CreatePrivateDirectory(string path, string sddl, string account, string installer, bool trustAccount) {
             path = CheckedPath(path);
             using (DirectoryChain parent = new DirectoryChain(Path.GetDirectoryName(path), "PARENT_NOT_FOUND")) {
+                parent.CheckTrust(account, installer, trustAccount);
                 RawSecurityDescriptor descriptor = new RawSecurityDescriptor(sddl);
                 byte[] bytes = new byte[descriptor.BinaryLength];
                 descriptor.GetBinaryForm(bytes, 0);
@@ -116,15 +117,45 @@ namespace SshApproval {
                     }
                 } catch { Dispose(); throw; }
             }
+            public void CheckTrust(string account, string installer, bool trustAccount) {
+                for (int n = 0; n < handles.Count; n++) CheckAncestor(handles[n], account, installer, trustAccount, n == handles.Count - 1);
+            }
             public void Dispose() { for (int n = handles.Count - 1; n >= 0; n--) handles[n].Dispose(); }
+        }
+        public static IDisposable PinTrustedDirectory(string path, string account, string installer, bool trustAccount) {
+            DirectoryChain chain = new DirectoryChain(path, "PARENT_NOT_FOUND");
+            try { chain.CheckTrust(account, installer, trustAccount); return chain; }
+            catch { chain.Dispose(); throw; }
         }
         static byte[] Security(SafeFileHandle handle) {
             uint size;
-            GetKernelObjectSecurity(handle, 4, null, 0, out size);
+            GetKernelObjectSecurity(handle, 5, null, 0, out size);
             if (size == 0 || size > 65536) Fail("PERMISSION_DENIED");
             byte[] descriptor = new byte[size];
-            if (!GetKernelObjectSecurity(handle, 4, descriptor, size, out size)) NativeFailure("OPERATION_FAILED", "read_security");
+            if (!GetKernelObjectSecurity(handle, 5, descriptor, size, out size)) NativeFailure("OPERATION_FAILED", "read_security");
             return descriptor;
+        }
+        static bool Trusted(string sid, string account, string installer, bool trustAccount) {
+            return sid == "S-1-5-18" || sid == "S-1-5-32-544" || sid == installer || (trustAccount && sid == account);
+        }
+        static void CheckAncestor(SafeFileHandle handle, string account, string installer, bool trustAccount, bool last) {
+            RawSecurityDescriptor descriptor = new RawSecurityDescriptor(Security(handle), 0);
+            // Ownership normally grants WRITE_DAC even without an explicit allow ACE.
+            if (descriptor.Owner == null || !Trusted(descriptor.Owner.Value, account, installer, trustAccount) || descriptor.DiscretionaryAcl == null) Fail("PERMISSION_DENIED");
+            foreach (GenericAce ace in descriptor.DiscretionaryAcl) {
+                if ((ace.AceFlags & AceFlags.InheritOnly) != 0) continue;
+                QualifiedAce allowed = ace as QualifiedAce;
+                if (allowed == null) Fail("PERMISSION_DENIED");
+                if (allowed.AceQualifier != AceQualifier.AccessAllowed) continue;
+                // Creation alone cannot replace an existing protected child. Deletion or
+                // security-control rights can; the volume root's ordinary create grants stay valid.
+                // Intermediate directories cannot become empty while the next component
+                // is pinned without delete sharing. The final parent has no such child:
+                // attribute-only opens bypass share checks and could set a reparse point.
+                int unsafeRights = unchecked((int)0x100D0040) | (last ? unchecked((int)0x40000100) : 0);
+                if ((allowed.AccessMask & unsafeRights) != 0 &&
+                    !Trusted(allowed.SecurityIdentifier.Value, account, installer, trustAccount)) Fail("PERMISSION_DENIED");
+            }
         }
         static void CheckWriters(SafeFileHandle handle, string account, string failure) {
             RawSecurityDescriptor descriptor = new RawSecurityDescriptor(Security(handle), 0);
@@ -188,11 +219,13 @@ namespace SshApproval {
                 if (!SetFileInformationByHandle(handle, overwrite ? 22 : 3, data, (uint)(nameOffset + name.Length + 2))) NativeFailure("OPERATION_FAILED", overwrite ? "rename_replace" : "rename_new");
             } finally { Marshal.FreeHGlobal(data); }
         }
-        public static Dictionary<string, object> Execute(string action, string id, string path, string hash, long size, long maximum, bool overwrite, string root, string stage, string account) {
+        public static Dictionary<string, object> Execute(string action, string id, string path, string hash, long size, long maximum, bool overwrite, string root, string stage, string account, string installer) {
             root = CheckedPath(root); stage = CheckedPath(stage);
             if (root.Equals(stage, StringComparison.OrdinalIgnoreCase) || Within(root, stage) || Within(stage, root)) Fail("STAGING_UNAVAILABLE");
             using (DirectoryChain stages = new DirectoryChain(stage, "STAGING_UNAVAILABLE"))
             using (DirectoryChain roots = new DirectoryChain(root, "PARENT_NOT_FOUND")) {
+                stages.CheckTrust(account, installer, true);
+                roots.CheckTrust(account, installer, true);
                 CheckWriters(stages.Last, account, "STAGING_UNAVAILABLE");
                 CheckWriters(roots.Last, account, "PERMISSION_DENIED");
                 string staged = stage + "\\" + id + ".part";
@@ -204,6 +237,7 @@ namespace SshApproval {
                 path = CheckedPath(path);
                 if (!Within(path, root)) Fail("UNSAFE_PATH");
                 using (DirectoryChain parents = new DirectoryChain(Path.GetDirectoryName(path), "PARENT_NOT_FOUND")) {
+                    parents.CheckTrust(account, installer, true);
                     CheckWriters(parents.Last, account, "PERMISSION_DENIED");
                     if (action == "snapshot") {
                         using (SafeFileHandle source = Open(path, Read, 1, 3, false, "FILE_NOT_FOUND")) {

@@ -55,12 +55,17 @@ test('Windows 설정은 미지원 작업을 막고 모델·파일·테스트 권
     assert.equal(await page.getByRole('checkbox', { name }).isEnabled(), true);
   }
   assert.equal(await page.getByLabel('자동승인할 명령', { exact: true }).isVisible(), false);
+  const uploadExplanation = page.getByRole('checkbox', { name: /^파일 자동업로드/ }).locator('..');
+  assert.match(await uploadExplanation.textContent(), /대상의 파일 전송 제한과 SSH 계정 권한/);
+  assert.doesNotMatch(await uploadExplanation.textContent(), /폴더 제한 없이/);
   await page.getByRole('checkbox', { name: /^파일 자동업로드/ }).check();
   await target.selectOption('linux');
+  assert.match(await uploadExplanation.textContent(), /폴더 제한 없이 SSH 계정이 쓸 수 있는 경로/);
   assert.equal(await page.getByRole('checkbox', { name: /^sudo 자동승인/ }).isEnabled(), true);
   assert.equal(await page.getByRole('checkbox', { name: /^제출한 Python 코드/ }).isEnabled(), true);
   assert.equal(await page.getByRole('checkbox', { name: /^파일 자동업로드/ }).isChecked(), false);
   await target.selectOption('windows');
+  assert.doesNotMatch(await uploadExplanation.textContent(), /폴더 제한 없이/);
   assert.equal(await page.getByRole('checkbox', { name: /^파일 자동업로드/ }).isChecked(), true);
   await page.getByRole('tab', { name: '검토·저장', exact: true }).click();
   await page.getByRole('button', { name: '이 설정으로 위험도 확인', exact: true }).click();

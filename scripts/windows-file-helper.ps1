@@ -1,6 +1,7 @@
 # stdin/stdout are a metadata-only protocol. Never print request data or exceptions.
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+$installLease = $null
 try {
     [Console]::InputEncoding = [Text.UTF8Encoding]::new($false, $true)
     [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
@@ -37,12 +38,14 @@ try {
     }
     if ($request.action -ne 'cleanup' -and $request.remotePath -isnot [string]) { throw 'UNSAFE_PATH' }
     $config = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'windows-file-helper.config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-    if ($config.version -ne 1 -or $config.accountSid -isnot [string]) { throw 'OPERATION_FAILED' }
+    if ($config.version -ne 1 -or $config.accountSid -isnot [string] -or
+        $config.installerSid -isnot [string] -or $config.installerSid -notmatch '^S-1-5-21-[0-9-]+$') { throw 'OPERATION_FAILED' }
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     if ($identity.User.Value -ne $config.accountSid) { throw 'PERMISSION_DENIED' }
     Add-Type -Path (Join-Path $PSScriptRoot 'windows-file-native.cs') -ErrorAction Stop | Out-Null
+    $installLease = [SshApproval.WindowsFiles]::PinTrustedDirectory($PSScriptRoot, $config.accountSid, $config.installerSid, $false)
     $result = [SshApproval.WindowsFiles]::Execute($request.action, $request.id, $request.remotePath,
-        $request.sha256, $size, $maximum, $overwrite, $config.fileRoot, $config.stageRoot, $config.accountSid)
+        $request.sha256, $size, $maximum, $overwrite, $config.fileRoot, $config.stageRoot, $config.accountSid, $config.installerSid)
     [Console]::Out.WriteLine(($result | ConvertTo-Json -Compress -Depth 4))
     exit 0
 } catch {
@@ -70,4 +73,6 @@ try {
     if ($null -ne $nativeStep) { $response.nativeStep = $nativeStep; $response.nativeError = $nativeError }
     [Console]::Out.WriteLine(($response | ConvertTo-Json -Compress))
     exit 1
+} finally {
+    if ($null -ne $installLease) { $installLease.Dispose() }
 }

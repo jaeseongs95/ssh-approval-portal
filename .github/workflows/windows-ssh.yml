@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: windows-ssh-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   windows-ssh:
     runs-on: windows-2025
@@ -21,6 +25,32 @@ jobs:
           node-version: '24.21.0'
       - run: npm ci --ignore-scripts
         id: dependencies
+      - name: Windows 조상 경로 권한 읽기 진단
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $paths = @('C:\', $env:ProgramData, 'D:\', 'D:\a', $env:RUNNER_TEMP) | Select-Object -Unique
+          foreach ($path in $paths) {
+            if (-not (Test-Path -LiteralPath $path -PathType Container)) { continue }
+            $acl = Get-Acl -LiteralPath $path
+            $rules = foreach ($rule in $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
+              @{
+                sid = $rule.IdentityReference.Value
+                mask = [long]$rule.FileSystemRights
+                rights = $rule.FileSystemRights.ToString()
+                access = $rule.AccessControlType.ToString()
+                inheritance = $rule.InheritanceFlags.ToString()
+                propagation = $rule.PropagationFlags.ToString()
+                inherited = $rule.IsInherited
+              }
+            }
+            @{
+              path = $path
+              owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
+              rules = @($rules)
+            } | ConvertTo-Json -Depth 5 -Compress
+          }
       - name: Windows 경로와 명령 회귀 시험
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         shell: pwsh
