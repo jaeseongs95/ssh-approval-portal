@@ -15,13 +15,13 @@
     },
     {
       "path": "README.ko.md",
-      "size": 21638,
-      "sha256": "cb225f11d3808cfe417fb70c3c9b649424e0038695cf1c6b1ccaa8d4dd17789b"
+      "size": 21902,
+      "sha256": "5ad984c451302f484b4b1588056cbc1b6d9672eaa37fcc01867f226818f07338"
     },
     {
       "path": "README.md",
-      "size": 20080,
-      "sha256": "6e502ca706829baff24ee03047e5d280acf28e501035ac5c83965984445a8796"
+      "size": 20317,
+      "sha256": "4ae213254fd1e9c504960429f481eae029d409ea56723d6eda1a93e2f5846698"
     },
     {
       "path": "THIRD_PARTY_NOTICES.json",
@@ -215,8 +215,8 @@
     },
     {
       "path": "docs/windows-targets.ko.md",
-      "size": 10615,
-      "sha256": "397c70f203e2a85cb4e14239281b4b525ad1b2fc9e907be1114aeb4a12ec2558"
+      "size": 11156,
+      "sha256": "174a18fd5af9848b18034b8d6f63a0e8a0d61251f1fbf7ca861ee647d72c63b0"
     },
     {
       "path": "helper/environment-helper.py",
