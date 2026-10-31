@@ -22,6 +22,7 @@ namespace SshApproval {
     public static class WindowsFiles {
         const uint Read = 0x80000000, Write = 0x40000000, Delete = 0x10000;
         const uint OpenReparse = 0x00200000, Backup = 0x02000000;
+        const string TrustedInstaller = "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464";
         [StructLayout(LayoutKind.Sequential)]
         struct Info {
             public uint Attributes;
@@ -106,21 +107,50 @@ namespace SshApproval {
         }
         sealed class DirectoryChain : IDisposable {
             readonly List<SafeFileHandle> handles = new List<SafeFileHandle>();
+            readonly List<SafeFileHandle> guards = new List<SafeFileHandle>();
+            readonly string path;
             public SafeFileHandle Last { get { return handles[handles.Count - 1]; } }
             public DirectoryChain(string path, string missing) {
+                this.path = path;
                 try {
                     string current = path.Substring(0, 3);
                     handles.Add(Open(current, 0x20080, 1, 3, true, missing));
-                    foreach (string component in path.Substring(3).Split('\\')) {
+                    if (path.Length > 3) foreach (string component in path.Substring(3).Split('\\')) {
                         current += (current.EndsWith("\\") ? "" : "\\") + component;
                         handles.Add(Open(current, 0x20080, 1, 3, true, missing));
                     }
                 } catch { Dispose(); throw; }
             }
             public void CheckTrust(string account, string installer, bool trustAccount) {
-                for (int n = 0; n < handles.Count; n++) CheckAncestor(handles[n], account, installer, trustAccount, n == handles.Count - 1);
+                for (int n = 0; n < handles.Count; n++) {
+                    bool last = n == handles.Count - 1;
+                    bool guarded = last && path.Equals(@"C:\ProgramData", StringComparison.OrdinalIgnoreCase) && PinExistingChild();
+                    CheckAncestor(handles[n], account, installer, trustAccount, last && !guarded, n == 0);
+                }
             }
-            public void Dispose() { for (int n = handles.Count - 1; n >= 0; n--) handles[n].Dispose(); }
+            bool PinExistingChild() {
+                // Only the Windows default ProgramData parent receives this exception.
+                // An existing child held without delete sharing keeps it nonempty, so
+                // attribute-only access cannot turn that parent into a reparse point.
+                int examined = 0;
+                foreach (string candidate in Directory.EnumerateFileSystemEntries(path)) {
+                    if (++examined > 64) break;
+                    try {
+                        CheckedPath(candidate);
+                        bool directory = (File.GetAttributes(candidate) & FileAttributes.Directory) != 0;
+                        SafeFileHandle child = Open(candidate, 0x80, 1, 3, directory, "FILE_NOT_FOUND");
+                        guards.Add(child);
+                        return true;
+                    } catch (FileFailure) { }
+                    catch (IOException) { }
+                    catch (UnauthorizedAccessException) { }
+                }
+                return false;
+            }
+            public void Dispose() {
+                for (int n = guards.Count - 1; n >= 0; n--) guards[n].Dispose();
+                for (int n = handles.Count - 1; n >= 0; n--) handles[n].Dispose();
+            }
         }
         public static IDisposable PinTrustedDirectory(string path, string account, string installer, bool trustAccount) {
             DirectoryChain chain = new DirectoryChain(path, "PARENT_NOT_FOUND");
@@ -138,10 +168,11 @@ namespace SshApproval {
         static bool Trusted(string sid, string account, string installer, bool trustAccount) {
             return sid == "S-1-5-18" || sid == "S-1-5-32-544" || sid == installer || (trustAccount && sid == account);
         }
-        static void CheckAncestor(SafeFileHandle handle, string account, string installer, bool trustAccount, bool last) {
+        static void CheckAncestor(SafeFileHandle handle, string account, string installer, bool trustAccount, bool last, bool volumeRoot) {
             RawSecurityDescriptor descriptor = new RawSecurityDescriptor(Security(handle), 0);
             // Ownership normally grants WRITE_DAC even without an explicit allow ACE.
-            if (descriptor.Owner == null || !Trusted(descriptor.Owner.Value, account, installer, trustAccount) || descriptor.DiscretionaryAcl == null) Fail("PERMISSION_DENIED");
+            if (descriptor.Owner == null || (!Trusted(descriptor.Owner.Value, account, installer, trustAccount) &&
+                !(volumeRoot && descriptor.Owner.Value == TrustedInstaller)) || descriptor.DiscretionaryAcl == null) Fail("PERMISSION_DENIED");
             foreach (GenericAce ace in descriptor.DiscretionaryAcl) {
                 if ((ace.AceFlags & AceFlags.InheritOnly) != 0) continue;
                 QualifiedAce allowed = ace as QualifiedAce;

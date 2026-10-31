@@ -2,7 +2,7 @@
 [CmdletBinding()]
 param(
     [string]$PowerShellExe = 'powershell.exe',
-    [string]$WorkRoot = (Join-Path ([IO.Path]::GetTempPath()) ('ssh-approval-helper-' + [Guid]::NewGuid().ToString('N')))
+    [string]$WorkRoot = (Join-Path 'C:/ProgramData' ('ssh-approval-helper-' + [Guid]::NewGuid().ToString('N')))
 )
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -88,13 +88,16 @@ try {
     [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
     if (Test-Path -LiteralPath $WorkRoot) { throw 'fixture path already exists' }
     if ([string]::IsNullOrWhiteSpace($fixtureParent) -or !(Test-Path -LiteralPath $fixtureParent -PathType Container)) { throw 'fixture parent must exist' }
-    $null = [IO.Directory]::CreateDirectory($WorkRoot)
+    $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    Add-Type -Path (Join-Path $PSScriptRoot '../scripts/windows-file-native.cs') -ErrorAction Stop | Out-Null
+    $fixtureSddl = 'D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;' + $sid + ')'
+    [SshApproval.WindowsFiles]::CreatePrivateDirectory($WorkRoot, $fixtureSddl, $sid, $sid, $false)
     $fixtureCreated = $true
+    Assert-True (Test-Path -LiteralPath $WorkRoot -PathType Container) 'default ProgramData parent supports protected directory creation'
     $install = Join-Path $WorkRoot 'helper'
     $script:stage = Join-Path $WorkRoot 'incoming'
     $root = Join-Path $WorkRoot 'files'
     $script:target = Join-Path $root 'result.bin'
-    $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
     $installer = Join-Path $PSScriptRoot '../scripts/install-windows-helper.ps1'
     $arguments = '-AccountSid "' + $sid + '" -FileRoot "' + $root + '" -InstallRoot "' + $install + '" -StageRoot "' + $script:stage + '"'
     $installed = Invoke-Script $installer $arguments
