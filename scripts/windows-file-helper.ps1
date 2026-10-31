@@ -49,12 +49,25 @@ try {
     $codes = @('PARENT_NOT_FOUND', 'FILE_NOT_FOUND', 'PERMISSION_DENIED', 'DESTINATION_EXISTS',
         'UNSAFE_PATH', 'STAGING_UNAVAILABLE', 'FILE_CHANGED', 'FILE_TOO_LARGE', 'INVALID_REQUEST', 'OPERATION_FAILED')
     $code = 'OPERATION_FAILED'
+    $nativeStep = $null
+    $nativeError = 0
     $failure = $_.Exception
     while ($null -ne $failure) {
-        if ($failure.PSObject.Properties['Code'] -and $failure.Code -cin $codes) { $code = $failure.Code; break }
+        if ($failure.PSObject.Properties['Code'] -and $failure.Code -cin $codes) {
+            $code = $failure.Code
+            if ($failure.PSObject.Properties['NativeStep'] -and $failure.NativeStep -cin @('native', 'create_directory',
+                'inspect', 'open', 'filesystem', 'final_path', 'read_security', 'remove', 'rename_replace', 'rename_new', 'write_security') -and
+                $failure.NativeError -is [int] -and $failure.NativeError -gt 0) {
+                $nativeStep = $failure.NativeStep
+                $nativeError = $failure.NativeError
+            }
+            break
+        }
         if ($failure.Message -cin $codes) { $code = $failure.Message; break }
         $failure = $failure.InnerException
     }
-    [Console]::Out.WriteLine('{"error":"File operation refused or failed","errorCode":"' + $code + '"}')
+    $response = @{ error = 'File operation refused or failed'; errorCode = $code }
+    if ($null -ne $nativeStep) { $response.nativeStep = $nativeStep; $response.nativeError = $nativeError }
+    [Console]::Out.WriteLine(($response | ConvertTo-Json -Compress))
     exit 1
 }

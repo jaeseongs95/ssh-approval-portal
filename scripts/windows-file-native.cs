@@ -11,7 +11,10 @@ using Microsoft.Win32.SafeHandles;
 namespace SshApproval {
     public sealed class FileFailure : Exception {
         public string Code { get; private set; }
+        public string NativeStep { get; private set; }
+        public int NativeError { get; private set; }
         public FileFailure(string code) : base(code) { Code = code; }
+        public FileFailure(string code, string step, int error) : this(code) { NativeStep = step; NativeError = error; }
     }
 
     // All pathname components stay open without write/delete sharing until completion.
@@ -34,6 +37,8 @@ namespace SshApproval {
         static extern uint GetFileType(SafeFileHandle handle);
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         static extern uint GetFinalPathNameByHandle(SafeFileHandle handle, StringBuilder path, uint length, uint flags);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+        static extern bool GetVolumeInformationByHandleW(SafeFileHandle handle, IntPtr volumeName, uint volumeSize, IntPtr serial, IntPtr componentLength, IntPtr flags, StringBuilder fileSystem, uint fileSystemSize);
         [DllImport("kernel32.dll", SetLastError = true)]
         static extern bool SetFileInformationByHandle(SafeFileHandle handle, int kind, IntPtr value, uint length);
         [DllImport("advapi32.dll", SetLastError = true)]
@@ -46,10 +51,11 @@ namespace SshApproval {
         static extern bool CreateDirectory(string path, ref SecurityAttributes security);
 
         static void Fail(string code) { throw new FileFailure(code); }
-        static void NativeFailure(string missing) {
+        static void NativeFailure(string missing, string step = "native") {
             int error = Marshal.GetLastWin32Error();
-            Fail(error == 2 || error == 3 ? missing : error == 5 || error == 32 || error == 33 ? "PERMISSION_DENIED" :
-                error == 80 || error == 183 ? "DESTINATION_EXISTS" : error == 1920 || error == 4390 ? "UNSAFE_PATH" : "OPERATION_FAILED");
+            string code = error == 2 || error == 3 ? missing : error == 5 || error == 32 || error == 33 ? "PERMISSION_DENIED" :
+                error == 80 || error == 183 ? "DESTINATION_EXISTS" : error == 1920 || error == 4390 ? "UNSAFE_PATH" : "OPERATION_FAILED";
+            throw new FileFailure(code, step, error);
         }
         public static string CheckedPath(string value) {
             if (value == null || value.Length < 4 || value.Length > 4096 || !Regex.IsMatch(value, @"\A[A-Za-z]:[/\\]")) Fail("UNSAFE_PATH");
@@ -72,24 +78,27 @@ namespace SshApproval {
                 GCHandle pin = GCHandle.Alloc(bytes, GCHandleType.Pinned);
                 try {
                     SecurityAttributes security = new SecurityAttributes { Length = Marshal.SizeOf(typeof(SecurityAttributes)), Descriptor = pin.AddrOfPinnedObject(), Inherit = 0 };
-                    if (!CreateDirectory("\\\\?\\" + path, ref security)) NativeFailure("PARENT_NOT_FOUND");
+                    if (!CreateDirectory("\\\\?\\" + path, ref security)) NativeFailure("PARENT_NOT_FOUND", "create_directory");
                 } finally { pin.Free(); }
             }
         }
         static Info Inspect(SafeFileHandle handle, bool directory) {
             Info info;
-            if (!GetFileInformationByHandle(handle, out info)) NativeFailure("OPERATION_FAILED");
+            if (!GetFileInformationByHandle(handle, out info)) NativeFailure("OPERATION_FAILED", "inspect");
             if (GetFileType(handle) != 1 || (info.Attributes & 0x400) != 0 || ((info.Attributes & 0x10) != 0) != directory || (!directory && info.Links != 1)) Fail("UNSAFE_PATH");
             return info;
         }
         static SafeFileHandle Open(string path, uint access, uint share, uint disposition, bool directory, string missing) {
             SafeFileHandle handle = CreateFile("\\\\?\\" + path, access, share, IntPtr.Zero, disposition, OpenReparse | (directory ? Backup : 0), IntPtr.Zero);
-            if (handle.IsInvalid) { handle.Dispose(); NativeFailure(missing); }
+            if (handle.IsInvalid) { handle.Dispose(); NativeFailure(missing, "open"); }
             try {
                 Inspect(handle, directory);
+                StringBuilder fileSystem = new StringBuilder(32);
+                if (!GetVolumeInformationByHandleW(handle, IntPtr.Zero, 0, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, fileSystem, (uint)fileSystem.Capacity)) NativeFailure("OPERATION_FAILED", "filesystem");
+                if (!fileSystem.ToString().Equals("NTFS", StringComparison.OrdinalIgnoreCase)) throw new FileFailure("OPERATION_FAILED", "filesystem", 50);
                 StringBuilder actual = new StringBuilder(32768);
                 uint length = GetFinalPathNameByHandle(handle, actual, (uint)actual.Capacity, 0);
-                if (length == 0) NativeFailure(missing);
+                if (length == 0) NativeFailure(missing, "final_path");
                 if (length >= actual.Capacity || !actual.ToString().TrimEnd('\\').Equals(("\\\\?\\" + path).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase)) Fail("UNSAFE_PATH");
                 return handle;
             } catch { handle.Dispose(); throw; }
@@ -114,7 +123,7 @@ namespace SshApproval {
             GetKernelObjectSecurity(handle, 4, null, 0, out size);
             if (size == 0 || size > 65536) Fail("PERMISSION_DENIED");
             byte[] descriptor = new byte[size];
-            if (!GetKernelObjectSecurity(handle, 4, descriptor, size, out size)) NativeFailure("OPERATION_FAILED");
+            if (!GetKernelObjectSecurity(handle, 4, descriptor, size, out size)) NativeFailure("OPERATION_FAILED", "read_security");
             return descriptor;
         }
         static void CheckWriters(SafeFileHandle handle, string account, string failure) {
@@ -156,7 +165,7 @@ namespace SshApproval {
             IntPtr data = Marshal.AllocHGlobal(4);
             try {
                 Marshal.WriteInt32(data, 1);
-                if (!SetFileInformationByHandle(handle, 4, data, 4)) NativeFailure("OPERATION_FAILED");
+                if (!SetFileInformationByHandle(handle, 4, data, 4)) NativeFailure("OPERATION_FAILED", "remove");
             } finally { Marshal.FreeHGlobal(data); }
         }
         static void Rename(SafeFileHandle handle, string path, bool overwrite) {
@@ -169,11 +178,14 @@ namespace SshApproval {
             IntPtr data = Marshal.AllocHGlobal(nameOffset + name.Length + 2);
             try {
                 for (int n = 0; n < nameOffset + name.Length + 2; n++) Marshal.WriteByte(data, n, 0);
-                Marshal.WriteInt32(data, overwrite ? 1 : 0);
+                // FileRenameInfoEx plus POSIX semantics replaces an open destination
+                // while its read-only identity/security handle remains pinned.
+                // Unsupported Windows/filesystem drivers fail closed; never drop that handle.
+                Marshal.WriteInt32(data, overwrite ? 3 : 0);
                 Marshal.WriteIntPtr(data, pointer, IntPtr.Zero);
                 Marshal.WriteInt32(data, lengthOffset, name.Length);
                 Marshal.Copy(name, 0, IntPtr.Add(data, nameOffset), name.Length);
-                if (!SetFileInformationByHandle(handle, 3, data, (uint)(nameOffset + name.Length + 2))) NativeFailure("OPERATION_FAILED");
+                if (!SetFileInformationByHandle(handle, overwrite ? 22 : 3, data, (uint)(nameOffset + name.Length + 2))) NativeFailure("OPERATION_FAILED", overwrite ? "rename_replace" : "rename_new");
             } finally { Marshal.FreeHGlobal(data); }
         }
         public static Dictionary<string, object> Execute(string action, string id, string path, string hash, long size, long maximum, bool overwrite, string root, string stage, string account) {
@@ -233,7 +245,7 @@ namespace SshApproval {
                                             using (SafeFileHandle current = Open(path, Read, 1 | 4, 3, false, "FILE_CHANGED")) {
                                                 if (!Same(old, Inspect(current, false))) Fail("FILE_CHANGED");
                                             }
-                                            if (!SetKernelObjectSecurity(destination, 4, Security(previous))) NativeFailure("OPERATION_FAILED");
+                                            if (!SetKernelObjectSecurity(destination, 4, Security(previous))) NativeFailure("OPERATION_FAILED", "write_security");
                                         }
                                         // With no previous destination, never replace a file created concurrently.
                                         Rename(destination, path, previous != null && overwrite);

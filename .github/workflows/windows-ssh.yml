@@ -20,15 +20,20 @@ jobs:
         with:
           node-version: '24.21.0'
       - run: npm ci --ignore-scripts
+        id: dependencies
       - name: Windows 경로와 명령 회귀 시험
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         shell: pwsh
         run: node --test test/windows-target.test.mjs test/windows-file-contracts.test.mjs
       - name: Windows PowerShell 파일 보조프로그램 시험
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         shell: pwsh
         run: ./test/windows-file-helper.tests.ps1 -PowerShellExe powershell.exe
       - name: PowerShell 7 파일 보조프로그램 시험
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         shell: pwsh
         run: ./test/windows-file-helper.tests.ps1 -PowerShellExe pwsh.exe
       - name: 실제 Windows OpenSSH와 파일 왕복 시험
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         shell: pwsh
         run: ./test/windows-ssh-ci.ps1

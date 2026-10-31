@@ -66,9 +66,21 @@ function Request([string]$action = 'publish', [string]$path = $script:target) {
         remotePath = $path; maxBytes = 67108864L; overwrite = $false; size = $script:bytes.Length; sha256 = $script:digest }
 }
 function Call($request) { return Invoke-Script $script:helper '' ($request | ConvertTo-Json -Compress) }
+function Describe-Result($result) {
+    # Whitelist-only failure metadata; never emit the helper response, path or exception text.
+    $code = 'unclassified'
+    if ($result.data.errorCode -cin @('PARENT_NOT_FOUND', 'FILE_NOT_FOUND', 'PERMISSION_DENIED', 'DESTINATION_EXISTS',
+        'UNSAFE_PATH', 'STAGING_UNAVAILABLE', 'FILE_CHANGED', 'FILE_TOO_LARGE', 'INVALID_REQUEST', 'OPERATION_FAILED')) { $code = $result.data.errorCode }
+    $step = 'none'
+    if ($result.data.nativeStep -cin @('native', 'create_directory', 'inspect', 'open', 'filesystem', 'final_path', 'read_security',
+        'remove', 'rename_replace', 'rename_new', 'write_security')) { $step = $result.data.nativeStep }
+    $number = 0
+    if ($result.data.nativeError -is [int] -and $result.data.nativeError -gt 0) { $number = $result.data.nativeError }
+    return ('exit=' + [int]$result.exitCode + '; code=' + $code + '; step=' + $step + '; native=' + $number)
+}
 function Refused($request, [string]$code) {
     $result = Call $request
-    Assert-True ($result.exitCode -eq 1 -and $result.data.errorCode -ceq $code) ('expected ' + $code)
+    Assert-True ($result.exitCode -eq 1 -and $result.data.errorCode -ceq $code) ('expected ' + $code + '; ' + (Describe-Result $result))
     Assert-True (!$result.raw.Contains('sensitive-marker')) 'content must never be returned'
 }
 function Stage($request) { [IO.File]::WriteAllBytes((Join-Path $script:stage ($request.id + '.part')), $script:bytes) }
@@ -103,8 +115,17 @@ try {
     $request.overwrite = $true
     $acl = (Get-Acl -LiteralPath $script:target).Sddl
     $result = Call $request
-    Assert-True ($result.exitCode -eq 0 -and $result.data.published) 'atomic overwrite'
+    Assert-True ($result.exitCode -eq 0 -and $result.data.published) ('atomic overwrite; ' + (Describe-Result $result))
     Assert-True ((Get-Acl -LiteralPath $script:target).Sddl -ceq $acl) 'overwrite retains destination DACL'
+    $reader = [IO.File]::Open($script:target, [IO.FileMode]::Open, [IO.FileAccess]::Read, ([IO.FileShare]::Read -bor [IO.FileShare]::Delete))
+    try {
+        $result = Call $request
+        Assert-True ($result.exitCode -eq 0 -and $result.data.published) ('overwrite preserves shared-delete reader; ' + (Describe-Result $result))
+        Assert-True ($reader.ReadByte() -eq $script:bytes[0]) 'replaced file remains readable through retained handle'
+    } finally { $reader.Dispose() }
+    $reader = [IO.File]::Open($script:target, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    try { Refused $request 'PERMISSION_DENIED' } finally { $reader.Dispose() }
+    Assert-True ([Convert]::ToBase64String([IO.File]::ReadAllBytes($script:target)) -ceq [Convert]::ToBase64String($script:bytes)) 'blocked overwrite preserves destination bytes'
     $request.action = 'cleanup'
     $result = Call $request
     Assert-True ($result.exitCode -eq 0 -and $result.data.cleaned) 'cleanup staged data'
