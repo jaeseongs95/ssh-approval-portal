@@ -34,6 +34,28 @@ function Write-Utf8([string] $Path, [string] $Text) {
 function Assert-Exit([string] $Operation) {
     if ($LASTEXITCODE -ne 0) { throw "$Operation 실패: 종료 코드 $LASTEXITCODE" }
 }
+function Write-ServerLogTail([int] $Lines = 60) {
+    if (-not (Test-Path -LiteralPath $serverLog)) { return }
+    $stream = $null
+    $reader = $null
+    try {
+        $sharing = [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete
+        $stream = [IO.FileStream]::new($serverLog, [IO.FileMode]::Open, [IO.FileAccess]::Read, $sharing)
+        $reader = [IO.StreamReader]::new($stream, $utf8, $true)
+        $tail = [Collections.Generic.Queue[string]]::new()
+        while (-not $reader.EndOfStream) {
+            $tail.Enqueue($reader.ReadLine())
+            if ($tail.Count -gt $Lines) { $null = $tail.Dequeue() }
+        }
+        foreach ($line in $tail) { Write-Output $line }
+    } catch {
+        # 진단 실패가 일회 계정·키·서버 정리를 중단하거나 원래 시험 실패를 가리면 안 된다.
+        Write-Output ('서버 로그 읽기 실패: ' + $_.Exception.GetType().Name + ', ' + $_.Exception.HResult)
+    } finally {
+        if ($null -ne $reader) { $reader.Dispose() }
+        elseif ($null -ne $stream) { $stream.Dispose() }
+    }
+}
 function Set-FixtureAcl([string] $Path, [string] $AccountSid, [string] $Rights = 'ReadAndExecute', [switch] $MachineOnly) {
     $acl = [Security.AccessControl.DirectorySecurity]::new()
     if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
@@ -220,7 +242,7 @@ Subsystem sftp $sftpPath
         finally { $socket.Dispose() }
     }
     if (-not $ready) {
-        if (Test-Path -LiteralPath $serverLog) { Get-Content -LiteralPath $serverLog -Tail 30 }
+        Write-ServerLogTail 30
         throw '격리 SSH 서버가 준비되지 않았습니다.'
     }
 
@@ -247,10 +269,6 @@ Subsystem sftp $sftpPath
     Write-Output '실제 Windows OpenSSH 통합 시험 통과'
 } finally {
     Remove-Item Env:AGS_WINDOWS_SSH_FIXTURE -ErrorAction SilentlyContinue
-    if (-not $testsPassed -and (Test-Path -LiteralPath $serverLog)) {
-        # 서버 진단에는 일회 계정명과 공개키 지문만 있으며 비밀키·암호는 기록하지 않는다.
-        Get-Content -LiteralPath $serverLog -Tail 40
-    }
     if ($registeredTask) {
         Stop-ScheduledTask -TaskName $taskName -ErrorAction Continue
         # 예약 작업의 잔존 자식도 해당 격리 설정 경로를 기준으로만 정리한다.
@@ -258,6 +276,10 @@ Subsystem sftp $sftpPath
             $_.CommandLine -and $_.CommandLine.Contains($fixtureRoot)
         } | ForEach-Object { & taskkill.exe /PID $_.ProcessId /T /F 2>$null | Out-Null }
         Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction Continue
+    }
+    if (-not $testsPassed) {
+        # 서버 종료 뒤에도 공유 읽기를 사용한다. 비밀키·암호는 로그에 기록되지 않는다.
+        Write-ServerLogTail
     }
     if ($createdUser) { Remove-LocalUser -Name $accountName -ErrorAction Continue }
     if (Test-Path -LiteralPath $fixtureRoot) {

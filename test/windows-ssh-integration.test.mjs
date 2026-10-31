@@ -34,6 +34,30 @@ test('실제 Windows SSH 명령·승인·파일 전송 경계', {
   const remote = name => win32.join(fixture.fileRoot, name).replaceAll('\\', '/');
   const connection = await runtime.registry.getOrCreate('windows-write');
   const call = script => connection.exec(wrapWindowsCommand(script));
+  // 실패 때만 동일 합성 명령의 원시 결과와 준비 후 재실행을 관측한다. 원시험 제한은 유지한다.
+  const directDiagnostic = async (label, command, profile = 'windows-write') => {
+    const started = Date.now();
+    let phase = '최초 직접 실행';
+    try {
+      const direct = await runtime.registry.getOrCreate(profile);
+      const result = await direct.exec(command, { timeoutMs: 60_000 });
+      t.diagnostic(JSON.stringify({ 진단: label, 단계: phase, 경과밀리초: Date.now() - started,
+        exitCode: result.exitCode, signal: result.signal,
+        stdoutBytes: Buffer.byteLength(result.stdout ?? ''), stderrBytes: Buffer.byteLength(result.stderr ?? ''),
+        stdout: result.stdout?.slice(0, 2048), stderr: result.stderr?.slice(0, 2048) }));
+      if (result.exitCode === 0 && !result.signal) {
+        phase = '같은 명령 10초 제한 재실행';
+        const warmStarted = Date.now();
+        const warm = await direct.exec(command, { timeoutMs: 10_000 });
+        t.diagnostic(JSON.stringify({ 진단: label, 단계: phase, 경과밀리초: Date.now() - warmStarted,
+          exitCode: warm.exitCode, signal: warm.signal,
+          stdoutBytes: Buffer.byteLength(warm.stdout ?? ''), stderrBytes: Buffer.byteLength(warm.stderr ?? ''),
+          stdout: warm.stdout?.slice(0, 2048), stderr: warm.stderr?.slice(0, 2048) }));
+      }
+    } catch (error) {
+      t.diagnostic(JSON.stringify({ 진단: label, 단계: phase, 경과밀리초: Date.now() - started, 오류: error.message }));
+    }
+  };
   const uploadOperation = async (name, bytes, overwrite = false) => {
     const meta = { fileName: name, remotePath: remote(name), size: bytes.length, sha256: digest(bytes), overwrite, elevate: false };
     const item = await store.begin(meta);
@@ -47,12 +71,18 @@ test('실제 Windows SSH 명령·승인·파일 전송 경계', {
   try {
     await t.test('한글·공백·양쪽 따옴표와 종료 코드가 원문대로 전달된다', async () => {
       const marker = `한글 공백 '작은따옴표' "큰따옴표"`;
-      const result = await runtime.executeCommand('windows-write', wrapWindowsCommand(`[Console]::Write('${marker.replaceAll("'", "''")}')`));
-      assert.equal(result.failed, false);
-      assert.deepEqual(result.texts, [marker]);
-      const failed = await call('[Console]::Error.Write("예상 실패"); exit 7');
-      assert.equal(failed.exitCode, 7);
-      assert.equal(failed.stderr, '예상 실패');
+      const wrapped = wrapWindowsCommand(`[Console]::Write('${marker.replaceAll("'", "''")}')`);
+      try {
+        const result = await runtime.executeCommand('windows-write', wrapped);
+        assert.equal(result.failed, false);
+        assert.deepEqual(result.texts, [marker]);
+        const failed = await call('[Console]::Error.Write("예상 실패"); exit 7');
+        assert.equal(failed.exitCode, 7);
+        assert.equal(failed.stderr, '예상 실패');
+      } catch (error) {
+        await directDiagnostic('한글 명령 직접 경로', wrapped);
+        throw error;
+      }
     });
 
     await t.test('정확한 기본 읽기 명령은 외부 모듈 검색 경로에 있는 동명 합성 모듈을 불러오지 않는다', async () => {
@@ -60,11 +90,16 @@ test('실제 Windows SSH 명령·승인·파일 전송 경계', {
         const inner = wrapWindowsCommand(command);
         // 외부 명령의 환경만 오염시킨다. 자식은 제품의 실제 기본 읽기 명령 런처다.
         const outer = wrapWindowsCommand(`$env:PSModulePath = '${fixture.modulesRoot.replaceAll("'", "''")}'; ${inner}`);
-        const result = await runtime.executeCommand('windows-read', outer);
-        assert.equal(result.failed, false);
-        assert.ok(result.texts.join('').trim(), '기본 명령의 정상 출력이 없음');
-        assert.doesNotMatch(result.texts.join(''), /untrusted module loaded/);
-        for (const marker of fixture.moduleMarkers) await absent(marker);
+        try {
+          const result = await runtime.executeCommand('windows-read', outer);
+          assert.equal(result.failed, false);
+          assert.ok(result.texts.join('').trim(), '기본 명령의 정상 출력이 없음');
+          assert.doesNotMatch(result.texts.join(''), /untrusted module loaded/);
+          for (const marker of fixture.moduleMarkers) await absent(marker);
+        } catch (error) {
+          await directDiagnostic('기본 읽기 직접 경로: ' + command, outer, 'windows-read');
+          throw error;
+        }
       }
     });
 
