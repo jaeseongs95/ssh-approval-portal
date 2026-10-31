@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto';
-import { posix, win32 } from 'node:path';
 import { COMMAND_MAX_BYTES, utf8WithinLimit } from '../contracts/ports.mjs';
 
 const HIDDEN = /[\u0000-\u001f\u007f-\u009f\u061c\u200b\u200e\u200f\u2028-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/;
@@ -34,5 +33,5 @@ export function anyRemotePath(path) {
 export function remoteBasename(path, platform = 'linux') {
   if (!['linux', 'windows'].includes(platform)) throw Error('Unsupported remote platform');
   (platform === 'windows' ? windowsRemotePath : remotePath)(path);
-  return (platform === 'windows' ? win32 : posix).basename(path);
+  return path.replace(/\/+$/, '').split(platform === 'windows' ? /[\\/]/ : '/').at(-1);
 }

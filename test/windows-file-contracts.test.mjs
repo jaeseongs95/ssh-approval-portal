@@ -40,6 +40,8 @@ test('기존 POSIX 경로 문법과 기본 basename 동작을 보존한다', () 
     assert.equal(remotePath(value), value); assert.equal(anyRemotePath(value), value);
   }
   assert.equal(remoteBasename('/tmp/back\\slash.bin'), 'back\\slash.bin');
+  assert.equal(remoteBasename('/tmp/directory///'), 'directory');
+  assert.equal(remoteBasename('///'), '');
   assert.throws(() => remotePath(path));
   assert.throws(() => anyRemotePath('C:/NUL.txt'));
 });
@@ -67,7 +69,9 @@ test('공유 저장소는 두 대상 문법을 받아들이고 메타데이터�
       assert.equal(ready.targetRevision, revision); assert.equal(ready.fileTargetBound, true);
       await store.remove(item.id);
     }
-    const imported = await store.importFile(metadata(), async () => ({ stream: Readable.from([bytes]), expectedSize: bytes.length }));
+    let closed = 0;
+    const imported = await store.importFile(metadata(), async () => ({ stream: Readable.from([bytes]), expectedSize: bytes.length, close: () => { closed++; } }));
+    assert.equal(closed, 1);
     assert.equal(imported.remotePath, path); assert.equal(imported.sha256, hash(bytes));
     await store.remove(imported.id);
     await assert.rejects(store.begin(metadata('C:/file:stream')));
