@@ -68,6 +68,7 @@ test('WIN-ENCODE UTF-16LE 래퍼가 원문과 셸 특수문자를 보존하고 �
   assert.equal(wrapped.includes(raw), false);
   assert.match(script, /\[Console\]::OutputEncoding=/);
   assert.match(script, /exit \$LASTEXITCODE/);
+  assert.ok(script.includes('} | Microsoft.PowerShell.Core\\Out-Default;exit $LASTEXITCODE'));
   for (const raw of ['', ' ', 'x\0y', 'x\ny', 'x\ry', 'x\ty', 'x\x1by', 'x\x7fy', 'x\x85y', '\ud800']) {
     assert.throws(() => wrapWindowsCommand(raw), /Invalid Windows command/);
   }

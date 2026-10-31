@@ -102,7 +102,7 @@ tty = false
 transferTimeoutMs = 10000
 "@
     }
-    return "[defaults]`ndefaultProfile = `"windows-write`"`ncommandTimeoutMs = 10000`n`n" + ($profiles -join "`n")
+    return "[defaults]`ndefaultProfile = `"windows-write`"`ncommandTimeoutMs = 60000`n`n" + ($profiles -join "`n")
 }
 
 try {

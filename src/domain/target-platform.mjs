@@ -9,7 +9,9 @@ export function targetCapabilities(target) {
 }
 
 const prefix = "[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false);$OutputEncoding=[Console]::OutputEncoding;$ErrorActionPreference='Stop';$global:LASTEXITCODE=0;try { & { ";
-const suffix = "\n};exit $LASTEXITCODE } catch { [Console]::Error.WriteLine($_.Exception.Message);exit 1 }";
+// Finish PowerShell's object formatting before exit; otherwise PathInfo/table
+// output can still be queued when the process terminates.
+const suffix = "\n} | Microsoft.PowerShell.Core\\Out-Default;exit $LASTEXITCODE } catch { [Console]::Error.WriteLine($_.Exception.Message);exit 1 }";
 const readModule = command => /^(Microsoft\.PowerShell\.(?:Utility|Management))\\(?:Get-Date|Get-Location)$/i.exec(command.trim())?.[1];
 
 export function wrapWindowsCommand(command) {
