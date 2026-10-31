@@ -39,7 +39,7 @@ class PackageContract(unittest.TestCase):
         self.write('ui/src/nested/source.js', 'export const ui = true;')
         self.write('web/src/nested/source.js', 'export const web = true;')
         self.write('web/dist/app.js', 'console.log("synthetic web bundle");')
-        for name in ['verify.mjs', 'check-package-imports.mjs']:
+        for name in ['verify.mjs', 'check-package-imports.mjs', 'windows-file-helper.ps1', 'windows-file-native.cs', 'install-windows-helper.ps1']:
             shutil.copyfile(SOURCE / 'scripts' / name, self.root / 'scripts' / name)
 
     def tearDown(self):
@@ -116,6 +116,19 @@ class PackageContract(unittest.TestCase):
         result = self.run_node(script, self.root)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('Source missing from manifest', result.stderr)
+
+    def test_manifest_requires_windows_transfer_runtime(self):
+        packager.package(self.root)
+        manifest = self.root / 'release-manifest.json'
+        original = json.loads(manifest.read_text(encoding='utf-8'))
+        for name in ['windows-file-helper.ps1', 'windows-file-native.cs', 'install-windows-helper.ps1']:
+            with self.subTest(name=name):
+                data = dict(original)
+                data['files'] = [entry for entry in original['files'] if entry['path'] != 'scripts/' + name]
+                manifest.write_text(json.dumps(data), encoding='utf-8')
+                result = self.run_node(self.root / 'scripts/verify.mjs', self.root)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('Required package entry missing: scripts/' + name, result.stderr)
 
     def test_oidc_proxy_examples_are_in_both_archives_and_manifest_with_working_doc_links(self):
         for name in OIDC_EXAMPLES:
