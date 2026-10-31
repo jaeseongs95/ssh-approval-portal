@@ -48,17 +48,17 @@ async function mcpFixture(t, { classify = classifyCommand, executeCommand = asyn
   return { app, executions, tool, call: (command = 'cat /tmp/PRIVATE_COMMAND_CANARY', changes = {}) => client.callTool({ name: 'read-command', arguments: { command, ...changes } }) };
 }
 
-test('READ-REFUSAL-01 실제 분류기의 복합 명령과 단독 안전 등급은 승인 사유로 거부한다', { timeout: 20000 }, async t => {
+test('READ-REFUSAL-01 실제 분류기의 안전·파괴적·권한 필요 등급은 승인 사유로 거부한다', { timeout: 20000 }, async t => {
   const f = await mcpFixture(t);
-  for (const command of [
-    'stat /tmp/PRIVATE_COMMAND_CANARY;sha256sum /tmp/PRIVATE_COMMAND_CANARY;free -m;ps -ef',
-    'sha256sum /tmp/PRIVATE_COMMAND_CANARY',
-    'rm /tmp/PRIVATE_COMMAND_CANARY',
-    'sudo id',
+  // 모든 입력은 분류·입장 거부용 합성 문자열이며 실제 SSH 실행기는 연결하지 않습니다.
+  for (const [command, expectedClass] of [
+    ['stat /tmp/PRIVATE_COMMAND_CANARY;sha256sum /tmp/PRIVATE_COMMAND_CANARY;free -m;ps -ef', 'safe'],
+    ['sha256sum /tmp/PRIVATE_COMMAND_CANARY', 'safe'],
+    ['rm /tmp/PRIVATE_COMMAND_CANARY', 'safe'],
+    ['rm -rf /', 'destructive'],
+    ['sudo id', 'privileged'],
   ]) {
-    assert.notEqual(classifyCommand(command).class, 'read-only');
-    if (command.startsWith('stat') || command.startsWith('sha256sum')) assert.equal(classifyCommand(command).class, 'safe');
-    if (command.startsWith('rm')) assert.equal(classifyCommand(command).class, 'destructive');
+    assert.equal(classifyCommand(command).class, expectedClass, command);
     assertRefusal(await f.call(command), 'READ_COMMAND_REQUIRES_APPROVAL');
   }
   await f.app.targets.drain();
