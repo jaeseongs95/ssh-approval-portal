@@ -34,27 +34,29 @@ export function createAgentCliPanel({document,api,isSignedOut,canLoad,storage,ra
  let capabilities,preview,job,remoteStatus,historyCursor,busy=false,uncertain=false,generation=0,timer,closed=false;
  const active=()=>!closed&&!isSignedOut()&&document.body.dataset.page==='settings';
  const binding=()=>capabilities?.bindings?.find(b=>b.targetId===target.value&&b.enabled===true);
+ const supported=()=>Boolean(binding())&&binding().supported!==false&&binding().platform!=='windows';
  const hint=()=>hints.find(h=>h.targetId===target.value&&h.provider===provider.value);
  const persist=h=>{hints=hints.filter(v=>v.targetId!==h.targetId||v.provider!==h.provider);hints.push(h);hints=hints.slice(-64);try{storage?.setItem(storageKey,JSON.stringify(hints));}catch{/* local restoration may be unavailable */}};
  const clearTimer=()=>{cancel(timer);timer=undefined;};
  const stateName=state=>({pending:t('승인 대기','Awaiting approval'),running:t('설치 실행 중','Installing'),completed:t('완료','Completed'),failed:t('실패','Failed'),unknown:t('결과 불명','Outcome unknown'),expired:t('만료','Expired'),denied:t('거부','Denied'),evaluating:t('평가 중','Assessing'),not_found:t('기록 없음','Not found'),preparing:t('준비 중','Preparing'),installing:t('설치 중','Installing'),reused:t('기존 버전 사용','Reused')})[state]??t('확인 필요','Check required');
  function lock(){
-  const ready=Boolean(binding())&&capabilities?.available&&active();
+  const ready=supported()&&capabilities?.available&&active();
   checkLogin.disabled=busy||!ready;
   inspect.disabled=busy||!ready||uncertain||Boolean(job&&['pending','running','evaluating','unknown'].includes(job.state));
-  recover.disabled=busy||!ready;historySelect.disabled=busy||!ready;historyNext.disabled=busy||!ready;submit.hidden=!preview||Boolean(job);submit.disabled=busy||uncertain||!ack.checked||!preview||Date.now()>=preview.expiresAt;
-  start.hidden=job?.state!=='pending';start.disabled=busy||uncertain||!ack.checked;
+  recover.disabled=busy||!ready;historySelect.disabled=busy||!ready;historyNext.disabled=busy||!ready;submit.hidden=!preview||Boolean(job);submit.disabled=busy||!ready||uncertain||!ack.checked||!preview||Date.now()>=preview.expiresAt;
+  start.hidden=job?.state!=='pending';start.disabled=busy||!ready||uncertain||!ack.checked;
   reconcile.hidden=!job||!['unknown','failed'].includes(job.state);reconcile.disabled=busy||!ready;
   readOutput.hidden=!validId(job?.result?.structuredContent?.output?.id);readOutput.disabled=busy||!ready;
-  ack.disabled=busy||(!preview&&job?.state!=='pending');root.setAttribute('aria-busy',String(busy));
+  ack.disabled=busy||!ready||(!preview&&job?.state!=='pending');login.hidden=Boolean(binding())&&!supported();provider.disabled=Boolean(binding())&&!supported();root.setAttribute('aria-busy',String(busy));
  }
  function clearHistory(){history.hidden=true;historySelect.replaceChildren();historyCursor=undefined;historyNext.hidden=true;}
  function scope(){generation++;clearTimer();clearHistory();preview=job=remoteStatus=undefined;ack.checked=false;uncertain=Boolean(hint());summary.hidden=true;summary.textContent='';output.hidden=true;output.textContent='';failure.textContent='';message.textContent='';
   loginState.textContent=t('로그인 상태: 미조회','Login status: Not checked');
-  const b=binding();identity.textContent=b?[b.displayName,b.targetId,b.sshTarget,b.profile].filter(Boolean).join(' · '):'';
+  const b=binding();identity.textContent=b?[b.displayName,b.targetId,b.platform==='windows'?'Windows':b.platform==='linux'?'Linux':'',b.sshTarget,b.profile].filter(Boolean).join(' · '):'';
+  if(b&&!supported()){uncertain=false;message.textContent=t('이 대상에서는 서버 CLI 설치·로그인 상태 진단을 지원하지 않습니다. 일반 명령과 파일 전송은 사용할 수 있습니다.','Server CLI installation and login diagnostics are unavailable on this target. General commands and file transfers remain available.');loginState.textContent=t('로그인 상태: 지원하지 않는 대상','Login status: Unsupported target');}
   const user=/^([A-Za-z_][A-Za-z0-9_.-]{0,63})@/.exec(b?.sshTarget??'')?.[1];
-  loginAccount.textContent=b?t('로그인할 SSH 계정: ','SSH account for login: ')+b.sshTarget+(user?t(' · 다른 계정이면 먼저 실행: ',' · From another account run first: ')+'sudo -iu '+user:''):'';
-  loginCommand.textContent=`PATH="/opt/ssh-approval/node/bin:$PATH" "$HOME/.local/share/ssh-approval-cli/${provider.value}/current/bin/${provider.value}"`+(provider.value==='codex'?' login --device-auth':'')+'\n'+t('기존 외부 설치를 사용하는 경우에는 그 설치의 실행 경로를 사용하세요.','For an existing external installation, use that installation’s executable path.');lock();
+  loginAccount.textContent=b&&supported()?t('로그인할 SSH 계정: ','SSH account for login: ')+b.sshTarget+(user?t(' · 다른 계정이면 먼저 실행: ',' · From another account run first: ')+'sudo -iu '+user:''):'';
+  loginCommand.textContent=supported()?`PATH="/opt/ssh-approval/node/bin:$PATH" "$HOME/.local/share/ssh-approval-cli/${provider.value}/current/bin/${provider.value}"`+(provider.value==='codex'?' login --device-auth':'')+'\n'+t('기존 외부 설치를 사용하는 경우에는 그 설치의 실행 경로를 사용하세요.','For an existing external installation, use that installation’s executable path.') : '';lock();
  }
  function validateJob(value){const b=binding(),op=value?.operation;if(!validId(value?.id)||!b||op?.agentCliContract!=='agent-cli-install-v1'||op.agentCliProvider!==provider.value||op.agentCliTargetId!==b.targetId||op.agentCliTargetRevision!==b.targetRevision||op.agentCliProfile!==b.profile||!['pending','running','completed','failed','unknown','expired','denied','evaluating'].includes(value.state))throw Error(t('요청의 대상 정보가 현재 선택과 다릅니다.','The request does not match the current target binding.'));return value;}
  function displayJob(value,status){job=validateJob(value);remoteStatus=status;preview=undefined;ack.checked=false;uncertain=false;
@@ -111,11 +113,11 @@ export function createAgentCliPanel({document,api,isSignedOut,canLoad,storage,ra
  reconcile.onclick=()=>run(async current=>{const value=await api('/api/agent-cli/reconcile','POST',{requestId:job.id});if(current()){if(value.requestId!==job.id||value.remoteStatus?.provider!==provider.value)throw Error('Invalid CLI receipt');displayJob(job,value.remoteStatus);}});
  readOutput.onclick=()=>run(async current=>{const outputId=job?.result?.structuredContent?.output?.id;if(!validId(outputId))return;const value=await api('/api/outputs/'+outputId+'?format=json&limit=4096');if(current()){if(typeof value.text!=='string')throw Error('Invalid CLI output');output.textContent=value.text;output.hidden=false;output.focus();}});
  recover.onclick=restore;ack.onchange=lock;
- for(const n of [target,provider])n.onchange=()=>{scope();if(hint()&&!busy)restore();};
+ for(const n of [target,provider])n.onchange=()=>{scope();if(supported()&&hint()&&!busy)restore();};
  async function load(){if(capabilities||busy||!active()||!canLoad())return;await run(async current=>{const value=await api('/api/agent-cli');if(!current())return;
   if(typeof value?.available!=='boolean'||!Array.isArray(value.bindings)||value.bindings.some(b=>!validTarget(b.targetId)||typeof b.targetRevision!=='string'||typeof b.profile!=='string'))throw Error('Invalid CLI capabilities');
-  capabilities=value;target.replaceChildren();const items=value.bindings.filter(b=>b.enabled===true);if(items.length!==1){const option=el('option',t('서버 선택','Choose a server'));option.value='';target.append(option);}for(const b of items){const option=el('option',b.displayName+' · '+b.targetId);option.value=b.targetId;target.append(option);}scope();if(!value.available)message.textContent=t('이 서버는 CLI 설치 연결을 제공하지 않습니다.','CLI installation is unavailable on this bridge.');
- });if(hint()&&!busy)await restore();}
+  capabilities=value;target.replaceChildren();const items=value.bindings.filter(b=>b.enabled===true);if(items.length!==1){const option=el('option',t('서버 선택','Choose a server'));option.value='';target.append(option);}for(const b of items){const option=el('option',b.displayName+' · '+b.targetId+(b.platform?' · '+(b.platform==='windows'?'Windows':'Linux'):'')+(b.supported===false||b.platform==='windows'?t(' · 지원하지 않음',' · Unsupported'):''));option.value=b.targetId;target.append(option);}scope();if(!value.available)message.textContent=t('이 서버는 CLI 설치 연결을 제공하지 않습니다.','CLI installation is unavailable on this bridge.');
+ });if(supported()&&hint()&&!busy)await restore();}
  let page=document.body.dataset.page;
  document.addEventListener('admin-scope-change',()=>{const next=document.body.dataset.page;if(next===page)return;page=next;scope();if(active())load();});
  document.addEventListener('visibilitychange',()=>{clearTimer();if(!document.hidden)poll();});

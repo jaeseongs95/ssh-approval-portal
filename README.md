@@ -4,6 +4,8 @@
 
 An MCP server for reviewing and approving SSH commands and file transfers. It provides MCP Apps cards for ChatGPT and Claude alongside a web administrator interface. One bridge supports up to 32 registered SSH targets. The unified administrator screen shows requests across targets and lets the owner filter and act on each request. See [target configuration](docs/multi-targets.ko.md).
 
+Windows SSH 대상의 PowerShell 명령·파일 전송 등록 방법과 지원 제약은 [Windows 대상 등록](docs/windows-targets.ko.md)을 확인하세요.
+
 Jev assists with commands outside the preapproved list. Owner settings determine whether its assessment can lead to automatic approval or requires owner review. A separate [synthetic evaluation tool](docs/jev-observation.ko.md) is also available.
 
 [Secret management (Korean)](docs/secret-management.ko.md) separates secret references from provider adapters. Its first backend is a private POSIX local store managed through a hidden-input operator CLI. Jev resolves a reference at startup; actual values stay out of chat, MCP results, and packages.

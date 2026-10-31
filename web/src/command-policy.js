@@ -67,8 +67,11 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
   };
   const one = section(1, tr('명령 고르기'));
   const target = field(importantFields, tr('정책 편집 대상'), 'select');
-  const workspaceRoot = el('div'); one.append(workspaceRoot);
-  const bulk = el('details', '', 'policy-details command-bulk'); bulk.append(el('summary', tr('목록 일괄 편집'))); one.append(bulk);
+  const platformNotice = el('p', '', 'policy-warning'); platformNotice.id = 'policy-platform-notice'; platformNotice.hidden = true; importantFields.append(platformNotice);
+  const nameNotice = el('p', '', 'policy-help'); nameNotice.hidden = true; one.append(nameNotice);
+  const nameFields = el('fieldset', '', 'policy-fields'); one.append(nameFields);
+  const workspaceRoot = el('div'); nameFields.append(workspaceRoot);
+  const bulk = el('details', '', 'policy-details command-bulk'); bulk.append(el('summary', tr('목록 일괄 편집'))); nameFields.append(bulk);
   bulk.append(el('p', tr('행 목록과 같은 초안입니다. 이름을 한 줄에 하나씩 입력합니다. 잘못된 입력은 위험도 확인에서 해당 위치를 알려줍니다.'), 'policy-help'));
   const commands = field(bulk, tr('자동승인할 명령'), 'textarea', '', tr('이름만 한 줄에 하나. 예: ls (-l 같은 옵션은 빼주세요.)')); commands.rows = 5; commands.spellcheck = false;
   const denied = field(bulk, tr('항상 차단할 명령'), 'textarea', '', tr('차단은 자동승인보다 우선합니다. 두 목록에 같은 이름이 있어도 차단이 우선하며, 한쪽을 바꿔도 다른 쪽은 유지됩니다.')); denied.rows = 3;
@@ -78,8 +81,8 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
   const search = workspace.search, selectedFilter = workspace.filter;
   const examples = el('details', '', 'policy-details'); examples.append(el('summary', tr('언제 자동승인되나요?')));
   for (const text of [tr('ls와 pwd를 등록했다면: pwd && ls -la → Jev 없이 자동승인'), tr('uptime이 미등록이라면: pwd && uptime → 전체 명령줄을 Jev로 평가'), tr('금지 명령이 포함되면 자동승인보다 금지가 우선합니다.'), tr('sudo가 꺼져 있으면 sudo 요청은 개별 승인합니다. 켜도 내부 명령 등록 여부를 확인합니다.')]) examples.append(el('p', text, 'policy-help'));
-  one.append(examples);
-  const uploads = check(importantFields, tr('파일 자동업로드 허용'), tr('폴더 제한 없이 SSH 계정이 쓸 수 있는 경로에 새 파일을 개별 승인 없이 저장합니다. 설정·인증·자동 실행 파일 생성에도 영향을 줍니다. 덮어쓰기·sudo 전송은 계속 승인받으며 파일 내용은 Jev가 검사하지 않습니다.'));
+  nameFields.append(examples);
+  const uploads = check(importantFields, tr('파일 자동업로드 허용'), tr('대상의 파일 전송 제한과 SSH 계정 권한 안에서 새 파일을 개별 승인 없이 저장합니다. 설정·인증·자동 실행 파일 생성에도 영향을 줍니다. 덮어쓰기·권한 상승 전송은 계속 승인받으며 파일 내용은 Jev가 검사하지 않습니다.'));
   const downloads = check(importantFields, tr('파일 자동다운로드 허용'), tr('SSH 계정이 읽을 수 있는 일반 파일을 개별 승인 없이 준비합니다. 개인정보·인증 파일도 포함될 수 있으며 파일 내용은 Jev가 검사하지 않습니다. sudo 다운로드는 sudo 자동승인도 함께 켜야 합니다. 파일 저장은 별도로 진행합니다.'));
 
   const sudo = check(importantFields, tr('sudo 자동승인 허용'), tr('기본값은 꺼짐입니다. 켜면 sudo 안에서 실행하는 명령까지 사전승인 목록과 비교합니다. 하나라도 미등록이면 전체 명령줄을 Jev로 평가하며, 끄면 sudo는 매번 개별 승인을 받습니다.'));
@@ -135,6 +138,7 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
   let currentTarget, conflict = false, unknownSave;
   const drafts = new Map(), archives = new Map(), removals = new Set();
   const bindingOf = id => { const b = snapshot?.bindings.find(b => b.targetId === id); return b && { targetId: b.targetId, targetRevision: b.targetRevision, profile: b.profile }; };
+  const supports = capability => { const b = snapshot?.bindings.find(b => b.targetId === target.value); return b?.capabilities?.[capability] ?? b?.platform !== 'windows'; };
   const announce = (node, text) => { if (node.textContent !== text) node.textContent = text; };
   const rawInputs = () => [commands, denied, search, selectedFilter, disclosure, execution, uploads, downloads, sudo, fallback, ...Object.values(scores).flatMap(p => [p.model, p.score]), sourceExecution, testServer];
   function remember() {
@@ -153,6 +157,9 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
     fields.disabled = !snapshot || busy || loading || !!unknownSave || conflict;
     importantFields.disabled = !snapshot || busy || loading || !!unknownSave;
     for (const input of [uploads, downloads, sudo, execution, sourceExecution]) input.disabled = conflict;
+    sudo.disabled ||= !supports('elevatedFileTransfer');
+    sourceExecution.disabled ||= !supports('pythonSource');
+    nameFields.disabled = !supports('commandNameApproval');
     testServer.disabled = conflict || snapshot?.testServerAvailable !== true && !testServer.checked;
     reviewButton.disabled = !snapshot || busy || loading || !!unknownSave || conflict;
     reload.disabled = quickLoad.disabled = busy || loading;
@@ -202,6 +209,8 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
   function update() {
     for (const [input, key] of [[uploads, 'automaticUploads'], [downloads, 'automaticDownloads'], [sudo, 'automaticSudo'], [execution, 'modelExecution']]) permissionNotes.get(input).textContent = (original ? tr('마지막 저장값: ') + (original[key] === true ? tr('허용') : tr('개별 승인')) : tr('저장된 정책 없음')) + tr(' / 초안: ') + (input.checked ? tr('허용') : tr('개별 승인'));
     permissionNotes.get(sourceExecution).textContent = (original ? tr('마지막 저장값: ') + (original.sourceExecutionContract === 'python-source-v1' ? tr('허용') : tr('개별 승인')) : tr('저장된 정책 없음')) + tr(' / 초안: ') + (sourceExecution.checked ? tr('허용') : tr('개별 승인'));
+    if (!supports('elevatedFileTransfer')) permissionNotes.get(sudo).textContent = tr('이 대상에서는 지원하지 않습니다.');
+    if (!supports('pythonSource')) permissionNotes.get(sourceExecution).textContent = tr('이 대상에서는 지원하지 않습니다.');
     permissionNotes.get(testServer).textContent = (original ? tr('마지막 저장값: ') + (original.testServer === true ? tr('사용') : tr('사용 안 함')) : tr('저장된 정책 없음')) + tr(' / 초안: ') + (testServer.checked ? tr('사용') : tr('사용 안 함')) + (snapshot?.testServerAvailable === true ? '' : tr(' · 테스트용 시크릿 미등록 · 활성화 불가'));
     testServer.disabled = conflict || snapshot?.testServerAvailable !== true && !testServer.checked;
     if (snapshot) {
@@ -213,7 +222,7 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
     announce(draftStatus, unknownSave ? tr('적용 미확인 · 현재 적용 설정을 확인해 주세요.') : conflict ? tr('초안 충돌 · 편집 잠금') : busy ? tr('요청 처리 중 · 입력한 초안을 유지합니다.') : draftDirty ? tr('미저장 초안 · 변경 사항은 아직 적용되지 않았습니다.') : tr('저장된 설정과 같은 초안입니다.'));
     scoreBox.hidden = !disclosure.checked && !execution.checked && !original?.thresholds.jev;
     transmissionNote.hidden = !execution.checked || disclosure.checked;
-    transmissionNote.textContent = tr('정보 전송을 허용하지 않아 Jev 자동 실행은 작동하지 않습니다. 등록 명령의 자동승인은 유지됩니다.');
+    transmissionNote.textContent = supports('commandNameApproval') ? tr('정보 전송을 허용하지 않아 Jev 자동 실행은 작동하지 않습니다. 등록 명령의 자동승인은 유지됩니다.') : tr('정보 전송을 허용하지 않아 모델 평가에 따른 자동 실행은 작동하지 않습니다. 개별 소유자 승인이 필요합니다.');
     for (const [provider, inputs] of Object.entries(scores)) {
       const threshold = original?.thresholds[provider], isLegacy = legacy(threshold) && !converted.has(provider);
       inputs.box.hidden = provider !== 'jev' && !threshold && fallback.value !== provider;
@@ -224,10 +233,11 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
     advancedHeading.textContent = tr('대체 평가·이전 기준 · 대체 ') + (original?.fallback ?? tr('없음'));
     advancedNote.textContent = tr('저장된 점수 설정: ') + active + tr('. 수정하지 않은 값은 그대로 보존합니다. 연결 상태는 미확인입니다.');
     summary.replaceChildren(el('strong', (nameOf(target.value) || tr('서버')) + tr('에 적용할 내용')));
+    if (!supports('commandNameApproval')) summary.append(el('p', platformNotice.textContent));
     if (removals.size) summary.append(el('p', tr('삭제할 정책: ') + [...removals].map(nameOf).join(', ')));
     const lines = [tr('명령 ') + commands.value.split(/\r?\n/).filter(line => line.trim()).length + tr('개 · 금지 명령 ') + denied.value.split(/\r?\n/).filter(line => line.trim()).length + tr('개'),
       tr('정보 전송 ') + (disclosure.checked ? tr('허용 (위험도 확인부터 전송)') : tr('허용 안 함')) + tr(' · Jev 기준 자동 실행 ') + (execution.checked ? tr('사용 (명령셋 밖도 포함)') : tr('사용 안 함'))];
-    summary.append(el('p', tr('제출한 Python 코드 평가·실행 허용') + ': ' + (sourceExecution.checked ? tr('허용') : tr('허용 안 함')) + (sourceExecution.checked !== (original?.sourceExecutionContract === 'python-source-v1') ? tr(' · 변경 사항은 아직 저장되지 않았습니다.') : '')));
+    summary.append(el('p', tr('제출한 Python 코드 평가·실행 허용') + ': ' + (!supports('pythonSource') ? tr('이 대상에서는 지원하지 않습니다.') : sourceExecution.checked ? tr('허용') : tr('허용 안 함')) + (sourceExecution.checked !== (original?.sourceExecutionContract === 'python-source-v1') ? tr(' · 변경 사항은 아직 저장되지 않았습니다.') : '')));
     summary.append(el('p', tr('테스트 서버: ') + (testServer.checked ? tr('사용 · 위험 심사와 개별 승인 없이 실행') : tr('사용 안 함'))));
     const threshold = original?.thresholds.jev;
     if (threshold || execution.checked || changed.has('jev')) lines.push(tr('Jev 기준 ') + probability.value + '% · ' + (legacy(threshold) && !converted.has('jev') ? tr('이전 방식 보존') : tr('낮은 위험 점수 방식 · 사용자 선택 기준')));
@@ -245,15 +255,20 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
     for (const [label, input, prior] of [[tr('업로드'), uploads, original?.automaticUploads], [tr('다운로드'), downloads, original?.automaticDownloads], ['sudo', sudo, original?.automaticSudo], [tr('AI 평가 자동승인'), execution, original?.modelExecution], [tr('정보 전송'), disclosure, original?.externalDisclosure], [tr('테스트 서버'), testServer, original?.testServer]]) if (input.checked !== (prior === true)) summary.append(el('p', label + tr(' 변경: ') + (prior === true ? tr('허용') : tr('허용 안 함')) + ' → ' + (input.checked ? tr('허용') : tr('허용 안 함'))));
     for (const [provider, inputs] of Object.entries(scores)) if (changed.has(provider)) summary.append(el('p', provider + tr(' 모델·기준: ') + (original?.thresholds[provider]?.model ?? tr('미설정')) + ' / ' + (original?.thresholds[provider] ? original.thresholds[provider].minLowRisk * 100 + '%' : tr('미설정')) + ' → ' + inputs.model.value + ' / ' + inputs.score.value + '%'));
     if ((fallback.value || null) !== (original?.fallback ?? null)) summary.append(el('p', tr('대체 평가자 변경: ') + (original?.fallback ?? tr('없음')) + ' → ' + (fallback.value || tr('없음'))));
-    summary.append(el('p', tr('sudo 자동승인 ') + (sudo.checked ? tr('허용 · 내부 명령까지 등록 검사 · 권한 상승 포함') : tr('허용 안 함 · sudo마다 개별 승인'))));
-    summary.append(el('p', tr('파일 자동업로드 ') + (uploads.checked ? tr('허용 · 폴더 제한 없이 SSH 계정이 쓸 수 있는 경로에 새 파일 저장 · 설정/인증/자동 실행 파일도 포함 · Jev 내용 검사 없음 · 덮어쓰기/sudo 제외') : tr('허용 안 함 · 전송마다 승인'))));
+    summary.append(el('p', tr('sudo 자동승인 ') + (!supports('elevatedFileTransfer') ? tr('이 대상에서는 지원하지 않습니다.') : sudo.checked ? tr('허용 · 내부 명령까지 등록 검사 · 권한 상승 포함') : tr('허용 안 함 · sudo마다 개별 승인'))));
+    summary.append(el('p', tr('파일 자동업로드 ') + (uploads.checked ? tr('허용 · 대상의 파일 전송 제한과 SSH 계정 권한 안에서 새 파일 저장 · 설정/인증/자동 실행 파일도 포함 · Jev 내용 검사 없음 · 덮어쓰기/sudo 제외') : tr('허용 안 함 · 전송마다 승인'))));
     summary.append(el('p', tr('파일 자동다운로드 ') + (downloads.checked ? tr('허용 · 읽을 수 있는 일반 파일 준비 · 개인정보/인증 파일 포함 가능 · Jev 내용 검사 없음 · sudo는 별도 허용 필요') : tr('허용 안 함 · 전송마다 승인'))));
   }
   function show() {
     currentTarget = target.value; conflict = false;
     original = snapshot.targets.find(rule => rule.targetId === target.value);
     changed.clear(); converted.clear(); clearFieldErrors(); loadHint.hidden = true; invalidate(tr('설정을 확인하고 위험도 확인을 눌러주세요.'));
-    commands.value = (original ? original.commands : Object.keys(RECOMMENDED)).join('\n'); denied.value = (original?.deniedCommands ?? []).join('\n');
+    const namedCommands = supports('commandNameApproval');
+    platformNotice.hidden = namedCommands;
+    platformNotice.textContent = namedCommands ? '' : tr('Windows PowerShell 5.1 대상입니다. 일반 명령과 파일 전송을 지원합니다. 명령 이름 사전승인, sudo·권한 상승 전송, Python 코드 제출, 서버 CLI 설치·로그인 진단은 지원하지 않습니다. 일반 명령은 모델 평가 또는 소유자 승인 정책을 따르며, 테스트 서버 설정도 지원 범위를 넓히지 않습니다.');
+    nameFields.hidden = !namedCommands; nameNotice.hidden = namedCommands;
+    nameNotice.textContent = namedCommands ? '' : tr('이 대상은 POSIX 명령 이름 규칙을 적용하지 않습니다. Jev·모델 탭에서 일반 명령의 평가 정책을 설정하세요.');
+    commands.value = (original ? original.commands : namedCommands ? Object.keys(RECOMMENDED) : []).join('\n'); denied.value = (original?.deniedCommands ?? []).join('\n');
     search.value = ''; selectedFilter.value = 'rules'; workspace.entry.value = ''; workspace.resetImport(); workspace.refresh();
     disclosure.checked = original?.externalDisclosure ?? false; execution.checked = original?.modelExecution ?? false; fallback.value = original?.fallback ?? '';
     sourceExecution.checked = original?.sourceExecutionContract === 'python-source-v1';
@@ -295,7 +310,7 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
     try {
       const fresh = await api('/api/command-policy');
       const unresolved = unknownSave; snapshot = fresh; target.replaceChildren();
-      for (const binding of snapshot.bindings) { const option = el('option', nameOf(binding.targetId) + (binding.enabled === false ? tr(' · 사용 중지') : '')); option.value = binding.targetId; target.append(option); }
+      for (const binding of snapshot.bindings) { const option = el('option', nameOf(binding.targetId) + (binding.platform ? ' · ' + (binding.platform === 'windows' ? 'Windows' : 'Linux') : '') + (binding.enabled === false ? tr(' · 사용 중지') : '')); option.value = binding.targetId; target.append(option); }
       for (const rule of snapshot.targets.filter(rule => !snapshot.bindings.some(binding => binding.targetId === rule.targetId))) { const option = el('option', rule.targetId + tr(' · 미등록 정책')); option.value = rule.targetId; target.append(option); }
       if (snapshot.bindings.some(b => b.targetId === selectedTarget)) target.value = selectedTarget;
       target.parentElement.hidden = target.options.length === 1; fields.hidden = false;
@@ -403,6 +418,7 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
       if (token !== importGeneration || isSignedOut() || !snapshot || document.body.dataset.page !== 'settings') return false;
       const binding = snapshot.bindings.find(b => b.targetId === request.targetId), rule = snapshot.targets.find(r => r.targetId === request.targetId);
       if (!binding || binding.enabled === false || binding.targetRevision !== request.targetRevision || binding.profile !== request.profile || rule && !activeRule(rule)) { error(tr('이력의 연결 정보가 현재 정책 대상과 다릅니다. 현재 설정을 확인해 주세요.')); return false; }
+      if (binding.capabilities?.commandNameApproval === false || binding.platform === 'windows') { error(tr('이 대상은 명령 이름 사전승인을 지원하지 않습니다. 일반 명령의 모델 평가 또는 소유자 승인 정책을 사용하세요.')); return false; }
       remember(); target.value = request.targetId; error(''); show(); document.dispatchEvent(new Event('admin-scope-change'));
       if (conflict || unknownSave) return false;
       tabs.select(0); const bulk = workspace.container.closest('.command-bulk'); if (bulk) bulk.open = true;

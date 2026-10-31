@@ -107,7 +107,8 @@ export function createWebView({ document, i18n }) {
       const policy = text(body, 'button', korean ? '이 서버 정책 열기' : 'Open this target policy', 'secondary'); policy.type = 'button';
       policy.setAttribute('aria-describedby', targetContext.id); policy.onclick = () => policyAction?.(job.targetId ?? 'default');
     }
-    if (document.body.dataset.commandAutomation === 'true' && job.kind === 'command' && !job.operation?.sourceContract && !['pending', 'running', 'evaluating'].includes(job.state)) {
+    const targetCapabilities = targetList.find(target => target.id === (job.targetId ?? 'default'));
+    if (document.body.dataset.commandAutomation === 'true' && targetCapabilities?.platform !== 'windows' && targetCapabilities?.capabilities?.commandNameApproval !== false && job.kind === 'command' && !job.operation?.sourceContract && !['pending', 'running', 'evaluating'].includes(job.state)) {
       const register = text(body, 'button', korean ? '이력의 명령 이름 등록' : 'Register names from this command', 'secondary'); register.type = 'button';
       const bound = [job.targetId, job.targetRevision, job.profile, job.command].every(value => typeof value === 'string' && value.length);
       register.disabled = !bound; register.setAttribute('aria-describedby', targetContext.id);
@@ -174,7 +175,7 @@ export function createWebView({ document, i18n }) {
         const node = document.createElement('button'); node.type = 'button'; node.className = 'server-card'; node.dataset.targetId = target.id;
         node.setAttribute('aria-pressed', String(target.id === selected));
         text(node, 'strong', target.displayName);
-        if (target.id) text(node, 'span', `${target.id} · ${t(target.enabled ? '등록됨' : '사용 중지')}`, 'server-id');
+        if (target.id) text(node, 'span', `${target.id}${target.platform ? ' · ' + (target.platform === 'windows' ? 'Windows' : 'Linux') : ''} · ${t(target.enabled ? '등록됨' : '사용 중지')}`, 'server-id');
         const labels=['보관 중', '승인 대기', '평가 중', '실행 중', '완료', '실패', '거부', '만료', '결과 불명'];
         text(node, 'span', labels.map((label,index)=>`${t(label)} ${values[index]}`).join(' · '), 'server-counts');
         node.onclick = () => { if (changeTarget && target.id !== (el('target-filter')?.value || '')) { el('target-filter').value = target.id; changeTarget(); } };
@@ -278,7 +279,7 @@ export function createWebView({ document, i18n }) {
       targetList = data.targets;
       const select = el('target-filter'); select.replaceChildren();
       const all = text(select, 'option', t('전체 대상')); all.value = '';
-      for (const target of data.targets) { const option = text(select, 'option', `${target.displayName} (${target.id})${target.enabled ? '' : ` · ${t('사용 중지')}`}`); option.value = target.id; }
+      for (const target of data.targets) { const option = text(select, 'option', `${target.displayName} (${target.id})${target.platform ? ' · ' + (target.platform === 'windows' ? 'Windows' : 'Linux') : ''}${target.enabled ? '' : ` · ${t('사용 중지')}`}`); option.value = target.id; }
       select.ariaLabel = korean ? '요청 조회 대상' : 'Request query target'; el('target-filter-label').hidden = false;
       identify(); changeTarget = select.onchange = () => {
         scrolls.set(lastTarget, ['jobs','running','history'].map(id => el(id)?.scrollTop ?? 0)); lastTarget = select.value;

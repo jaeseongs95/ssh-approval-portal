@@ -1,5 +1,12 @@
 /** UI-owned strings only. Never apply this catalog to commands, output or user input. */
 const english = {
+  '이 대상에서는 지원하지 않습니다.':'Unsupported on this target.',
+  'Windows PowerShell 5.1 대상입니다. 일반 명령과 파일 전송을 지원합니다. 명령 이름 사전승인, sudo·권한 상승 전송, Python 코드 제출, 서버 CLI 설치·로그인 진단은 지원하지 않습니다. 일반 명령은 모델 평가 또는 소유자 승인 정책을 따르며, 테스트 서버 설정도 지원 범위를 넓히지 않습니다.':'Windows PowerShell 5.1 target. General commands and file transfers are supported. Command-name preapproval, sudo or elevated file transfers, submitted Python code, and server CLI installation or login diagnostics are unavailable. General commands follow model assessment or owner approval policy. Test-server mode does not expand supported capabilities.',
+  '이 대상은 POSIX 명령 이름 규칙을 적용하지 않습니다. Jev·모델 탭에서 일반 명령의 평가 정책을 설정하세요.':'POSIX command-name rules do not apply to this target. Configure general command assessment in the Jev and models tab.',
+  '이 대상은 명령 이름 사전승인을 지원하지 않습니다. 일반 명령의 모델 평가 또는 소유자 승인 정책을 사용하세요.':'Command-name preapproval is unavailable on this target. Use model assessment or owner approval for general commands.',
+  '정보 전송을 허용하지 않아 모델 평가에 따른 자동 실행은 작동하지 않습니다. 개별 소유자 승인이 필요합니다.':'Model-based automatic execution is unavailable because information disclosure is disabled. Individual owner approval is required.',
+  '대상의 파일 전송 제한과 SSH 계정 권한 안에서 새 파일을 개별 승인 없이 저장합니다. 설정·인증·자동 실행 파일 생성에도 영향을 줍니다. 덮어쓰기·권한 상승 전송은 계속 승인받으며 파일 내용은 Jev가 검사하지 않습니다.':'Create new files within target transfer limits and SSH account permissions without individual approval. This can create configuration, credential or autorun files. Overwrite and elevated transfers still need approval; Jev does not inspect file contents.',
+  '허용 · 대상의 파일 전송 제한과 SSH 계정 권한 안에서 새 파일 저장 · 설정/인증/자동 실행 파일도 포함 · Jev 내용 검사 없음 · 덮어쓰기/sudo 제외':'Allowed · create files within target transfer limits and SSH permissions · includes configuration/credential/autorun files · no Jev content inspection · excludes overwrite/sudo',
   ' · 테스트용 시크릿 미등록 · 활성화 불가':' · Test-server secret not registered · cannot enable',
   '테스트 서버':'Test server',
   '테스트 서버: ':'Test server: ',
