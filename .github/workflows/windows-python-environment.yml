@@ -101,7 +101,7 @@ jobs:
           $text = [IO.File]::ReadAllText($stdout)
           [Console]::Write($text)
           [Console]::Error.Write([IO.File]::ReadAllText($stderr))
-          $rows = @($text -split '\r?\n' | Where-Object { $_.StartsWith('# {') } | ForEach-Object { $_.Substring(2) | ConvertFrom-Json })
+          $rows = @($text -split '\r?\n' | Where-Object { $_.StartsWith('# {') -or $_.StartsWith('ℹ {') } | ForEach-Object { $_.Substring(2) | ConvertFrom-Json })
           $first = @($rows | Where-Object { $_.단계 -eq '직접 실행: 한글·따옴표 인자' -and $_.사건 -eq '시작' })
           $sourceRows = @($rows | Where-Object { $_.진단 -eq '최초 원문 PowerShell 단계 계측' -and $_.sourceSha256 })
           if ($first.Count -ne 1 -or $first[0].frameBytes -ne 608 -or $first[0].sourceBytes -ne 217) { throw '원시험 217/608 고정 확인 실패' }
