@@ -1280,8 +1280,8 @@
     },
     {
       "path": "test/execution-failure.test.mjs",
-      "size": 9433,
-      "sha256": "8df8b477dcf30aff5cf3e84c77211bedf53669f011e8f75f6b4ea28cd07de26b"
+      "size": 9461,
+      "sha256": "efc85c7326e52cbd8278abc353f166be572370fc992e41edf7b0b9b7f76d96d0"
     },
     {
       "path": "test/file-contracts.test.mjs",
@@ -1667,6 +1667,11 @@
       "path": "test/ssh-connection-lifecycle.test.mjs",
       "size": 11443,
       "sha256": "d72d09bb051ce440ff197e7c6597e53f33f2d5e5555fda98a3e4427e2a9dc529"
+    },
+    {
+      "path": "test/ssh-recovery-red.sh",
+      "size": 1571,
+      "sha256": "4f649c4718822d679f0676fccb82e90a53b053fba3df8a5722b303853104fc29"
     },
     {
       "path": "test/ssh-roundtrip.mjs",

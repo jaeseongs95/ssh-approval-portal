@@ -109,7 +109,7 @@ test('tagged execution causes survive the queue result, terminal persistence, au
     assert.deepEqual(f.terminal.failure, expected);
     const reply = jobResult(f.job);
     assert.deepEqual(reply.structuredContent.result.structuredContent.failure, expected);
-    assert.deepEqual(JSON.parse(reply.content[0].text), reply.structuredContent);
+    assert.deepEqual(JSON.parse(reply.content[0].text), JSON.parse(JSON.stringify(reply.structuredContent)));
     noLeak([f.job, f.events, f.persisted, reply]);
   });
 });

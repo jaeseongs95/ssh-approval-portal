@@ -78,6 +78,16 @@ jobs:
       - run: npm ci --ignore-scripts
       - name: Node regression
         run: node --test --test-skip-pattern='^CLI-LOOPBACK exact helper executes inspection/status over pinned SSH and preserves authentication bytes$' test/*.test.mjs
+      - name: Pre-fix SSH recovery regressions must fail
+        run: bash test/ssh-recovery-red.sh
+      - name: Preserve pre-fix regression evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ssh-recovery-red
+          path: ${{ runner.temp }}/ssh-recovery-red-*.log
+          if-no-files-found: warn
+          retention-days: 7
       - name: Isolated CLI loopback fixture
         shell: bash
         run: |
