@@ -14,13 +14,14 @@ const DOWNLOAD_AUTHORITY = Symbol('server-download-policy');
 /** Approval policy and in-process execution claims; transports and durable audit are injected. */
 export class ApprovalQueue {
   /**
-   * @param {{classify:(command:string)=>{class:string}, executeOperation:(operation:Object,id:string)=>Promise<OperationOutcome>, profile:string, target:string, requestCapacity?:number, audit?:(event:Object)=>void, now?:()=>number, idFactory?:()=>string, onTerminal?:(job:Object)=>void, externalBusy?:()=>boolean}} ports
+   * @param {{classify:(command:string)=>{class:string}, executeOperation:(operation:Object,id:string)=>Promise<OperationOutcome>, profile:string, target:string, requestCapacity?:number, audit?:(event:Object)=>void, now?:()=>number, idFactory?:()=>string, onTerminal?:(job:Object)=>void, externalBusy?:()=>boolean, failureOutcome?:(text:string,operation:Object)=>OperationOutcome}} ports
    * audit is synchronous and may throw: a failed admission record never authorizes execution.
    */
-  constructor({ classify, executeOperation, profile, target, requestCapacity = 100, audit = () => {}, now = () => Date.now(), idFactory = () => randomBytes(24).toString('hex'), onTerminal = () => {}, externalBusy = () => false, identity, claimExecution = () => () => {} }) {
+  constructor({ classify, executeOperation, profile, target, requestCapacity = 100, audit = () => {}, now = () => Date.now(), idFactory = () => randomBytes(24).toString('hex'), onTerminal = () => {}, externalBusy = () => false, identity, claimExecution = () => () => {}, failureOutcome = text => ({failed: true, texts: [text]}) }) {
     if (typeof profile !== 'string' || !profile) throw Error('Approval profile is required');
     if (!Number.isSafeInteger(requestCapacity) || requestCapacity < 100 || requestCapacity > 1000) throw Error('Invalid request capacity');
-    Object.assign(this, { classify, executeOperation, profile, target, requestCapacity, audit, now, idFactory, onTerminal, externalBusy });
+    if (typeof failureOutcome !== 'function') throw Error('Failure outcome port required');
+    Object.assign(this, { classify, executeOperation, profile, target, requestCapacity, audit, now, idFactory, onTerminal, externalBusy, failureOutcome });
     this.identity = identity && Object.freeze({ ...identity }); this.claimExecution = claimExecution;
     this.jobs = new Map(); this.active = null; this.maintenance = false;
     this.requestWaiters = new Set();
@@ -117,7 +118,7 @@ export class ApprovalQueue {
     job.state = 'failed'; job.finishedAt = this.now();
     const details = dispatchFailureDetails(error);
     job.decision = { ...job.decision, dispatchFailure: 'not_dispatched', ...details };
-    job.result = { failed: true, texts: ['Automatic execution rejected before dispatch; operation was not executed.'] };
+    job.result = this.failureOutcome('Automatic execution rejected before dispatch; operation was not executed.', job.operation);
     try { job.persist?.(this.public(job)); this.audit({ action: 'automatic-dispatch-rejected', id, reasonCode: 'not_dispatched', ...details }); }
     finally { try { this.onTerminal(job); } finally { this.notifyRequest(job); } }
     return true;
@@ -158,7 +159,7 @@ export class ApprovalQueue {
         job.result = await this.executeOperation(job.operation, job.id);
         job.state = job.result.failed ? 'failed' : 'completed';
       } catch {
-        job.result = { failed: true, texts: ['Operation failed; check the protected server diagnostics.'] };
+        job.result = this.failureOutcome('Operation failed; check the protected server diagnostics.', job.operation);
         job.state = job.operation.sourceContract ? 'unknown' : 'failed';
       } finally {
         job.finishedAt = this.now();

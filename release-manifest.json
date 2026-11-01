@@ -30,8 +30,8 @@
     },
     {
       "path": "app.mjs",
-      "size": 30842,
-      "sha256": "1de668c96d99ed0bd8884ad1f917d88b55531b4a3e79336ad3734ac0b9e69d54"
+      "size": 31002,
+      "sha256": "4d23c9a260a7c301332fa1cc728858dcd0b8bc5567639a1b2c784a21cf2fc537"
     },
     {
       "path": "bridge.mjs",
@@ -355,13 +355,13 @@
     },
     {
       "path": "scripts/deployment_entry.py",
-      "size": 7587,
-      "sha256": "b34fa31c53418cc9d24be6750e41a4e666a99fe32017c76940ea6e154bc410a2"
+      "size": 8460,
+      "sha256": "28f67e0994bbc141d31bdb60254662b704bcc7ac54947f48742f4f6b35706fab"
     },
     {
       "path": "scripts/deployment_migration.py",
-      "size": 31790,
-      "sha256": "066192f8987a4589f581f022f9b9b6998197eda9d85f9557f7adddc194584664"
+      "size": 33053,
+      "sha256": "3302ec9d0df10ad7c1f8fb176f014a875510b4beb1506761d95d50f3236eb8ab"
     },
     {
       "path": "scripts/docker-secrets.py",
@@ -730,8 +730,8 @@
     },
     {
       "path": "src/adapters/storage/command-output.mjs",
-      "size": 12430,
-      "sha256": "5562f3581172c7a2cf448da31169c1e1a9f6faeca0607ed4bb2c60a2022a2f05"
+      "size": 12625,
+      "sha256": "f9d8934c50ea800402954e5c0e9614b07cc989d16e3414ecc8da224bb8e17169"
     },
     {
       "path": "src/adapters/storage/command-state.mjs",
@@ -855,8 +855,8 @@
     },
     {
       "path": "src/domain/approval-queue.mjs",
-      "size": 14464,
-      "sha256": "93aaebb8467fbd530a732ed5d4e23191b471287f59de0a6b35b329387d802d74"
+      "size": 14714,
+      "sha256": "54a24c485585521df90e309b76a1596fba3ce9c19d069d5ac1fd829059a768aa"
     },
     {
       "path": "src/domain/automation-risk-question.json",
@@ -1165,8 +1165,8 @@
     },
     {
       "path": "test/command-output.test.mjs",
-      "size": 17152,
-      "sha256": "e315f86c05b09eb7ca767fa77da8788faf1ec30ae21d786cf3669e07fd9710eb"
+      "size": 19057,
+      "sha256": "ad1e9d4fddc2f509292367f6411125c798980c21ce22c2f29d8eed6ee3fc6098"
     },
     {
       "path": "test/command-policy-review.test.mjs",
@@ -1530,8 +1530,8 @@
     },
     {
       "path": "test/preservation-integration.test.mjs",
-      "size": 7877,
-      "sha256": "c9203b2f5c3244abfed02194059a5a56b1fbd61cd5e6e52a38e418545dcfc4be"
+      "size": 7821,
+      "sha256": "7a78992046370d2bc94a9310d7d4992c1a60bbdd85e12630ddad72a6d0e5c67b"
     },
     {
       "path": "test/preservation-verification.test.mjs",
@@ -1655,8 +1655,8 @@
     },
     {
       "path": "test/source-automation.test.mjs",
-      "size": 30456,
-      "sha256": "5c00b7f40c8f199faffff2f8ab037889e053c3dd169144361ed6ac81d6c2608a"
+      "size": 31609,
+      "sha256": "769b391baf1fe9e01254f63949f00624a8b4768aba31a54e2b03a67349e546d0"
     },
     {
       "path": "test/source-input-refusals.test.mjs",
@@ -1760,8 +1760,8 @@
     },
     {
       "path": "test/test_deployment_migration.py",
-      "size": 15213,
-      "sha256": "d2122d64ece278dddbab7ed5bc13e3bdf81ed657c2b7421e9eced6f20250f4bb"
+      "size": 16151,
+      "sha256": "207ae1e5e1c7045fe6a7981c54df9c7de80e584deefb5cfa36a47c59c2675a4e"
     },
     {
       "path": "test/test_env_editor_lock.py",

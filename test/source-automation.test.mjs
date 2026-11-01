@@ -1,4 +1,5 @@
 import test from 'node:test';
+import {DatabaseSync} from 'node:sqlite';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -50,7 +51,7 @@ async function fixture(t, options = {}) {
   const run = async (changes = {}) => { const result = await app.targets.commands.runSource({ source, cwd: '/tmp', context, ...changes }); await app.targets.drain(); return app.queue.get(result.job.id); };
   t.after(async () => { await app.close(); await rm(root, { recursive: true, force: true }); });
   return { root, get app() { return app; }, get origin() { return origin; }, inputs, executions, events, profiles, api, policy, run,
-    async restart() { await app.close(); app = await make(); await listen(); } };
+    async restart(inspect) { await app.close(); if (inspect) await inspect(root); app = await make(); await listen(); } };
 }
 
 test('SOURCE-PRODUCT-01 exact source reaches the real Jev HTTP adapter via MCP, then the identical bound executor, without public or durable body copies', async t => {
@@ -166,7 +167,14 @@ test('SOURCE-PRODUCT-08 transport ambiguity is unknown and stable request key ne
   const f = await fixture(t, { executePythonSource: async () => { calls++; throw Error('PRIVATE_BODY_SOURCE_32 transport ambiguous'); } }); await f.policy({});
   const args = { requestKey: 'source-unknown-key-0001' }, job = await f.run(args);
   assert.equal(job.state, 'unknown'); assert.doesNotMatch(JSON.stringify(job), /PRIVATE_BODY_SOURCE_32/);
-  assert.equal((await f.run(args)).id, job.id); await f.restart(); assert.equal((await f.run(args)).state, 'unknown'); assert.equal(calls, 1);
+  assert.deepEqual(job.result, {failed:true,texts:[],output:{version:1,captureSource:'redacted-adapter-outcome',sshCompleteness:'unknown',state:'unavailable'}});
+  assert.equal((await f.run(args)).id, job.id);
+  await f.restart(root => {
+    const db=new DatabaseSync(join(root,'command-automation.sqlite'),{readOnly:true});
+    try {const saved=JSON.parse(db.prepare('SELECT body FROM requests WHERE id=?').get(job.id).body);assert.deepEqual(saved.result,job.result);assert.equal(saved.state,'unknown');}
+    finally {db.close();}
+  });
+  const replay=await f.run(args);assert.equal(replay.id,job.id);assert.equal(replay.state,'unknown');assert.deepEqual(replay.result,job.result);assert.equal(calls,1);
 });
 
 test('SOURCE-PRODUCT-09 reject credentials/arguments/cwd before admission and keep bounded source evidence complete', async t => {
@@ -347,5 +355,7 @@ test('test server source busy rejection releases the private plan without owner 
  const args={requestKey:'test-source-busy-key-0001',context:''};const job=await f.run(args);
  assert.equal(job.state,'failed');assert.equal(job.decision.dispatchFailure,'not_dispatched');assert.equal(job.decision.dispatchFailureReason,'busy');assert.equal(job.decision.dispatchFailureStage,'busy_check');assert.equal(f.executions.length,0);
  assert.throws(()=>f.app.targets.commands.source(job.id));q.externalBusy=busy;
- assert.equal((await f.run(args)).id,job.id);assert.equal(f.executions.length,0);
+ assert.deepEqual(job.result,{failed:true,texts:[],output:{version:1,captureSource:'redacted-adapter-outcome',sshCompleteness:'unknown',state:'unavailable'}});
+ await f.restart(root=>{const db=new DatabaseSync(join(root,'command-automation.sqlite'),{readOnly:true});try{assert.deepEqual(JSON.parse(db.prepare('SELECT body FROM requests WHERE id=?').get(job.id).body).result,job.result);}finally{db.close();}});
+ const replay=await f.run(args);assert.equal(replay.id,job.id);assert.equal(replay.state,'failed');assert.deepEqual(replay.result,job.result);assert.equal(f.executions.length,0);
 });

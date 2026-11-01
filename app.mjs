@@ -32,7 +32,7 @@ import { capturePreservationSnapshot, comparePreservationSnapshots, BASELINE_PRE
 import { createCommandAutomation } from './src/application/command-automation.mjs';
 import { AUTOMATION_QUESTION, AUTOMATION_QUESTION_VERSION, COMMAND_SET_QUESTION, deniedCommand } from './src/domain/command-policy.mjs';
 import { createCommandPolicyReview } from './src/application/command-policy-review.mjs';
-import { CommandOutputs } from './src/adapters/storage/command-output.mjs';
+import { CommandOutputs, unavailableOutputOutcome } from './src/adapters/storage/command-output.mjs';
 import { hash } from './src/domain/validation.mjs';
 import { createModelCatalog } from './src/application/model-catalog.mjs';
 import { createAutomationMetrics } from './src/application/automation-metrics.mjs';
@@ -162,6 +162,7 @@ export async function createApplication({ registry, classify, executeCommand, ex
       }, beforeDispatch)); } catch (error) { outputs.abandon(reservation); throw error; }
     };
     const queue = new ApprovalQueue({ classify: targetClassify, target, profile: writeProfile, requestCapacity: settings.requestCapacity, audit: targetAudit, identity, claimExecution,
+      failureOutcome: (text, operation) => operation.kind === 'command' ? unavailableOutputOutcome() : {failed: true, texts: [text]},
       externalBusy: () => (commands?.reading() ?? false) || cliProbes.size > 0 || claimExecution.busy(),
       executeOperation: async (operation, id) => {
         if (operation.agentCliContract) requireTargetCapability(definition, 'agentCli');

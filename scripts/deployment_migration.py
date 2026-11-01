@@ -5,7 +5,7 @@ statements occur in v1.7.0, v1.6.2-v1.6.6 and the earlier partial stores describ
 by the deployment design; a release label alone never authorizes an input.
 Source connections are read-only, never immutable (which would ignore writers).
 """
-from contextlib import closing
+from contextlib import closing, contextmanager
 import copy
 import hashlib
 import json
@@ -16,6 +16,7 @@ import shutil
 import sqlite3
 import stat
 import subprocess
+import threading
 import time
 
 CONTRACT = "explicit-state-migration-v1"
@@ -102,11 +103,42 @@ def _file(path, uid):
     return {"size": before.st_size, "sha256": digest.hexdigest(), "identity": _identity(before)}
 
 
+@contextmanager
+def _source_read_identity(path):
+    owner = path.lstat()
+    switch = os.name != "nt" and os.geteuid() == 0 and owner.st_uid != 0
+    if not switch:
+        yield
+        return
+    if threading.active_count() != 1:
+        raise MigrationError("Source identity requires a single-threaded offline executor")
+    gid, groups = os.getegid(), os.getgroups()
+    try:
+        os.setgroups([])
+        os.setegid(owner.st_gid)
+        os.seteuid(owner.st_uid)
+        yield
+    finally:
+        os.seteuid(0)
+        os.setegid(gid)
+        os.setgroups(groups)
+
+
 def _connect(path):
-    connection = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=0)
-    connection.row_factory = sqlite3.Row
-    connection.execute("PRAGMA query_only=ON")
-    return connection
+    # SQLite's Unix VFS can fchown even a read-only zero-header journal when
+    # effective uid is root. Acquire the real SHARED read transaction as its
+    # non-root owner first; keep that transaction pinned for root's backup.
+    with _source_read_identity(path):
+        connection = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=0)
+        try:
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA query_only=ON")
+            connection.execute("BEGIN")
+            connection.execute("SELECT count(*) FROM sqlite_master").fetchone()
+            return connection
+        except BaseException:
+            connection.close()
+            raise
 
 
 def _schema(db):
@@ -201,7 +233,6 @@ def _validate_rows(name, tables):
 def _read_db(path, name):
     try:
         with closing(_connect(path)) as db:
-            db.execute("BEGIN")
             if [tuple(row) for row in db.execute("PRAGMA integrity_check")] != [("ok",)]:
                 raise MigrationError("Database integrity check failed")
             if db.execute("PRAGMA journal_mode").fetchone()[0].lower() != "delete":
@@ -250,6 +281,8 @@ def _snapshot(root, uid=None):
                 header = stream.read(28)
             if header and (len(header) < 28 or any(header)):
                 raise MigrationError("Hot or unknown rollback journal is unsupported")
+            if os.name != "nt" and (root / name[:-8]).lstat().st_uid == 0:
+                raise MigrationError("A non-hot journal requires non-root service-owned source state")
     databases = {name: _read_db(root / name, name) for name in SCHEMAS if name in files}
     _validate_payloads(root, databases, files)
     # Recheck the entire bundle, including sidecars and transfer staging bytes.

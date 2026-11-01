@@ -10,6 +10,8 @@ const TTL = 3_600_000, MAX = 16 * 1024 * 1024, BUDGET = 128 * 1024 * 1024;
 const validId = value => typeof value === 'string' && /^[a-f0-9]{48}$/.test(value);
 const digest = value => createHash('sha256').update(value).digest('hex');
 const capture = { version: 1, captureSource: 'redacted-adapter-outcome', sshCompleteness: 'unknown' };
+// A failed executor gives no capturable outcome or proof of non-execution.
+export const unavailableOutputOutcome = () => ({failed: true, texts: [], output: {...capture, state: 'unavailable'}});
 const safe = st => st.isFile() && !st.isSymbolicLink() && st.nlink === 1 && (process.platform === 'win32' || (!(st.mode & 0o077) && st.uid === process.getuid()));
 const readExactly = (fd, size, position) => {
   const buffer = Buffer.alloc(size); let n = 0;

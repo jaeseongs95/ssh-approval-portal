@@ -194,7 +194,21 @@ class DeploymentMigrationTests(unittest.TestCase):
         sidecar = Path(str(path) + "-journal")
         sidecar.write_bytes(b"\0" * 28 + b"old non-hot page data")
         sidecar.chmod(0o600)
+        if os.geteuid() == 0:
+            # Real deployed state belongs to a service uid. A root SQLite
+            # reader must never fchown its zero-header rollback journal.
+            with self.assertRaisesRegex(migration.MigrationError, "non-root service-owned"):
+                migration.inspect_state(self.source)
+            os.chown(self.base, 700, 700)
+            for current in [self.source, *self.source.rglob("*")]:
+                os.chown(current, 700, 700)
+        before = migration.inspect_state(self.source)
+        identity = migration._identity(sidecar.lstat())
+        effective_identity = (os.geteuid(), os.getegid(), os.getgroups())
         receipt = self.migrate()
+        self.assertEqual(migration.inspect_state(self.source), before)
+        self.assertEqual(migration._identity(sidecar.lstat()), identity, "root must not change even journal ctime")
+        self.assertEqual((os.geteuid(), os.getegid(), os.getgroups()), effective_identity)
         self.assertTrue(sidecar.exists(), "read-only inspection must not recover/remove a journal")
         self.assertFalse((self.destination / sidecar.name).exists())
         self.assertEqual(receipt["verification"]["newLosses"], 0)

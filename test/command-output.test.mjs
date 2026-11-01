@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, readdirSync, unlinkSync, linkSync, chmodSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, readdirSync, unlinkSync, linkSync, chmodSync, mkdirSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import {execFileSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
 import { join, resolve, sep } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -184,20 +186,39 @@ test('AIK output observation requires original binding and revalidates after del
   assert.deepEqual(events, ['get-request-status', 'read-command-output']);
 });
 
-test('legacy journal conversion preserves snapshot; expiry and restart retain durable replay protection', async t => {
-  const root = directory(t), realNow = Date.now; let clock = realNow(), executions = 0, app;
+test('legacy journal requires explicit migration; copied snapshot TTL and restart preserve replay protection', async t => {
+  const parent = directory(t), sourceRoot = join(parent, 'source'), destinationRoot = join(parent, 'destination');
+  mkdirSync(sourceRoot, {mode: 0o700});
+  const realNow = Date.now; let clock = realNow(), executions = 0, app, activeRoot = sourceRoot;
   Date.now = () => clock;
-  const id = 'd'.repeat(48), original = { failed: false, texts: ['LEGACY_SENTINEL', ''], data: { preserved: true } };
-  const state = createCommandState(root);
-  state.insert({ id, kind: 'command', operation: { kind: 'command', command: 'sudo id' }, command: 'sudo id', profile: 'aws-local', commandClass: 'privileged', target: 'fixture@127.0.0.1:22', state: 'completed', createdAt: clock, finishedAt: clock, expiresAt: clock + 3600000, result: original }, null, 'legacy'); state.close();
-  const make = () => createApplication({ registry: { getProfile: name => ({ host: '127.0.0.1', port: 22, user: 'fixture', readOnly: name === 'aws-readonly' }), closeAll: async () => {} },
-    classify: () => ({ class: 'privileged' }), executeCommand: async () => { executions++; return { failed: false, texts: ['new-output'] }; }, audit: () => {}, transferRoot: root,
-    env: { BRIDGE_MCP_TOKEN: 'synthetic-mcp', BRIDGE_ADMIN_TOKEN: 'synthetic-owner', BRIDGE_UI_TICKET_KEY: 'a'.repeat(64), BRIDGE_ADMIN_ORIGIN: 'https://owner.test', BRIDGE_COMMAND_AUTOMATION: 'true' }, uiHtml: '<html>fixture</html>' });
+  const id = 'd'.repeat(48), original = {failed: false, texts: ['LEGACY_SENTINEL', ''], data: {preserved: true}};
+  const make = () => createApplication({registry: {getProfile: name => ({host: '127.0.0.1', port: 22, user: 'fixture', readOnly: name === 'aws-readonly'}), closeAll: async () => {}},
+    classify: () => ({class: 'privileged'}), executeCommand: async () => {executions++; return {failed: false, texts: ['new-output']};}, audit: () => {}, transferRoot: activeRoot,
+    env: {BRIDGE_MCP_TOKEN: 'synthetic-mcp', BRIDGE_ADMIN_TOKEN: 'synthetic-owner', BRIDGE_UI_TICKET_KEY: 'a'.repeat(64), BRIDGE_ADMIN_ORIGIN: 'https://owner.test', BRIDGE_COMMAND_AUTOMATION: 'true'}, uiHtml: '<html>fixture</html>'});
   try {
+    app = await make(); const runtime = app.targets.select();
+    const targetId = runtime.id, targetRevision = runtime.revision;
+    await app.close(); app = null;
+    const state = createCommandState(sourceRoot);
+    state.insert({id, kind: 'command', operation: {kind: 'command', command: 'sudo id'}, command: 'sudo id', targetId, targetRevision, profile: 'aws-local', commandClass: 'privileged', target: 'fixture@127.0.0.1:22', state: 'completed', createdAt: clock, finishedAt: clock, expiresAt: clock + 3600000, result: original}, null, 'a'.repeat(64)); state.close();
+    const sourceBefore = readFileSync(join(sourceRoot, 'command-automation.sqlite'));
+    await assert.rejects(make(), /explicit offline migration/);
+    assert.deepEqual(readFileSync(join(sourceRoot, 'command-automation.sqlite')), sourceBefore, 'refused startup never converts the original row');
+    const scripts = fileURLToPath(new URL('../scripts', import.meta.url));
+    const code = 'import json,os,sys;sys.path.insert(0,sys.argv[1]);from deployment_migration import migrate_state;print(json.dumps(migrate_state(sys.argv[2],sys.argv[3],uid=os.getuid(),gid=os.getgid(),now_ms=int(sys.argv[4]))))';
+    const receipt = JSON.parse(execFileSync('python3', ['-c', code, scripts, sourceRoot, destinationRoot, String(clock + 1000)], {encoding: 'utf8', env: {...process.env, SSH_PORTAL_MIGRATION_NODE: realpathSync(process.execPath)}}));
+    assert.equal(receipt.verification.newLosses, 0); assert.equal(receipt.verification.legacyOutputsConverted, 1);
+    assert.deepEqual(readFileSync(join(sourceRoot, 'command-automation.sqlite')), sourceBefore, 'explicit migration changes only the copied generation');
+    activeRoot = destinationRoot;
     app = await make(); const migrated = app.queue.get(id).result;
     assert.deepEqual(migrated.texts, []); assert.equal(migrated.output.state, 'ready'); assert.equal(executions, 0);
+    assert.equal(migrated.output.expiresAt, clock + 3600000, 'migration never restarts retention at migration time');
     await app.close(); app = null;
-    const outputs = new CommandOutputs(root); try { assert.deepEqual(JSON.parse(restore(outputs, migrated.output.id, 'json', 4096, value => assert.equal(value.executionId, id))), original); } finally { outputs.close(); }
+    const outputs = new CommandOutputs(destinationRoot);
+    try {
+      assert.deepEqual(JSON.parse(restore(outputs, migrated.output.id, 'json', 4096, value => assert.equal(value.executionId, id))), original);
+      assert.equal(restore(outputs, migrated.output.id, 'text', 4096, () => {}), original.texts.join('\n') + '\n' + JSON.stringify(original.data, null, 2));
+    } finally {outputs.close();}
     app = await make();
     const key = 'synthetic-output-replay-0001', first = await app.targets.commands.run('sudo id', undefined, key);
     await app.queue.approve(first.job.id); assert.equal(executions, 1);
@@ -207,5 +228,5 @@ test('legacy journal conversion preserves snapshot; expiry and restart retain du
     const replay = await app.targets.commands.run('sudo id', undefined, key);
     assert.equal(replay.job.id, first.job.id); assert.equal(replay.job.state, 'completed'); assert.equal(executions, 1);
     assert.equal(replay.job.result.output.id, output.id);
-  } finally { await app?.close(); Date.now = realNow; }
+  } finally {await app?.close(); Date.now = realNow;}
 });

@@ -13,6 +13,8 @@ EXECUTORS = Path('/usr/local/libexec/ssh-approval-deployments')
 LAUNCHER = Path('/usr/local/libexec/ssh-approval-launcher')
 MODULES = ('deployment.py', 'deployment_migration.py')
 JOBS = Path('/var/lib/ssh-mcp/deployments/jobs')
+ACTIVE = Path('/var/lib/ssh-mcp/deployments/active.json')
+RELEASES = Path('/var/lib/ssh-mcp/app/releases')
 
 
 def require(condition, code):
@@ -173,3 +175,22 @@ def executor_for_plan(plan):
     module = load_executor(path)
     module.validate_plan(plan)
     return module
+
+
+def active_release():
+    value = json.loads(read_file(ACTIVE, 65536))
+    require(isinstance(value, dict) and value.get('schemaVersion') == 1, 'ACTIVE_SCHEMA_INVALID')
+    release = Path(value.get('release', ''))
+    require(release.is_absolute() and release.parent == RELEASES and '..' not in release.parts,
+            'ACTIVE_RELEASE_INVALID')
+    verify_source(release, value.get('manifestSha256'))
+    return release
+
+
+if __name__ == '__main__':
+    require(os.geteuid() == 0 and sys.argv[1:] == ['active-release'], 'FIXED_ACTIVE_RELEASE_COMMAND')
+    try:
+        print(active_release())
+    except (ValueError, OSError, KeyError, TypeError):
+        print('활성 배포 세대를 확인할 수 없습니다.', file=sys.stderr)
+        raise SystemExit(1)
