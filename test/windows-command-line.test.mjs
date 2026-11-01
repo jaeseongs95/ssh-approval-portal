@@ -62,9 +62,10 @@ test('WIN-EOF 표준입력은 실제 파이프 종료만 EOF로 취급하고 준
 });
 
 test('WIN-EOF 실제 0바이트 쓰기는 건너뛰고 뒤따르는 바이트와 파이프 종료를 구분한다', {
-  skip: process.platform !== 'win32' || process.env.GITHUB_ACTIONS !== 'true', timeout: 15000,
+  skip: process.platform !== 'win32' || process.env.GITHUB_ACTIONS !== 'true', timeout: 25000,
 }, async t => {
-  // 준비/컴파일과 실제 읽기를 고정 단계로 분리한다. 프로세스 10초 상한은 유지한다.
+  // 기동 표식 관측은 10초, 최초 SCRIPT_BEGIN부터 기능·정상 종료까지 별도 10초다.
+  // 총 20초 강제 정리와 25초 시험 상한을 두며 제품 실행 시간 한도는 바꾸지 않는다.
   // 제품 준비 뒤에만 쓰기를 시작하고, 데이터 단언 뒤에만 EOF를 허용한다.
   // 성공한 0바이트 읽기를 EOF로 바꾸면 첫 번째 길이 단언에서 실패한다.
   // 단계 파일만 관측에 쓰며 실제 stdout/stderr/종료·부모 설정 단언은 완화하지 않는다.
@@ -99,13 +100,14 @@ public static class StdinFixture {
   const encodedPath = value => Buffer.from(value, 'utf8').toString('base64');
   const script = `$entryAt=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds();$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';$phasePath=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encodedPath(phasePath)}'));$watch=[Diagnostics.Stopwatch]::StartNew();$self=[Diagnostics.Process]::GetCurrentProcess();function Write-FixturePhase([string]$value){$self.Refresh();[IO.File]::AppendAllText($phasePath,$value+'|'+[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()+'|'+$watch.ElapsedMilliseconds+'|'+[int]$self.TotalProcessorTime.TotalMilliseconds+[Environment]::NewLine,[Text.UTF8Encoding]::new($false))};[IO.File]::AppendAllText($phasePath,'SCRIPT_BEGIN|'+$entryAt+[Environment]::NewLine,[Text.UTF8Encoding]::new($false));Write-FixturePhase 'ENTRY';Write-FixturePhase 'FIXTURE_COMPILE_BEGIN';Add-Type -TypeDefinition '${fixture}';Write-FixturePhase 'FIXTURE_COMPILE_END';[StdinFixture]::Setup([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encodedPath(writerPath)}')));Write-FixturePhase 'PIPE_SETUP';try{$ProgressPreference='Continue';${reader}if($ProgressPreference -cne 'Continue'){throw 'PROGRESS_SCOPE_CHANGED'};Write-FixturePhase 'PREPARED';$b=[byte[]]::new(4);Write-FixturePhase 'READ_DATA_BEGIN';[StdinFixture]::StartWriter();$n=[SshApproval.Stdin]::Read($b,0,4);Write-FixturePhase ('READ_DATA_END_'+$n);if($n -ne 3 -or $b[0] -ne 237 -or $b[1] -ne 149 -or $b[2] -ne 156){throw 'ZERO_WRITE_WAS_EOF'};Write-FixturePhase 'BYTES_VERIFIED';[StdinFixture]::AllowEof();Write-FixturePhase 'READ_EOF_BEGIN';$e=[SshApproval.Stdin]::Read($b,3,1);Write-FixturePhase ('READ_EOF_END_'+$e);if($e -ne 0){throw 'PIPE_END_NOT_EOF'};Write-FixturePhase 'EOF_VERIFIED'}finally{[StdinFixture]::Stop()};Write-FixturePhase 'DONE';[Console]::Write('ok')`;
   const started = Date.now();
-  let result, failure, spawnedAt;
+  const startupLimitMs = 10000, functionLimitMs = 10000, totalLimitMs = startupLimitMs + functionLimitMs;
+  let result, failure, spawnedAt, completedAt;
   const events = [];
   const event = (단계, details = {}) => {
     const at = Date.now();
     events.push({ 단계, 세계시밀리초: at, 경과밀리초: at - started, ...details });
   };
-  const pending = promisify(execFile)('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { windowsHide: true, timeout: 10000, encoding: 'utf8' });
+  const pending = promisify(execFile)('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { windowsHide: true, timeout: totalLimitMs, encoding: 'utf8' });
   const child = pending.child;
   child?.once('spawn', () => { spawnedAt = Date.now(); event('프로세스 생성'); });
   child?.once('exit', (code, signal) => event('프로세스 exit', { code, signal }));
@@ -118,22 +120,74 @@ public static class StdinFixture {
     stream?.once('error', error => event(name + ' 오류', { code: error.code }));
     if (name !== '표준입력') stream?.once('data', chunk => event(name + ' 최초 수신', { bytes: Buffer.byteLength(chunk) }));
   }
+  let scriptBeginAt = null, scriptBeginObservedAt = null, functionDeadline = null, budgetFailure = null;
+  let startupTimer, functionTimer, pollTimer, polling = true, pollPending;
+  const expire = stage => {
+    if (budgetFailure) return;
+    budgetFailure = { 단계: stage, 세계시밀리초: Date.now() };
+    polling = false;
+    clearTimeout(startupTimer); clearTimeout(functionTimer); clearTimeout(pollTimer);
+    event('시험 시간 한도', { stage });
+    // 한도 실패를 기록한 뒤에만 정리한다. 정상 종료나 자연스러운 stdio 닫힘으로 세지 않는다.
+    child?.stdout?.destroy(); child?.stderr?.destroy(); child?.kill('SIGTERM');
+  };
+  startupTimer = setTimeout(() => expire('기동'), Math.max(0, startupLimitMs - (Date.now() - started)));
+  const observeBegin = async () => {
+    try {
+      const text = await readFile(phasePath, 'utf8');
+      if (!polling) return;
+      const match = /^SCRIPT_BEGIN\|(\d+)\r?$/m.exec(text);
+      if (match) {
+        const at = Number(match[1]), observed = Date.now();
+        if (!Number.isSafeInteger(at) || at < started || at > observed) { expire('기동 시각 오류'); return; }
+        if (at > started + startupLimitMs) { expire('기동'); return; }
+        // 최초 표식 하나로만 한도를 고정한다. 폴링 지연만큼 기능 시간을 더 주지 않는다.
+        scriptBeginAt = at; scriptBeginObservedAt = observed; functionDeadline = at + functionLimitMs;
+        clearTimeout(startupTimer);
+        event('SCRIPT_BEGIN 관측', { scriptBeginAt: at, functionDeadline });
+        functionTimer = setTimeout(() => expire('기능·정상 종료'), Math.max(0, functionDeadline - observed));
+        return;
+      }
+    } catch (error) {
+      if (error.code !== 'ENOENT') event('기동 표식 읽기 오류', { code: error.code });
+    }
+    if (polling) pollTimer = setTimeout(() => { pollPending = observeBegin(); }, 100);
+  };
+  pollPending = observeBegin();
   try { result = await pending; } catch (error) { failure = error; }
-  const completedAt = Date.now();
+  finally {
+    completedAt = Date.now();
+    polling = false;
+    clearTimeout(startupTimer); clearTimeout(functionTimer); clearTimeout(pollTimer);
+    await pollPending;
+  }
   const phases = async (path, pattern) => readFile(path, 'utf8').then(text => text.split(/\r?\n/).filter(line => pattern.test(line)).slice(0, 64), error => ['파일 읽기 오류: ' + error.code]);
   const [psPhases, writerPhases] = await Promise.all([
     phases(phasePath, /^(?:SCRIPT_BEGIN\|\d+|(?:ENTRY|FIXTURE_COMPILE_BEGIN|FIXTURE_COMPILE_END|PIPE_SETUP|MODULE_BEGIN|MODULE_END|READER_COMPILE_BEGIN|READER_COMPILE_END|PREPARED|READ_DATA_BEGIN|READ_DATA_END_\d+|BYTES_VERIFIED|READ_EOF_BEGIN|READ_EOF_END_\d+|EOF_VERIFIED|DONE)\|\d+\|\d+\|\d+)$/),
     phases(writerPath, /^(?:WRITER_STARTED|ZERO_WRITE_BEGIN|ZERO_WRITE_END|DATA_WRITE_BEGIN|DATA_WRITE_END|EOF_ALLOWED|EOF_WAIT_TIMEOUT|WRITER_NATIVE_ERROR_\d+|WRITER_CLOSE_ERROR_\d+|WRITER_FAILED|WRITER_CLOSED)\|\d+$/),
   ]);
   const phaseTime = name => Number(psPhases.find(line => line.startsWith(name + '|'))?.split('|')[1]) || null;
+  // 빠른 정상 종료가 다음 폴링보다 앞서면 저장된 첫 표식으로 같은 한도를 대조한다.
+  // 파일 회수에 걸린 시간은 프로세스 정상 종료 시간에 더하지 않는다.
+  if (!budgetFailure && !failure && scriptBeginAt === null) {
+    const at = phaseTime('SCRIPT_BEGIN');
+    if (!Number.isSafeInteger(at) || at < started || at > completedAt) budgetFailure = { 단계: '기동 시각 오류', 세계시밀리초: completedAt };
+    else if (at > started + startupLimitMs) budgetFailure = { 단계: '기동', 세계시밀리초: completedAt };
+    else { scriptBeginAt = at; scriptBeginObservedAt = Date.now(); functionDeadline = at + functionLimitMs; }
+  }
+  if (!budgetFailure && functionDeadline !== null && completedAt > functionDeadline) budgetFailure = { 단계: '기능·정상 종료', 세계시밀리초: completedAt };
   t.diagnostic(JSON.stringify({ 진단: '0바이트쓰기 준비와 실제 읽기 경계', 시작시각: new Date(started).toISOString(),
     프로세스시작밀리초: spawnedAt === undefined ? null : spawnedAt - started, 경과밀리초: completedAt - started,
     exitCode: failure ? failure.code : 0, signal: failure?.signal ?? null, killed: failure?.killed ?? false,
     stdout: result?.stdout ?? failure?.stdout ?? '', stderr: result?.stderr ?? failure?.stderr ?? '',
     시각기준: '1970-01-01 세계시부터의 밀리초', 시각상관: { nodeStart: started, spawn: spawnedAt ?? null, callback: completedAt,
       scriptBegin: phaseTime('SCRIPT_BEGIN'), entry: phaseTime('ENTRY'), done: phaseTime('DONE') },
+    시간한도: { 기동밀리초: startupLimitMs, 기능밀리초: functionLimitMs, 총밀리초: totalLimitMs,
+      scriptBeginAt, scriptBeginObservedAt, functionDeadline, 실패: budgetFailure },
     프로세스사건: events, 준비와읽기: psPhases, 쓰기: writerPhases }));
+  if (budgetFailure) throw Error('0바이트쓰기 ' + budgetFailure.단계 + ' 시간초과');
   if (failure) throw Object.assign(Error('0바이트쓰기 프로세스 실패: ' + failure.code + '/' + failure.signal), { code: failure.code, signal: failure.signal, killed: failure.killed });
+  assert.ok(scriptBeginAt !== null, '기동 표식이 기능 한도를 시작하지 못함');
   assert.equal(result.stdout, 'ok');
   assert.equal(result.stderr, '');
 });

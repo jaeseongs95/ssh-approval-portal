@@ -84,6 +84,7 @@ if(fixture.provider==='claude'){
  $testArchive='{"provider":"codex","version":"1.2.3"}'
  function Download($url,$destination,$deadline) {
      [IO.File]::WriteAllText($destination,$testArchive,$utf8)
+     $script:downloadOwner=(Get-Acl -LiteralPath $destination).GetOwner([Security.Principal.SecurityIdentifier]).Value
      if($script:lockDownload){$script:downloadHandle=[IO.File]::Open($destination,'Open','Read','None')}
  }
  function Integrity { return 'sha512-'+[Convert]::ToBase64String([Security.Cryptography.SHA512]::Create().ComputeHash($utf8.GetBytes($testArchive))) }
@@ -180,6 +181,10 @@ if(fixture.provider==='claude'){
  }
  function AssertWorkClean($operation,$name) {
      $entries=@(Get-ChildItem -LiteralPath (Join-Path $root ('operations/'+$operation)) -Force)
+     if($entries.Count -ne 1 -or $entries[0].Name -cne 'receipt.json'){
+         $observed=@($entries | ForEach-Object {@{name=$_.Name;directory=$_.PSIsContainer;attributes=[int]$_.Attributes;owner=(Get-Acl -LiteralPath $_.FullName).GetOwner([Security.Principal.SecurityIdentifier]).Value}})
+         [Console]::Error.WriteLine('CLI_CLEANUP_REMAINING='+(Json @{case=$name;entries=$observed;createdDownloadOwner=$script:downloadOwner;accountOwner=$accountSid;cleanupFailures=(Status $root 'codex' $operation).cleanupFailures}))
+     }
      Assert ($entries.Count -eq 1 -and $entries[0].Name -ceq 'receipt.json') ($name+'-only-receipt-remains')
  }
  $testArchive='{"provider":"codex","version":"1.2.5"}'
@@ -188,6 +193,32 @@ if(fixture.provider==='claude'){
  Assert ($rejected -and (Inspect $root 'codex').version -eq '1.2.4') 'integrity-before-activation'
  AssertFailurePreserved ('f'*48) 'integrity'
  AssertWorkClean ('f'*48) 'integrity'
+ $fixtureStage='failure-cleanup-owner-boundary'
+ $ownerWork=Join-Path $testRoot 'cleanup-owner';PrivateDirectory $ownerWork
+ AtomicJson (Join-Path $ownerWork 'receipt.json') @{state='failed';fixture='preserved'}
+ $ownerReceiptHash=(Get-FileHash -LiteralPath (Join-Path $ownerWork 'receipt.json') -Algorithm SHA256).Hash
+ $defaultPayload=Join-Path $ownerWork 'clr-default-owner.txt'
+ [IO.File]::WriteAllText($defaultPayload,'default-token-owner',$utf8)
+ $defaultOwner=(Get-Acl -LiteralPath $defaultPayload).GetOwner([Security.Principal.SecurityIdentifier]).Value
+ Assert ($defaultOwner -ceq $identity.Owner.Value) 'payload-observed-default-token-owner'
+ Assert ((CleanupWork $ownerWork) -eq 0 -and -not [IO.File]::Exists($defaultPayload)) 'private-default-owner-payload-reclaimed'
+ Assert ((Get-FileHash -LiteralPath (Join-Path $ownerWork 'receipt.json') -Algorithm SHA256).Hash -ceq $ownerReceiptHash) 'owner-cleanup-receipt-preserved'
+ # Broader read access remains forbidden even for a trusted default owner.
+ $sharedPayload=Join-Path $ownerWork 'shared-payload.txt'
+ [IO.File]::WriteAllText($sharedPayload,'must-remain',$utf8)
+ $sharedAcl=Get-Acl -LiteralPath $sharedPayload
+ $sharedAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new('S-1-1-0'),'Read','Allow'))
+ Set-Acl -LiteralPath $sharedPayload -AclObject $sharedAcl
+ Assert ((CleanupWork $ownerWork) -gt 0 -and [IO.File]::Exists($sharedPayload)) 'shared-acl-payload-refused'
+ $outsideRejected=$false
+ try{$null=RemovePrivateEntry $unrelatedPayload $ownerWork $true}catch{$outsideRejected=$_.Exception.ToString() -match 'UNSAFE_CLEANUP'}
+ Assert ($outsideRejected -and [IO.File]::ReadAllText($unrelatedPayload) -ceq 'unrelated-work-preserved') 'cleanup-outside-own-boundary-refused'
+ if($identity.Owner.Value -cne $accountSid){
+     # A trusted Administrators owner is allowed only below the container;
+     # it must not make an account-unowned operation root eligible for cleanup.
+     $rootAcl=Get-Acl -LiteralPath $ownerWork;$rootAcl.SetOwner([Security.Principal.SecurityIdentifier]::new($identity.Owner.Value));Set-Acl -LiteralPath $ownerWork -AclObject $rootAcl
+     Assert ((CleanupWork $ownerWork) -gt 0 -and [IO.File]::Exists($sharedPayload)) 'cleanup-unowned-root-refused'
+ }
  foreach($mode in @('npm','timeout')) {
      $fixtureStage='failure-cleanup-'+$mode
      $failureOperation=$(if($mode -eq 'npm'){'5'*48}else{'6'*48})

@@ -19,13 +19,13 @@ function HashBytes([byte[]]$bytes, [string]$algorithm = 'SHA256') {
     try { ([BitConverter]::ToString($hash.ComputeHash($bytes))).Replace('-', '').ToLowerInvariant() } finally { $hash.Dispose() }
 }
 function Digest($value) { HashBytes ($utf8.GetBytes((Json $value) + "`n")) }
-function Trusted([string]$path, [bool]$private = $false) {
+function Trusted([string]$path, [bool]$private = $false, [bool]$accountOwner = $true) {
     $item = Get-Item -LiteralPath $path -Force
     Require (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) 'UNSAFE_PATH'
     $acl = Get-Acl -LiteralPath $path
     $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
     $trustedOwners = @($accountSid, 'S-1-5-18', 'S-1-5-32-544', 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464')
-    Require ($owner -in $trustedOwners -and (-not $private -or $owner -eq $accountSid)) 'UNSAFE_PATH'
+    Require ($owner -in $trustedOwners -and (-not $private -or -not $accountOwner -or $owner -eq $accountSid)) 'UNSAFE_PATH'
     $writeMask = [Security.AccessControl.FileSystemRights]::Write -bor [Security.AccessControl.FileSystemRights]::Delete -bor [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor [Security.AccessControl.FileSystemRights]::ChangePermissions -bor [Security.AccessControl.FileSystemRights]::TakeOwnership
     foreach ($rule in $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
         if ($rule.AccessControlType -eq 'Allow' -and ($rule.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly) -eq 0 -and ($private -or ($rule.FileSystemRights -band $writeMask) -ne 0)) {
@@ -82,14 +82,16 @@ function AtomicJson([string]$path, $value) {
     try { $bytes = $utf8.GetBytes((Json $value) + "`n"); $stream.Write($bytes, 0, $bytes.Length); $stream.Flush($true) } finally { $stream.Dispose() }
     if ([IO.File]::Exists($path)) { [AgentCliState]::Replace($temporary, $path) } else { [IO.File]::Move($temporary, $path) }
 }
-function RemovePrivateEntry([string]$path, [string]$boundary) {
+function RemovePrivateEntry([string]$path, [string]$boundary, [bool]$payload = $false) {
     $resolved=[IO.Path]::GetFullPath($path); $base=[IO.Path]::GetFullPath($boundary).TrimEnd('\')+'\'
     Require ($resolved.StartsWith($base,[StringComparison]::OrdinalIgnoreCase)) 'UNSAFE_CLEANUP'
     try {
-        $item=Trusted $resolved $true
+        # The owning container remains account-owned. npm/CLR may create its
+        # private descendants with the trusted Administrators default owner.
+        $item=Trusted $resolved $true (-not $payload)
         $failures=0
         if ($item.PSIsContainer) {
-            foreach ($child in Get-ChildItem -LiteralPath $resolved -Force) { $failures += RemovePrivateEntry $child.FullName $boundary }
+            foreach ($child in Get-ChildItem -LiteralPath $resolved -Force) { $failures += RemovePrivateEntry $child.FullName $boundary $true }
             if ($failures -eq 0) { [IO.Directory]::Delete($resolved,$false) }
         } else { [IO.File]::Delete($resolved) }
         return $failures
@@ -100,7 +102,7 @@ function CleanupWork([string]$work) {
     try {
         $null=Trusted $work $true
         foreach ($item in Get-ChildItem -LiteralPath $work -Force) {
-            if ($item.Name -cne 'receipt.json') { $failures += RemovePrivateEntry $item.FullName $work }
+            if ($item.Name -cne 'receipt.json') { $failures += RemovePrivateEntry $item.FullName $work $true }
         }
     } catch { $failures++ }
     return $failures

@@ -25,10 +25,20 @@ const replaceOnce = (text, before, after) => {
   assert.equal(text.split(before).length, 2, '진단 계측점은 원문에서 한 번만 나타나야 합니다.');
   return text.replace(before, after);
 };
-// 최초 원시험의 source/argv/cwd/frame과 Python 고정 수신기 인수는 그대로 둔다.
-// PowerShell의 관측문·누적 해시만 추가하므로 계측이 시점을 바꿀 가능성은 남는다.
+// 최초 원시험의 source/argv/cwd/frame은 그대로 두고 수신기 복사본만 계측한다.
+// 추가 sys/time 가져오기·관측문·해시가 초기화와 시점을 바꿀 가능성은 남는다.
 const diagnosticBootstrapOf = p => {
-  const receiver = receiverOf(p);
+  const pyStage = name => `sys.stderr.write('AGS_PY_STAGE|'+str(time.time_ns()//1000000)+'|${name}\\n');sys.stderr.flush()\n`;
+  let receiver = replaceOnce(receiverOf(p), 'import hashlib,json,os,sys,types\n',
+    `import sys,time\n${pyStage('receiver-entry')}import hashlib,json,os,sys,types\n${pyStage('receiver-imports-complete')}`);
+  receiver = replaceOnce(receiver, 'b=sys.stdin.buffer.read(n+1)\n', `${pyStage('receiver-read-start')}b=sys.stdin.buffer.read(n+1)\n${pyStage('receiver-read-complete')}`);
+  receiver = replaceOnce(receiver, "if v['elevate']:", `${pyStage('frame-verified')}if v['elevate']:`);
+  receiver = replaceOnce(receiver, 'try:\n c=compile', `${pyStage('source-compile-start')}try:\n c=compile`);
+  receiver = replaceOnce(receiver, "sys.argv=['<ssh-python-source-v1>',*v['argv']]", `${pyStage('source-compiled')}sys.argv=['<ssh-python-source-v1>',*v['argv']]`);
+  receiver = replaceOnce(receiver, 'exec(c,m.__dict__)\n', `${pyStage('source-start')}exec(c,m.__dict__)\n${pyStage('source-complete')}`);
+  assert.equal(receiver.split('\n').filter(line => line !== 'import sys,time'
+    && !line.startsWith("sys.stderr.write('AGS_PY_STAGE|")).join('\n'), receiverOf(p),
+    '고정 관측문과 추가 가져오기를 제거하면 제품 receiver 원문과 같아야 합니다.');
   const psStage = name => `psstage '${name}';`;
   const original = launcherOf(p);
   let launcher = original;
@@ -43,6 +53,10 @@ const diagnosticBootstrapOf = p => {
   launcher = replaceOnce(launcher, 'exit $p.ExitCode', psStage('launcher-exit') + 'exit $p.ExitCode');
   const startup = original.slice(original.indexOf('$s=[Diagnostics.ProcessStartInfo]::new();'), original.indexOf('if(-not [IO.File]::Exists'));
   assert.ok(startup.length > 0 && launcher.includes(startup), 'Python 실행파일과 전체 인수는 제품과 정확히 같아야 합니다.');
+  // 제품 인수 문자열에서 고정 receiver 한 부분만 치환한다. 원문 프레임·길이·해시·옵션은 그대로다.
+  launcher = replaceOnce(launcher, receiverOf(p).replaceAll("'", "''"), receiver.replaceAll("'", "''"));
+  assert.ok(launcher.includes(startup.replace(receiverOf(p).replaceAll("'", "''"), receiver.replaceAll("'", "''"))),
+    '계측 receiver 외의 Python 실행파일·옵션·프레임 길이와 해시는 변하면 안 됩니다.');
   const bootstrap = `& ([scriptblock]::Create([IO.StreamReader]::new([IO.Compression.GZipStream]::new([IO.MemoryStream]::new([Convert]::FromBase64String('${gzipSync(launcher, { level: 9 }).toString('base64')}')),[IO.Compression.CompressionMode]0)).ReadToEnd()))`;
   assert.doesNotMatch(bootstrap, /["$`%\r\n]/);
   assert.ok(bootstrap.length + p.command.length - launcherBootstrapOf(p).length <= 8000);
@@ -155,20 +169,23 @@ const ciWindows = process.platform === 'win32' && process.env.GITHUB_ACTIONS ===
 // 실제 SSH와 동일하게 비동기로 입력을 닫고 출력을 동시에 비운다.
 // 제한은 유지하고 실패 시 어느 수명 단계가 끝났는지에 한정해 남긴다.
 const run = (t, label, p, input = p.transportStdin, host = 'direct', diagnosticBootstrap) => traceInput(t, label, p, input, () => new Promise(resolve => {
+  const started = Date.now();
   // Node의 cmd.exe 셸 호출과 동일하게 바깥 따옴표를 보존하고 CRT 재인용을 막는다.
   const child = spawn(host === 'cmd' ? 'cmd.exe' : 'powershell.exe', host === 'cmd' ? ['/d', '/s', '/c', `"${p.command}"`]
     : powershellArguments(host === 'powershell-shell' ? p.command : diagnosticBootstrap ?? launcherBootstrapOf(p)),
     { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, windowsVerbatimArguments: host === 'cmd' });
   const events = [], stdout = [], stderr = [];
-  const started = Date.now();
-  const event = stage => events.push({ 단계: stage, 경과밀리초: Date.now() - started });
+  const event = stage => {
+    const now = Date.now();
+    events.push({ 단계: stage, 세계시밀리초: now, 경과밀리초: now - started });
+  };
   let error, completed = false;
   const finish = (status = child.exitCode, signal = child.signalCode) => {
     if (completed) return;
     completed = true;
     clearTimeout(deadline);
     const result = { status, signal, error, stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8') };
-    if (error || diagnosticBootstrap) t.diagnostic(JSON.stringify({ 진단: 'Python 직접 실행 수명', 프로세스번호: child.pid, 사건: events,
+    if (error || diagnosticBootstrap) t.diagnostic(JSON.stringify({ 진단: 'Python 직접 실행 수명', 프로세스번호: child.pid, 시작세계시밀리초: started, 종료세계시밀리초: Date.now(), 사건: events,
       stdoutBytes: Buffer.byteLength(result.stdout), stderrBytes: Buffer.byteLength(result.stderr), errorCode: error?.code,
       원계획BootstrapSha256: p.manifest.launcherBootstrapSha256,
       실행BootstrapSha256: createHash('sha256').update(diagnosticBootstrap ?? launcherBootstrapOf(p)).digest('hex') }));
@@ -206,11 +223,11 @@ test('Windows PowerShell 5.1 forwards source bytes and literal arguments without
   const source = "import json,os,sys\r\nassert sys.stdin.buffer.read()==b''\r\nassert '__file__' not in globals()\r\nassert __package__ is None and __spec__ is None\r\nprint(json.dumps([sys.argv[1:],os.getcwd(),__name__],ensure_ascii=False))\r\n";
   const firstPlan = plan(source, { ...options, argv: literal });
   const instrumented = diagnosticBootstrapOf(firstPlan);
-  assert.equal(instrumented.receiverSha256, firstPlan.manifest.receiverSha256);
   t.diagnostic(JSON.stringify({ 진단: '최초 원문 PowerShell 단계 계측', 기준계획Digest: firstPlan.planDigest,
     계측LauncherSha256: instrumented.launcherSha256, 계측ReceiverSha256: instrumented.receiverSha256,
+    원ReceiverSha256: firstPlan.manifest.receiverSha256,
     sourceSha256: firstPlan.manifest.sourceSha256, sourceBytes: firstPlan.manifest.sourceBytes,
-    프레임변경: false, Python인수변경: false, 시점영향가능: true }));
+    프레임변경: false, Python인수변경: '고정 receiver 복사본의 관측문만 추가', 시점영향가능: true }));
   const good = await run(t, '직접 실행: 한글·따옴표 인자', firstPlan, firstPlan.transportStdin, 'direct', instrumented.bootstrap);
   const stages = good.stderr.split(/\r?\n/).filter(line => line.startsWith('AGS_PY_STAGE|'));
   t.diagnostic(JSON.stringify({ 진단: '최초 원문 PowerShell 단계 계측', 관측단계: stages }));
@@ -219,6 +236,10 @@ test('Windows PowerShell 5.1 forwards source bytes and literal arguments without
   assert.deepEqual(JSON.parse(good.stdout), [literal, cwd, '__main__']);
   assert.ok(stages.some(line => line.endsWith(`|native-eof:${firstPlan.manifest.transportBytes}:${firstPlan.manifest.transportSha256}`)));
   assert.ok(stages.some(line => line.endsWith('|launcher-exit')));
+  for (const stage of ['receiver-entry', 'receiver-imports-complete', 'receiver-read-start', 'receiver-read-complete',
+    'frame-verified', 'source-compile-start', 'source-compiled', 'source-start', 'source-complete']) {
+    assert.ok(stages.some(line => line.endsWith('|' + stage)), `수신기 계측 누락: ${stage}`);
+  }
   await assert.rejects(access(attackMarker), { code: 'ENOENT' });
   for (const host of ['cmd', 'powershell-shell']) {
     const throughShell = await run(t, `기본 셸 ${host}: 한글·따옴표 인자`, plan(source, { ...options, argv: literal }), undefined, host);
