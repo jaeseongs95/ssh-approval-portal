@@ -27,8 +27,10 @@ const replaceOnce = (text, before, after) => {
 };
 // 최초 원시험의 source/argv/cwd/frame은 그대로 두고 수신기 복사본만 계측한다.
 // 추가 sys/time 가져오기·관측문·해시가 초기화와 시점을 바꿀 가능성은 남는다.
-const diagnosticBootstrapOf = p => {
-  const pyStage = name => `sys.stderr.write('AGS_PY_STAGE|'+str(time.time_ns()//1000000)+'|${name}\\n');sys.stderr.flush()\n`;
+const diagnosticBootstrapOf = (p, { auditPath, redirectOutput = false, closeWriter = false } = {}) => {
+  const audit = name => auditPath ? `with open(bytes.fromhex('${Buffer.from(auditPath).toString('hex')}').decode('utf-8'),'a',encoding='utf-8') as f:f.write(str(time.time_ns()//1000000)+'|${name}\\n');f.flush()\n` : '';
+  const pyStage = name => audit(name + ':before-stderr')
+    + `sys.stderr.write('AGS_PY_STAGE|'+str(time.time_ns()//1000000)+'|${name}\\n');sys.stderr.flush()\n` + audit(name + ':after-stderr');
   let receiver = replaceOnce(receiverOf(p), 'import hashlib,json,os,sys,types\n',
     `import sys,time\n${pyStage('receiver-entry')}import hashlib,json,os,sys,types\n${pyStage('receiver-imports-complete')}`);
   receiver = replaceOnce(receiver, 'b=sys.stdin.buffer.read(n+1)\n', `${pyStage('receiver-read-start')}b=sys.stdin.buffer.read(n+1)\n${pyStage('receiver-read-complete')}`);
@@ -37,7 +39,7 @@ const diagnosticBootstrapOf = p => {
   receiver = replaceOnce(receiver, "sys.argv=['<ssh-python-source-v1>',*v['argv']]", `${pyStage('source-compiled')}sys.argv=['<ssh-python-source-v1>',*v['argv']]`);
   receiver = replaceOnce(receiver, 'exec(c,m.__dict__)\n', `${pyStage('source-start')}exec(c,m.__dict__)\n${pyStage('source-complete')}`);
   assert.equal(receiver.split('\n').filter(line => line !== 'import sys,time'
-    && !line.startsWith("sys.stderr.write('AGS_PY_STAGE|")).join('\n'), receiverOf(p),
+    && !line.startsWith("sys.stderr.write('AGS_PY_STAGE|") && !line.startsWith('with open(bytes.fromhex(')).join('\n'), receiverOf(p),
     '고정 관측문과 추가 가져오기를 제거하면 제품 receiver 원문과 같아야 합니다.');
   const psStage = name => `psstage '${name}';`;
   const original = launcherOf(p);
@@ -57,10 +59,23 @@ const diagnosticBootstrapOf = p => {
   launcher = replaceOnce(launcher, receiverOf(p).replaceAll("'", "''"), receiver.replaceAll("'", "''"));
   assert.ok(launcher.includes(startup.replace(receiverOf(p).replaceAll("'", "''"), receiver.replaceAll("'", "''"))),
     '계측 receiver 외의 Python 실행파일·옵션·프레임 길이와 해시는 변하면 안 됩니다.');
+  launcher = replaceOnce(launcher, '$i=$p.StandardInput.BaseStream;', '$i=$p.StandardInput.BaseStream;$inputHandle=$i.SafeFileHandle;');
+  launcher = replaceOnce(launcher, '$i.Close();$hash.Dispose()', (closeWriter ? '$p.StandardInput.Close();' : '$i.Close();')
+    + "psstage ('child-input-handle-closed:'+$inputHandle.IsClosed);$hash.Dispose()");
+  launcher = replaceOnce(launcher, '$p.WaitForExit();', "while(-not $p.WaitForExit(1000)){$p.Refresh();psstage ('child-wait-pending:pid:'+$p.Id+':cpu-ms:'+$p.TotalProcessorTime.TotalMilliseconds+':handles:'+$p.HandleCount)};");
+  if (redirectOutput) {
+    launcher = replaceOnce(launcher, '$s.RedirectStandardInput=$true;', '$s.RedirectStandardInput=$true;$s.RedirectStandardOutput=$true;$s.RedirectStandardError=$true;');
+    launcher = replaceOnce(launcher, '$p=[Diagnostics.Process]::Start($s);', '$p=[Diagnostics.Process]::Start($s);$outTask=$p.StandardOutput.BaseStream.CopyToAsync([Console]::OpenStandardOutput());$errTask=$p.StandardError.BaseStream.CopyToAsync([Console]::OpenStandardError());');
+    launcher = replaceOnce(launcher, "psstage 'child-exited';", "[Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($outTask,$errTask));psstage 'child-exited';");
+  }
   const bootstrap = `& ([scriptblock]::Create([IO.StreamReader]::new([IO.Compression.GZipStream]::new([IO.MemoryStream]::new([Convert]::FromBase64String('${gzipSync(launcher, { level: 9 }).toString('base64')}')),[IO.Compression.CompressionMode]0)).ReadToEnd()))`;
   assert.doesNotMatch(bootstrap, /["$`%\r\n]/);
   assert.ok(bootstrap.length + p.command.length - launcherBootstrapOf(p).length <= 8000);
-  return { bootstrap, launcherSha256: createHash('sha256').update(launcher).digest('hex'), receiverSha256: createHash('sha256').update(receiver).digest('hex') };
+  return { bootstrap, receiver, launcherSha256: createHash('sha256').update(launcher).digest('hex'), receiverSha256: createHash('sha256').update(receiver).digest('hex') };
+};
+const observeAudit = async (t, label, path) => {
+  try { t.diagnostic(JSON.stringify({ 진단: '동일 원문 수신기 독립 관측', 경로종류: label, 파일단계: (await readFile(path, 'utf8')).trim().split('\n') })); }
+  catch (error) { if (error.code !== 'ENOENT') throw error; t.diagnostic(JSON.stringify({ 진단: '동일 원문 수신기 독립 관측', 경로종류: label, 파일생성: false })); }
 };
 const quotePayload = marker => `’;[IO.File]::WriteAllText('${marker.replaceAll("'", "''")}','injected');}catch{};#`;
 const maximumArgv = Array.from({ length: 8 }, (_, index) => 'x'.repeat(index === 7 ? 508 : 509));
@@ -168,10 +183,11 @@ const pythonExecutable = process.env.SOLID_PYTHON ?? process.env.PYTHON;
 const ciWindows = process.platform === 'win32' && process.env.GITHUB_ACTIONS === 'true';
 // 실제 SSH와 동일하게 비동기로 입력을 닫고 출력을 동시에 비운다.
 // 제한은 유지하고 실패 시 어느 수명 단계가 끝났는지에 한정해 남긴다.
-const run = (t, label, p, input = p.transportStdin, host = 'direct', diagnosticBootstrap) => traceInput(t, label, p, input, () => new Promise(resolve => {
+const run = (t, label, p, input = p.transportStdin, host = 'direct', diagnosticBootstrap, diagnosticReceiver) => traceInput(t, label, p, input, () => new Promise(resolve => {
   const started = Date.now();
   // Node의 cmd.exe 셸 호출과 동일하게 바깥 따옴표를 보존하고 CRT 재인용을 막는다.
-  const child = spawn(host === 'cmd' ? 'cmd.exe' : 'powershell.exe', host === 'cmd' ? ['/d', '/s', '/c', `"${p.command}"`]
+  const child = spawn(host === 'python' ? p.manifest.interpreter : host === 'cmd' ? 'cmd.exe' : 'powershell.exe', host === 'python' ? p.args.map((value, index) => index === 6 && diagnosticReceiver ? diagnosticReceiver : value)
+    : host === 'cmd' ? ['/d', '/s', '/c', `"${p.command}"`]
     : powershellArguments(host === 'powershell-shell' ? p.command : diagnosticBootstrap ?? launcherBootstrapOf(p)),
     { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, windowsVerbatimArguments: host === 'cmd' });
   const events = [], stdout = [], stderr = [];
@@ -212,7 +228,7 @@ const run = (t, label, p, input = p.transportStdin, host = 'direct', diagnosticB
 }));
 
 test('Windows PowerShell 5.1 forwards source bytes and literal arguments without BOM or newline transformation', {
-  skip: !ciWindows, timeout: 90_000,
+  skip: !ciWindows, timeout: 90_000, concurrency: true,
 }, async t => {
   assert.ok(pythonExecutable, 'Windows CI must supply the fixed SOLID_PYTHON or PYTHON executable');
   const cwd = await mkdtemp(join(tmpdir(), 'windows-source-'));
@@ -222,25 +238,54 @@ test('Windows PowerShell 5.1 forwards source bytes and literal arguments without
   const literal = ['한글', "a'b", 'a"b', 'C:\\tail\\', '', '‘’“”', quotePayload(attackMarker)];
   const source = "import json,os,sys\r\nassert sys.stdin.buffer.read()==b''\r\nassert '__file__' not in globals()\r\nassert __package__ is None and __spec__ is None\r\nprint(json.dumps([sys.argv[1:],os.getcwd(),__name__],ensure_ascii=False))\r\n";
   const firstPlan = plan(source, { ...options, argv: literal });
-  const instrumented = diagnosticBootstrapOf(firstPlan);
-  t.diagnostic(JSON.stringify({ 진단: '최초 원문 PowerShell 단계 계측', 기준계획Digest: firstPlan.planDigest,
-    계측LauncherSha256: instrumented.launcherSha256, 계측ReceiverSha256: instrumented.receiverSha256,
-    원ReceiverSha256: firstPlan.manifest.receiverSha256,
-    sourceSha256: firstPlan.manifest.sourceSha256, sourceBytes: firstPlan.manifest.sourceBytes,
-    프레임변경: false, Python인수변경: '고정 receiver 복사본의 관측문만 추가', 시점영향가능: true }));
-  const good = await run(t, '직접 실행: 한글·따옴표 인자', firstPlan, firstPlan.transportStdin, 'direct', instrumented.bootstrap);
-  const stages = good.stderr.split(/\r?\n/).filter(line => line.startsWith('AGS_PY_STAGE|'));
-  t.diagnostic(JSON.stringify({ 진단: '최초 원문 PowerShell 단계 계측', 관측단계: stages }));
-  assert.ifError(good.error);
-  assert.equal(good.status, 0, good.stderr);
-  assert.deepEqual(JSON.parse(good.stdout), [literal, cwd, '__main__']);
-  assert.ok(stages.some(line => line.endsWith(`|native-eof:${firstPlan.manifest.transportBytes}:${firstPlan.manifest.transportSha256}`)));
-  assert.ok(stages.some(line => line.endsWith('|launcher-exit')));
-  for (const stage of ['receiver-entry', 'receiver-imports-complete', 'receiver-read-start', 'receiver-read-complete',
-    'frame-verified', 'source-compile-start', 'source-compiled', 'source-start', 'source-complete']) {
-    assert.ok(stages.some(line => line.endsWith('|' + stage)), `수신기 계측 누락: ${stage}`);
-  }
-  await assert.rejects(access(attackMarker), { code: 'ENOENT' });
+  assert.equal(firstPlan.manifest.sourceBytes, 217);
+  assert.equal(firstPlan.manifest.transportBytes, 608);
+  // 각 경로는 처음부터 명시한 비교 사례다. 불명 결과에 따른 자동 재실행이 아니다.
+  // 병렬 시작은 같은 초기 상태의 비교를 돕지만 초기화·자원 경합에 영향을 줄 수 있다.
+  await Promise.all([
+    ...[
+    ['원시험 상속 출력', 'direct', {}], ['Node 직접 Python', 'python', {}],
+    ['명시 바이트 출력 연결', 'direct', { redirectOutput: true }], ['입력 writer 추가 닫기', 'direct', { closeWriter: true }],
+  ].map(([label, host, variant]) => t.test(label, { timeout: 25_000 }, async sub => {
+    const auditPath = join(cwd, 'audit-' + (host === 'python' ? 'native' : variant.redirectOutput ? 'redirect' : variant.closeWriter ? 'writer' : 'original') + '.txt');
+    const instrumented = diagnosticBootstrapOf(firstPlan, { auditPath, ...variant });
+    sub.diagnostic(JSON.stringify({ 진단: '최초 동일 원문 경로 비교', 경로종류: label, 기준계획Digest: firstPlan.planDigest,
+      계측LauncherSha256: instrumented.launcherSha256, 계측ReceiverSha256: instrumented.receiverSha256,
+      원ReceiverSha256: firstPlan.manifest.receiverSha256, sourceSha256: firstPlan.manifest.sourceSha256,
+      sourceBytes: firstPlan.manifest.sourceBytes, frameBytes: firstPlan.manifest.transportBytes, 프레임변경: false,
+      Python인수변경: '고정 receiver 관측 복사본만', 출력연결: variant.redirectOutput ? '명시 바이트 복사' : '기존 상속', 입력writer추가닫기: !!variant.closeWriter,
+      실행방식: host, 시점영향가능: true }));
+    const good = await run(sub, '동일 원문: ' + label, firstPlan, firstPlan.transportStdin, host, instrumented.bootstrap, instrumented.receiver);
+    const stages = good.stderr.split(/\r?\n/).filter(line => line.startsWith('AGS_PY_STAGE|'));
+    sub.diagnostic(JSON.stringify({ 진단: '최초 동일 원문 경로 비교', 경로종류: label, 관측단계: stages }));
+    await observeAudit(sub, label, auditPath);
+    assert.ifError(good.error);
+    assert.equal(good.status, 0, good.stderr);
+    assert.deepEqual(JSON.parse(good.stdout), [literal, cwd, '__main__']);
+    if (host !== 'python') {
+      assert.ok(stages.some(line => line.endsWith(`|native-eof:${firstPlan.manifest.transportBytes}:${firstPlan.manifest.transportSha256}`)));
+      assert.ok(stages.some(line => line.endsWith('|child-input-handle-closed:True')));
+      assert.ok(stages.some(line => line.endsWith('|launcher-exit')));
+    }
+    for (const stage of ['receiver-entry', 'receiver-imports-complete', 'receiver-read-start', 'receiver-read-complete',
+      'frame-verified', 'source-compile-start', 'source-compiled', 'source-start', 'source-complete']) {
+      assert.ok(stages.some(line => line.endsWith('|' + stage)), `수신기 계측 누락: ${stage}`);
+    }
+    await assert.rejects(access(attackMarker), { code: 'ENOENT' });
+  })),
+    t.test('실제 SSH 동일608프레임·원제품명령', { timeout: 25_000 }, async sub => {
+      const fixture = JSON.parse(await readFile(process.env.AGS_WINDOWS_SSH_FIXTURE, 'utf8'));
+      const { createSshRuntime } = await import('../src/adapters/ssh/vendor.mjs');
+      const runtime = await createSshRuntime({ BRIDGE_CONFIG_PATH: fixture.adminConfigPath, BRIDGE_HOST_KEY_MODE: 'strict' });
+      sub.after(() => runtime.registry.closeAll());
+      const connection = await runtime.registry.getOrCreate('admin-write');
+      const result = await traceInput(sub, '실제 SSH: 최초와 동일한 원문608프레임', firstPlan, firstPlan.transportStdin,
+        () => connection.exec(firstPlan.command, { stdin: firstPlan.transportStdin, timeoutMs: 20_000 }));
+      assert.equal(result.exitCode, 0, result.stderr);
+      assert.deepEqual(JSON.parse(result.stdout), [literal, cwd, '__main__']);
+      await assert.rejects(access(attackMarker), { code: 'ENOENT' });
+    }),
+  ]);
   for (const host of ['cmd', 'powershell-shell']) {
     const throughShell = await run(t, `기본 셸 ${host}: 한글·따옴표 인자`, plan(source, { ...options, argv: literal }), undefined, host);
     assert.ifError(throughShell.error);
