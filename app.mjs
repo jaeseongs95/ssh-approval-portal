@@ -24,6 +24,8 @@ import { createSecretService } from './src/application/secret-service.mjs';
 import { createLocalSecretStore } from './src/adapters/secrets/local-file.mjs';
 import { createVaultSecretStore } from './src/adapters/secrets/vault-kv.mjs';
 import { createCommandState } from './src/adapters/storage/command-state.mjs';
+import { createRetainedHistory } from './src/application/history.mjs';
+import { presentJob } from './src/adapters/presentation/results.mjs';
 import { openDormantCommandState } from './src/adapters/storage/offline-preservation.mjs';
 import { createMaintenanceState } from './src/adapters/storage/maintenance-state.mjs';
 import { capturePreservationSnapshot, comparePreservationSnapshots, BASELINE_PRESERVATION_CONTRACT, baselinePreservationAccepted } from './src/adapters/storage/preservation-verification.mjs';
@@ -352,7 +354,11 @@ export async function createApplication({ registry, classify, executeCommand, ex
     readFile(new URL('./web/index.html', import.meta.url), 'utf8'),
     readFile(new URL('./web/dist/app.js', import.meta.url), 'utf8'),
   ]);
-  protocols = createProtocolAdapters({ queue, commands, files, store, lifecycle, settings, signer, adminAccess, browserSessions, targets, requestSafety,
+  const retainedHistory = createRetainedHistory({ commandJournal: commandState ?? dormantCommandState, cliJournal: cliState,
+    readQueue: () => runtimes.flatMap(runtime => [...runtime.queue.jobs.values()]),
+    readTargets: () => runtimes.map(runtime => ({ id: runtime.id, revision: runtime.revision, enabled: runtime.enabled, writeProfile: runtime.writeProfile })),
+    verifyCliTarget: id => { targets.select(id).verify(); }, present: presentJob });
+  protocols = createProtocolAdapters({ queue, commands, files, store, lifecycle, settings, signer, adminAccess, browserSessions, targets, requestSafety, retainedHistory,
     authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal: shutdown.signal, commandPolicy, commandOutputs, environmentEditor,agentCli, preservation, automationMetrics: createAutomationMetrics({state:commandState}) });
   const timer = setInterval(() => { lifecycle.reap().catch(() => {}); try { outputs.reap(); } catch { /* Failed deletions stay charged. */ } }, 30_000); timer.unref();
   let closing;

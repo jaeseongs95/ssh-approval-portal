@@ -1,4 +1,5 @@
-import { renderDecision, recordedApprovalMode, requestContext } from '../../ui/src/decision.js';
+import { recordedApprovalMode } from '../../ui/src/decision.js';
+import { createRequestDetail } from './request-detail.js';
 export function createWebView({ document, i18n }) {
   const { t, korean, locale, states, kinds } = i18n;
   const el = id => document.getElementById(id);
@@ -12,16 +13,36 @@ export function createWebView({ document, i18n }) {
   let targetList = [], changeTarget, policyAction, commandImportAction;
   const scrolls = new Map(); let lastTarget = '';
   function identify() {
-    const settings = document.body.dataset.page === 'settings';
+    const page = document.body.dataset.page, settings = page === 'settings';
     const selected = targetList.find(item => item.id === el('target-filter')?.value);
-    const name = settings ? (korean ? '중계기 설정 · 정책 대상은 아래에서 선택' : 'Bridge settings · select the policy target below') : selected ? `${selected.displayName} [${selected.id}]` : multiTarget ? t('전체 대상') : targetName;
+    const name = settings ? (korean ? '서버 설정 · 정책 대상은 아래에서 선택' : 'Server settings · select the policy target below') : page === 'bridge' ? (korean ? '중계기 전체 설정' : 'Bridge settings') : page === 'preferences' ? (korean ? '화면 설정' : 'Display preferences') : selected ? `${selected.displayName} [${selected.id}]` : multiTarget ? t('전체 대상') : targetName;
     document.title = `${bridgeName} · ${name} · ${korean ? 'SSH 승인' : 'SSH approvals'}`;
     if (el('server-identity')) el('server-identity').textContent = `${t('중계기')} · ${bridgeName} / ${name}`;
   }
-  let handlers;
+  let handlers, detail, returnButton, requestOriginPath = '/';
+  const announce = message => { const node = el('request-announcement'); if (node && node.textContent !== message) node.textContent = message; };
   let historyOffset=0, historyAnchor, latestJobs=[], latestDeciding=false, pager;
   let historySearch, historyFilter, historyFrom, historyTo, historyDateError, historyRange={};
+  let historyResult, historyCursor, historyPrevious = [], historyBusy = false, historyFailure = false, historyStatus, historyCoverage;
   const historyPageSize=20;
+  function historyQuery() {
+    updateHistoryRange();
+    const query = new URLSearchParams();
+    if (historyRange.from !== undefined) query.set('from', historyRange.from);
+    if (historyRange.to !== undefined) query.set('to', historyRange.to);
+    if (el('target-filter')?.value) query.set('target', el('target-filter').value);
+    if (historyFilter?.value) query.set('state', historyFilter.value);
+    if (historySearch?.value.trim()) query.set('q', historySearch.value.trim());
+    if (historyCursor) query.set('cursor', historyCursor);
+    return { query: query.toString(), valid: !historyRange.invalid };
+  }
+  function queryHistory(reset = false) {
+    if (reset) { historyCursor = undefined; historyPrevious = []; historyResult = undefined; }
+    historyBusy = true; historyFailure = false; el('history')?.setAttribute('aria-busy', 'true');
+    if (historyStatus) historyStatus.textContent = korean ? '이력을 조회하는 중입니다.' : 'Loading history.';
+    render(latestJobs,latestDeciding);
+    handlers?.history?.();
+  }
   function updateHistoryRange() {
     const boundary=(input,nextDay=false)=>{
       if(!input?.value)return undefined;
@@ -54,101 +75,25 @@ export function createWebView({ document, i18n }) {
     history: empty(t('아직 승인 이력이 없습니다'), t('승인·거부된 요청의 상태와 결과가 여기에 표시됩니다.')),
     filteredHistory: empty(korean?'검색 조건에 맞는 승인 이력이 없습니다':'No approval history matches your filters',korean?'조회기간·검색어·상태·대상 서버를 확인해 주세요.':'Check the date range, search, status and target server.'),
     running: empty(t('실행 중인 요청이 없습니다'), t('승인 후 실행 중인 명령과 파일 전송이 표시됩니다.')),
+    loadingHistory: empty(korean?'승인 이력을 조회하고 있습니다':'Loading approval history',korean?'조회 조건과 보관 기록을 확인하고 있습니다.':'Checking filters and retained records.'),
+    failedHistory: empty(korean?'승인 이력을 조회하지 못했습니다':'Approval history unavailable',korean?'오류를 확인하고 요청 조회를 다시 누르세요. 실행 요청은 반복하지 않습니다.':'Check the error and refresh requests. Execution is not repeated.'),
   };
-  function createRecord(job, deciding, previous) {
-    const waiting = job.state === 'pending';
-    const box = document.createElement(waiting ? 'article' : 'details');
-    box.className = 'request' + (waiting ? '' : ' history-item'); box.dataset.requestId = job.id;
-    const command = job.kind === 'command' ? job.command : JSON.stringify(job.operation, null, 2);
-    let body = box;
-    if (!waiting) {
-      box.open = previous?.node.open ?? false;
-      const summary = text(box, 'summary', ''); const head = text(summary, 'div', '', 'summary-head');
-      text(head, 'span', '›', 'chevron'); text(head, 'span', kinds[job.kind] ?? job.kind, 'kind');
-      text(head, 'span', `${job.targetDisplayName ?? targetName}${job.targetId ? ` [${job.targetId}]` : ''}`, 'summary-target');
-      if (recordedApprovalMode(job) === 'automatic') text(head, 'span', korean ? '자동승인' : 'Automatically approved', 'badge automatic-approval');
-      text(head, 'span', states[job.state] ?? job.state, `badge ${job.state}`);
-      text(summary, 'span', command, 'preview'); body = text(box, 'div', '', 'history-body');
-    } else {
-      const head = text(box, 'div', '', 'request-top'); text(head, 'span', kinds[job.kind] ?? job.kind, 'kind'); text(head, 'span', t('승인 대기'), 'badge pending');
-    }
-    const targetContext = text(body, 'p', `${t('중계기')} · ${bridgeName} / ${t('대상 서버')} · ${job.targetDisplayName ?? targetName}${job.targetId ? ` [${job.targetId}]` : ''} (${job.target}) · ${t('요청')} ${job.id}`, 'target'); targetContext.id = 'request-target-' + job.id;
-    if (job.targetId) targetContext.textContent += ` · ${t('설정 revision')} ${job.targetRevision} / ${t('호스트 키')} ${job.hostKey}`; text(body, 'pre', command, 'command');
-    if (job.kind === 'command' && requestContext(job, korean)) { const context = text(body, 'details', ''); text(context, 'summary', korean ? '요청자가 제공한 작업 설명' : 'Caller-provided context'); text(context, 'p', requestContext(job, korean)); }
-    if (job.operation?.sourceContract) {
-      const op = job.operation;
-      text(body, 'p', 'Python · ' + op.sourceContract + ' · ' + op.sourceBytes + ' bytes · SHA-256 ' + op.sourceSha256, 'target');
-      if (targetList.find(target => target.id === job.targetId)?.platform === 'windows') text(body, 'p', korean ? 'Windows의 관리자 등록 Python 경로로 격리 시작 옵션을 사용합니다. 지정 작업 폴더·인자·원문을 실행하며 권한 상승 요청은 기존 관리자 연결 토큰이 필요합니다.' : 'Uses the administrator-configured Windows Python executable with isolated startup flags, the specified working directory, arguments and source. Elevated execution requires the existing administrator connection token.', 'target');
-      text(body, 'pre', JSON.stringify({ cwd: op.sourceCwd, argv: JSON.parse(op.sourceArgvJson), elevate: op.sourceElevate }, null, 2), 'command');
-      if (waiting) {
-        const button = text(body, 'button', korean ? '제출 코드 원문 보기' : 'View submitted source', 'secondary'), area = text(body, 'div', '');
-        button.type = 'button';
-        button.onclick = async () => {
-          button.disabled = true;
-          try {
-            const result = await handlers.source(job.id);
-            if (!box.isConnected) return;
-            area.replaceChildren(); text(area, 'pre', result.source, 'command submitted-source');
-          } catch { if (box.isConnected) { area.replaceChildren(); text(area, 'p', korean ? '코드 원문을 읽을 수 없습니다. 만료·재시작·처리 상태를 확인하세요. 다시 실행하지 않습니다.' : 'Source unavailable. Check expiry, restart and request state; no execution is retried.', 'error'); } }
-          finally { if (box.isConnected) button.disabled = false; }
-        };
-      } else text(body, 'p', korean ? '처리된 코드 원문은 보관하지 않습니다. 실행 계획 정보만 표시합니다.' : 'Finished source is not retained. Only execution plan metadata is shown.', 'target');
-    }
-    if (job.decision) renderDecision(document, body, job.decision, korean, job);
-    const meta = text(body, 'div', '', 'meta'); text(meta, 'span', `${t('요청')} ${job.id}`, 'request-id');
-    const time = waiting ? job.expiresAt : job.finishedAt ?? job.createdAt;
-    text(meta, 'span', `${t(waiting ? '만료' : job.finishedAt ? '처리 완료' : '요청')} ${new Date(time).toLocaleString(locale)}`);
-    const actions = text(body, 'div', '', 'actions'), buttons = [];
-    if (waiting) for (const action of ['approve', 'deny']) {
-      const button = text(actions, 'button', t(action === 'approve' ? '승인·실행' : '거부'), action === 'approve' ? 'primary' : 'secondary reject');
-      button.disabled = deciding; button.onclick = () => handlers.decide(job.id, action); buttons.push(button);
-      button.setAttribute('aria-describedby', targetContext.id);
-    }
-    if (document.body.dataset.commandAutomation === 'true') {
-      const policy = text(body, 'button', korean ? '이 서버 정책 열기' : 'Open this target policy', 'secondary'); policy.type = 'button';
-      policy.setAttribute('aria-describedby', targetContext.id); policy.onclick = () => policyAction?.(job.targetId ?? 'default');
-    }
-    const targetCapabilities = targetList.find(target => target.id === (job.targetId ?? 'default'));
-    if (document.body.dataset.commandAutomation === 'true' && targetCapabilities?.capabilities?.commandNameApproval !== false && job.kind === 'command' && !job.operation?.sourceContract && !['pending', 'running', 'evaluating'].includes(job.state)) {
-      const register = text(body, 'button', korean ? '이력의 명령 이름 등록' : 'Register names from this command', 'secondary'); register.type = 'button';
-      const bound = [job.targetId, job.targetRevision, job.profile, job.command].every(value => typeof value === 'string' && value.length);
-      register.disabled = !bound; register.setAttribute('aria-describedby', targetContext.id);
-      if (!bound) register.title = korean ? '현재 대상 정보가 없는 이력은 자동으로 연결하지 않습니다.' : 'History without target binding cannot be linked automatically.';
-      register.onclick = async () => { register.disabled = true;
-        try { await commandImportAction?.({ targetId: job.targetId, targetRevision: job.targetRevision, profile: job.profile, command: job.command }); }
-        finally { if (register.isConnected) register.disabled = !bound; }
-      };
-    }
-    const output = job.kind === 'command' && job.result?.structuredContent?.output;
-    if (output) {
-      text(body, 'p', korean ? `저장된 실행 결과 · ${output.bytes ?? 0}바이트 · ${output.state}` : `Stored result · ${output.bytes ?? 0} bytes · ${output.state}`, 'output-label');
-      text(body, 'p', korean ? '저장 상태와 현재 읽기 권한은 다릅니다. 열 때 대상 활성화·설정 revision·만료를 다시 확인합니다. SSH 전체 출력의 완전성은 확인되지 않았습니다.' : 'Storage state is separate from read access. Opening rechecks target activation, configuration revision and expiry. Complete SSH capture is not guaranteed.', 'target');
-      const area = text(body, 'div', '');
-      const load = async (offset = 0) => {
-        if (!box.isConnected) return;
-        button.disabled = true;
-        try {
-          const page = await handlers.output(output.id, offset);
-          if (!box.isConnected) return;
-          area.replaceChildren(); text(area, 'p', `${page.offsetBytes}–${page.nextOffset} / ${page.totalBytes} bytes`); text(area, 'pre', page.text, 'output');
-          button.textContent = page.eof ? (korean ? '처음부터 보기' : 'Read from start') : (korean ? '다음 부분' : 'Next page');
-          button.onclick = () => load(page.eof ? 0 : page.nextOffset);
-        } catch { if (box.isConnected) { area.replaceChildren(); text(area, 'p', korean ? '출력을 읽을 수 없습니다. 만료·연결 상태를 확인하세요. 명령은 다시 실행하지 않습니다.' : 'Output unavailable. Check expiry/connection; the command is not rerun.', 'error'); } }
-        finally { if (box.isConnected) button.disabled = false; }
-      };
-      const button = text(actions, 'button', korean ? '출력 보기' : 'View output', 'secondary'); button.disabled = output.state !== 'ready'; button.onclick = () => load();
-    } else if (job.result) {
-      text(body, 'p', t('실행 결과'), 'output-label');
-      const blocks = job.result.content?.filter(x => x.type === 'text');
-      text(body, 'pre', blocks?.length ? blocks.map(x => x.text ?? '').join('\n') : JSON.stringify(job.result.structuredContent ?? job.result, null, 2), 'output');
-    }
-    if (job.auditError) text(body, 'p', job.auditError, 'error');
-    if (job.state === 'completed' && job.kind === 'download') {
-      text(body, 'p', korean ? '서버 파일 준비 완료 · PC 저장이나 에이전트 수신은 아직 확인되지 않았습니다. 아래 파일 저장 버튼을 사용하세요.' : 'Server file ready. Device save or agent receipt is not confirmed. Use Save file below.', 'auth-note');
-      const button = text(actions, 'button', t('파일 저장'), 'secondary'); button.onclick = () => handlers.download(job.id);
-    }
-    if (!actions.childElementCount) actions.remove();
-    return { node: box, fingerprint: JSON.stringify(job), buttons };
+  function createRecord(job) {
+    const node = document.createElement('article'); node.className = 'request request-row'; node.dataset.requestId = job.id;
+    const head = text(node, 'div', '', 'request-top'), kind = text(head, 'span', '', 'kind'), badge = text(head, 'span');
+    const target = text(node, 'p', '', 'target'); target.id = 'request-target-' + job.id;
+    const command = text(node, 'pre', '', 'command');
+    const button = text(node, 'button', korean ? '요청 상세 보기' : 'View request details', 'secondary'); button.type = 'button'; button.dataset.requestDetail = job.id; button.setAttribute('aria-describedby', target.id); button.setAttribute('aria-controls', 'request-detail'); button.setAttribute('aria-expanded','false');
+    const record = { node, button, update(value) {
+      record.job = value; node.dataset.state = value.state;
+      kind.textContent = kinds[value.kind] ?? value.kind;
+      badge.className = `badge ${value.state}`; badge.textContent = `${states[value.state] ?? value.state}${recordedApprovalMode(value) === 'automatic' ? (korean ? ' · 자동승인' : ' · Automatic') : ''}`;
+      target.textContent = `${value.targetDisplayName ?? targetName}${value.targetId ? ` [${value.targetId}]` : ''} · ${value.target} · ${t('요청')} ${value.id}`;
+      const content = value.kind === 'command' ? value.command : JSON.stringify(value.operation, null, 2);
+      if (command.textContent !== content) command.textContent = content;
+      record.fingerprint = JSON.stringify(value);
+    } };
+    button.onclick = () => { requestOriginPath = document.body.dataset.page === 'history' ? '/history' : '/'; detail?.select(record.job, button); }; record.update(job); return record;
   }
   function reconcile(parent, desired) {
     const wanted = new Set(desired);
@@ -172,16 +117,18 @@ export function createWebView({ document, i18n }) {
     const nodes = entries.map(target => {
       const values = counts(target.id || undefined), fingerprint = JSON.stringify([target, values, selected]);
       let record = serverRecords.get(target.id);
-      if (record?.fingerprint !== fingerprint) {
+      if (!record) {
         const node = document.createElement('button'); node.type = 'button'; node.className = 'server-card'; node.dataset.targetId = target.id;
-        node.setAttribute('aria-pressed', String(target.id === selected));
-        text(node, 'strong', target.displayName);
-        if (target.id) text(node, 'span', `${target.id}${target.platform ? ' · ' + (target.platform === 'windows' ? 'Windows' : 'Linux') : ''} · ${t(target.enabled ? '등록됨' : '사용 중지')}`, 'server-id');
-        const labels=['보관 중', '승인 대기', '평가 중', '실행 중', '완료', '실패', '거부', '만료', '결과 불명'];
-        text(node, 'span', labels.map((label,index)=>`${t(label)} ${values[index]}`).join(' · '), 'server-counts');
+        const name = text(node, 'strong', target.displayName), identity = text(node, 'span', '', 'server-id'), counts = text(node, 'span', '', 'server-counts');
         node.onclick = () => { if (changeTarget && target.id !== (el('target-filter')?.value || '')) { el('target-filter').value = target.id; changeTarget(); } };
-        if (!changeTarget) node.disabled = true;
-        record = { node, fingerprint }; serverRecords.set(target.id, record);
+        record = { node, name, identity, counts }; serverRecords.set(target.id, record);
+      }
+      if (record.fingerprint !== fingerprint) {
+        record.node.setAttribute('aria-pressed', String(target.id === selected)); record.name.textContent = target.displayName;
+        record.identity.textContent = target.id ? `${target.id}${target.platform ? ' · ' + (target.platform === 'windows' ? 'Windows' : 'Linux') : ''} · ${t(target.enabled ? '등록됨' : '사용 중지')}` : '';
+        const labels=['보관 중', '승인 대기', '평가 중', '실행 중', '완료', '실패', '거부', '만료', '결과 불명'];
+        record.counts.textContent = labels.map((label,index)=>`${t(label)} ${values[index]}`).join(' · ');
+        record.node.disabled = !changeTarget; record.fingerprint = fingerprint;
       }
       return record.node;
     });
@@ -195,29 +142,32 @@ export function createWebView({ document, i18n }) {
     const selected = el('target-filter')?.value;
     const visible = selected ? jobs.filter(job => (job.targetId ?? 'default') === selected) : jobs;
     const ordered=[...visible].sort((a,b)=>(b.createdAt??0)-(a.createdAt??0)||a.id.localeCompare(b.id));
-    const historyJobs=ordered.filter(matchesHistory);
+    const latestById = new Map(jobs.map(job => [job.id, job]));
+    const historyJobs = historyResult ? historyResult.items.map(job => latestById.has(job.id) ? { ...job, ...latestById.get(job.id) } : job).filter(matchesHistory) : handlers?.history ? [] : ordered.filter(matchesHistory);
     if(historyAnchor){const anchor=historyJobs.findIndex(job=>job.id===historyAnchor);if(anchor>=0)historyOffset=anchor;else historyAnchor=undefined;}
     historyOffset=Math.min(historyOffset,Math.max(0,historyJobs.length-1));
-    const historySlice=historyJobs.slice(historyOffset,historyOffset+historyPageSize),pageIds=new Set(historySlice.map(job=>job.id));
-    const live = new Set(jobs.map(job => job.id)), pending = [], running = [], history = [];
+    const historySlice=historyResult ? historyJobs : historyJobs.slice(historyOffset,historyOffset+historyPageSize),pageIds=new Set(historySlice.map(job=>job.id));
+    const combined = [...new Map([...historySlice, ...jobs].map(job => [job.id, job])).values()];
+    const live = new Set(combined.map(job => job.id)), pending = [], running = [], history = [];
     for (const [id, record] of records) if (!live.has(id)) { record.node.remove(); records.delete(id); }
     // Aggregate queues arrive grouped by target, so insertion order is not chronology.
-    for (const job of ordered) {
+    const listJobs = [...new Map([...ordered.filter(job => ['pending','running','evaluating'].includes(job.state)), ...historySlice].map(job => [job.id, job])).values()];
+    for (const job of listJobs) {
       if(!['pending','running','evaluating'].includes(job.state)&&!pageIds.has(job.id))continue;
       let record = records.get(job.id);
       if (record?.fingerprint !== JSON.stringify(job)) {
-        const previous = record; record = createRecord(job, deciding, previous);
-        previous?.node.remove(); records.set(job.id, record);
+        if (record) record.update(job); else { record = createRecord(job); records.set(job.id, record); }
       }
-      for (const button of record.buttons) button.disabled = deciding;
       (job.state === 'pending' ? pending : ['running', 'evaluating'].includes(job.state) ? running : history).push(record.node);
     }
     reconcile(el('jobs'), pending.length ? pending : [placeholders.pending]);
     const filtered=historySearch?.value.trim()||historyFilter?.value||historyFrom?.value||historyTo?.value||historyRange.invalid||selected;
-    reconcile(el('history'), history.length ? history : [filtered?placeholders.filteredHistory:placeholders.history]);
+    reconcile(el('history'), history.length ? history : [historyBusy?placeholders.loadingHistory:historyFailure?placeholders.failedHistory:filtered?placeholders.filteredHistory:placeholders.history]);
     if (el('running')) reconcile(el('running'), running.length ? running : [placeholders.running]);
     el('pending-count').textContent = pending.length; el('history-count').textContent = historyJobs.length;
     if (el('running-count')) el('running-count').textContent = running.length;
+    if (el('work-summary')) el('work-summary').textContent = korean ? `승인 대기 ${pending.length} · 처리 중 ${running.length}` : `${pending.length} pending · ${running.length} in progress`;
+    detail?.update(combined, deciding);
     const navigation=el('history-pagination');
     if(navigation){
       if(!pager){
@@ -225,16 +175,27 @@ export function createWebView({ document, i18n }) {
         label.setAttribute('aria-live','polite');
         const move=delta=>{historyOffset=Math.max(0,historyOffset+delta);historyAnchor=historyJobsAtOffset();render(latestJobs,latestDeciding);};
         const historyJobsAtOffset=()=>{const target=el('target-filter')?.value;return [...latestJobs].filter(job=>(!target||(job.targetId??'default')===target)&&matchesHistory(job)).sort((a,b)=>(b.createdAt??0)-(a.createdAt??0)||a.id.localeCompare(b.id))[historyOffset]?.id;};
-        previous.onclick=()=>move(-historyPageSize);next.onclick=()=>move(historyPageSize);pager={previous,label,next};
+        previous.onclick=()=>{ if (handlers?.history) { historyCursor=historyPrevious.pop();queryHistory(); } else move(-historyPageSize); };
+        next.onclick=()=>{ if (handlers?.history) { historyPrevious.push(historyCursor);historyCursor=historyResult?.nextCursor;queryHistory(); } else move(historyPageSize); };pager={previous,label,next};
       }
-      navigation.hidden=historyJobs.length<=historyPageSize;
-      pager.label.textContent=`${historyOffset+1}–${Math.min(historyOffset+historyPageSize,historyJobs.length)} / ${historyJobs.length}`;
-      pager.previous.disabled=deciding||historyOffset===0;pager.next.disabled=deciding||historyOffset+historyPageSize>=historyJobs.length;
+      navigation.hidden=handlers?.history ? !historyPrevious.length&&!historyResult?.nextCursor : historyJobs.length<=historyPageSize;
+      pager.label.textContent=handlers?.history ? (korean ? `${historyPrevious.length+1}페이지 · ${historyJobs.length}건 표시` : `Page ${historyPrevious.length+1} · ${historyJobs.length} shown`) : `${historyOffset+1}–${Math.min(historyOffset+historyPageSize,historyJobs.length)} / ${historyJobs.length}`;
+      pager.previous.disabled=historyBusy||(handlers?.history ? !historyPrevious.length : historyOffset===0);pager.next.disabled=historyBusy||(handlers?.history ? !historyResult?.nextCursor : historyOffset+historyPageSize>=historyJobs.length);
     }
   }
   function initialize(actions) {
     handlers = actions;
-    document.addEventListener?.('admin-scope-change', identify);
+    el('history').tabIndex = 0; el('history').setAttribute('role','region'); el('history').setAttribute('aria-labelledby','history-heading');
+    detail = createRequestDetail({ document, i18n, bridgeName, targetName, targets: () => targetList, actions, policy: id => policyAction?.(id), importNames: input => commandImportAction?.(input), announce });
+    const intro = document.querySelector?.('.intro');
+    if (intro) {
+      returnButton = text(intro,'button',korean?'원 요청으로 돌아가기':'Return to request','secondary');returnButton.type='button';returnButton.id='request-return';returnButton.hidden=true;
+      returnButton.onclick=()=>document.dispatchEvent(new CustomEvent('admin-request-return',{detail:{path:requestOriginPath}}));
+    }
+    document.addEventListener?.('admin-scope-change', () => {
+      identify(); const active = ['approvals','history'].includes(document.body.dataset.page);detail?.page(active);
+      if(returnButton)returnButton.hidden=active||!detail?.selected();
+    });
     document.documentElement.lang = korean ? 'ko' : 'en';
     document.title = `${bridgeName} · ${targetName} · ${korean ? 'SSH 승인' : 'SSH approvals'}`;
     const serverIdentity = el('server-identity');
@@ -255,7 +216,9 @@ export function createWebView({ document, i18n }) {
     const note=text(filters,'p',korean?`요청 생성일 기준 · 현지시간 (${zone}) · 시작일·종료일 포함`:`Request creation date · Local time (${zone}) · Both dates included`,'history-date-note');note.id='history-date-note';
     historyDateError=text(filters,'p','','error history-date-error');historyDateError.id='history-date-error';historyDateError.setAttribute('role','alert');historyDateError.hidden=true;
     el('history').before(filters);
-    const filterChanged=()=>{historyOffset=0;historyAnchor=undefined;render(latestJobs,latestDeciding);};
+    historyStatus = text(filters,'p','','policy-message');historyStatus.id='history-query-status';historyStatus.setAttribute('role','status');
+    historyCoverage = text(filters,'p','','auth-note');historyCoverage.id='history-coverage';
+    const filterChanged=()=>{historyOffset=0;historyAnchor=undefined;if(actions.history)queryHistory(true);else render(latestJobs,latestDeciding);};
     historySearch.oninput=historyFilter.onchange=historyFrom.oninput=historyTo.oninput=filterChanged;
     clearDates.onclick=()=>{historyFrom.value=historyTo.value='';filterChanged();};
     el('token').addEventListener('keydown', event => { if (event.key === 'Enter') actions.load(); });
@@ -274,6 +237,17 @@ export function createWebView({ document, i18n }) {
     set importCommandNames(action) { commandImportAction = action; },
     uncertainDecisionMessage: () => korean ? '승인·거부 결과를 확인하지 못했습니다. 요청을 반복하지 말고 목록을 새로 조회해 처리 상태를 확인해 주세요. 계속 확인되지 않으면 서버 기록을 확인한 뒤 다시 로그인해 주세요.' : 'Approval or denial result needs checking. Refresh requests to reconcile the state; do not repeat the action. If it remains unresolved, inspect server records before signing in again.',
     initialize, render, multiTarget,
+    historyQuery,
+    detailRevision: () => detail?.revision(),
+    decision: (id, phase) => detail?.decision(id, phase),
+    historyLoading: value => { historyBusy=value;el('history')?.setAttribute('aria-busy', String(value));if(value&&historyStatus)historyStatus.textContent=korean?'이력을 조회하는 중입니다.':'Loading history.'; },
+    history: data => {
+      historyResult=data;historyBusy=false;historyFailure=false;el('history')?.setAttribute('aria-busy','false');
+      if(historyStatus)historyStatus.textContent=korean?`${data.items.length}건을 표시합니다. 전체 건수는 제공하지 않습니다.`:`Showing ${data.items.length} requests. An all-time total is not available.`;
+      if(historyCoverage)historyCoverage.textContent=data.coverage ? (korean?`조회 가능한 보관 기록 · 명령 저장기록 ${data.coverage.commandJournal?'포함':'없음'} · CLI 저장기록 ${data.coverage.cliJournal?'포함':'없음'} · 파일 이력은 현재 메모리에만 보관됩니다. 삭제·미등록 서버는 제외하며 CLI는 현재 연결 설정의 기록만 표시합니다. 조회 중 새 기록이 반영될 수 있습니다.`:`Retained history · Command journal ${data.coverage.commandJournal?'included':'unavailable'} · CLI journal ${data.coverage.cliJournal?'included':'unavailable'} · File history is memory-only. Unregistered targets are excluded; CLI history covers current bindings only. Records may change during browsing.`) : '';
+      render(latestJobs,latestDeciding);
+    },
+    historyError: message => { historyResult={items:[],nextCursor:null};historyBusy=false;historyFailure=true;el('history')?.setAttribute('aria-busy','false');if(historyStatus)historyStatus.textContent=message;render(latestJobs,latestDeciding); },
     target: () => el('target-filter')?.value || undefined,
     selectionRevision: () => selectionRevision,
     targets(data, changed) {
@@ -284,7 +258,7 @@ export function createWebView({ document, i18n }) {
       select.ariaLabel = korean ? '요청 조회 대상' : 'Request query target'; el('target-filter-label').hidden = false;
       identify(); changeTarget = select.onchange = () => {
         scrolls.set(lastTarget, ['jobs','running','history'].map(id => el(id)?.scrollTop ?? 0)); lastTarget = select.value;
-        selectionRevision++; historyOffset = 0; historyAnchor = undefined; render(latestJobs, latestDeciding); identify();
+        selectionRevision++; detail?.close(false); if(returnButton)returnButton.hidden=true; historyOffset = 0; historyAnchor = undefined; historyResult=undefined;historyCursor=undefined;historyPrevious=[];render(latestJobs, latestDeciding); identify();
         ['jobs','running','history'].forEach((id,i) => { if (el(id)) el(id).scrollTop = scrolls.get(lastTarget)?.[i] ?? 0; });
         document.dispatchEvent?.(new Event('admin-scope-change'));
         el('error').textContent = ''; el('error').hidden = true; changed();
@@ -294,7 +268,7 @@ export function createWebView({ document, i18n }) {
     unauthorized: () => { el('sign-in').hidden = false; },
     error: (message = '') => { el('error').textContent = message; el('error').hidden = !message; },
     loading: busy => { el('load').disabled = false; el('load').setAttribute('aria-busy', String(busy)); },
-    deciding: busy => { latestDeciding = busy; for (const record of records.values()) for (const button of record.buttons) button.disabled = busy; },
+    deciding: busy => { latestDeciding = busy; detail?.busy(busy); },
     connected: () => {
       el('connection').classList.add('connected'); el('connection-text').textContent = korean ? '관리자 연결됨' : 'Administrator connected'; el('logout').hidden = false; el('sign-in').hidden = true;
       el('updated').textContent = `${t('마지막 갱신')} ${new Date().toLocaleTimeString(locale)} · ${t('10초마다 갱신')}`;
@@ -303,6 +277,7 @@ export function createWebView({ document, i18n }) {
     logoutErrorMessage:()=>korean?'관리자 로그아웃을 확인하지 못했습니다. 다시 시도해 주세요.':'Administrator sign-out could not be confirmed. Please retry.',
     logoutRetry:()=>{el('logout').disabled=false;el('logout').textContent=korean?'로그아웃 다시 시도':'Retry sign out';},
     signedOut: () => {
+      detail?.clear();if(returnButton)returnButton.hidden=true;historyResult=undefined;historyCursor=undefined;historyPrevious=[];historyBusy=false;
       el('token').value = ''; el('jobs').replaceChildren(); el('history').replaceChildren(); records.clear();
       el('running')?.replaceChildren(); el('server-overview')?.replaceChildren(); serverRecords.clear(); targetList = [];
       if (el('overview-section')) el('overview-section').hidden = true;

@@ -12,7 +12,7 @@ const json = (res, status, value) => { res.writeHead(status, { 'Content-Type': '
 
 const escapeHtml = value => value.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
 
-export function createProtocolAdapters({ queue, commands, files, store, lifecycle, settings, signer, adminAccess, browserSessions, authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal, targets, requestSafety, commandPolicy, commandOutputs, automationMetrics, environmentEditor,agentCli, preservation }) {
+export function createProtocolAdapters({ queue, commands, files, store, lifecycle, settings, signer, adminAccess, browserSessions, authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal, targets, requestSafety, commandPolicy, commandOutputs, automationMetrics, environmentEditor,agentCli, preservation, retainedHistory }) {
   const capabilities = createCapabilities({ queue, store, signer, settings, targets, adminAuthMode: adminAccess.mode });
   const mcpServer = createMcpAdapter({ queue, commands, files, settings, capabilities, uiHtml, bindFileSource, shutdownSignal, targets, requestSafety, commandOutputs });
   const mcpHttp = createServer(async (req, res) => {
@@ -41,6 +41,12 @@ export function createProtocolAdapters({ queue, commands, files, store, lifecycl
       const authorization = await authorize();
       if (!authorization.allowed) return json(res, authorization.status ?? 403, { error: authorization.status === 401 ? 'Unauthorized' : authorization.status === 409 ? 'Request refused, expired, busy or unavailable' : 'Forbidden' });
       const url = new URL(req.url, settings.adminOrigin);
+      if (url.pathname === '/api/history') {
+        if (req.method !== 'GET') return json(res, 405, { error: 'Method not allowed' });
+        if (!retainedHistory) return json(res, 503, { error: 'HISTORY_UNAVAILABLE' });
+        try { return json(res, 200, retainedHistory(url.searchParams)); }
+        catch (error) { return json(res, error.historyCode ? error.status : 503, { error: error.historyCode ?? 'HISTORY_UNAVAILABLE' }); }
+      }
       if(req.method==='GET'&&url.pathname==='/signed-out'){
         res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"});
         return res.end('<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>관리자 로그아웃 · Signed out</title><style>body{font:16px system-ui;background:#f3f5fa;color:#182946;margin:0;padding:10vh 24px}main{max-width:560px;margin:auto;background:white;border:1px solid #dbe2ef;border-radius:16px;padding:32px}a{display:inline-block;margin-top:16px;color:#174db4}</style><main><h1>관리자 로그아웃 완료</h1><p>Administrator signed out.</p><p>MCP 인증은 유지됩니다. · MCP authentication is preserved.</p><a href="/">관리자 다시 연결 · Reconnect administrator</a></main></html>');
@@ -128,7 +134,7 @@ export function createProtocolAdapters({ queue, commands, files, store, lifecycl
         }
         return;
       }
-      if (req.method === 'GET' && ['/', '/settings', '/history', '/app.js'].includes(url.pathname)) {
+      if (req.method === 'GET' && ['/', '/settings', '/bridge', '/preferences', '/servers', '/history', '/app.js'].includes(url.pathname)) {
         res.writeHead(200, { 'Content-Type': url.pathname !== '/app.js' ? 'text/html; charset=utf-8' : 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'", 'Referrer-Policy': 'no-referrer' });
         return res.end(url.pathname !== '/app.js' ? webHtml.replace('data-auth-mode="token"', () => `data-auth-mode="${adminAccess.mode}" data-command-automation="${Boolean(commandPolicy)}" data-multi-target="${settings.targets ? 'true' : 'false'}" data-bridge-display-name="${escapeHtml(settings.bridgeDisplayName)}" data-target-display-name="${escapeHtml(settings.targetDisplayName)}"`)
           .replace('<title>SSH 승인 · Approval Portal</title>', () => `<title>${escapeHtml(settings.bridgeDisplayName)} · ${escapeHtml(settings.targetDisplayName)} · SSH Approval Portal</title>`) : webJs);

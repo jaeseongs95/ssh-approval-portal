@@ -3,6 +3,7 @@ import {openSync,closeSync,lstatSync} from 'node:fs';
 import {join} from 'node:path';
 import {idValid} from '../../domain/validation.mjs';
 import {AGENT_CLI_CONTRACT} from '../../domain/agent-cli.mjs';
+import {journalHistoryReader} from './history-query.mjs';
 
 /** Dedicated private journal; does not enable or write the command-automation policy. */
 export function createAgentCliState(root){
@@ -25,6 +26,7 @@ export function createAgentCliState(root){
   }
  }catch(error){db.close();throw error;}
  return {
+  ...journalHistoryReader(db),
   preservationRows(){const usage=db.prepare('SELECT count(*) AS count,coalesce(sum(length(CAST(body AS BLOB))+coalesce(length(CAST(remote_status AS BLOB)),0)),0) AS bytes FROM requests').get();if(usage.count>10000||usage.bytes>64*1024*1024)throw Error('CLI preservation budget exceeded');return {schema:db.prepare('SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY name').all(),requests:db.prepare('SELECT * FROM requests ORDER BY id').all()};},
   find(key){const row=db.prepare('SELECT digest,body FROM requests WHERE request_key=?').get(key);return row&&{digest:row.digest,job:JSON.parse(row.body)};},
   list(){return db.prepare('SELECT body FROM requests').all().map(row=>JSON.parse(row.body));},

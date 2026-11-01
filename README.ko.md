@@ -1,6 +1,6 @@
 # SSH Approval Portal 1.6.7
 
-[English](README.md) · [관리자 로그인](docs/admin-login.ko.md) · [에이전트 파일 업로드](docs/agent-upload.ko.md) · [구조와 호환성](docs/architecture.ko.md)
+[English](README.md) · [관리자 작업 공간](docs/admin-workspace.ko.md) · [관리자 로그인](docs/admin-login.ko.md) · [에이전트 파일 업로드](docs/agent-upload.ko.md) · [구조와 호환성](docs/architecture.ko.md)
 
 SSH 명령과 파일 전송을 사용자가 확인하고 승인할 수 있는 MCP 서버입니다. ChatGPT·Claude의 MCP Apps 카드와 웹 관리자 화면을 함께 제공합니다. 중계기 하나에 SSH 대상을 최대 32개 등록할 수 있습니다. 통합 관리자 화면에서 전체 요청을 확인하고 서버별로 좁혀 개별 요청을 처리합니다. [대상 설정 안내](docs/multi-targets.ko.md)를 참고하세요.
 

@@ -3,7 +3,7 @@ import { uiText as tr } from './ui-text.js';
 export function createEnvironmentPanel({ document, api, delay = ms => new Promise(resolve => setTimeout(resolve, ms)) }) {
   const el = (tag, text, cls) => { const n = document.createElement(tag); if (text) n.textContent = tr(text); if (cls) n.className = cls; return n; };
   const root = el('section', '', 'request environment-editor'); root.id = 'environment-editor';
-  root.append(el('h2', tr('중계기 전체 환경설정 · ENV')), el('p', tr('이 중계기 서비스 전체의 ENV와 재시작을 관리합니다. 위에서 선택한 정책 대상에 한정되지 않으며, 등록된 모든 대상의 연결과 요청에 영향을 줄 수 있습니다. ENV 저장 내용은 서비스 재시작 후 적용됩니다.'), 'policy-help'));
+  root.append(el('h2', tr('중계기 전체 환경설정 · ENV')), el('p', tr('등록된 모든 서버의 연결과 요청에 영향을 주는 설정입니다. 서버별 정책과 별개이며, 저장한 환경은 서비스 재시작 후 적용됩니다.'), 'policy-help'));
   const message = el('p', '', 'policy-message'); message.setAttribute('role', 'status'); root.append(message);
   const load = el('button', tr('ENV 불러오기'), 'secondary'); load.type = 'button'; root.append(load);
   const failure = el('p', '', 'error'); failure.setAttribute('role', 'alert'); root.append(failure);
@@ -32,7 +32,17 @@ export function createEnvironmentPanel({ document, api, delay = ms => new Promis
     snapshot = value; uncertain = false; setup.hidden = value.available; form.hidden = !value.available;
     if (!value.available) { message.textContent = tr(value.message); return; }
     fields.replaceChildren(); inputs.clear(); ack.checked = false;
+    const groups = new Map();
+    const groupFor = key => /(?:TOKEN|SECRET|KEY|AUTH|OIDC|ACCESS|OWNER)/.test(key) ? '인증과 접근' : /(?:JEV|MODEL|PROVIDER|ASSESS|EVALUAT|AUTOMAT)/.test(key) ? '평가와 자동승인' : /(?:SSH|HOST|PORT|ORIGIN|BRIDGE|TARGET)/.test(key) ? '연결과 서버' : '실행과 기타 설정';
     for (const item of value.fields) {
+      const group = groupFor(item.key);
+      if (!groups.has(group)) {
+        const section = el('details', '', 'environment-group');
+        section.open = group === '연결과 서버';
+        section.append(el('summary', tr(group)));
+        const grid = el('div', '', 'environment-group-grid'); section.append(grid); fields.append(section);
+        groups.set(group, grid);
+      }
       const row = el('div', '', 'environment-field'), label = el('label', '', 'policy-field');
       const input = el(item.type === 'boolean' ? 'select' : 'input'); input.id = 'env-' + item.key;
       label.append(el('span', item.label), input); row.append(label, el('small', item.key, 'policy-help'));
@@ -44,7 +54,7 @@ export function createEnvironmentPanel({ document, api, delay = ms => new Promis
       removeLabel.append(remove, el('span', tr(item.label) + tr(' 설정 해제 (기본값 사용)'))); row.append(removeLabel);
       remove.onchange = () => { input.disabled = remove.checked; ack.checked = false; lock(); };
       input.oninput = () => { remove.checked = false; failure.textContent = ''; ack.checked = false; lock(); };
-      fields.append(row); inputs.set(item.key, { input, remove, original: item.value ?? '', type: item.type });
+      groups.get(group).append(row); inputs.set(item.key, { input, remove, original: item.value ?? '', type: item.type });
     }
     readonly.textContent = tr('터미널에서 관리하는 항목 (값 비공개): ') + value.readOnlyKeys.join(', ');
     const states = { scheduled: tr('재시작 예약됨'), restarting: tr('재시작 중'), healthy: tr('재시작 완료 · health 정상'), 'rolled-back': tr('새 ENV로 기동 실패 · 이전 ENV 복구 완료'), 'recovery-failed': tr('복구 실패 · 서버 터미널 확인 필요'), failed: tr('재시작 실패'), conflict: tr('ENV가 별도로 변경되어 재시작 중단'), 'schedule-failed': tr('재시작 예약 실패') };

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {fileURLToPath} from 'node:url';
 import {launchBrowser} from './browser.mjs';
 import {fixtureServer} from './fixture-server.mjs';
+import {openRequest, navigate, environmentGroups, selectServer} from './admin-ui.mjs';
 const root=fileURLToPath(new URL('../../',import.meta.url));
 const binding=id=>({targetId:id,targetRevision:(id==='alpha'?'a':'b').repeat(64),profile:id+'-write',displayName:'동일 이름',enabled:true});
 const rule=id=>({...Object.fromEntries(Object.entries(binding(id)).filter(([key])=>!['displayName','enabled'].includes(key))),commands:['id'],deniedCommands:[],externalDisclosure:false,modelExecution:false,fallback:null,thresholds:{}});
@@ -31,67 +32,68 @@ async function fixture(run,{width=1280,locale='ko-KR',envAvailable=false,disable
   }finally{await browser?.close();await server.close();}
 }
 
-for(const width of [320,375,390,760,800,820,1440])test('query/policy scopes, draft/search and keyboard scroll remain independent at '+width,()=>fixture(async({page,server,posts})=>{
+for(const width of [320,375,390,760,800,820,1440])test('query/policy scopes, draft/search and keyboard page navigation remain independent at '+width,()=>fixture(async({page,server,posts})=>{
   server.state.jobs=[...Array.from({length:16},(_,i)=>job('a-'+i)),...Array.from({length:16},(_,i)=>job('run-'+i,'alpha','running')),job('beta-only','beta')];
   await page.goto(server.origin+'/');await page.locator('#jobs article').first().waitFor();
   await page.selectOption('#target-filter','alpha');await page.waitForFunction(()=>!document.querySelector('#load').getAttribute('aria-busy')||document.querySelector('#load').getAttribute('aria-busy')==='false');
   for(const id of ['jobs','running']){
     const region=page.locator('#'+id);assert.equal(await region.getAttribute('role'),'region');assert.equal(await region.getAttribute('tabindex'),'0');
-    await region.focus();await page.keyboard.press('PageDown');await page.waitForFunction(id=>document.getElementById(id).scrollTop>0,id);
-    assert.ok(await region.evaluate(n=>n.scrollHeight>n.clientHeight));
+    await region.focus();await page.keyboard.press('PageDown');await page.waitForFunction(()=>scrollY>0);
   }
-  const oldScroll=await page.locator('#jobs').evaluate(n=>n.scrollTop);
-  const approve=page.locator('#jobs article').first().getByRole('button',{name:'승인·실행',exact:true});
+  await openRequest(page, 'a-0', '#jobs');
+  const approve=page.locator('#request-detail-body').getByRole('button',{name:'승인·실행',exact:true});
   assert.match(await approve.getAttribute('aria-describedby'),/^request-target-/);
   const description=await approve.evaluate(n=>document.getElementById(n.getAttribute('aria-describedby')).textContent);assert.match(description,/alpha/);assert.match(description,/a{64}/);
   await page.selectOption('#target-filter','beta');await page.locator('#jobs article .command').filter({hasText:'beta-only'}).waitFor();
+  await openRequest(page, 'beta-only', '#jobs');
   await page.getByRole('button',{name:'이 서버 정책 열기',exact:true}).click();
-  await page.getByLabel('정책 편집 대상',{exact:true}).selectOption('alpha');await bulk(page);
+  await page.getByLabel('편집 대상 서버',{exact:true}).selectOption('alpha');await bulk(page);
   await page.getByLabel('자동승인할 명령',{exact:true}).fill('id\npwd');await page.getByLabel('명령 검색',{exact:true}).fill('pwd');
-  await page.getByRole('link',{name:'승인',exact:true}).click();
+  await page.locator('[data-page-link][href="/"]').click();
   assert.equal(await page.locator('#target-filter').inputValue(),'beta','policy navigation does not retarget queries');
+  await openRequest(page, 'beta-only', '#jobs');
   await page.getByRole('button',{name:'이 서버 정책 열기',exact:true}).click();
-  assert.equal(await page.getByLabel('정책 편집 대상',{exact:true}).inputValue(),'beta');assert.equal(await page.locator('#target-filter-label').isVisible(),false);
-  assert.match(await page.locator('#server-identity').textContent(),/중계기 설정/);assert.doesNotMatch(await page.locator('#server-identity').textContent(),/alpha|beta/);
-  const options=await page.getByLabel('정책 편집 대상',{exact:true}).locator('option').allTextContents();assert.ok(options.some(n=>n.includes('[alpha]'))&&options.some(n=>n.includes('[beta]')));
-  await page.getByLabel('정책 편집 대상',{exact:true}).selectOption('alpha');await bulk(page);
+  assert.equal(await page.getByLabel('편집 대상 서버',{exact:true}).inputValue(),'beta');assert.equal(await page.locator('#target-filter-label').isVisible(),false);
+  assert.match(await page.locator('#server-edit-context').textContent(),/beta/);
+  const options=await page.getByLabel('편집 대상 서버',{exact:true}).locator('option').allTextContents();assert.ok(options.some(n=>n.includes('[alpha]'))&&options.some(n=>n.includes('[beta]')));
+  await page.getByLabel('편집 대상 서버',{exact:true}).selectOption('alpha');await bulk(page);
   assert.equal(await page.getByLabel('자동승인할 명령',{exact:true}).inputValue(),'id\npwd');assert.equal(await page.getByLabel('명령 검색',{exact:true}).inputValue(),'pwd');
-  assert.match(await page.locator('#environment-editor h2').textContent(),/중계기 전체/);assert.match(await page.locator('#environment-editor').textContent(),/모든 대상/);
-  await page.getByRole('link',{name:'승인',exact:true}).click();await page.selectOption('#target-filter','alpha');
-  assert.ok(await page.locator('#jobs').evaluate(n=>n.scrollTop)>=oldScroll-2);
+  assert.equal(await page.locator('#environment-editor').isVisible(),false);await navigate(page,'/bridge');assert.equal(await page.locator('#environment-editor').isVisible(),true);assert.match(await page.locator('#environment-editor').textContent(),/모든 대상/);
+  await page.locator('[data-page-link][href="/"]').click();await page.selectOption('#target-filter','alpha');
+  assert.match(await page.locator('#jobs').textContent(),/a-0/);
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true);
   assert.equal(posts.length,0);
 },{width}));
 
 test('language discard confirmation preserves all target drafts on cancel and only then stores preference',()=>fixture(async({page,server,posts})=>{
-  await page.goto(server.origin+'/settings');await page.getByLabel('정책 편집 대상',{exact:true}).waitFor();await bulk(page);await page.getByLabel('자동승인할 명령',{exact:true}).fill('id\npwd');
-  await page.getByLabel('정책 편집 대상',{exact:true}).selectOption('beta');await bulk(page);await page.getByLabel('자동승인할 명령',{exact:true}).fill('id\nls');
-  await page.getByLabel('관리자 화면 언어',{exact:true}).selectOption('en');
-  let message;page.once('dialog',async dialog=>{message=dialog.message();await dialog.dismiss();});await page.getByRole('button',{name:'언어 적용·새로고침'}).click();
+  await page.goto(server.origin+'/settings');await selectServer(page,'alpha');await bulk(page);await page.getByLabel('자동승인할 명령',{exact:true}).fill('id\npwd');
+  await page.getByLabel('편집 대상 서버',{exact:true}).selectOption('beta');await bulk(page);await page.getByLabel('자동승인할 명령',{exact:true}).fill('id\nls');
+  await navigate(page,'/preferences');await page.getByLabel('관리자 화면 언어',{exact:true}).selectOption('en');
+  let message;page.once('dialog',async dialog=>{message=dialog.message();await dialog.dismiss();});await navigate(page,'/preferences');await page.getByRole('button',{name:'언어 적용·새로고침'}).click();
   assert.match(message,/alpha/);assert.match(message,/beta/);assert.equal(await page.evaluate(()=>localStorage.getItem('ssh-approval-language')),null);
   assert.equal(await page.getByLabel('자동승인할 명령',{exact:true}).inputValue(),'id\nls');assert.equal(posts.length,0);
-  page.once('dialog',dialog=>dialog.accept());await page.getByRole('button',{name:'언어 적용·새로고침'}).click();await page.waitForFunction(()=>document.documentElement.lang==='en');
+  page.once('dialog',dialog=>dialog.accept());await navigate(page,'/preferences');await page.getByRole('button',{name:'언어 적용·새로고침'}).click();await page.waitForFunction(()=>document.documentElement.lang==='en');
   assert.equal(await page.evaluate(()=>localStorage.getItem('ssh-approval-language')),'en');assert.equal(posts.length,0);
 }));
 
 test('lost policy save blocks language reload and target jumps without replaying POST',()=>fixture(async({page,server,posts})=>{
   await page.route('**/api/command-policy',async route=>{if(route.request().method()==='GET')return route.fallback();posts.push({path:'/api/command-policy'});return route.abort();});
-  server.state.jobs=[job('beta-only','beta')];await page.goto(server.origin+'/settings');await page.getByLabel('정책 편집 대상',{exact:true}).waitFor();await bulk(page);await page.getByLabel('자동승인할 명령',{exact:true}).fill('id\npwd');
+  server.state.jobs=[job('beta-only','beta')];await page.goto(server.origin+'/settings');await selectServer(page,'alpha');await bulk(page);await page.getByLabel('자동승인할 명령',{exact:true}).fill('id\npwd');
   await page.getByRole('tab',{name:'검토·저장',exact:true}).click();await page.getByRole('button',{name:'이 설정으로 위험도 확인',exact:true}).click();await page.getByRole('checkbox',{name:/^위험도와 변경 내용을/}).check();await page.getByRole('button',{name:'이 서버에 저장',exact:true}).click();
-  await page.getByText(/저장을 확인하지 못했습니다\./).waitFor();await page.getByLabel('관리자 화면 언어',{exact:true}).selectOption('en');await page.getByRole('button',{name:'언어 적용·새로고침'}).click();
+  await page.getByText(/저장을 확인하지 못했습니다\./).waitFor();await navigate(page,'/preferences');await page.getByLabel('관리자 화면 언어',{exact:true}).selectOption('en');await navigate(page,'/preferences');await page.getByRole('button',{name:'언어 적용·새로고침'}).click();
   await page.getByText(/처리 중이거나 결과 확인이 필요한 작업/).waitFor();assert.equal(await page.evaluate(()=>localStorage.getItem('ssh-approval-language')),null);
-  await page.getByRole('link',{name:'승인',exact:true}).click();await page.getByRole('button',{name:'이 서버 정책 열기',exact:true}).click();assert.equal(await page.getByLabel('정책 편집 대상',{exact:true}).inputValue(),'alpha');
+  await page.locator('[data-page-link][href="/"]').click();await openRequest(page,'beta-only','#jobs');await page.getByRole('button',{name:'이 서버 정책 열기',exact:true}).click();assert.equal(await page.getByLabel('편집 대상 서버',{exact:true}).inputValue(),'alpha');
   assert.equal(posts.filter(p=>p.path==='/api/command-policy').length,1);
 }));
 
 test('ENV dirty/busy/uncertain blocks or confirms language change without printing or persisting secret inputs',()=>fixture(async({page,server})=>{
-  await page.goto(server.origin+'/settings');const input=page.locator('#env-BRIDGE_DISPLAY_NAME');await input.fill('unsaved-name');
-  page.once('dialog',dialog=>dialog.dismiss());await page.getByRole('button',{name:'언어 적용·새로고침'}).click();assert.equal(await input.inputValue(),'unsaved-name');
+  await page.goto(server.origin+'/bridge');await environmentGroups(page);const input=page.locator('#env-BRIDGE_DISPLAY_NAME');await input.fill('unsaved-name');
+  page.once('dialog',dialog=>dialog.dismiss());await navigate(page,'/preferences');await page.getByRole('button',{name:'언어 적용·새로고침'}).click();assert.equal(await input.inputValue(),'unsaved-name');
   let release,entered;const waiting=new Promise(resolve=>entered=resolve);let posts=0;
   await page.route('**/api/environment',async route=>{if(route.request().method()==='GET')return route.fallback();posts++;entered();await new Promise(resolve=>release=resolve);await route.abort().catch(()=>{});});
-  await page.locator('#environment-editor input[type=checkbox]').last().check();await page.getByRole('button',{name:'ENV 저장',exact:true}).click();await waiting;
-  await page.getByRole('button',{name:'언어 적용·새로고침'}).click();await page.getByText(/처리 중이거나 결과 확인이 필요한 작업/).waitFor();release();await page.getByText(/저장됐을 수도 있으므로/).waitFor();
-  await page.getByRole('button',{name:'언어 적용·새로고침'}).click();assert.equal(await input.inputValue(),'unsaved-name');assert.equal(await page.evaluate(()=>localStorage.getItem('ssh-approval-language')),null);assert.equal(posts,1);
+  await navigate(page,'/bridge');await page.locator('#environment-editor form > .policy-check input').check();await page.getByRole('button',{name:'ENV 저장',exact:true}).click();await waiting;
+  await navigate(page,'/preferences');await page.getByRole('button',{name:'언어 적용·새로고침'}).click();await page.getByText(/처리 중이거나 결과 확인이 필요한 작업/).waitFor();release();await navigate(page,'/bridge');await page.getByText(/저장됐을 수도 있으므로/).waitFor();
+  await navigate(page,'/preferences');await page.getByRole('button',{name:'언어 적용·새로고침'}).click();assert.equal(await input.inputValue(),'unsaved-name');assert.equal(await page.evaluate(()=>localStorage.getItem('ssh-approval-language')),null);assert.equal(posts,1);
 },{envAvailable:true}));
 
 test('a hung query is superseded immediately; late responses cannot replace the selected target',()=>fixture(async({page,server})=>{
@@ -107,14 +109,14 @@ test('old metrics from A to B to A are discarded by generation including page ch
   await page.goto(server.origin+'/');await page.locator('#target-filter').waitFor();await page.selectOption('#target-filter','alpha');
   let release,entered;const waiting=new Promise(resolve=>entered=resolve);let count=0;
   await page.route('**/api/automation-metrics*',async route=>{count++;if(count===1){entered();await new Promise(resolve=>release=resolve);return route.fulfill({json:{available:true,from:0,to:0,total:999,providers:{}}}).catch(()=>{});}return route.fulfill({json:{available:false,from:count*100000,to:count*100000}});});
-  await page.locator('#automation-metrics summary').click();await waiting;await page.selectOption('#target-filter','beta');await page.selectOption('#target-filter','alpha');await page.getByRole('link',{name:'설정',exact:true}).click();
+  await page.locator('#automation-metrics summary').click();await waiting;await page.selectOption('#target-filter','beta');await page.selectOption('#target-filter','alpha');await page.locator('[data-page-link][href="/settings"]').click();await selectServer(page,'alpha');
   await page.waitForFunction(()=>document.querySelector('#automation-metrics button').disabled===false);release();
   assert.doesNotMatch(await page.locator('#automation-metrics').textContent(),/999|beta/);assert.match(await page.locator('#automation-metrics').textContent(),/alpha/);
 }));
 
 test('inactive policy deletion is explicit and reviewed; duplicate request IDs expose no approval buttons',()=>fixture(async({page,server,posts})=>{
   server.state.jobs=[job('duplicate'),job('duplicate','beta')];await page.goto(server.origin+'/');await page.getByText(/중복된 요청 ID/).waitFor();assert.equal(await page.locator('#jobs article button').count(),0);
-  await page.getByRole('link',{name:'설정',exact:true}).click();const removal=page.getByRole('checkbox',{name:/alpha.*현재 미적용/});await removal.check();await page.getByRole('tab',{name:'검토·저장',exact:true}).click();
+  await page.locator('[data-page-link][href="/settings"]').click();await selectServer(page,'alpha');const removal=page.getByRole('checkbox',{name:/alpha.*현재 미적용/});await removal.check();await page.getByRole('tab',{name:'검토·저장',exact:true}).click();
   await page.getByRole('button',{name:'이 설정으로 위험도 확인',exact:true}).click();await page.getByRole('checkbox',{name:/^위험도와 변경 내용을/}).waitFor({state:'visible'});assert.deepEqual(posts[0].body.policy.targets.map(t=>t.targetId),['beta']);assert.equal(posts.length,1);
 },{disabled:true}));
 
@@ -122,37 +124,37 @@ test('lost approval response blocks language until a current request status reco
   server.state.jobs=[job('approval-unknown')];let posts=0,failedReads=false;
   await page.route('**/api/requests',route=>failedReads?route.fulfill({status:503,json:{error:'read temporarily unavailable'}}):route.fallback());
   await page.route('**/api/approval-unknown/approve',route=>{posts++;server.state.jobs[0].state='running';failedReads=true;return route.abort();});
-  await page.goto(server.origin+'/');await page.getByRole('button',{name:'승인·실행',exact:true}).click();await page.getByText(/승인·거부 결과.*read temporarily unavailable/).waitFor();
-  await page.getByRole('link',{name:'설정',exact:true}).click();await page.getByLabel('관리자 화면 언어',{exact:true}).selectOption('en');await page.getByRole('button',{name:'언어 적용·새로고침'}).click();
+  await page.goto(server.origin+'/');await openRequest(page,'approval-unknown','#jobs');await page.getByRole('button',{name:'승인·실행',exact:true}).click();await page.getByText(/승인·거부 결과.*read temporarily unavailable/).waitFor();
+  await page.locator('[data-page-link][href="/settings"]').click();await navigate(page,'/preferences');await page.getByLabel('관리자 화면 언어',{exact:true}).selectOption('en');await navigate(page,'/preferences');await page.getByRole('button',{name:'언어 적용·새로고침'}).click();
   await page.getByText(/처리 중이거나 결과 확인이 필요한 작업/).waitFor();assert.equal(await page.evaluate(()=>localStorage.getItem('ssh-approval-language')),null);assert.equal(posts,1);
   failedReads=false;server.state.jobs[0].state='pending';await page.locator('#load').click();await page.waitForFunction(()=>document.querySelector('#load').getAttribute('aria-busy')==='false');
-  await page.getByRole('button',{name:'언어 적용·새로고침'}).click();assert.equal(await page.evaluate(()=>localStorage.getItem('ssh-approval-language')),null,'pending alone cannot prove the lost approval was never received');
+  await navigate(page,'/preferences');await page.getByRole('button',{name:'언어 적용·새로고침'}).click();assert.equal(await page.evaluate(()=>localStorage.getItem('ssh-approval-language')),null,'pending alone cannot prove the lost approval was never received');
   server.state.jobs[0].state='running';await page.locator('#load').click();await page.waitForFunction(()=>document.querySelector('#load').getAttribute('aria-busy')==='false');
-  await page.getByRole('button',{name:'언어 적용·새로고침'}).click();await page.waitForFunction(()=>document.documentElement.lang==='en');assert.equal(posts,1);assert.equal(server.state.jobs[0].state,'running');
+  await navigate(page,'/preferences');await page.getByRole('button',{name:'언어 적용·새로고침'}).click();await page.waitForFunction(()=>document.documentElement.lang==='en');assert.equal(posts,1);assert.equal(server.state.jobs[0].state,'running');
 }));
 
 test('download link POST blocks language while pending and cannot navigate after an explicit page change',()=>fixture(async({page,server})=>{
   server.state.jobs=[{...job('download-busy','alpha','completed'),kind:'download',operation:{remotePath:'/tmp/synthetic.bin'}}];
   let release,entered;const started=new Promise(resolve=>entered=resolve);let posts=0;
   await page.route('**/api/download-busy/download',async route=>{posts++;entered();await new Promise(resolve=>release=resolve);await route.fulfill({json:{downloadUrl:'/fixture/download/download-busy'}}).catch(()=>{});});
-  await page.goto(server.origin+'/history');await page.locator('#history details summary').click();await page.locator('#history').getByRole('button',{name:'파일 저장',exact:true}).click();await started;
-  await page.getByRole('link',{name:'설정',exact:true}).click();await page.getByRole('button',{name:'언어 적용·새로고침'}).click();await page.getByText(/처리 중이거나 결과 확인이 필요한 작업/).waitFor();assert.equal(await page.evaluate(()=>localStorage.getItem('ssh-approval-language')),null);
+  await page.goto(server.origin+'/history');await page.locator('#history article [data-request-detail]').click();await page.locator('#request-detail-body').getByRole('button',{name:'파일 저장',exact:true}).click();await started;
+  await page.locator('[data-page-link][href="/settings"]').click();await navigate(page,'/preferences');await page.getByRole('button',{name:'언어 적용·새로고침'}).click();await page.getByText(/처리 중이거나 결과 확인이 필요한 작업/).waitFor();assert.equal(await page.evaluate(()=>localStorage.getItem('ssh-approval-language')),null);
   const finished=page.waitForResponse(response=>response.url().includes('/api/download-busy/download'));release();await finished;
   await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
-  assert.equal(new URL(page.url()).pathname,'/settings');assert.equal(posts,1);
-  await page.getByLabel('관리자 화면 언어',{exact:true}).selectOption('en');await page.getByRole('button',{name:'언어 적용·새로고침'}).click();await page.waitForFunction(()=>document.documentElement.lang==='en');assert.equal(new URL(page.url()).pathname,'/settings');
+  assert.equal(new URL(page.url()).pathname,'/preferences');assert.equal(posts,1);
+  await navigate(page,'/preferences');await page.getByLabel('관리자 화면 언어',{exact:true}).selectOption('en');await navigate(page,'/preferences');await page.getByRole('button',{name:'언어 적용·새로고침'}).click();await page.waitForFunction(()=>document.documentElement.lang==='en');assert.equal(new URL(page.url()).pathname,'/preferences');
 }));
 
 for(const navigation of ['click','back','unchanged'])for(const outcome of ['success','error'])test('download page generation rejects stale responses ('+navigation+'-'+outcome+')',()=>fixture(async({page,server})=>{
   server.state.jobs=[{...job('page-download','alpha','completed'),kind:'download',operation:{remotePath:'/tmp/synthetic.bin'}}];
   let entered,release,posts=0;const started=new Promise(resolve=>entered=resolve),held=new Promise(resolve=>release=resolve);
   await page.route('**/api/page-download/download',async route=>{posts++;entered();await held;await route.fulfill(outcome==='success'?{json:{downloadUrl:'/fixture/download/page-download'}}:{status:409,json:{error:'synthetic page download error'}}).catch(()=>{});});
-  await page.goto(server.origin+'/history');await page.locator('#history details summary').click();await page.locator('#history').getByRole('button',{name:'파일 저장',exact:true}).click();await started;
+  await page.goto(server.origin+'/history');await page.locator('#history article [data-request-detail]').click();await page.locator('#request-detail-body').getByRole('button',{name:'파일 저장',exact:true}).click();await started;
   if(navigation!=='unchanged'){
-    await page.getByRole('link',{name:'설정',exact:true}).click();
-    if(navigation==='back')await page.goBack();else await page.getByRole('link',{name:'승인 이력',exact:true}).click();
+    await page.locator('[data-page-link][href="/settings"]').click();
+    if(navigation==='back')await page.goBack();else await page.locator('[data-page-link][href="/history"]').click();
     await page.waitForURL('**/history');
-  }else await page.getByRole('link',{name:'승인 이력',exact:true}).click();
+  }else await page.locator('[data-page-link][href="/history"]').click();
   await page.locator('#error').evaluate(node=>node.textContent='Current page notice');
   const response=page.waitForResponse(reply=>reply.url().endsWith('/api/page-download/download'));release();await(await response).finished();
   if(navigation==='unchanged'&&outcome==='success'){

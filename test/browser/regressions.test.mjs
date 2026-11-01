@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import {launchBrowser} from './browser.mjs';
 import { fixtureServer } from './fixture-server.mjs';
+import { openRequest, historyReady, navigate, selectServer } from './admin-ui.mjs';
 
 const root = resolve(process.env.SOLID_BROWSER_ROOT ?? fileURLToPath(new URL('../../', import.meta.url)));
 async function browserFixture(run, locale = 'en-US') {
@@ -21,6 +22,12 @@ async function card(page, server) {
   await page.goto(server.origin + '/fixture/card'); await page.waitForFunction(() => window.fixture);
   await page.evaluate(() => window.fixture.transfer('/tmp/A'));
   await page.locator('input[type=file]').setInputFiles({ name: 'fixture.bin', mimeType: 'application/octet-stream', buffer: Buffer.from([1, 2, 3, 4]) });
+}
+async function webRequest(page, server, value) {
+  server.state.jobs = [value];
+  const area = value.state === 'pending' ? '#jobs' : ['running','evaluating'].includes(value.state) ? '#running' : '#history';
+  await page.goto(server.origin + (area === '#history' ? '/history' : '/'));
+  await openRequest(page, value.id, area);
 }
 
 
@@ -42,8 +49,10 @@ for(const locale of ['ko-KR','en-US'])for(const [width,height]of [[1440,900],[12
   await page.route('**/api/environment',route=>route.fulfill({json:{available:true,revision:'a'.repeat(64),fields:[{key:'BRIDGE_DISPLAY_NAME',label:'중계기 표시 이름',type:'text',value:'fixture'}],readOnlyKeys:[],restart:{state:'idle'}}}));
   await page.setViewportSize({width,height});await page.goto(server.origin+'/settings');
   await page.locator('#connection.connected').waitFor();
+  await navigate(page,'/bridge');
   await page.locator('#env-BRIDGE_DISPLAY_NAME').waitFor({state:'attached'});
-  await page.waitForFunction(()=>document.querySelector('#important-settings select')?.options.length===1);
+  await navigate(page,'/settings');
+  await selectServer(page,'default');
   assert.equal(policyReads,1,'SSO settings load without an administrator-token click');
   assert.equal(await page.locator('#token').isVisible(),false);
   assert.equal(await page.locator('#auth-note').textContent(),locale==='ko-KR'?'SSO에서 확인한 본인 계정으로 요청을 처리합니다.':'Manage requests with your owner account verified by SSO.');
@@ -75,16 +84,16 @@ test('card and web show classification and actual review condition before diagno
   await page.getByText('60.0%', { exact: true }).waitFor();
   await page.getByText(/구체적인 위험 근거는 제공하지/).waitFor();
   assert.doesNotMatch(await page.locator('.assessment-details').textContent(), /confidence|command-explanation/);
-  server.state.jobs = [value]; await page.goto(server.origin + '/fixture/web');
+  await webRequest(page, server, value);
   await page.getByText('위험도가 높다는 평가로 사용자 확인이 필요합니다.', { exact: true }).waitFor();
   assert.equal(await page.locator('.assessment-scores dd').first().isVisible(), false);
   await page.getByText('AI 평가 상세', { exact: true }).click(); await page.getByText('40.0%', { exact: true }).waitFor();
   server.state.jobs = [{ ...value, decision: { decision: 'review', reasonCode: 'model_review', assessment: decision.assessment, provider: 'jev' } }];
-  await page.reload(); await page.getByText('평가 결과에 따른 사용자 확인 필요 · AI 분류: 높은 위험', { exact: true }).waitFor();
+  await page.reload(); await openRequest(page, value.id, '#jobs'); await page.getByText('평가 결과에 따른 사용자 확인 필요 · AI 분류: 높은 위험', { exact: true }).waitFor();
   assert.equal(await page.getByText(/못 미쳐/).count(), 0, 'old records cannot claim an unrecorded gate failure');
   for (const [reason, label, message] of [['execution_disabled', 'high_risk', 'Jev 자동승인이 꺼져 있어 사용자 승인이 필요합니다. · AI 분류: 높은 위험'], ['threshold_missing', 'uncertain', '자동승인 기준이 등록되지 않아 사용자 승인이 필요합니다. · AI 분류: 판단 불가']]) {
     const next = { ...value, decision: { ...decision, reviewReason: reason, assessment: { ...decision.assessment, label } } };
-    server.state.jobs = [next]; await page.goto(server.origin + '/fixture/web'); await page.getByText(message, { exact: true }).waitFor();
+    await webRequest(page, server, next); await page.getByText(message, { exact: true }).waitFor();
     await page.goto(server.origin + '/fixture/card'); await page.waitForFunction(() => window.fixture);
     await page.evaluate(value => window.fixture.receive({ structuredContent: value, _meta: { sshApproval: { uiEnabled: true } } }), next);
     await page.getByText(message, { exact: true }).waitFor();
@@ -103,7 +112,7 @@ for (const locale of ['ko-KR', 'en-US']) for (const label of ['low_risk', 'high_
     if (surface === 'card') {
       await page.goto(server.origin + '/fixture/card'); await page.waitForFunction(() => window.fixture);
       await page.evaluate(value => window.fixture.receive({ structuredContent: value, _meta: { sshApproval: {} } }), value);
-    } else { server.state.jobs = [value]; await page.goto(server.origin + '/fixture/web'); }
+    } else { await webRequest(page, server, value); }
     const summary = page.locator('.assessment-summary');
     assert.ok((await summary.textContent()).includes(korean ? (label === 'low_risk' ? '안전' : '위험') : (label === 'low_risk' ? 'Safe' : 'Risk')));
     await page.getByText(korean ? 'AI 평가 상세' : 'AI assessment details', { exact: true }).click();
@@ -137,11 +146,11 @@ const job = (id, state = 'pending') => ({ id, kind: 'command', state, command: '
 test('UI-S-02 unrelated 10-second refresh preserves node identity, focus, selection, open details and scroll', async () => browserFixture(async (page, server) => {
   server.state.jobs = [job('A'), job('C', 'completed')];
   // Freeze before navigation so setup actions cannot consume part of the polling interval.
-  await page.clock.install({time:new Date('2026-01-01T00:00:00Z')}); await page.clock.pauseAt(new Date('2026-01-01T00:00:01Z')); await page.goto(server.origin + '/fixture/web'); await page.locator('#jobs .actions button').first().waitFor(); await page.locator('[href="/history"]').click();
+  await page.clock.install({time:new Date('2026-01-01T00:00:00Z')}); await page.clock.pauseAt(new Date('2026-01-01T00:00:01Z')); await page.goto(server.origin + '/fixture/web'); await page.locator('#jobs [data-request-detail]').first().waitFor(); await page.locator('[href="/history"]').click();await openRequest(page,'C');
   await page.evaluate(() => {
-    const pending = document.querySelector('#jobs .request'), history = document.querySelector('#history details'), output = history.querySelector('.output');
-    history.open = true; output.scrollTop = 120;
-    const button = history.querySelector('summary'); button.focus();
+    const pending = document.querySelector('#jobs .request'), history = document.querySelector('#history article[data-request-id]'), output = document.querySelector('#request-output');
+    output.scrollTop = 120;
+    const button = history.querySelector('[data-request-detail]'); button.focus();
     const range = document.createRange(); range.setStart(output.firstChild, 0); range.setEnd(output.firstChild, 12); getSelection().removeAllRanges(); getSelection().addRange(range);
     window.saved = { pending, history, output, button, selected: getSelection().toString(), scroll: output.scrollTop };
   });
@@ -150,9 +159,9 @@ test('UI-S-02 unrelated 10-second refresh preserves node identity, focus, select
   const reads = server.state.reads; server.state.jobs.push(job('B'));
   await page.clock.runFor(9999); assert.equal(server.state.reads, reads, 'Poll must not run before ten seconds');
   await page.clock.runFor(1); await page.waitForFunction(() => document.querySelector('#pending-count').textContent === '2');
-  const result = await page.evaluate(() => ({ pending: saved.pending.isConnected && saved.pending.querySelector('.command').textContent === 'printf A', history: saved.history === document.querySelector('#history details'),
-    output: saved.output === document.querySelector('#history .output'), focus: document.activeElement === saved.button, selected: getSelection().toString() === saved.selected,
-    open: saved.history.open, scroll: saved.output.scrollTop === saved.scroll }));
+  const result = await page.evaluate(() => ({ pending: saved.pending.isConnected && saved.pending.querySelector('.command').textContent === 'printf A', history: saved.history === document.querySelector('#history article[data-request-id]'),
+    output: saved.output === document.querySelector('#request-output'), focus: document.activeElement === saved.button, selected: getSelection().toString() === saved.selected,
+    open: !document.querySelector('#request-detail').hidden && document.querySelector('#request-detail-body').dataset.requestId==='C', scroll: saved.output.scrollTop === saved.scroll }));
   assert.deepEqual(result, { pending: true, history: true, output: true, focus: true, selected: true, open: true, scroll: true });
   assert.ok(server.state.requests.every(request => request.authorization === null), 'Access mode must not send a bearer token');
 }));
@@ -171,8 +180,9 @@ test('server names distinguish installations, remain text, and accompany pending
   await page.goto(server.origin + '/fixture/web'); await page.locator('#jobs .request').waitFor();
   assert.equal(await page.title(), `${malicious} · 운영 대상 & SSH · SSH approvals`);
   assert.match(await page.locator('#server-identity').textContent(), /Bridge · <img/);
-  for (const selector of ['#jobs .target', '#history .target']) {
-    const text = await page.locator(selector).textContent();
+  for (const [id,area] of [['named-pending','#jobs'], ['named-done','#history']]) {
+    if(area==='#history')await navigate(page,'/history');await openRequest(page,id,area);
+    const text = await page.locator('#request-detail-target').textContent();
     assert.ok(text.includes(malicious)); assert.ok(text.includes('Target server · 운영 대상 & SSH')); assert.ok(text.includes('(fixture)'));
   }
   assert.equal(await page.locator('img').count(), 0); assert.equal(await page.evaluate(() => window.nameInjected), undefined);
@@ -234,12 +244,12 @@ for (const mode of ['beta-success','beta-error','aba-success','aba-error','uncha
   server.state.multiTarget = true;server.state.downloadError=mode.endsWith('error');
   server.state.jobs=['alpha','beta'].map(id=>({...job(id+'-file','completed'),kind:'download',operation:{remotePath:'/tmp/same.bin',elevate:false},targetId:id,targetDisplayName:id+' 이름',targetRevision:id+'-v1',hostKey:'SHA256:'+id}));
   await page.goto(server.origin+'/history');await page.locator('#target-filter').waitFor({state:'visible'});
-  await page.selectOption('#target-filter','alpha');await page.waitForFunction(()=>document.querySelector('#history details')?.dataset.requestId==='alpha-file'&&document.querySelector('#history-count').textContent==='1');
-  await page.locator('#history details').evaluate(node=>node.open=true);
+  await page.selectOption('#target-filter','alpha');await page.waitForFunction(()=>document.querySelector('#history article[data-request-id]')?.dataset.requestId==='alpha-file'&&document.querySelector('#history-count').textContent==='1');
+  await openRequest(page, 'alpha-file');
   let entered, release;const started=new Promise(resolve=>entered=resolve),held=new Promise(resolve=>release=resolve);
   server.state.beforeDownload=async()=>{entered();await held;};
   const reply=page.waitForResponse(response=>response.url().endsWith('/api/alpha-file/download'));
-  await page.locator('#history button').click();await started;
+  await page.locator('#request-detail-body').getByRole('button',{name:'Save file',exact:true}).click();await started;
   if(mode!=='unchanged') {
     await page.selectOption('#target-filter','beta');
     if(mode.startsWith('aba'))await page.selectOption('#target-filter','alpha');
@@ -258,23 +268,23 @@ test('unified console counts all targets, separates running work, sorts across q
   const on=(id,target,state,createdAt,kind='command')=>({...job(id,state),targetId:target,targetDisplayName:'same name',targetRevision:target+'-v1',hostKey:'SHA256:'+target,createdAt,kind,...(kind==='command'?{}:{operation:{remotePath:'/tmp/same.bin',elevate:false}})});
   // Grouped target queues deliberately arrive out of chronological order.
   server.state.jobs=[on('alpha-old','alpha','pending',10),on('alpha-upload','alpha','pending',30,'upload'),on('alpha-done','alpha','completed',11),on('beta-new','beta','pending',20),on('beta-running','beta','running',40,'download'),on('beta-failed','beta','failed',12)];
-  await page.goto(server.origin+'/fixture/web');await page.locator('#server-overview button').first().waitFor();
+  await page.goto(server.origin+'/fixture/web');await page.locator('#overview-section > summary').click();await page.locator('#server-overview button').first().waitFor();
   assert.equal(await page.locator('#pending-count').textContent(),'3');
   assert.equal(await page.locator('#running-count').textContent(),'1');
   assert.equal(await page.locator('#history-count').textContent(),'2');
   assert.deepEqual(await page.locator('#jobs .request').evaluateAll(nodes=>nodes.map(n=>n.dataset.requestId)),['alpha-upload','beta-new','alpha-old']);
   const counts=await page.locator('#server-overview button').first().textContent();
   for(const expected of ['Retained 6','Awaiting approval 3','Assessing 0','Running 1','Completed 1','Failed 1'])assert.ok(counts.includes(expected));
-  assert.ok((await page.locator('#history summary').allTextContents()).every(text=>/same name \[(alpha|beta)\]/.test(text)));
+  assert.ok((await page.locator('#history .target').allTextContents()).every(text=>/same name \[(alpha|beta)\]/.test(text)));
   const beta=page.locator('#server-overview button[data-target-id=beta]');
   await beta.click();await page.waitForFunction(()=>document.querySelector('#pending-count').textContent==='1');
   assert.equal(await beta.getAttribute('aria-pressed'),'true');
   assert.equal(await page.locator('#jobs .request').getAttribute('data-request-id'),'beta-new');
   assert.ok((await page.locator('#server-overview button').first().textContent()).includes('Awaiting approval 3'),'Server selection must not shrink global counts');
-  await page.locator('#jobs button').first().click();await page.waitForFunction(()=>document.querySelector('#running-count').textContent==='2');
+  await openRequest(page,'beta-new','#jobs');await page.locator('#request-detail-body').getByRole('button',{name:'Approve and run',exact:true}).click();await page.waitForFunction(()=>document.querySelector('#running-count').textContent==='2');
   assert.deepEqual(server.state.requests.filter(r=>r.method==='POST'),[{method:'POST',id:'beta-new',action:'approve'}]);
   await page.selectOption('#target-filter','alpha');await page.waitForFunction(()=>document.querySelector('#pending-count').textContent==='2');
-  await page.locator('#jobs .request[data-request-id=alpha-upload] button').last().click();
+  await openRequest(page,'alpha-upload','#jobs');await page.locator('#request-detail-body').getByRole('button',{name:'Denied',exact:true}).click();
   await page.waitForFunction(()=>document.querySelector('#history-count').textContent==='2');
   assert.equal(server.state.jobs.find(j=>j.id==='alpha-upload').state,'denied');
   assert.equal(server.state.jobs.find(j=>j.id==='alpha-old').state,'pending');
@@ -291,12 +301,12 @@ test('approved history keeps historical scores and threshold while explaining th
       assessment: { model: 'jev-1.14.0', questionVersion: 'ssh-command-risk-v4', label: 'uncertain', confidence: 0.505, probabilities: { low_risk: 0.01, high_risk: 0.32, uncertain: 0.67 } }, threshold: { minLowRisk: 0.51 } } };
   server.state.jobs = [value];
   await page.goto(server.origin + '/history');
-  await page.locator('#history > details').evaluate(node => node.open = true);
+  await openRequest(page);
   await page.getByText('사용자가 승인한 요청입니다', { exact: true }).waitFor();
   await page.getByText('당시 자동승인을 보류했고, 사용자가 직접 승인해 진행한 요청입니다.', { exact: true }).waitFor();
   await page.getByText('AI 평가 상세', { exact: true }).click();
   await page.getByText('당시 보류 사유: AI가 위험도를 판단하지 못했습니다.', { exact: true }).waitFor();
-  assert.doesNotMatch(await page.locator('#history').textContent(), /사용자 확인이 필요합니다/);
+  assert.doesNotMatch(await page.locator('#request-detail-body').textContent(), /사용자 확인이 필요합니다/);
   assert.match(await page.locator('.assessment-details').textContent(), /51.0% 이상/);
   assert.deepEqual(await page.locator('.assessment-scores dt').allTextContents(), ['낮은 위험', '높은 위험', '판단 불가']);
   assert.deepEqual(await page.locator('.assessment-scores dd').allTextContents(), ['1.0%', '32.0%', '67.0%']);
@@ -310,7 +320,7 @@ test('approved history keeps historical scores and threshold while explaining th
   assert.deepEqual(await page.locator('.assessment-scores dt').allTextContents(), ['낮은 위험', '높은 위험', '판단 불가']);
   assert.deepEqual(await page.locator('.assessment-scores dd').allTextContents(), ['1.0%', '32.0%', '67.0%']);
   server.state.compiled = true; await page.goto(server.origin + '/history');
-  await page.locator('#history > details').evaluate(node => node.open = true);
+  await openRequest(page);
   await page.getByText('AI 평가 상세', { exact: true }).click();
   assert.deepEqual(await page.locator('.assessment-scores dt').allTextContents(), ['낮은 위험', '높은 위험', '판단 불가']);
   assert.deepEqual(await page.locator('.assessment-scores dd').allTextContents(), ['1.0%', '32.0%', '67.0%']);
@@ -320,13 +330,14 @@ test('long history uses a full-width page of 20 and preserves expanded records a
   server.state.multiTarget=true;
   server.state.jobs=Array.from({length:45},(_,i)=>({...job('history-'+i,'completed'),createdAt:100-i,targetId:i%2?'alpha':'beta'}));
   server.state.jobs.push({...job('evaluating-now','evaluating'),createdAt:200},{...job('running-now','running'),createdAt:201});
-  await page.goto(server.origin+'/history');await page.locator('#history details').first().waitFor();
-  assert.equal(await page.locator('#history details').count(),20);assert.equal(await page.locator('#history-count').textContent(),'45');
+  await page.goto(server.origin+'/history');await page.locator('#history article[data-request-id]').first().waitFor();
+  await historyReady(page);assert.equal(await page.locator('#history article[data-request-id]').count(),20);assert.equal(await page.locator('#history-count').textContent(),'20');assert.match(await page.locator('#history-query-status').textContent(),/total is not available/);
   const counts=await page.locator('#server-overview button').first().textContent();assert.match(counts,/Retained 47/);assert.match(counts,/Assessing 1/);assert.match(counts,/Running 1/);
-  const first=page.locator('#history details').first();await first.locator('summary').click();await first.evaluate(n=>window.savedHistory=n);
-  await page.locator('#history-pagination').getByRole('button',{name:'Next',exact:true}).click();assert.equal(await page.locator('#history details').first().getAttribute('data-request-id'),'history-20');
-  await page.locator('#history-pagination').getByRole('button',{name:'Previous',exact:true}).click();assert.equal(await first.evaluate(n=>n===window.savedHistory&&n.open),true);
-  await page.locator('#load').click();assert.equal(await first.evaluate(n=>n===window.savedHistory&&n.open),true);
+  const first=page.locator('#history article[data-request-id]').first();await openRequest(page,'history-0');await page.locator('#request-output').evaluate(n=>window.savedHistoryOutput=n);
+  await page.locator('#history-pagination').getByRole('button',{name:'Next',exact:true}).click();await historyReady(page);assert.equal(await page.locator('#history article[data-request-id]').first().getAttribute('data-request-id'),'history-20');
+  assert.equal(await page.locator('#request-detail-body').getAttribute('data-request-id'),'history-0');assert.equal(await page.locator('#request-output').evaluate(n=>n===window.savedHistoryOutput),true);
+  await page.locator('#history-pagination').getByRole('button',{name:'Previous',exact:true}).click();await historyReady(page);assert.equal(await first.getAttribute('data-request-id'),'history-0');assert.equal(await page.locator('#request-output').evaluate(n=>n===window.savedHistoryOutput),true);
+  await page.locator('#load').click();await historyReady(page);assert.equal(await page.locator('#request-output').evaluate(n=>n===window.savedHistoryOutput),true);
   assert.ok(await page.locator('#history').evaluate(n=>n.getBoundingClientRect().width>document.querySelector('.grid').getBoundingClientRect().width*.95));
   if(process.env.FOLLOWUP_SCREENSHOTS)await page.screenshot({path:process.env.FOLLOWUP_SCREENSHOTS+'/history-desktop.png',fullPage:true});
   await page.setViewportSize({width:390,height:844});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
@@ -369,14 +380,15 @@ for (const [locale, korean] of [['ko-KR', true], ['en-US', false]]) test(`record
       if (surface === 'card') {
         await page.goto(server.origin + '/fixture/card'); await page.waitForFunction(() => window.fixture);
         await page.evaluate(value => window.fixture.receive({ structuredContent: value, _meta: { sshApproval: { uiEnabled: true } } }), value);
-      } else { server.state.jobs = [value]; await page.goto(server.origin + '/fixture/web'); }
+      } else { await webRequest(page, server, value); }
       const summary = page.locator('.assessment-summary');
       assert.equal(await summary.locator('strong').textContent(), title, item.id + '/' + surface);
       const text = await summary.textContent();
       if (noReview) assert.doesNotMatch(text, /사용자 확인 필요|사용자 승인이 필요|Owner review required|owner approval is required/i, item.id + '/' + surface);
       if (!item.assessment) assert.ok(!text.includes(aiNote), 'no invented AI assessment: ' + item.id + '/' + surface);
       else assert.ok(text.includes(aiNote), 'recorded assessment remains historical');
-      assert.equal(await page.locator('.automatic-approval').count(), item.title === automatic ? 1 : 0, 'actual approval badge: ' + item.id + '/' + surface);
+      if(surface==='card')assert.equal(await page.locator('.automatic-approval').count(), item.title === automatic ? 1 : 0, 'actual approval badge: ' + item.id + '/' + surface);
+      else assert.equal((await page.locator('article[data-request-id] .badge').textContent()).includes(korean?'자동승인':'Automatic'),item.title===automatic,'actual approval badge: '+item.id+'/'+surface);
       if (item.reasonCode === 'download_policy' && item.state === 'completed') assert.match(text, korean ? /파일 자동다운로드/ : /File download allowed/);
       if (item.auditError) assert.ok((await page.locator('body').textContent()).includes(item.auditError), 'audit failure must not replace completion');
     }
@@ -392,9 +404,9 @@ for (const locale of ['ko-KR', 'en-US']) test('owner and assessment details sele
       assessment: { model: 'jev-1.14.0', label: 'uncertain', confidence: 1, probabilities: { low_risk: 0, high_risk: 0, uncertain: 1 } } } };
   const expected = locale === 'ko-KR' ? displayContext : context, excluded = locale === 'ko-KR' ? context : displayContext;
   server.state.jobs = [value]; await page.goto(server.origin + '/history');
-  await page.locator('#history > details').evaluate(n => n.open = true);
-  assert.ok((await page.locator('#history').textContent()).includes(expected));
-  assert.ok(!(await page.locator('#history').textContent()).includes(excluded));
+  await openRequest(page);
+  assert.ok((await page.locator('#request-detail-body').textContent()).includes(expected));
+  assert.ok(!(await page.locator('#request-detail-body').textContent()).includes(excluded));
   await page.getByText(locale === 'ko-KR' ? 'AI 평가 상세' : 'AI assessment details', { exact: true }).click();
   assert.ok((await page.locator('.assessment-details').textContent()).includes(expected));
   assert.equal(await page.evaluate(() => window.localizedInjected), undefined);
@@ -417,7 +429,7 @@ for (const locale of ['ko-KR', 'en-US']) test('JEV failure details distinguish u
   for (const surface of ['card', 'web', 'compiled-web']) {
     server.state.compiled = surface === 'compiled-web';
     if (surface === 'card') { await page.goto(server.origin + '/fixture/card'); await page.waitForFunction(() => window.fixture); await page.evaluate(value => window.fixture.receive({ structuredContent: value, _meta: { sshApproval: { uiEnabled: true } } }), value); }
-    else { server.state.jobs = [value]; await page.goto(server.origin + '/fixture/web'); await page.locator('.assessment-summary').waitFor(); }
+    else { await webRequest(page, server, value); await page.locator('.assessment-summary').waitFor(); }
     const detail = page.locator('.assessment-failure-details');
     assert.equal(await detail.count(), 1, 'stored evaluator failures must be visible in both surfaces');
     assert.equal(await detail.getAttribute('open'), null, 'failure details start collapsed');
@@ -433,7 +445,7 @@ for (const locale of ['ko-KR', 'en-US']) test('JEV failure details distinguish u
     assert.equal(await page.locator('.assessment-failure-details img').count(), 0);
   }
   const uncertain = { ...value, decision: { decision: 'review', reasonCode: 'model_review', reviewReason: 'uncertain', decisionRuleVersion: 'command-explanation-v1', assessment: { model: 'fixture-model', label: 'uncertain', probabilities: { low_risk: 0.01, high_risk: 0.23, uncertain: 0.76 } }, attempts: [] } };
-  server.state.jobs = [uncertain]; await page.goto(server.origin + '/fixture/web');
+  await webRequest(page, server, uncertain);
   await page.getByText(korean ? '안전 여부를 판단하지 못해 사용자 확인이 필요합니다.' : 'The assessment is uncertain; owner review is required.', { exact: true }).waitFor();
   assert.equal(await page.locator('.assessment-failure-details').count(), 0, 'valid uncertainty must not be called an evaluator failure');
   assert.equal(await page.locator('.assessment-scores dd').count(), 3);

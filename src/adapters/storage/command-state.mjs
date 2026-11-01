@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { openSync, closeSync, lstatSync } from 'node:fs';
 import { join } from 'node:path';
 import { validateCommandPolicy } from '../../domain/command-policy.mjs';
+import { journalHistoryReader } from './history-query.mjs';
 
 /** Service-private SQLite journal; one bridge process owns the database at a time. */
 export function createCommandState(root) {
@@ -23,6 +24,7 @@ export function createCommandState(root) {
   } catch (error) { db.close(); throw error; }
   const policy = () => { const row = db.prepare('SELECT revision,body FROM policy WHERE id=1').get(); return { revision: row.revision, ...validateCommandPolicy(JSON.parse(row.body)) }; };
   return {
+    ...journalHistoryReader(db),
     policy,
     preservationRows() {
       const usage = db.prepare('SELECT count(*) AS count, coalesce(sum(length(CAST(body AS BLOB))),0) AS bytes FROM requests').get();

@@ -45,6 +45,24 @@ export async function fixtureServer(root) {
         await state.beforeRequests?.(target);
         response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify(jobs)); return;
       }
+      if (url.pathname === '/api/history') {
+        state.historyReads = (state.historyReads ?? 0) + 1;
+        state.requests.push({ method: request.method, path: url.pathname, query: Object.fromEntries(url.searchParams), authorization: request.headers.authorization ?? null });
+        await state.beforeHistory?.(url);
+        const q = url.searchParams.get('q')?.toLowerCase() ?? '', target = url.searchParams.get('target'), status = url.searchParams.get('state');
+        const from = url.searchParams.has('from') ? Number(url.searchParams.get('from')) : -Infinity;
+        const to = url.searchParams.has('to') ? Number(url.searchParams.get('to')) : Infinity;
+        const offset = Number(url.searchParams.get('cursor') ?? 0);
+        const rows = (state.historyJobs ?? state.jobs).filter(job => !['pending', 'running', 'evaluating'].includes(job.state)
+          && (!target || (job.targetId ?? 'default') === target) && (!status || job.state === status)
+          && (from === -Infinity && to === Infinity || Number.isFinite(job.createdAt) && job.createdAt >= from && job.createdAt < to)
+          && (!q || [job.id, job.command, job.targetId, job.targetDisplayName, JSON.stringify(job.operation)].join(' ').toLowerCase().includes(q)))
+          .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0) || b.id.localeCompare(a.id));
+        response.setHeader('Content-Type', 'application/json');
+        response.end(JSON.stringify({ items: rows.slice(offset, offset + 20).map(job => ({ ...job, history: job.history ?? {stateSource:'memory', storage:'memory', targetStatus:'active'} })),
+          nextCursor: offset + 20 < rows.length ? String(offset + 20) : null, asOf: Date.now(), observedAt: Date.now(),
+          coverage: {commandJournal:true, cliJournal:true, fileHistory:'memory-only', snapshot:false} })); return;
+      }
       if (['/cdn-cgi/access/logout','/oauth2/sign_out'].includes(url.pathname)) { response.end('Synthetic signed out'); return; }
       let text, type = 'text/javascript';
       if(url.pathname==='/app.js'&&state.compiled){response.setHeader('Content-Type','text/javascript');response.end(await readFile(resolve(root,'web/dist/app.js'),'utf8'));return;}
@@ -62,7 +80,7 @@ export async function fixtureServer(root) {
         text = await readFile(resolve(root, '.' + url.pathname), 'utf8');
       } else if (url.pathname === '/src/domain/command-risks.json') {
         text = await readFile(resolve(root, 'src/domain/command-risks.json'), 'utf8'); type = 'application/json';
-      } else if (['/', '/settings', '/history', '/fixture/web'].includes(url.pathname)) {
+      } else if (['/', '/settings', '/bridge', '/preferences', '/history', '/fixture/web'].includes(url.pathname)) {
         text = (await readFile(resolve(root, 'web/index.html'), 'utf8')).replace('data-auth-mode="token"', () => `data-auth-mode="${state.oidc===true?'oidc':'access'}" data-command-automation="${state.commandAutomation === true}" data-multi-target="${state.multiTarget}" data-bridge-display-name="${escape(state.bridgeDisplayName)}" data-target-display-name="${escape(state.targetDisplayName)}"`).replace('data-command-automation="false"', () => `data-command-automation="${state.commandAutomation === true}"`).replace('<script src="/app.js" defer></script>', state.compiled?'<script src="/app.js" defer></script>':'<script type="module" src="/web/app.js"></script>'); type = 'text/html';
       } else {
         const path = resolve(root, '.' + url.pathname);

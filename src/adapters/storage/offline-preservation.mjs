@@ -4,6 +4,7 @@ import {resolve, join} from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
 import {createMaintenanceState} from './maintenance-state.mjs';
 import {capturePreservationSnapshot} from './preservation-verification.mjs';
+import {journalHistoryReader} from './history-query.mjs';
 
 function openReadOnly(path) {
   for (const suffix of ['', '-journal', '-wal', '-shm']) {
@@ -36,7 +37,7 @@ export function openDormantCommandState(root) {
   const path = join(root, 'command-automation.sqlite');
   try { lstatSync(path); } catch (error) { if (error.code === 'ENOENT') return undefined; throw error; }
   const db = openReadOnly(path);
-  return { ...journal(db, false), close: () => db.close() };
+  return { ...journal(db, false), ...journalHistoryReader(db), close: () => db.close() };
 }
 
 /** Run as the bridge account after independent proof of clean service stop. */

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {launchBrowser} from './browser.mjs';
 import { createApplication } from '../../app.mjs';
+import { environmentGroups } from './admin-ui.mjs';
 
 async function fixture(run, { width = 1280, available = true } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'env-browser-')); let browser;
@@ -47,9 +48,9 @@ async function fixture(run, { width = 1280, available = true } = {}) {
     });
     const page=await context.newPage(); page.setDefaultTimeout(7000);
     const pageErrors=[]; page.on('pageerror',error=>pageErrors.push(error.message));
-    await page.goto(origin+'/settings');
+    await page.goto(origin+'/bridge');
     await page.getByPlaceholder('관리자 토큰').fill('synthetic-owner'); await page.getByRole('button',{name:'요청 조회',exact:true}).click();
-    try { await page.locator('#env-JEV_API_KEY').waitFor(); }
+    try { await page.locator('#env-JEV_API_KEY').waitFor({state:'attached'}); await environmentGroups(page); }
     catch(error) { throw Error(JSON.stringify({browserErrors:pageErrors,body:(await page.locator('body').innerText()).slice(-2500),cause:error.message})); }
     await run({page,posts,state,addPending:()=>app.queue.submit('synthetic-pending'),setFailSave:value=>failSave=value,setDropRestart:value=>dropRestart=value});
   } finally {await browser?.close();await app.close();await rm(root,{recursive:true});}
@@ -85,6 +86,7 @@ test('ENV browser secret replacement/unset, conflict keeps draft, responsive wid
   assert.equal(posts.length,1);
   await panel.getByRole('button',{name:'ENV 불러오기',exact:true}).click();
   await page.waitForFunction(()=>document.querySelector('#env-JEV_API_KEY').value==='');
+  await environmentGroups(page);
   setFailSave(false);
   await panel.getByRole('checkbox',{name:'Jev API 키 설정 해제 (기본값 사용)',exact:true}).check();
   await panel.getByRole('checkbox',{name:/변경 내용을 확인했습니다/}).check();

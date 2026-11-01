@@ -1,5 +1,5 @@
 /** Fixed-provider owner workflow. Browser storage contains only bounded public lookup hints. */
-export function createAgentCliPanel({document,api,isSignedOut,canLoad,storage,random=globalThis.crypto,schedule=setTimeout,cancel=clearTimeout}) {
+export function createAgentCliPanel({document,api,isSignedOut,canLoad,storage,getTarget,onRequestTarget,onStateChange=()=>{},random=globalThis.crypto,schedule=setTimeout,cancel=clearTimeout}) {
  const ko=document.documentElement.lang.startsWith('ko'),t=(a,b)=>ko?a:b;
  const el=(tag,text='',cls='')=>{const n=document.createElement(tag);n.textContent=text;if(cls)n.className=cls;return n;};
  const root=el('section','','request agent-cli-settings');root.id='agent-cli-settings';
@@ -8,7 +8,7 @@ export function createAgentCliPanel({document,api,isSignedOut,canLoad,storage,ra
  const select=(id,koLabel,enLabel)=>{const label=el('label',t(koLabel,enLabel),'policy-field'),node=el('select');node.id=id;label.append(node);controls.append(label);return node;};
  const target=select('cli-target','설치 대상 서버','Installation target'),provider=select('cli-provider','CLI','CLI');
  for(const [id,name] of [['codex','Codex'],['claude','Claude']]){const o=el('option',name);o.value=id;provider.append(o);}
- const identity=el('p','','target'),message=el('p','','policy-message'),failure=el('p','','error');message.setAttribute('role','status');failure.setAttribute('role','alert');root.append(identity,message,failure);
+ const identity=el('p','','target'),message=el('p','','policy-message'),failure=el('p','','error');identity.id='cli-target-context';message.setAttribute('role','status');failure.setAttribute('role','alert');root.append(identity,message,failure);
  const buttons=el('div','','cli-actions');root.append(buttons);
  const button=(id,a,b,cls='secondary')=>{const n=el('button',t(a,b),cls);n.id=id;n.type='button';buttons.append(n);return n;};
  const inspect=button('cli-inspect','버전 확인·설치 준비','Check versions and prepare');
@@ -22,16 +22,18 @@ export function createAgentCliPanel({document,api,isSignedOut,canLoad,storage,ra
  const actions=el('div','','cli-actions');root.append(actions);
  const actionButton=(id,a,b)=>{const n=el('button',t(a,b),'primary');n.type='button';n.id=id;actions.append(n);return n;};
  const submit=actionButton('cli-submit','설치 요청 등록','Create installation request'),start=actionButton('cli-start','승인하고 설치 시작','Approve and start installation');
+ for(const button of [submit,start])button.setAttribute('aria-describedby',identity.id);
  const reconcile=button('cli-reconcile','서버의 설치 기록 확인','Check server installation receipt');
  const readOutput=button('cli-output-read','저장 출력 읽기','Read stored output'),output=el('pre','','output');output.id='cli-output';output.tabIndex=0;output.hidden=true;root.append(output);
  const login=el('details');login.id='cli-login';login.append(el('summary',t('로그인 안내','Login guidance')));
  login.append(el('p',t('로그인 상태 확인 버튼으로 선택한 CLI의 저장된 로그인 상태를 조회할 수 있습니다. 설치 대상의 SSH 계정으로 터미널을 열어 로그인하세요. 인증코드·키는 이 화면에 입력하지 마세요. 설치만으로 Jev나 대체 심사가 활성화되지는 않습니다.','Use Check login status to read the selected CLI’s saved login state. Open a terminal as the target SSH account to log in. Do not enter login codes or keys here. Installation does not activate Jev or fallback review.'),'policy-help'));
  const loginAccount=el('p','','policy-help');loginAccount.id='cli-login-account';login.append(loginAccount);
- const loginCommand=el('pre');login.append(loginCommand);root.append(login);document.querySelector('.grid')?.before(root);
+ const loginCommand=el('pre');login.append(loginCommand);root.append(login);const panels=document.getElementById('server-panels');if(panels)panels.append(root);else document.querySelector('.grid')?.before(root);
  const storageKey='ssh-approval-cli-requests-v1',validId=v=>typeof v==='string'&&/^[a-f0-9]{48}$/.test(v),validTarget=v=>typeof v==='string'&&/^[a-z][a-z0-9_-]{0,31}$/.test(v);
  const validHint=h=>h&&Object.keys(h).every(k=>['requestKey','requestId','targetId','provider'].includes(k))&&typeof h.requestKey==='string'&&/^[A-Za-z0-9_.:-]{16,128}$/.test(h.requestKey)&&validTarget(h.targetId)&&['codex','claude'].includes(h.provider)&&(!Object.hasOwn(h,'requestId')||validId(h.requestId));
  let hints=[];try{const raw=storage?.getItem(storageKey);if(raw&&raw.length<=24576){const v=JSON.parse(raw);if(Array.isArray(v)&&v.length<=64&&v.every(validHint))hints=v;}}catch{/* disabled or invalid storage never grants execution */}
- let capabilities,preview,job,remoteStatus,historyCursor,busy=false,uncertain=false,generation=0,timer,closed=false;
+ let capabilities,preview,job,remoteStatus,historyCursor,busy=false,uncertain=false,generation=0,timer,closed=false,currentScope='',currentBinding;
+ const drafts=new Map(),blocked=()=>busy||uncertain||['running','evaluating','unknown'].includes(job?.state);
  const active=()=>!closed&&!isSignedOut()&&document.body.dataset.page==='settings';
  const binding=()=>capabilities?.bindings?.find(b=>b.targetId===target.value&&b.enabled===true);
  const supported=()=>Boolean(binding())&&binding().supported!==false;
@@ -40,19 +42,22 @@ export function createAgentCliPanel({document,api,isSignedOut,canLoad,storage,ra
  const clearTimer=()=>{cancel(timer);timer=undefined;};
  const stateName=state=>({pending:t('승인 대기','Awaiting approval'),running:t('설치 실행 중','Installing'),completed:t('완료','Completed'),failed:t('실패','Failed'),unknown:t('결과 불명','Outcome unknown'),expired:t('만료','Expired'),denied:t('거부','Denied'),evaluating:t('평가 중','Assessing'),not_found:t('기록 없음','Not found'),preparing:t('준비 중','Preparing'),installing:t('설치 중','Installing'),reused:t('기존 버전 사용','Reused')})[state]??t('확인 필요','Check required');
  function lock(){
-  const ready=supported()&&capabilities?.available&&active();
+  const ready=supported()&&capabilities?.available&&active()&&(!getTarget||getTarget()===target.value);
   checkLogin.disabled=busy||!ready;
   inspect.disabled=busy||!ready||uncertain||Boolean(job&&['pending','running','evaluating','unknown'].includes(job.state));
   recover.disabled=busy||!ready;historySelect.disabled=busy||!ready;historyNext.disabled=busy||!ready;submit.hidden=!preview||Boolean(job);submit.disabled=busy||!ready||uncertain||!ack.checked||!preview||Date.now()>=preview.expiresAt;
   start.hidden=job?.state!=='pending';start.disabled=busy||!ready||uncertain||!ack.checked;
   reconcile.hidden=!job||!['unknown','failed'].includes(job.state);reconcile.disabled=busy||!ready;
   readOutput.hidden=!validId(job?.result?.structuredContent?.output?.id);readOutput.disabled=busy||!ready;
-  ack.disabled=busy||!ready||(!preview&&job?.state!=='pending');login.hidden=Boolean(binding())&&!supported();provider.disabled=Boolean(binding())&&!supported();root.setAttribute('aria-busy',String(busy));
+  ack.disabled=busy||!ready||(!preview&&job?.state!=='pending');login.hidden=Boolean(binding())&&!supported();target.disabled=blocked();provider.disabled=blocked()||Boolean(binding())&&!supported();root.setAttribute('aria-busy',String(busy));onStateChange();
  }
  function clearHistory(){history.hidden=true;historySelect.replaceChildren();historyCursor=undefined;historyNext.hidden=true;}
- function scope(){generation++;clearTimer();clearHistory();preview=job=remoteStatus=undefined;ack.checked=false;uncertain=Boolean(hint());summary.hidden=true;summary.textContent='';output.hidden=true;output.textContent='';failure.textContent='';message.textContent='';
+ function scope(){
+  if(currentScope)drafts.set(currentScope,{binding:currentBinding,preview,job,remoteStatus,uncertain,summary:summary.textContent,message:message.textContent,loginState:loginState.textContent});
+  generation++;clearTimer();clearHistory();preview=job=remoteStatus=undefined;ack.checked=false;uncertain=Boolean(hint());summary.hidden=true;summary.textContent='';output.hidden=true;output.textContent='';failure.textContent='';message.textContent='';
   loginState.textContent=t('로그인 상태: 미조회','Login status: Not checked');
-  const b=binding();identity.textContent=b?[b.displayName,b.targetId,b.platform==='windows'?'Windows':b.platform==='linux'?'Linux':'',b.sshTarget,b.profile].filter(Boolean).join(' · '):'';
+  const b=binding();currentScope=target.value+'\n'+provider.value;currentBinding=b&&{targetId:b.targetId,targetRevision:b.targetRevision,profile:b.profile};identity.textContent=b?[document.body.dataset.bridgeDisplayName,b.displayName,b.targetId,b.platform==='windows'?'Windows':b.platform==='linux'?'Linux':'',b.sshTarget,b.profile].filter(Boolean).join(' · '):target.value?t('선택 서버: ','Selected server: ')+target.value+t(' · CLI 연결 정보를 확인하지 못했습니다.',' · CLI binding is unavailable.'):'';
+  if(!target.value)message.textContent=t('편집할 서버를 선택해 주세요. 서버 선택 전에는 명령줄 도구 작업을 시작할 수 없습니다.','Choose a server to edit. Command-line tool operations remain unavailable until a server is selected.');
   if(b&&!supported()){uncertain=false;message.textContent=t('이 대상에서는 서버 CLI 설치·로그인 상태 진단을 지원하지 않습니다. 일반 명령과 파일 전송은 사용할 수 있습니다.','Server CLI installation and login diagnostics are unavailable on this target. General commands and file transfers remain available.');loginState.textContent=t('로그인 상태: 지원하지 않는 대상','Login status: Unsupported target');}
   const user=/^([A-Za-z_][A-Za-z0-9_.-]{0,63})@/.exec(b?.sshTarget??'')?.[1];
   loginAccount.textContent=b&&supported()?t('로그인할 SSH 계정: ','SSH account for login: ')+b.sshTarget+(b.platform==='windows'?t(' · 설치·업데이트에는 Node.js 22 이상과 npm이 필요합니다. 로그인은 같은 Windows 계정에서 진행하세요.',' · Installation and updates require Node.js 22+ and npm. Log in as the same Windows account.') : user?t(' · 다른 계정이면 먼저 실행: ',' · From another account run first: ')+'sudo -iu '+user:''):'';
@@ -64,7 +69,10 @@ $package = Get-Content -LiteralPath (Join-Path $packageRoot 'package.json') -Raw
 $bin = if ($package.bin -is [string]) { $package.bin } else { $package.bin.${p} }
 $executable = Join-Path $packageRoot $bin
 if ($executable.EndsWith('.exe')) { & $executable ${p==='codex'?'login':'auth login'} } else { & node.exe $executable ${p==='codex'?'login':'auth login'} }
-`+t('관리 설치용 안내입니다. 기존 외부 설치는 확인한 실행 파일 경로를 사용하세요.','For a managed installation. Use the verified executable path for an existing external installation.') : `PATH="/opt/ssh-approval/node/bin:$PATH" "$HOME/.local/share/ssh-approval-cli/${p}/current/bin/${p}"`+(p==='codex'?' login --device-auth':'')+'\n'+t('기존 외부 설치를 사용하는 경우에는 그 설치의 실행 경로를 사용하세요.','For an existing external installation, use that installation’s executable path.');lock();
+`+t('관리 설치용 안내입니다. 기존 외부 설치는 확인한 실행 파일 경로를 사용하세요.','For a managed installation. Use the verified executable path for an existing external installation.') : `PATH="/opt/ssh-approval/node/bin:$PATH" "$HOME/.local/share/ssh-approval-cli/${p}/current/bin/${p}"`+(p==='codex'?' login --device-auth':'')+'\n'+t('기존 외부 설치를 사용하는 경우에는 그 설치의 실행 경로를 사용하세요.','For an existing external installation, use that installation’s executable path.');
+  const draft=drafts.get(currentScope);
+  if(b&&draft&&draft.binding?.targetId===b.targetId&&draft.binding.targetRevision===b.targetRevision&&draft.binding.profile===b.profile){({preview,job,remoteStatus,uncertain}=draft);summary.textContent=draft.summary;summary.hidden=!preview&&!job;message.textContent=draft.message;loginState.textContent=draft.loginState;}
+  lock();poll();
  }
  function validateJob(value){const b=binding(),op=value?.operation;if(!validId(value?.id)||!b||op?.agentCliContract!=='agent-cli-install-v1'||op.agentCliProvider!==provider.value||op.agentCliTargetId!==b.targetId||op.agentCliTargetRevision!==b.targetRevision||op.agentCliProfile!==b.profile||!['pending','running','completed','failed','unknown','expired','denied','evaluating'].includes(value.state))throw Error(t('요청의 대상 정보가 현재 선택과 다릅니다.','The request does not match the current target binding.'));return value;}
  function displayJob(value,status){job=validateJob(value);remoteStatus=status;preview=undefined;ack.checked=false;uncertain=false;
@@ -121,15 +129,22 @@ if ($executable.EndsWith('.exe')) { & $executable ${p==='codex'?'login':'auth lo
  reconcile.onclick=()=>run(async current=>{const value=await api('/api/agent-cli/reconcile','POST',{requestId:job.id});if(current()){if(value.requestId!==job.id||value.remoteStatus?.provider!==provider.value)throw Error('Invalid CLI receipt');displayJob(job,value.remoteStatus);}});
  readOutput.onclick=()=>run(async current=>{const outputId=job?.result?.structuredContent?.output?.id;if(!validId(outputId))return;const value=await api('/api/outputs/'+outputId+'?format=json&limit=4096');if(current()){if(typeof value.text!=='string')throw Error('Invalid CLI output');output.textContent=value.text;output.hidden=false;output.focus();}});
  recover.onclick=restore;ack.onchange=lock;
- for(const n of [target,provider])n.onchange=()=>{scope();if(supported()&&hint()&&!busy)restore();};
- async function load(){if(capabilities||busy||!active()||!canLoad())return;await run(async current=>{const value=await api('/api/agent-cli');if(!current())return;
+ target.onchange=()=>{const requested=target.value;target.value=currentBinding?.targetId??'';if(onRequestTarget)return onRequestTarget(requested);return selectTarget(requested);};
+ provider.onchange=()=>{const previous=currentScope.split('\n')[1];if(blocked()){provider.value=previous;failure.textContent=t('처리 결과를 확인하기 전에는 CLI를 바꿀 수 없습니다.','The CLI cannot change until the current result is reconciled.');return;}scope();if(supported()&&hint()&&!preview&&!job&&!busy)restore();};
+ function selectTarget(id){
+  if(id===target.value)return true;
+  if(blocked()){failure.textContent=t('처리 중이거나 결과 미확인으로 서버를 전환하지 못했습니다. 현재 서버를 유지합니다.','Server switch refused while processing or awaiting reconciliation. The current server is preserved.');return false;}
+  if(![...target.options].some(option=>option.value===id)){const option=el('option',id+t(' · CLI 연결 정보 없음',' · CLI binding unavailable'));option.value=id;target.append(option);}
+  target.value=id;scope();if(supported()&&hint()&&!preview&&!job&&!busy)restore();return true;
+ }
+ async function load(){if(capabilities||busy||!active()||!canLoad())return Boolean(capabilities);await run(async current=>{const value=await api('/api/agent-cli');if(!current())return;
   if(typeof value?.available!=='boolean'||!Array.isArray(value.bindings)||value.bindings.some(b=>!validTarget(b.targetId)||typeof b.targetRevision!=='string'||typeof b.profile!=='string'))throw Error('Invalid CLI capabilities');
-  capabilities=value;target.replaceChildren();const items=value.bindings.filter(b=>b.enabled===true);if(items.length!==1){const option=el('option',t('서버 선택','Choose a server'));option.value='';target.append(option);}for(const b of items){const option=el('option',b.displayName+' · '+b.targetId+(b.platform?' · '+(b.platform==='windows'?'Windows':'Linux'):'')+(b.supported===false?t(' · 지원하지 않음',' · Unsupported'):''));option.value=b.targetId;target.append(option);}scope();if(!value.available)message.textContent=t('이 서버는 CLI 설치 연결을 제공하지 않습니다.','CLI installation is unavailable on this bridge.');
- });if(supported()&&hint()&&!busy)await restore();}
+  capabilities=value;target.replaceChildren();const items=value.bindings.filter(b=>b.enabled===true);const option=el('option',t('서버 선택','Choose a server'));option.value='';target.append(option);for(const b of items){const option=el('option',b.displayName+' · '+b.targetId+(b.platform?' · '+(b.platform==='windows'?'Windows':'Linux'):'')+(b.supported===false?t(' · 지원하지 않음',' · Unsupported'):''));option.value=b.targetId;target.append(option);}const requested=getTarget?.();if(requested&&![...target.options].some(option=>option.value===requested)){const option=el('option',requested+t(' · CLI 연결 정보 없음',' · CLI binding unavailable'));option.value=requested;target.append(option);}target.value=requested??'';scope();if(!value.available)message.textContent=t('이 서버는 CLI 설치 연결을 제공하지 않습니다.','CLI installation is unavailable on this bridge.');
+ });if(supported()&&hint()&&!preview&&!job&&!busy)await restore();return Boolean(capabilities);}
  let page=document.body.dataset.page;
- document.addEventListener('admin-scope-change',()=>{const next=document.body.dataset.page;if(next===page)return;page=next;scope();if(active())load();});
+ document.addEventListener('admin-scope-change',()=>{const next=document.body.dataset.page;if(next===page)return;page=next;generation++;clearTimer();lock();if(active()){if(!capabilities)load();else if(supported()&&hint()&&uncertain&&!busy)restore();else poll();}});
  document.addEventListener('visibilitychange',()=>{clearTimer();if(!document.hidden)poll();});
  document.querySelector('#load')?.addEventListener('click',load);
- document.querySelector('#logout')?.addEventListener('click',()=>{closed=true;hints=[];try{storage?.removeItem(storageKey);}catch{}scope();});
- scope();queueMicrotask(load);return {root,reloadState:()=>({blocked:busy||uncertain,dirty:preview?[t('CLI 설치 계획','CLI installation plan')]:[]})};
+ document.querySelector('#logout')?.addEventListener('click',()=>{closed=true;hints=[];drafts.clear();currentScope='';try{storage?.removeItem(storageKey);}catch{}scope();});
+ scope();queueMicrotask(load);return {root,targetControl:target,ensureLoaded:load,selectTarget,scopeState:()=>({targetId:target.value,name:binding()?.displayName,ready:!!capabilities,blocked:blocked(),uncertain}),reloadState:()=>({blocked:busy||uncertain,dirty:preview?[t('CLI 설치 계획','CLI installation plan')]:[]})};
 }

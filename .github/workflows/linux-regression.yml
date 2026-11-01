@@ -2,7 +2,7 @@ name: Linux regression
 
 on:
   push:
-    branches: [fix/jev-binary-assessment, feat/windows-full-support-20261101]
+    branches: [fix/jev-binary-assessment, feat/windows-full-support-20261101, feat/admin-ui-1.6.8-20261101]
   workflow_dispatch:
 
 permissions:
@@ -34,9 +34,19 @@ jobs:
                 "$scheme://$host/ubuntu/dists/$VERSION_CODENAME/InRelease" || true
             done
           done
-      - run: npx playwright install --with-deps chromium
+      - run: npx playwright install --with-deps chromium firefox webkit
       - name: 관리자 화면 회귀 시험
-        run: npm run test:browser
+        run: node test/browser/run.mjs all
+        env:
+          UI_TEST_RESULTS: ${{ runner.temp }}/admin-ui-results
+      - name: 관리자 화면 시험 결과와 화면갈무리 보관
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: admin-ui-results
+          path: ${{ runner.temp }}/admin-ui-results
+          if-no-files-found: warn
+          retention-days: 7
   compose-update:
     runs-on: ubuntu-latest
     timeout-minutes: 30

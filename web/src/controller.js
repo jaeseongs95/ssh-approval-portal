@@ -2,15 +2,17 @@ export function createWebController({ state, view, api, document, location, time
   const capture = () => ({ target: view.target?.(), revision: view.selectionRevision?.() });
   const current = context => context.target === view.target?.() && context.revision === view.selectionRevision?.();
   let generation = 0, activeRead, uncertainDecision, activeDownloads = 0, latestJobs = [];
+  let historyGeneration = 0, historyRead;
   let page = document.body?.dataset.page, pageRevision = 0;
   document.addEventListener?.('admin-scope-change', () => {
     const next = document.body?.dataset.page;
     if (next !== page) { page = next; pageRevision++; }
+    if (next === 'history') loadHistory();
   });
   const uncertainMessage = () => view.uncertainDecisionMessage?.() ?? 'Approval result needs checking. Refresh requests; do not repeat the action.';
   function stopPolling() { timers.clearInterval(state.polling); state.polling = null; }
   async function load(force = false) {
-    if (state.signedOut) return;
+    if (state.signedOut || state.deciding) return;
     if (state.loading && force !== true) return state.loading;
     activeRead?.abort();
     const read = activeRead = new AbortController(), token = ++generation;
@@ -30,6 +32,7 @@ export function createWebController({ state, view, api, document, location, time
       const matches = uncertainDecision ? jobs.filter(job => job.id === uncertainDecision) : [];
       if (matches.length === 1 && ['running', 'completed', 'failed', 'denied', 'expired', 'unknown'].includes(matches[0].state)) uncertainDecision = undefined;
       latestJobs = jobs; view.render(jobs, state.deciding || !!uncertainDecision); view.connected(); view.error(uncertainDecision ? uncertainMessage() : '');
+      if (document.body?.dataset.page === 'history') loadHistory();
     } catch (error) {
       if (!state.signedOut && token === generation && !read.signal.aborted && current(context)) {
         view.error((uncertainDecision ? uncertainMessage() + ' ' : '') + error.message); view.disconnected();
@@ -37,17 +40,39 @@ export function createWebController({ state, view, api, document, location, time
       }
     } finally { if (token === generation) { state.loading = null; view.loading(state.signedOut); } settled(); }
   }
+  async function loadHistory() {
+    historyRead?.abort();
+    const token = ++historyGeneration;
+    if (state.signedOut || !view.historyQuery || document.body?.dataset.page !== 'history' || !state.accessMode && !view.token?.()) { view.historyLoading?.(false); return; }
+    const query = view.historyQuery();
+    if (!query.valid) { view.history?.({ items: [], nextCursor: null }); return; }
+    const read = historyRead = new AbortController(), context = capture();
+    view.historyLoading?.(true);
+    try {
+      const result = await api('/api/history' + (query.query ? '?' + query.query : ''), 'GET', undefined, { signal: read.signal });
+      if (state.signedOut || token !== historyGeneration || !current(context) || document.body?.dataset.page !== 'history') return;
+      view.history?.(result);
+    } catch (error) {
+      if (!state.signedOut && token === historyGeneration && !read.signal.aborted && current(context) && document.body?.dataset.page === 'history') view.historyError?.(error.message);
+    }
+  }
+  function historyChanged() {
+    return loadHistory();
+  }
   async function decide(id, action) {
     if (state.signedOut || state.deciding || uncertainDecision) return;
-    state.deciding = true; view.deciding(true); view.error('');
+    // 승인 응답 뒤 이전 조회가 대기 상태를 되돌리지 못하게 한다.
+    generation++; activeRead?.abort(); state.loading = null;
+    state.deciding = true; view.deciding(true); view.error('');view.decision?.(id, 'sending');
     try {
       const job = await api(`/api/${id}/${action}`, 'POST', undefined, { preferAsync: action === 'approve' });
       if (!state.signedOut) {
         latestJobs = latestJobs.map(previous => previous.id === id ? { ...previous, ...job } : previous);
         view.render(latestJobs, true);
+        view.decision?.(id, 'accepted');
       }
     } catch (error) {
-      if (!state.signedOut) { uncertainDecision = id; view.error(uncertainMessage()); }
+      if (!state.signedOut) { uncertainDecision = id; view.error(uncertainMessage());view.decision?.(id, 'uncertain'); }
     } finally { state.deciding = false; if (!state.signedOut) view.deciding(!!uncertainDecision); }
     // Acceptance releases the decision lock; execution is observed by ordinary reads.
     if (!state.signedOut) await load(true);
@@ -55,8 +80,8 @@ export function createWebController({ state, view, api, document, location, time
   async function download(id) {
     if (state.signedOut || activeDownloads) return;
     activeDownloads++;
-    const context = capture(), revision = pageRevision, originPage = document.body?.dataset.page;
-    const currentPage = () => !state.signedOut && current(context) && originPage === document.body?.dataset.page && revision === pageRevision;
+    const context = capture(), revision = pageRevision, originPage = document.body?.dataset.page, detailRevision = view.detailRevision?.();
+    const currentPage = () => !state.signedOut && current(context) && originPage === document.body?.dataset.page && revision === pageRevision && detailRevision === view.detailRevision?.();
     try {
       const result = await api(`/api/${id}/download`, 'POST');
       if (currentPage()) location.assign(result.downloadUrl);
@@ -65,9 +90,9 @@ export function createWebController({ state, view, api, document, location, time
   }
   async function output(outputId, offsetBytes = 0) {
     if (state.signedOut) throw Error('Signed out');
-    const context = capture();
+    const context = capture(), detailRevision = view.detailRevision?.();
     const result = await api(`/api/outputs/${outputId}?offset=${offsetBytes}`);
-    if (state.signedOut || !current(context)) throw Error('Output view replaced');
+    if (state.signedOut || !current(context) || detailRevision !== view.detailRevision?.()) throw Error('Output view replaced');
     return result;
   }
   async function source(id) {
@@ -78,7 +103,7 @@ export function createWebController({ state, view, api, document, location, time
     return result;
   }
   async function logout() {
-    state.signedOut = true; generation++; activeRead?.abort(); stopPolling(); view.signedOut();
+    state.signedOut = true; generation++; historyGeneration++; historyRead?.abort(); activeRead?.abort(); stopPolling(); view.signedOut();
     if(!state.accessMode){location.replace('/');return;}
     try{await api.endAdminSession();location.replace('/signed-out');}
     catch{view.error(view.logoutErrorMessage?.()??'Administrator sign-out could not be confirmed. Please retry.');view.logoutRetry?.();}
@@ -90,7 +115,7 @@ export function createWebController({ state, view, api, document, location, time
     if(!state.signedOut)location.replace('/');
   }
   function start() {
-    view.initialize({ accessMode: state.accessMode, load: () => load(true), decide, download, output, source, logout, reconnect });
+    view.initialize({ accessMode: state.accessMode, load: () => load(true), history: historyChanged, decide, download, output, source, logout, reconnect });
     if (state.accessMode) return load();
   }
   return { start, load, decide, download, output, source, logout, reconnect, reloadState: () => ({ blocked: state.deciding || !!uncertainDecision || activeDownloads > 0 }) };
