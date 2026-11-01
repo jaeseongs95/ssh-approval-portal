@@ -83,7 +83,7 @@ public static class StdinFixture {
  [DllImport("kernel32.dll",SetLastError=true)] static extern bool CloseHandle(IntPtr h);
  static IntPtr read,write,original;static Thread thread;static int error;static bool failed;static string path;
  static readonly ManualResetEventSlim eofAllowed=new ManualResetEventSlim(false);
- static void Mark(string value){File.AppendAllText(path,value+"|"+(DateTime.UtcNow.Ticks/TimeSpan.TicksPerMillisecond)+"\\n",new UTF8Encoding(false));}
+ static void Mark(string value){File.AppendAllText(path,value+"|"+DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()+"\\n",new UTF8Encoding(false));}
  public static void Setup(string phasePath){path=phasePath;original=GetStdHandle(-10);if(!CreatePipe(out read,out write,IntPtr.Zero,0)||!SetStdHandle(-10,read))throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());}
  public static void StartWriter(){thread=new Thread(()=>{try{uint n;Mark("WRITER_STARTED");Thread.Sleep(150);Mark("ZERO_WRITE_BEGIN");if(!WriteFile(write,new byte[0],0,out n,IntPtr.Zero))throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());Mark("ZERO_WRITE_END");Thread.Sleep(150);Mark("DATA_WRITE_BEGIN");if(!WriteFile(write,new byte[]{237,149,156},3,out n,IntPtr.Zero))throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());if(n!=3)throw new Exception("SHORT_WRITE");Mark("DATA_WRITE_END");if(!eofAllowed.Wait(5000)){Mark("EOF_WAIT_TIMEOUT");throw new Exception("EOF_NOT_ALLOWED");}Mark("EOF_ALLOWED");}catch(System.ComponentModel.Win32Exception ex){failed=true;error=ex.NativeErrorCode;Mark("WRITER_NATIVE_ERROR_"+error);}catch{failed=true;error=-1;Mark("WRITER_FAILED");}finally{bool closed=CloseHandle(write);int e=Marshal.GetLastWin32Error();write=IntPtr.Zero;if(closed)Mark("WRITER_CLOSED");else{failed=true;error=e;Mark("WRITER_CLOSE_ERROR_"+e);}}});thread.IsBackground=true;thread.Start();}
  public static void AllowEof(){eofAllowed.Set();}
@@ -97,19 +97,42 @@ public static class StdinFixture {
   reader = replaceOnce(reader, 'Microsoft.PowerShell.Utility\\Add-Type ', "Write-FixturePhase 'MODULE_END';Write-FixturePhase 'READER_COMPILE_BEGIN';Microsoft.PowerShell.Utility\\Add-Type ");
   reader = replaceOnce(reader, ' -ErrorAction Stop};', " -ErrorAction Stop;Write-FixturePhase 'READER_COMPILE_END'};");
   const encodedPath = value => Buffer.from(value, 'utf8').toString('base64');
-  const script = `$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';$phasePath=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encodedPath(phasePath)}'));$watch=[Diagnostics.Stopwatch]::StartNew();$self=[Diagnostics.Process]::GetCurrentProcess();function Write-FixturePhase([string]$value){$self.Refresh();[IO.File]::AppendAllText($phasePath,$value+'|'+([DateTime]::UtcNow.Ticks/[TimeSpan]::TicksPerMillisecond)+'|'+$watch.ElapsedMilliseconds+'|'+[int]$self.TotalProcessorTime.TotalMilliseconds+[Environment]::NewLine,[Text.UTF8Encoding]::new($false))};Write-FixturePhase 'ENTRY';Write-FixturePhase 'FIXTURE_COMPILE_BEGIN';Add-Type -TypeDefinition '${fixture}';Write-FixturePhase 'FIXTURE_COMPILE_END';[StdinFixture]::Setup([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encodedPath(writerPath)}')));Write-FixturePhase 'PIPE_SETUP';try{$ProgressPreference='Continue';${reader}if($ProgressPreference -cne 'Continue'){throw 'PROGRESS_SCOPE_CHANGED'};Write-FixturePhase 'PREPARED';$b=[byte[]]::new(4);Write-FixturePhase 'READ_DATA_BEGIN';[StdinFixture]::StartWriter();$n=[SshApproval.Stdin]::Read($b,0,4);Write-FixturePhase ('READ_DATA_END_'+$n);if($n -ne 3 -or $b[0] -ne 237 -or $b[1] -ne 149 -or $b[2] -ne 156){throw 'ZERO_WRITE_WAS_EOF'};Write-FixturePhase 'BYTES_VERIFIED';[StdinFixture]::AllowEof();Write-FixturePhase 'READ_EOF_BEGIN';$e=[SshApproval.Stdin]::Read($b,3,1);Write-FixturePhase ('READ_EOF_END_'+$e);if($e -ne 0){throw 'PIPE_END_NOT_EOF'};Write-FixturePhase 'EOF_VERIFIED'}finally{[StdinFixture]::Stop()};Write-FixturePhase 'DONE';[Console]::Write('ok')`;
+  const script = `$entryAt=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds();$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';$phasePath=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encodedPath(phasePath)}'));$watch=[Diagnostics.Stopwatch]::StartNew();$self=[Diagnostics.Process]::GetCurrentProcess();function Write-FixturePhase([string]$value){$self.Refresh();[IO.File]::AppendAllText($phasePath,$value+'|'+[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()+'|'+$watch.ElapsedMilliseconds+'|'+[int]$self.TotalProcessorTime.TotalMilliseconds+[Environment]::NewLine,[Text.UTF8Encoding]::new($false))};[IO.File]::AppendAllText($phasePath,'SCRIPT_BEGIN|'+$entryAt+[Environment]::NewLine,[Text.UTF8Encoding]::new($false));Write-FixturePhase 'ENTRY';Write-FixturePhase 'FIXTURE_COMPILE_BEGIN';Add-Type -TypeDefinition '${fixture}';Write-FixturePhase 'FIXTURE_COMPILE_END';[StdinFixture]::Setup([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encodedPath(writerPath)}')));Write-FixturePhase 'PIPE_SETUP';try{$ProgressPreference='Continue';${reader}if($ProgressPreference -cne 'Continue'){throw 'PROGRESS_SCOPE_CHANGED'};Write-FixturePhase 'PREPARED';$b=[byte[]]::new(4);Write-FixturePhase 'READ_DATA_BEGIN';[StdinFixture]::StartWriter();$n=[SshApproval.Stdin]::Read($b,0,4);Write-FixturePhase ('READ_DATA_END_'+$n);if($n -ne 3 -or $b[0] -ne 237 -or $b[1] -ne 149 -or $b[2] -ne 156){throw 'ZERO_WRITE_WAS_EOF'};Write-FixturePhase 'BYTES_VERIFIED';[StdinFixture]::AllowEof();Write-FixturePhase 'READ_EOF_BEGIN';$e=[SshApproval.Stdin]::Read($b,3,1);Write-FixturePhase ('READ_EOF_END_'+$e);if($e -ne 0){throw 'PIPE_END_NOT_EOF'};Write-FixturePhase 'EOF_VERIFIED'}finally{[StdinFixture]::Stop()};Write-FixturePhase 'DONE';[Console]::Write('ok')`;
   const started = Date.now();
   let result, failure, spawnedAt;
+  const events = [];
+  const event = (단계, details = {}) => {
+    const at = Date.now();
+    events.push({ 단계, 세계시밀리초: at, 경과밀리초: at - started, ...details });
+  };
   const pending = promisify(execFile)('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { windowsHide: true, timeout: 10000, encoding: 'utf8' });
-  pending.child?.once('spawn', () => { spawnedAt = Date.now(); });
+  const child = pending.child;
+  child?.once('spawn', () => { spawnedAt = Date.now(); event('프로세스 생성'); });
+  child?.once('exit', (code, signal) => event('프로세스 exit', { code, signal }));
+  child?.once('close', (code, signal) => event('프로세스 close', { code, signal }));
+  child?.once('error', error => event('프로세스 오류', { code: error.code }));
+  for (const [name, stream] of [['표준입력', child?.stdin], ['표준출력', child?.stdout], ['표준오류', child?.stderr]]) {
+    stream?.once('finish', () => event(name + ' finish'));
+    stream?.once('end', () => event(name + ' end'));
+    stream?.once('close', () => event(name + ' close'));
+    stream?.once('error', error => event(name + ' 오류', { code: error.code }));
+    if (name !== '표준입력') stream?.once('data', chunk => event(name + ' 최초 수신', { bytes: Buffer.byteLength(chunk) }));
+  }
   try { result = await pending; } catch (error) { failure = error; }
+  const completedAt = Date.now();
   const phases = async (path, pattern) => readFile(path, 'utf8').then(text => text.split(/\r?\n/).filter(line => pattern.test(line)).slice(0, 64), error => ['파일 읽기 오류: ' + error.code]);
+  const [psPhases, writerPhases] = await Promise.all([
+    phases(phasePath, /^(?:SCRIPT_BEGIN\|\d+|(?:ENTRY|FIXTURE_COMPILE_BEGIN|FIXTURE_COMPILE_END|PIPE_SETUP|MODULE_BEGIN|MODULE_END|READER_COMPILE_BEGIN|READER_COMPILE_END|PREPARED|READ_DATA_BEGIN|READ_DATA_END_\d+|BYTES_VERIFIED|READ_EOF_BEGIN|READ_EOF_END_\d+|EOF_VERIFIED|DONE)\|\d+\|\d+\|\d+)$/),
+    phases(writerPath, /^(?:WRITER_STARTED|ZERO_WRITE_BEGIN|ZERO_WRITE_END|DATA_WRITE_BEGIN|DATA_WRITE_END|EOF_ALLOWED|EOF_WAIT_TIMEOUT|WRITER_NATIVE_ERROR_\d+|WRITER_CLOSE_ERROR_\d+|WRITER_FAILED|WRITER_CLOSED)\|\d+$/),
+  ]);
+  const phaseTime = name => Number(psPhases.find(line => line.startsWith(name + '|'))?.split('|')[1]) || null;
   t.diagnostic(JSON.stringify({ 진단: '0바이트쓰기 준비와 실제 읽기 경계', 시작시각: new Date(started).toISOString(),
-    프로세스시작밀리초: spawnedAt === undefined ? null : spawnedAt - started, 경과밀리초: Date.now() - started,
+    프로세스시작밀리초: spawnedAt === undefined ? null : spawnedAt - started, 경과밀리초: completedAt - started,
     exitCode: failure ? failure.code : 0, signal: failure?.signal ?? null, killed: failure?.killed ?? false,
     stdout: result?.stdout ?? failure?.stdout ?? '', stderr: result?.stderr ?? failure?.stderr ?? '',
-    준비와읽기: await phases(phasePath, /^(?:ENTRY|FIXTURE_COMPILE_BEGIN|FIXTURE_COMPILE_END|PIPE_SETUP|MODULE_BEGIN|MODULE_END|READER_COMPILE_BEGIN|READER_COMPILE_END|PREPARED|READ_DATA_BEGIN|READ_DATA_END_\d+|BYTES_VERIFIED|READ_EOF_BEGIN|READ_EOF_END_\d+|EOF_VERIFIED|DONE)\|[\d.]+\|\d+\|\d+$/),
-    쓰기: await phases(writerPath, /^(?:WRITER_STARTED|ZERO_WRITE_BEGIN|ZERO_WRITE_END|DATA_WRITE_BEGIN|DATA_WRITE_END|EOF_ALLOWED|EOF_WAIT_TIMEOUT|WRITER_NATIVE_ERROR_\d+|WRITER_CLOSE_ERROR_\d+|WRITER_FAILED|WRITER_CLOSED)\|\d+$/) }));
+    시각기준: '1970-01-01 세계시부터의 밀리초', 시각상관: { nodeStart: started, spawn: spawnedAt ?? null, callback: completedAt,
+      scriptBegin: phaseTime('SCRIPT_BEGIN'), entry: phaseTime('ENTRY'), done: phaseTime('DONE') },
+    프로세스사건: events, 준비와읽기: psPhases, 쓰기: writerPhases }));
   if (failure) throw Object.assign(Error('0바이트쓰기 프로세스 실패: ' + failure.code + '/' + failure.signal), { code: failure.code, signal: failure.signal, killed: failure.killed });
   assert.equal(result.stdout, 'ok');
   assert.equal(result.stderr, '');

@@ -95,11 +95,18 @@ function RemovePrivateEntry([string]$path, [string]$boundary) {
         return $failures
     } catch { return 1 }
 }
-function Cleanup([string]$root,[string]$work,[string[]]$keepVersions) {
+function CleanupWork([string]$work) {
     $failures=0
-    foreach ($item in Get-ChildItem -LiteralPath $work -Force) {
-        if ($item.Name -cne 'receipt.json') { $failures += RemovePrivateEntry $item.FullName $work }
-    }
+    try {
+        $null=Trusted $work $true
+        foreach ($item in Get-ChildItem -LiteralPath $work -Force) {
+            if ($item.Name -cne 'receipt.json') { $failures += RemovePrivateEntry $item.FullName $work }
+        }
+    } catch { $failures++ }
+    return $failures
+}
+function Cleanup([string]$root,[string]$work,[string[]]$keepVersions) {
+    $failures=CleanupWork $work
     $versions=Join-Path $root 'versions'
     foreach ($item in Get-ChildItem -LiteralPath $versions -Force) {
         if ($item.Name -cnotin $keepVersions) { $failures += RemovePrivateEntry $item.FullName $versions }
@@ -387,13 +394,14 @@ function Install([string]$root, [string]$action, [string]$provider, [string]$ver
         Require ($action -ne 'update' -or $before.managed) 'MANAGED_UPDATE_REQUIRED'
         PrivateDirectory $work
         $receipt=[ordered]@{provider=$provider;operationId=$operation;intentDigest=$digest;state='preparing';version=$version;login='not_checked'}
-        $receiptPath=Join-Path $work 'receipt.json'; AtomicJson $receiptPath $receipt
-        if ($before.installed -and $before.version -ceq $version) {
-            if ($before.managed) { Require ((ReadJson (Join-Path (Join-Path $root $before.active) '.installed.json')).integrity -ceq $integrity) 'INSTALLED_RELEASE_CHANGED' }
-            $receipt.state='reused'; AtomicJson $receiptPath $receipt; return $receipt
-        }
-        $switched=$false; $prior=$before.active; $target=$null
+        $receiptPath=Join-Path $work 'receipt.json'
+        $switched=$false; $staged=$false; $prior=$before.active; $target=$null; $final=$null
         try {
+            AtomicJson $receiptPath $receipt
+            if ($before.installed -and $before.version -ceq $version) {
+                if ($before.managed) { Require ((ReadJson (Join-Path (Join-Path $root $before.active) '.installed.json')).integrity -ceq $integrity) 'INSTALLED_RELEASE_CHANGED' }
+                $receipt.state='reused'; AtomicJson $receiptPath $receipt; return $receipt
+            }
             $runtime=NodeRuntime; $nodeDirectory=[IO.Path]::GetDirectoryName($runtime[0]); PrivateDirectory (Join-Path $work 'home')
             $nodeResult=[AgentCliProcess]::Run($runtime[0],@('--version'),$work,(EnvironmentFor (Join-Path $work 'home') $nodeDirectory),10000,256)
             Require ($nodeResult[0] -eq 0 -and $nodeResult[1] -cmatch '^v(?:2[2-9]|[3-9][0-9])\.[0-9]+\.[0-9]+\s*$') 'NODE22_REQUIRED'
@@ -414,7 +422,7 @@ function Install([string]$root, [string]$action, [string]$provider, [string]$ver
             Require ((Inspect $root $provider).installationRevision -ceq $expected) 'STALE_INSTALLATION'
             $target='versions/' + $version + '-' + (HashBytes ($utf8.GetBytes($integrity))).Substring(0,16)
             $final=Join-Path $root $target; Require (-not (Test-Path -LiteralPath $final)) 'VERSION_ALREADY_STAGED'
-            [IO.Directory]::Move($prefix,$final)
+            [IO.Directory]::Move($prefix,$final); $staged=$true
             AtomicJson (Join-Path $root 'current.json') @{active=$target}; $switched=$true
             $keepVersions=@($target.Substring(9)); if ($before.managed) { $keepVersions += $prior.Substring(9) }
             $failures=Cleanup $root $work $keepVersions
@@ -423,15 +431,25 @@ function Install([string]$root, [string]$action, [string]$provider, [string]$ver
             return $receipt
         } catch {
             $receipt.state='failed'; $receipt['error']='INSTALL_FAILED'
-            if ($switched) {
+            $failure='INSTALL_FAILED'; $failures=0
+            if ($staged) {
                 try {
-                    Require ((ReadJson (Join-Path $root 'current.json')).active -ceq $target) 'RECOVERY_REQUIRED'
-                    if ($before.managed) { AtomicJson (Join-Path $root 'current.json') @{active=$prior} }
-                    else { Remove-Item -LiteralPath (Join-Path $root 'current.json') -Force }
-                } catch { throw 'RECOVERY_REQUIRED' }
+                    if ($switched) {
+                        Require ((ReadJson (Join-Path $root 'current.json')).active -ceq $target) 'RECOVERY_REQUIRED'
+                        if ($before.managed) { AtomicJson (Join-Path $root 'current.json') @{active=$prior} }
+                        else { Remove-Item -LiteralPath (Join-Path $root 'current.json') -Force }
+                    }
+                    Require ((Inspect $root $provider).installationRevision -ceq $expected) 'RECOVERY_REQUIRED'
+                    # Only our newly moved version, after verified rollback.
+                    # Unknown recovery keeps the version and its metadata intact.
+                    $failures += RemovePrivateEntry $final (Join-Path $root 'versions')
+                } catch { $failure='RECOVERY_REQUIRED'; $failures++ }
             }
-            try { AtomicJson $receiptPath $receipt } catch { throw 'RESULT_UNKNOWN' }
-            throw 'INSTALL_FAILED'
+            $failures += CleanupWork $work
+            if ($failures -gt 0) { $receipt['cleanupFailures']=[long]$receipt['cleanupFailures']+$failures }
+            try { AtomicJson $receiptPath $receipt }
+            catch { $null=CleanupWork $work; throw 'RESULT_UNKNOWN' }
+            throw $failure
         }
     } finally { $lock.Dispose() }
 }

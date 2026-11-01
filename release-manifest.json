@@ -395,8 +395,8 @@
     },
     {
       "path": "scripts/manage-agent-cli-windows.ps1",
-      "size": 36255,
-      "sha256": "fc8be145314470f976a1c6474b55278d7efe2cee7a94b4b8633c69c5498c18ad"
+      "size": 37180,
+      "sha256": "cfbd1d1bfbd5d6de4304264c3764bd24b11538ad2b893cce34ee5edfd9fcb254"
     },
     {
       "path": "scripts/manage-agent-cli.py",
@@ -1750,8 +1750,8 @@
     },
     {
       "path": "test/windows-agent-cli-fixture.mjs",
-      "size": 14771,
-      "sha256": "becb54155e5256a2b45a2cc116006da2bd52ec999e7374b2c32b03116a2e6c91"
+      "size": 22547,
+      "sha256": "53dc8b9ca895955a30bfacfd7eb0104509da82e996eb9b8b41fb5b92dca8b3c1"
     },
     {
       "path": "test/windows-agent-cli-helper.test.mjs",
@@ -1770,8 +1770,8 @@
     },
     {
       "path": "test/windows-command-line.test.mjs",
-      "size": 18980,
-      "sha256": "298c960400408e52a9b1f4f3cf5d44aa12d3982c42b089d79d296b31430b7f41"
+      "size": 20687,
+      "sha256": "7f4d1d6994296666f8221d750aa5b5c3c51de082555b6d4361671c32ef9a9156"
     },
     {
       "path": "test/windows-dispatch-binding.test.mjs",
@@ -1800,8 +1800,8 @@
     },
     {
       "path": "test/windows-python-source.test.mjs",
-      "size": 27514,
-      "sha256": "1967008be9bb55af04c073344aabd3686fe158efc8054202672c607dd075be13"
+      "size": 26666,
+      "sha256": "794cca773f982c28a54d896f75ce614506049e8d33ef64b3eeaf7df8a08d2e10"
     },
     {
       "path": "test/windows-ssh-ci.ps1",

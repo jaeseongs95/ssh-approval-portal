@@ -59,6 +59,13 @@ const fs=require('fs'),path=require('path');
 const prefix=process.argv[process.argv.indexOf('--prefix')+1];
 const fixture=JSON.parse(fs.readFileSync(process.argv.at(-1),'utf8'));
 fs.appendFileSync(path.join(__dirname,'npm-executions.log'),JSON.stringify({provider:fixture.provider,version:fixture.version})+'\\n');
+if(fixture.failure){
+ fs.mkdirSync(prefix,{recursive:true});fs.writeFileSync(path.join(prefix,'partial-install.txt'),'partial');
+ const cache=process.argv[process.argv.indexOf('--cache')+1];fs.mkdirSync(cache,{recursive:true});fs.writeFileSync(path.join(cache,'partial-cache.txt'),'partial');
+ fs.writeFileSync(path.join(process.env.USERPROFILE,'partial-home.txt'),'partial');
+ if(fixture.failure==='timeout'){setTimeout(()=>{},60000);return;}
+ process.exit(1);
+}
 const packageDir=path.join(prefix,'node_modules',fixture.provider==='claude'?'@anthropic-ai':'@openai',fixture.provider==='claude'?'claude-code':'codex');
 fs.mkdirSync(path.join(packageDir,'bin'),{recursive:true});
 const relative=fixture.provider==='claude'?'bin/claude.exe':'bin/codex.js';
@@ -75,7 +82,10 @@ if(fixture.provider==='claude'){
  }
  function NodeRuntime { return @($testNode,$fakeNpm) }
  $testArchive='{"provider":"codex","version":"1.2.3"}'
- function Download($url,$destination,$deadline) { [IO.File]::WriteAllText($destination,$testArchive,$utf8) }
+ function Download($url,$destination,$deadline) {
+     [IO.File]::WriteAllText($destination,$testArchive,$utf8)
+     if($script:lockDownload){$script:downloadHandle=[IO.File]::Open($destination,'Open','Read','None')}
+ }
  function Integrity { return 'sha512-'+[Convert]::ToBase64String([Security.Cryptography.SHA512]::Create().ComputeHash($utf8.GetBytes($testArchive))) }
  $env:PATH=[IO.Path]::GetDirectoryName($testNode)
  $fixtureStage='login-environment'
@@ -141,12 +151,105 @@ if(fixture.provider==='claude'){
  try { $null=Install $root 'update' 'codex' '1.2.4' (Integrity) $before.installationRevision $expiry ('c'*48) } catch { $rejected=$true }
  Assert $rejected 'stale-revision'
  $before=Inspect $root 'codex'
+ $fixtureStage='failure-cleanup'
+ $successfulReceiptPath=Join-Path $root ('operations/'+('b'*48)+'/receipt.json')
+ $successfulReceiptHash=(Get-FileHash -LiteralPath $successfulReceiptPath -Algorithm SHA256).Hash
+ $stableCurrentHash=(Get-FileHash -LiteralPath (Join-Path $root 'current.json') -Algorithm SHA256).Hash
+ $protectedFiles=@()
+ foreach($active in @($oldActive,$before.active)){
+     $prefix=Join-Path $root $active
+     foreach($path in @((PackageExecutable $prefix 'codex'),(Join-Path $prefix '.installed.json'))){$protectedFiles+=@{path=$path;hash=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash}}
+ }
+ $unrelatedWork=Join-Path $root ('operations/'+('e'*48));PrivateDirectory $unrelatedWork
+ $unrelatedPayload=Join-Path $unrelatedWork 'keep.txt';[IO.File]::WriteAllText($unrelatedPayload,'unrelated-work-preserved',$utf8)
+ AtomicJson (Join-Path $unrelatedWork 'receipt.json') @{provider='codex';operationId=('e'*48);intentDigest=('e'*64);state='preparing';version='1.2.9';login='not_checked'}
+ $unrelatedReceiptHash=(Get-FileHash -LiteralPath (Join-Path $unrelatedWork 'receipt.json') -Algorithm SHA256).Hash
+ function AssertFailurePreserved($operation,$name,[bool]$restored=$true) {
+     $executed=ExecutionCount
+     $failed=Status $root 'codex' $operation
+     Assert ($failed.state -ceq 'failed' -and $failed.operationId -ceq $operation) ($name+'-failed-receipt')
+     Assert ((ExecutionCount) -eq $executed) ($name+'-status-does-not-reinstall')
+     Assert ((Get-FileHash -LiteralPath $successfulReceiptPath -Algorithm SHA256).Hash -ceq $successfulReceiptHash) ($name+'-original-receipt-preserved')
+     Assert ((Get-FileHash -LiteralPath (Join-Path $unrelatedWork 'receipt.json') -Algorithm SHA256).Hash -ceq $unrelatedReceiptHash) ($name+'-other-receipt-preserved')
+     Assert ([IO.File]::ReadAllText($unrelatedPayload) -ceq 'unrelated-work-preserved') ($name+'-other-work-preserved')
+     Assert ([IO.File]::ReadAllText($credentialFixture) -ceq 'credential-fixture-unchanged') ($name+'-credentials-preserved')
+     Assert (Test-Path -LiteralPath (Join-Path $root $oldActive)) ($name+'-previous-version-preserved')
+     foreach($protected in $protectedFiles){Assert ((Get-FileHash -LiteralPath $protected.path -Algorithm SHA256).Hash -ceq $protected.hash) ($name+'-active-and-previous-bytes-preserved')}
+     if($restored){Assert ((Get-FileHash -LiteralPath (Join-Path $root 'current.json') -Algorithm SHA256).Hash -ceq $stableCurrentHash) ($name+'-current-preserved')}
+     $released=[IO.File]::Open((Join-Path $root '.lock'),'Open','ReadWrite','None');$released.Dispose()
+ }
+ function AssertWorkClean($operation,$name) {
+     $entries=@(Get-ChildItem -LiteralPath (Join-Path $root ('operations/'+$operation)) -Force)
+     Assert ($entries.Count -eq 1 -and $entries[0].Name -ceq 'receipt.json') ($name+'-only-receipt-remains')
+ }
  $testArchive='{"provider":"codex","version":"1.2.5"}'
  $rejected=$false
  try { $null=Install $root 'update' 'codex' '1.2.5' ('sha512-'+[Convert]::ToBase64String((New-Object byte[] 64))) $before.installationRevision $expiry ('f'*48) } catch { $rejected=$true }
  Assert ($rejected -and (Inspect $root 'codex').version -eq '1.2.4') 'integrity-before-activation'
- Assert ((Status $root 'codex' ('f'*48)).state -eq 'failed') 'failure-receipt'
+ AssertFailurePreserved ('f'*48) 'integrity'
+ AssertWorkClean ('f'*48) 'integrity'
+ foreach($mode in @('npm','timeout')) {
+     $fixtureStage='failure-cleanup-'+$mode
+     $failureOperation=$(if($mode -eq 'npm'){'5'*48}else{'6'*48})
+     $testArchive=Json @{provider='codex';version='1.2.5';failure=$mode}
+     $failureExpiry=$(if($mode -eq 'timeout'){[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()+5000}else{$expiry})
+     $executed=ExecutionCount;$rejected=$false
+     try{$null=Install $root 'update' 'codex' '1.2.5' (Integrity) $before.installationRevision $failureExpiry $failureOperation}
+     catch{$rejected=$_.Exception.ToString() -match 'INSTALL_FAILED'}
+     Assert ($rejected -and (ExecutionCount) -eq ($executed+1)) ($mode+'-actual-npm-started-and-failed')
+     AssertFailurePreserved $failureOperation $mode
+     AssertWorkClean $failureOperation $mode
+ }
+ # Keep an exclusive handle to our downloaded payload: deletion must fail
+ # observably without concealing the residue or touching another operation.
+ $fixtureStage='failure-cleanup-locked-payload'
+ $testArchive='{"provider":"codex","version":"1.2.5"}'
+ $script:lockDownload=$true;$script:downloadHandle=$null
+ try {
+     $rejected=$false
+     try{$null=Install $root 'update' 'codex' '1.2.5' ('sha512-'+[Convert]::ToBase64String((New-Object byte[] 64))) $before.installationRevision $expiry ('7'*48)}catch{$rejected=$true}
+     Assert $rejected 'locked-payload-install-refused'
+     AssertFailurePreserved ('7'*48) 'locked-payload'
+     $lockedStatus=Status $root 'codex' ('7'*48)
+     Assert ($lockedStatus.cleanupFailures -gt 0) 'locked-payload-cleanup-diagnostic'
+     Assert ([IO.File]::Exists((Join-Path $root ('operations/'+('7'*48)+'/package.tgz')))) 'locked-payload-residue-observed-before-fixture-finally'
+ } finally {if($null -ne $script:downloadHandle){$script:downloadHandle.Dispose()};$script:lockDownload=$false}
+ # Fail immediately after the production activation, then verify rollback
+ # before any fixture-wide cleanup can hide a leaked prefix or new version.
+ $savedCleanup=\${function:Cleanup}
+ try {
+     function Cleanup { throw 'FIXTURE_AFTER_ACTIVATION' }
+     $fixtureStage='failure-cleanup-after-activation'
+     $testArchive='{"provider":"codex","version":"1.2.6"}'
+     $newTarget='versions/1.2.6-'+(HashBytes ($utf8.GetBytes((Integrity)))).Substring(0,16)
+     $rejected=$false
+     try{$null=Install $root 'update' 'codex' '1.2.6' (Integrity) $before.installationRevision $expiry ('8'*48)}catch{$rejected=$_.Exception.ToString() -match 'INSTALL_FAILED'}
+     Assert $rejected 'post-activation-refused'
+     AssertFailurePreserved ('8'*48) 'post-activation'
+     AssertWorkClean ('8'*48) 'post-activation'
+     Assert (-not (Test-Path -LiteralPath (Join-Path $root $newTarget))) 'post-activation-own-new-version-reclaimed'
+     $fixtureStage='failure-cleanup-unknown-recovery'
+     $savedAtomicJson=\${function:AtomicJson};$rollbackTarget=$before.active
+     try {
+         function AtomicJson($path,$value) {
+             if($path -ceq (Join-Path $root 'current.json') -and $value.active -ceq $rollbackTarget){throw 'FIXTURE_ROLLBACK_FAILED'}
+             & $savedAtomicJson $path $value
+         }
+         $testArchive='{"provider":"codex","version":"1.2.7"}'
+         $recoveryTarget='versions/1.2.7-'+(HashBytes ($utf8.GetBytes((Integrity)))).Substring(0,16)
+         $rejected=$false
+         try{$null=Install $root 'update' 'codex' '1.2.7' (Integrity) $before.installationRevision $expiry ('9'*48)}catch{$rejected=$_.Exception.ToString() -match 'RECOVERY_REQUIRED'}
+         Assert $rejected 'unknown-recovery-refused'
+         AssertFailurePreserved ('9'*48) 'unknown-recovery' $false
+         AssertWorkClean ('9'*48) 'unknown-recovery'
+         Assert ((ReadJson (Join-Path $root 'current.json')).active -ceq $recoveryTarget) 'unknown-recovery-active-pointer-preserved'
+         Assert (Test-Path -LiteralPath (Join-Path (Join-Path $root $recoveryTarget) '.installed.json')) 'unknown-recovery-version-and-metadata-preserved'
+         Assert ((Status $root 'codex' ('9'*48)).cleanupFailures -gt 0) 'unknown-recovery-retention-diagnostic'
+     } finally {Set-Item -Path Function:AtomicJson -Value $savedAtomicJson}
+     AtomicJson (Join-Path $root 'current.json') @{active=$before.active}
+ } finally {Set-Item -Path Function:Cleanup -Value $savedCleanup}
  Assert ([IO.File]::ReadAllText($credentialFixture) -eq 'credential-fixture-unchanged') 'credentials-preserved'
+ $testArchive='{"provider":"codex","version":"1.2.5"}'
  $externalPrefix=Join-Path $homeDirectory 'AppData/Roaming/npm'
  $fixtureStage='external-reuse'
  $externalArchive=Join-Path $testRoot 'external.json'; [IO.File]::WriteAllText($externalArchive,$testArchive,$utf8)
