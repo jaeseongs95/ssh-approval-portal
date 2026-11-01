@@ -9,6 +9,7 @@ import json
 import multiprocessing
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch, Mock
 
@@ -93,7 +94,144 @@ def owned_stat():
     return owned
 
 
+def package_fixture(root, *, version='1.8.0', settings_source=None):
+    names = ('bridge.mjs', 'app.mjs', 'package.json', 'package-lock.json',
+             'scripts/deployment.py', 'scripts/verify.mjs', 'scripts/deployment-preservation.mjs',
+             'scripts/deployment_migration.py', 'scripts/migrate-state.mjs',
+             'scripts/deployment-launcher.py', 'config/ssh-approval-bridge.service',
+             'helper/environment-helper.py', 'scripts/settings_contract.py',
+             'config/settings-contract.json')
+    root.mkdir(mode=0o700)
+    entries = []
+    for name in names:
+        path = root / name
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        raw = b'listed-package-member\n'
+        if name == 'package.json':
+            raw = json.dumps({'version': version}).encode()
+        elif name == 'scripts/settings_contract.py' and settings_source is not None:
+            raw = settings_source.encode()
+        path.write_bytes(raw)
+        path.chmod(0o600)
+        entries.append({'path': name, 'size': len(raw), 'sha256': deployment.digest(raw)})
+    raw = deployment.canonical({'version': version, 'files': entries})
+    (root / 'release-manifest.json').write_bytes(raw)
+    (root / 'release-manifest.json').chmod(0o600)
+    return deployment.digest(raw), {entry['path'] for entry in entries} | {'release-manifest.json'}
+
+
 class DeploymentStateMachineTests(unittest.TestCase):
+    def root_fixture(self):
+        if not hasattr(deployment.os, 'geteuid') or deployment.os.geteuid() != 0:
+            self.skipTest('Run this isolated Linux security fixture as root in CI/TEST')
+        return tempfile.TemporaryDirectory(prefix='portal-deployment-security-', dir='/var/lib')
+
+    def test_unlisted_external_symlink_and_git_are_never_copied_or_published(self):
+        with self.root_fixture() as directory:
+            root = Path(directory)
+            source, stage, releases = root / 'package', root / 'stage', root / 'releases'
+            pin, expected = package_fixture(source)
+            marker = b'outside-package-confidential-marker-20261101'
+            outside = root / 'private-source'
+            outside.write_bytes(marker)
+            outside.chmod(0o600)
+            (source / 'unexpected-link').symlink_to(outside)
+            (source / 'operator-notes.txt').write_bytes(marker)
+            (source / '.git').mkdir(mode=0o700)
+            (source / '.git/config').write_bytes(marker)
+            deployment.copy_manifest_source(source, stage, pin)
+            releases.mkdir(mode=0o700)
+            updater = deployment.load_module(SCRIPT.with_name('update_release.py'), 'deployment_security_publisher')
+            target = releases / 'verified'
+            updater.publish_release(stage, target, 65534,
+                                    lambda tree: deployment.verify_manifest(tree, pin))
+            for tree in (stage, target):
+                self.assertEqual({path.relative_to(tree).as_posix() for path in tree.rglob('*') if path.is_file()}, expected)
+                self.assertFalse((tree / 'unexpected-link').exists())
+                self.assertFalse((tree / '.git').exists())
+                self.assertTrue(all(marker not in path.read_bytes() for path in tree.rglob('*') if path.is_file()))
+            self.assertEqual(outside.read_bytes(), marker)
+
+    def test_legacy_rejects_mutable_or_linked_scripts_before_root_import(self):
+        for attack in ('writable-directory', 'linked-directory'):
+            with self.subTest(attack=attack), self.root_fixture() as directory:
+                root = Path(directory)
+                releases = root / 'releases'
+                releases.mkdir(mode=0o700)
+                source, marker = releases / 'old', root / 'import-side-effect'
+                malicious = 'from pathlib import Path\nPath(' + repr(str(marker)) + ').write_text("executed")\ndef read_env(_): return {}\n'
+                package_fixture(source, version='1.7.0', settings_source=malicious)
+                link = root / 'active'
+                link.symlink_to(source)
+                if attack == 'writable-directory':
+                    (source / 'scripts').chmod(0o777)
+                else:
+                    external_scripts = root / 'outside-scripts'
+                    (source / 'scripts').rename(external_scripts)
+                    (source / 'scripts').symlink_to(external_scripts, target_is_directory=True)
+                with patch.object(deployment, 'LEGACY_LINK', link), patch.object(deployment, 'RELEASES', releases):
+                    with self.assertRaisesRegex(deployment.DeploymentError, 'UNTRUSTED_DIRECTORY'):
+                        deployment._legacy_state()
+                self.assertFalse(marker.exists(), 'unverified settings module ran as root')
+
+    def test_service_uid_reads_active_and_launcher_under_private_umask(self):
+        with self.root_fixture() as directory:
+            root = Path(directory)
+            root.chmod(0o755)
+            account = SimpleNamespace(pw_uid=65534, pw_gid=65534)
+            state = root / 'deployments'
+            previous = deployment.os.umask(0o077)
+            try:
+                with patch.object(deployment, 'STATE_ROOT', state), patch.object(deployment.pwd, 'getpwnam', return_value=account):
+                    deployment._ensure_state(state)
+                releases, generations = root / 'releases', root / 'generations'
+                for path in (releases, generations):
+                    path.mkdir(mode=0o755)
+                    path.chmod(0o755)
+                job_id = 'deploy-' + 'a' * 32
+                release, generation = releases / 'code', generations / job_id
+                for path in (release, generation):
+                    path.mkdir(mode=0o750)
+                    deployment.os.chown(path, 0, account.pw_gid)
+                    path.chmod(0o750)
+                data = generation / 'transfers'
+                data.mkdir(mode=0o700)
+                deployment.os.chown(data, account.pw_uid, account.pw_gid)
+                bridge = b'export const trusted = true;\n'
+                (release / 'bridge.mjs').write_bytes(bridge)
+                manifest = deployment.canonical({'files': [{'path': 'bridge.mjs', 'size': len(bridge), 'sha256': deployment.digest(bridge)}]})
+                (release / 'release-manifest.json').write_bytes(manifest)
+                for path in (release / 'bridge.mjs', release / 'release-manifest.json'):
+                    deployment.os.chown(path, 0, account.pw_gid)
+                    path.chmod(0o640)
+                environment, node = root / 'environment', root / 'node'
+                environment.write_bytes(b'BRIDGE_MCP_TOKEN=private\n')
+                environment.chmod(0o600)
+                node.write_bytes(b'#!/bin/false\n')
+                node.chmod(0o755)
+                launcher = root / 'launcher.py'
+                launcher.write_bytes(SCRIPT.with_name('deployment-launcher.py').read_bytes())
+                launcher.chmod(0o644)
+                active = {'schemaVersion': 1, 'generation': job_id, 'release': str(release),
+                          'dataRoot': str(data), 'environmentFile': str(environment),
+                          'manifestSha256': deployment.digest(manifest)}
+                deployment.atomic_json(state / 'active.json', active, mode=0o640, gid=account.pw_gid)
+            finally:
+                deployment.os.umask(previous)
+            program = ('import importlib.util, pathlib, sys; '
+                       'spec=importlib.util.spec_from_file_location("launcher_fixture",sys.argv[1]); '
+                       'module=importlib.util.module_from_spec(spec); spec.loader.exec_module(module); '
+                       'paths=[pathlib.Path(p) for p in sys.argv[2:]]; '
+                       'result=module.select_generation(active=paths[0],releases=paths[1],generations=paths[2],environment=paths[3],node=paths[4]); '
+                       'print(result["generation"])')
+            result = deployment.subprocess.run(['/usr/bin/python3', '-I', '-B', '-c', program,
+                str(launcher), str(state / 'active.json'), str(releases), str(generations), str(environment), str(node)],
+                user=account.pw_uid, group=account.pw_gid, extra_groups=[], capture_output=True, timeout=15)
+            self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
+            self.assertEqual(result.stdout.decode().strip(), job_id)
+            self.assertEqual(state.stat().st_mode & 0o777, 0o750)
+            self.assertEqual((state / 'active.json').stat().st_mode & 0o777, 0o640)
+
     def test_audit_prefix_allows_append_and_rejects_replacement(self):
         if not hasattr(deployment.os, 'O_NOFOLLOW'):
             self.skipTest('Linux audit preservation test')

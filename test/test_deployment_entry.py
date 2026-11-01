@@ -42,6 +42,12 @@ class DeploymentEntryTests(unittest.TestCase):
             'helper/environment-helper.py': b'# fixture helper\n',
             'scripts/deployment-preservation.mjs': b'export {};\n',
             'scripts/migrate-state.mjs': b'export {};\n',
+            'scripts/install.sh': b'#!/bin/sh\nexit 0\n',
+            'scripts/deployment-bootstrap.py': b'# fixture bootstrap\n',
+            'helper/file-helper.py': b'# fixture file helper\n',
+            'config/config.example.toml': b'# fixture configuration\n',
+            'scripts/ensure-node-runtime.sh': b'#!/bin/sh\nexit 0\n',
+            'scripts/generate-secrets.mjs': b'export {};\n',
             'bridge.mjs': b'export {};\n',
             'app.mjs': b'export {};\n',
             'package.json': b'{"version":"1.8.0"}\n',
@@ -196,6 +202,18 @@ class DeploymentEntryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             entry.install_executor(self.source, hashlib.sha256(raw).hexdigest())
         self.assertFalse(self.executors.exists())
+
+    def test_missing_fresh_install_member_is_rejected_before_executor_publication(self):
+        names = ('scripts/install.sh', 'scripts/deployment-bootstrap.py', 'helper/file-helper.py',
+                 'config/config.example.toml', 'scripts/ensure-node-runtime.sh', 'scripts/generate-secrets.mjs')
+        for name in names:
+            with self.subTest(member=name):
+                manifest = {**self.manifest, 'files': [value for value in self.manifest['files']
+                                                     if value['path'] != name]}
+                pin = self.save_manifest(self.source, manifest)
+                with self.assertRaisesRegex(ValueError, 'DEPLOYMENT_PACKAGE_INCOMPLETE'):
+                    entry.install_executor(self.source, pin)
+                self.assertFalse(self.executors.exists())
 
 
 if __name__ == '__main__':

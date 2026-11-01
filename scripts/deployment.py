@@ -340,10 +340,44 @@ def verify_manifest(source, manifest_sha256, *, deployment_package=True):
                 'scripts/deployment_migration.py', 'scripts/migrate-state.mjs',
                 'scripts/deployment-launcher.py', 'config/ssh-approval-bridge.service',
                 'helper/environment-helper.py'}
-    need(not deployment_package or required <= seen, 'DEPLOYMENT_PACKAGE_INCOMPLETE')
+    predecessor_required = {'bridge.mjs', 'app.mjs', 'package.json',
+                            'scripts/settings_contract.py', 'config/settings-contract.json'}
+    need((required if deployment_package else predecessor_required) <= seen,
+         'DEPLOYMENT_PACKAGE_INCOMPLETE')
     need(json.loads(trusted_file(source / 'package.json'))['version'] == value['version'],
          'VERSION_MISMATCH')
     return value
+
+
+def copy_manifest_source(source, destination, manifest_sha256):
+    """Copy only pinned regular members; never traverse unlisted source paths."""
+    source, destination = Path(source), Path(destination)
+    manifest = verify_manifest(source, manifest_sha256)
+    raw_manifest = trusted_file(source / 'release-manifest.json', 4 * 1024 * 1024)
+    need(digest(raw_manifest) == manifest_sha256, 'MANIFEST_PIN_MISMATCH')
+    trusted_directory(destination.parent)
+    destination.mkdir(mode=0o700)
+    for entry in manifest['files']:
+        relative = PurePosixPath(entry['path'])
+        need('.git' not in relative.parts and entry['path'] != 'release-manifest.json',
+             'MANIFEST_MEMBER_INVALID')
+        raw = trusted_file(source.joinpath(*relative.parts), 64 * 1024 * 1024)
+        need(len(raw) == entry['size'] and digest(raw) == entry['sha256'], 'SOURCE_CHANGED')
+        target = destination.joinpath(*relative.parts)
+        target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(descriptor, 'wb') as stream:
+            stream.write(raw)
+            stream.flush()
+            os.fsync(stream.fileno())
+    descriptor = os.open(destination / 'release-manifest.json',
+                         os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(descriptor, 'wb') as stream:
+        stream.write(raw_manifest)
+        stream.flush()
+        os.fsync(stream.fileno())
+    sync_directory(destination)
+    return manifest
 
 
 def source_layout_preflight(root, uid):
@@ -444,17 +478,18 @@ def _legacy_state():
     release = Path(os.readlink(LEGACY_LINK))
     need(release.is_absolute() and release.parent == RELEASES, 'LEGACY_RELEASE_INVALID')
     trusted_directory(release)
+    manifest_pin = source_fingerprint(release)
+    manifest = verify_manifest(release, manifest_pin, deployment_package=False)
+    need(manifest['version'] == '1.7.0', 'UNSUPPORTED_LEGACY_RELEASE')
     # Parse with the existing strict contract, never source ENV as shell code.
     settings = load_module(release / 'scripts/settings_contract.py', 'deployment_settings')
     env = settings.read_env(str(ENVIRONMENT))
     root = Path(env.get('BRIDGE_TRANSFER_ROOT', str(BASE / 'transfers')))
     need(root.is_absolute() and '..' not in root.parts and root == BASE / 'transfers',
          'LEGACY_DATA_PATH_REQUIRES_EXPLICIT_IMPORT')
-    manifest = json.loads(trusted_file(release / 'release-manifest.json'))
-    need(manifest['version'] == '1.7.0', 'UNSUPPORTED_LEGACY_RELEASE')
     return {'schemaVersion': 0, 'generation': 'legacy-1.7.0', 'release': str(release),
             'dataRoot': str(root), 'environmentFile': str(ENVIRONMENT),
-            'manifestSha256': source_fingerprint(release)}
+            'manifestSha256': manifest_pin}
 
 
 def executor_path(manifest_sha256):
@@ -763,7 +798,7 @@ class SystemBackend:
             need(not os.path.lexists(self.target), 'TARGET_RELEASE_ALREADY_EXISTS')
             source_stage = self.job / 'source'
             need(not os.path.lexists(source_stage), 'PREPARE_SOURCE_ALREADY_EXISTS')
-            shutil.copytree(source, source_stage, symlinks=False)
+            copy_manifest_source(source, source_stage, self.plan['manifestSha256'])
             for name in ('npm-user.conf', 'npm-global.conf'):
                 (self.job / name).write_bytes(b'')
             npm = RUNTIME / 'lib/node_modules/npm/bin/npm-cli.js'

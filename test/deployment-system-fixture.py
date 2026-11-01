@@ -149,6 +149,15 @@ class Fixture:
         return json.loads((STATE / 'active.json').read_text(encoding='utf-8'))
 
     def package(self):
+        # GitHub 도구 캐시는 /opt를 runner 쓰기 가능하게 제공할 수 있다.
+        # 폐기형 VM의 조상 디렉터리만 일반 Ubuntu root 신뢰 조건으로 맞춘다.
+        # 제품 검사와 Node 트리의 신뢰 조건은 완화하지 않는다.
+        self.report['hostTrustBefore'] = {
+            str(path): {'uid': path.stat().st_uid, 'gid': path.stat().st_gid,
+                        'mode': oct(path.stat().st_mode & 0o777)}
+            for path in (Path('/'), Path('/opt'), Path('/usr/local'))}
+        self.command('normalize-disposable-vm-opt-owner', ['chown', 'root:root', '/opt'])
+        self.command('normalize-disposable-vm-opt-mode', ['chmod', '0755', '/opt'])
         require(not self.work.exists(), 'FIXTURE_WORK_ALREADY_EXISTS')
         self.work.mkdir(mode=0o755)
         # 프로젝트의 패키징 명령을 사용하고 checkout의 생성물은 바꾸지 않는다.

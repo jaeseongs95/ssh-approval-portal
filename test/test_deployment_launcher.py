@@ -74,7 +74,7 @@ class DeploymentLauncherTests(unittest.TestCase):
         self.assertEqual(observed['cwd'], str(fixture['release']))
         self.assertEqual(observed['environment'], {'NODE_OPTIONS': None, 'NODE_PATH': None,
                          'BRIDGE_TRANSFER_ROOT': str(fixture['data']),
-                         'BRIDGE_SECRET_ENV_FILE': str(fixture['environment'])})
+                         'BRIDGE_SECRET_ENV_FILE': None})
 
     def test_invalid_generation_and_external_data_or_release_never_fall_back(self):
         cases = [('generation', 'deploy-' + 'A' * 32, 'ACTIVE_GENERATION'),
