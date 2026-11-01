@@ -210,8 +210,8 @@
     },
     {
       "path": "docs/request-queue.ko.md",
-      "size": 2751,
-      "sha256": "f39a0d71d9ea93ae9434af5bf83e637c7a4508aebc80d43e415f3beb82ac13ae"
+      "size": 3203,
+      "sha256": "0c5d3edaf33dc6dcb98d65f81c7ebc9d8c330830413564f687871bedb824b6e5"
     },
     {
       "path": "docs/roadmap.ko.md",
@@ -575,8 +575,8 @@
     },
     {
       "path": "src/adapters/http/protocol.mjs",
-      "size": 19889,
-      "sha256": "3134a930d453ec5c562a9c7f9bced28fc4eed7a6654469af45fb36084f18bc32"
+      "size": 21456,
+      "sha256": "f89069306cd51214b6e9288343e49c72ab74b5352970da8186c4bd5dd378f719"
     },
     {
       "path": "src/adapters/mcp/server.mjs",
@@ -780,8 +780,8 @@
     },
     {
       "path": "src/application/request-admission.mjs",
-      "size": 3920,
-      "sha256": "9503e46b36295b9641f9907764606fd40be7b7d39fe421bd239c6bcd2b587299"
+      "size": 3872,
+      "sha256": "6c6ac3433b9780fa8055f61900738ebc4fb566370122cf3d639122be02013161"
     },
     {
       "path": "src/application/request-safety.mjs",

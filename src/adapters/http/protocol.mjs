@@ -37,6 +37,35 @@ async function responseFinished(res) {
   });
 }
 
+async function readMcpMessage(req, res) {
+  const chunks = []; let bytes = 0;
+  // Keep the socket alive long enough to deliver a bounded refusal, then close it.
+  for await (const chunk of req.iterator({ destroyOnReturn: false })) {
+    bytes += chunk.length;
+    if (bytes > 1024 * 1024) {
+      req.pause(); res.setHeader('Connection', 'close');
+      json(res, 413, { jsonrpc: '2.0', id: null, error: { code: -32000, message: 'Request body too large' } });
+      return;
+    }
+    chunks.push(chunk);
+  }
+  let message;
+  try { message = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks))); }
+  catch {
+    json(res, 400, { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Invalid JSON' } });
+    return;
+  }
+  if (Array.isArray(message)) {
+    // A response lease cannot be detached by one member while sibling calls still run.
+    json(res, 400, { jsonrpc: '2.0', id: null, error: { code: -32600,
+      message: 'Send one JSON-RPC message per HTTP request', data: {
+        error_code: 'MCP_BATCH_NOT_SUPPORTED', executionAttempted: false, requestSubmitted: false,
+      } } });
+    return;
+  }
+  return { message };
+}
+
 export function createProtocolAdapters({ queue, commands, files, store, lifecycle, settings, signer, adminAccess, browserSessions, authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal, targets, requestSafety, commandPolicy, commandOutputs, automationMetrics, environmentEditor,agentCli, preservation, retainedHistory, requestAdmission }) {
   const capabilities = createCapabilities({ queue, store, signer, settings, targets, adminAuthMode: adminAccess.mode });
   const mcpServer = createMcpAdapter({ queue, commands, files, settings, capabilities, uiHtml, bindFileSource, shutdownSignal, targets, requestSafety, commandOutputs });
@@ -56,9 +85,14 @@ export function createProtocolAdapters({ queue, commands, files, store, lifecycl
       scope = requestScope(req, res);
       lease = await admission.mcp.acquire({ signal: scope.signal });
       if (scope.signal.aborted) return;
+      const mediaType = (req.headers['content-type'] ?? '').split(';', 1)[0].trim().toLowerCase();
+      if (mediaType !== 'application/json') return json(res, 415, { jsonrpc: '2.0', id: null,
+        error: { code: -32000, message: 'Content-Type must be application/json' } });
+      const parsed = await readMcpMessage(req, res);
+      if (!parsed || scope.signal.aborted) return;
       const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true, maxRequestBodySize: 1024 * 1024 });
       server = mcpServer(scope.signal, lease);
-      await server.connect(transport); await transport.handleRequest(req, res);
+      await server.connect(transport); await transport.handleRequest(req, res, parsed.message);
     } catch (error) {
       if (error instanceof RequestAdmissionError) admissionRefusal(res, error);
       else if (!res.headersSent && !res.destroyed) json(res, req.url === '/health' ? 503 : 500, { error: req.url === '/health' ? 'Health check unavailable' : 'MCP request failed' });

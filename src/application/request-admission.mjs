@@ -1,5 +1,3 @@
-import { performance } from 'node:perf_hooks';
-
 const messages = Object.freeze({
   REQUEST_QUEUE_FULL: 'Request queue is full',
   REQUEST_QUEUE_TIMEOUT: 'Request queue wait timed out',
