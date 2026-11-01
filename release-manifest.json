@@ -1,6 +1,6 @@
 {
   "version": "1.7.1",
-  "status": "candidate-pending-live-host-verification",
+  "status": "release",
   "runtime": "Node.js 24",
   "files": [
     {
