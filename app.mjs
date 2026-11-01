@@ -41,7 +41,8 @@ import {createAgentCliService} from './src/application/agent-cli.mjs';
 import {createAgentReleaseCatalog} from './src/adapters/releases/agent-cli.mjs';
 import {prepareAgentCliPlan,prepareAgentCliStatus} from './src/adapters/ssh/agent-cli.mjs';
 import {agentCliProviders,AGENT_CLI_CONTRACT} from './src/domain/agent-cli.mjs';
-import {platformOf, targetCapabilities, classifyForTarget, prepareWindowsCommand, requireTargetCapability} from './src/domain/target-platform.mjs';
+import {platformOf, targetCapabilities, classifyForTarget, requireTargetCapability} from './src/domain/target-platform.mjs';
+import {prepareWindowsCommand} from './src/adapters/ssh/windows-command.mjs';
 
 // Preserve the original injectable createApplication callback at the composition boundary.
 // Concrete runtime executors already return the neutral outcome accepted by use cases.

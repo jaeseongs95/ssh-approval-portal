@@ -6,4 +6,4 @@ const source = 'using System;using System.IO;using System.Runtime.InteropService
 // 준비는 자식 범위에서만 실행하여 호출자의 모듈 탐색 정책과 명령 이름을 보존한다.
 // 삽입 뒤 [SshApproval.Stdin]::Read(byte[], offset, count>0)를 호출한다.
 // 0은 실제 EOF, 그 밖의 읽기 오류는 예외다. 호출자는 원래 상한과 검증을 유지한다.
-export const WINDOWS_STDIN_READER = `&{Microsoft.PowerShell.Core\\Import-Module -Name ([IO.Path]::Combine($PSHOME,'Modules','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Utility.psd1')) -Scope Local -Force -ErrorAction Stop;Microsoft.PowerShell.Utility\\Add-Type -TypeDefinition '${source}' -ErrorAction Stop};`;
+export const WINDOWS_STDIN_READER = `&{$ProgressPreference='SilentlyContinue';Microsoft.PowerShell.Core\\Import-Module -Name ([IO.Path]::Combine($PSHOME,'Modules','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Utility.psd1')) -Scope Local -Force -ErrorAction Stop;Microsoft.PowerShell.Utility\\Add-Type -TypeDefinition '${source}' -ErrorAction Stop};`;

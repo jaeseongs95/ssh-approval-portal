@@ -13,7 +13,7 @@ import { createTransferExecutor } from '../src/adapters/ssh/transfers.mjs';
 import { ApprovalQueue } from '../src/domain/approval-queue.mjs';
 import { prepareAgentCliPlan } from '../src/adapters/ssh/agent-cli.mjs';
 import { buildWindowsCliFixtureScript } from './windows-agent-cli-fixture.mjs';
-import { WINDOWS_STDIN_READER } from '../src/domain/windows-stdin.mjs';
+import { WINDOWS_STDIN_READER } from '../src/adapters/ssh/windows-stdin.mjs';
 
 // 시험 계획: 실제 sshd/키/고정 호스트 키/비관리자 계정/SFTP/설치된 보조프로그램을
 // 통과한다. 바이트 비교는 입력 원본과 직접 비교하며 구현의 결과를 기대값으로 쓰지 않는다.
@@ -31,7 +31,8 @@ test('실제 Windows SSH 명령·승인·파일 전송 경계', {
   assert.equal(process.platform, 'win32');
   assert.equal(process.env.GITHUB_ACTIONS, 'true');
   const fixture = JSON.parse(await readFile(fixturePath, 'utf8'));
-  const { wrapWindowsCommand, prepareWindowsCommand, commandNamesForTarget } = await import('../src/domain/target-platform.mjs');
+  const { commandNamesForTarget } = await import('../src/domain/target-platform.mjs');
+  const { wrapWindowsCommand, prepareWindowsCommand } = await import('../src/adapters/ssh/windows-command.mjs');
   const runtime = await createSshRuntime({ BRIDGE_CONFIG_PATH: fixture.configPath, BRIDGE_HOST_KEY_MODE: 'strict' });
   const transport = createSshTransport(runtime.registry);
   const helperFailures = [];

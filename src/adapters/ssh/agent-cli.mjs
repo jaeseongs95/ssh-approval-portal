@@ -2,7 +2,7 @@ import {readFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import {preparePythonHelper} from './python-source.mjs';
 import {agentCliProvider,validateAgentRelease,AGENT_CLI_CONTRACT} from '../../domain/agent-cli.mjs';
-import {WINDOWS_STDIN_READER} from '../../domain/windows-stdin.mjs';
+import {WINDOWS_STDIN_READER} from './windows-stdin.mjs';
 
 const source=readFileSync(new URL('../../../scripts/manage-agent-cli.py',import.meta.url),'utf8');
 const loginSource=readFileSync(new URL('../../../scripts/check-agent-cli-login.py',import.meta.url),'utf8');

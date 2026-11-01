@@ -5,9 +5,10 @@ import { gunzipSync } from 'node:zlib';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { windowsCommandLineNames, windowsPolicyName } from '../src/domain/windows-command-line.mjs';
-import { commandNamesForTarget, classifyForTarget, prepareWindowsCommand, targetCapabilities } from '../src/domain/target-platform.mjs';
+import { commandNamesForTarget, classifyForTarget, targetCapabilities } from '../src/domain/target-platform.mjs';
+import { prepareWindowsCommand } from '../src/adapters/ssh/windows-command.mjs';
 import { commandLineNames } from '../src/domain/command-line.mjs';
-import { WINDOWS_STDIN_READER } from '../src/domain/windows-stdin.mjs';
+import { WINDOWS_STDIN_READER } from '../src/adapters/ssh/windows-stdin.mjs';
 
 const decode = command => {
   const stub = Buffer.from(command.split(' -EncodedCommand ')[1], 'base64').toString('utf16le');
@@ -43,7 +44,7 @@ test('WIN-EOF 표준입력은 실제 파이프 종료만 EOF로 취급하고 준
   assert.match(WINDOWS_STDIN_READER, /bool ok=ReadFile\([^;]+;int e=Marshal.GetLastWin32Error\(\);if\(!ok\)\{if\(e==109\)return 0;throw new System\.ComponentModel\.Win32Exception\(e\);\}if\(r>0\)/);
   assert.match(WINDOWS_STDIN_READER, /for\(;;\)/);
   assert.doesNotMatch(WINDOWS_STDIN_READER, /CloseHandle|\.Dispose|PSModuleAutoLoadingPreference|SetCurrentDirectory/);
-  assert.match(WINDOWS_STDIN_READER, /^&\{Microsoft.PowerShell.Core\\Import-Module/);
+  assert.match(WINDOWS_STDIN_READER, /^&\{\$ProgressPreference='SilentlyContinue';Microsoft.PowerShell.Core\\Import-Module/);
   assert.match(WINDOWS_STDIN_READER, /-Scope Local -Force -ErrorAction Stop/);
   assert.match(WINDOWS_STDIN_READER, /\$PSHOME,'Modules','Microsoft.PowerShell.Utility'/);
   const raw = 'Microsoft.PowerShell.Utility\\Get-Date';
@@ -73,7 +74,7 @@ public static class StdinFixture {
  public static void Start(){original=GetStdHandle(-10);if(!CreatePipe(out read,out write,IntPtr.Zero,0)||!SetStdHandle(-10,read))throw new Exception("PIPE_SETUP");thread=new Thread(()=>{try{uint n;Thread.Sleep(150);if(!WriteFile(write,new byte[0],0,out n,IntPtr.Zero))throw new Exception();Thread.Sleep(150);if(!WriteFile(write,new byte[]{237,149,156},3,out n,IntPtr.Zero)||n!=3)throw new Exception();Thread.Sleep(150);}catch{error=1;}finally{CloseHandle(write);}});thread.IsBackground=true;thread.Start();}
  public static void Stop(){bool joined=thread.Join(2000);SetStdHandle(-10,original);CloseHandle(read);if(!joined||error!=0)throw new Exception("PIPE_WRITE");}
 }`;
-  const script = `$ErrorActionPreference='Stop';Add-Type -TypeDefinition '${fixture}';[StdinFixture]::Start();try{${WINDOWS_STDIN_READER}$b=[byte[]]::new(4);$n=[SshApproval.Stdin]::Read($b,0,4);if($n -ne 3 -or $b[0] -ne 237 -or $b[1] -ne 149 -or $b[2] -ne 156){throw 'ZERO_WRITE_WAS_EOF'};$e=[SshApproval.Stdin]::Read($b,3,1);if($e -ne 0){throw 'PIPE_END_NOT_EOF'}}finally{[StdinFixture]::Stop()};[Console]::Write('ok')`;
+  const script = `$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';Add-Type -TypeDefinition '${fixture}';[StdinFixture]::Start();try{$ProgressPreference='Continue';${WINDOWS_STDIN_READER}if($ProgressPreference -cne 'Continue'){throw 'PROGRESS_SCOPE_CHANGED'};$b=[byte[]]::new(4);$n=[SshApproval.Stdin]::Read($b,0,4);if($n -ne 3 -or $b[0] -ne 237 -or $b[1] -ne 149 -or $b[2] -ne 156){throw 'ZERO_WRITE_WAS_EOF'};$e=[SshApproval.Stdin]::Read($b,3,1);if($e -ne 0){throw 'PIPE_END_NOT_EOF'}}finally{[StdinFixture]::Stop()};[Console]::Write('ok')`;
   const result = await promisify(execFile)('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { windowsHide: true, timeout: 10000, encoding: 'utf8' });
   assert.equal(result.stdout, 'ok');
   assert.equal(result.stderr, '');

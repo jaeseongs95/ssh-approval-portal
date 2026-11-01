@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
-import { WINDOWS_STDIN_READER } from '../../domain/windows-stdin.mjs';
+import { WINDOWS_STDIN_READER } from './windows-stdin.mjs';
 
 const digest = value => createHash('sha256').update(value).digest('hex');
 const decodePowerShell = value => `[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${Buffer.from(value, 'utf8').toString('base64')}'))`;

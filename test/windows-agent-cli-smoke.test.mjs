@@ -4,10 +4,10 @@ import {readFile,writeFile} from 'node:fs/promises';
 import {readFileSync} from 'node:fs';
 import {randomBytes} from 'node:crypto';
 import {win32} from 'node:path';
-import {createSshRuntime} from '../src/adapters/ssh/vendor.mjs';
+import {createSshRuntime,executeAgentCli} from '../src/adapters/ssh/vendor.mjs';
 import {prepareAgentCliPlan} from '../src/adapters/ssh/agent-cli.mjs';
 import {validateAgentRelease} from '../src/domain/agent-cli.mjs';
-import {wrapWindowsCommand} from '../src/domain/target-platform.mjs';
+import {wrapWindowsCommand} from '../src/adapters/ssh/windows-command.mjs';
 
 // Official registry metadata checked on 2026-11-01. Execution never resolves
 // latest: both tarball bytes and versions below are immutable test inputs.
@@ -17,6 +17,48 @@ const releases=Object.freeze([
 ]);
 const literal=value=>"'"+value.replaceAll("'","''")+"'";
 const enabled=process.env.AGS_WINDOWS_CLI_PACKAGE_SMOKE==='1';
+
+// Observe only public receipt fields before the production projection. Never
+// dump arbitrary stdout/stderr, credentials, environment or vendor diagnostics.
+function receiptObservation(result,plan){
+ let value;
+ try{value=JSON.parse(result.stdout);}catch{}
+ const publicField=(key,pattern)=>{
+  const field=value?.[key],type=field===null?'null':Array.isArray(field)?'array':typeof field;
+  return {type,...(typeof field==='string'&&pattern.test(field)?{value:field}:{}),...(typeof field==='string'?{length:field.length}:{})};
+ };
+ return {
+  action:plan.agentCli.action,expected:{provider:plan.agentCli.provider,intentDigest:plan.agentCli.intentDigest,version:JSON.parse(plan.manifest.argvJson)[2]||null,login:'not_checked'},
+  exitCode:result.exitCode,signal:result.signal??null,
+  stdoutBytes:typeof result.stdout==='string'?Buffer.byteLength(result.stdout):null,stderrBytes:typeof result.stderr==='string'?Buffer.byteLength(result.stderr):null,
+  parsedRecord:value!==null&&typeof value==='object'&&!Array.isArray(value),
+  operationMatches:value?.operationId===plan.agentCli.operationId,
+  state:publicField('state',/^(?:not_found|unknown|preparing|installing|completed|reused|failed|refused)$/),
+  provider:publicField('provider',/^(?:codex|claude)$/),intentDigest:publicField('intentDigest',/^[a-f0-9]{64}$/),
+  version:publicField('version',/^(?:0|[1-9][0-9]{0,5})\.(?:0|[1-9][0-9]{0,5})\.(?:0|[1-9][0-9]{0,5})$/),login:publicField('login',/^not_checked$/),
+ };
+}
+
+async function observedAgentCli(runtime,plan,verify,diagnostic){
+ const registry={
+  getProfile:name=>runtime.registry.getProfile(name),
+  async getOrCreate(name){
+   const connection=await runtime.registry.getOrCreate(name);
+   return new Proxy(connection,{get(target,key,receiver){
+    if(key==='exec')return async function(...args){
+     // Preserve the production per-dispatch guard's dynamic receiver.
+     let result;
+     try{result=await Reflect.apply(target.exec,this,args);}
+     catch(error){diagnostic(JSON.stringify({receiptObservation:{action:plan.agentCli.action,provider:plan.agentCli.provider,transportReturned:false}}));throw error;}
+     diagnostic(JSON.stringify({receiptObservation:receiptObservation(result,plan)}));
+     return result;
+    };
+    return Reflect.get(target,key,receiver);
+   }});
+  },
+ };
+ return executeAgentCli(registry,plan,verify);
+}
 
 test('고정 공식 npm 패키지를 격리 Windows SSH 계정에 설치하고 버전·상태를 확인한다',{
  skip:!enabled,timeout:1_950_000,
@@ -103,12 +145,27 @@ try{
     const before=await runtime.executeAgentCli(prepareAgentCliPlan({action:'inspect',provider:entry.provider,binding}),()=>binding);
     assert.equal(before.failed,false);assert.equal(before.data.agentCli.installed,false);
     const plan=prepareAgentCliPlan({action:'install',provider:entry.provider,binding,release,expectedInstallationRevision:before.data.agentCli.installationRevision,expiresAt:Date.now()+900_000,operationId:randomBytes(24).toString('hex')});
+    // Compare the actual plan's canonical bytes using the unmodified helper
+    // functions before any install. This probe only serializes public inputs.
+    const [action,provider,version,integrity,expected,expires]=JSON.parse(plan.manifest.argvJson);
+    const canonical=JSON.stringify({action,expires:Number(expires),expected,integrity,provider,version});
+    const intentProbePath=win32.join(fixture.fileRoot,'cli-intent-preflight-'+entry.provider+'.ps1');
+    await writeFile(intentProbePath,library+'\n'+accountGuard+`
+$intent=[ordered]@{action=${literal(action)};expires=[long]${literal(expires)};expected=${literal(expected)};integrity=${literal(integrity)};provider=${literal(provider)};version=${literal(version)}}
+[Console]::Out.WriteLine((Json @{canonical=(Json $intent);digest=(Digest $intent)}))
+`,'utf8');
+    const intentRaw=await probeConnection.exec(`powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "${intentProbePath}"`,{timeoutMs:30_000});
+    assert.equal(intentRaw.exitCode,0,intentRaw.stderr);assert.equal(intentRaw.stderr,'');
+    const intent=JSON.parse(intentRaw.stdout);
+    t.diagnostic(JSON.stringify({intentObservation:{provider:entry.provider,canonicalMatches:intent.canonical===canonical,expectedDigest:plan.agentCli.intentDigest,actualDigest:intent.digest}}));
+    assert.equal(intent.canonical,canonical,'PowerShell/JavaScript 승인 인수의 정규 JSON 불일치');
+    assert.equal(intent.digest,plan.agentCli.intentDigest,'PowerShell/JavaScript 승인 intentDigest 불일치');
     let installed;
-    try{installed=await runtime.executeAgentCli(plan,()=>binding);}
+    try{installed=await observedAgentCli(runtime,plan,()=>binding,value=>t.diagnostic(value));}
     catch(error){
      // A lost reply grants a receipt read only; never replay the installation.
      try{
-      const status=await runtime.executeAgentCli(prepareAgentCliPlan({action:'status',provider:entry.provider,binding,operationId:plan.agentCli.operationId,expectedIntentDigest:plan.agentCli.intentDigest}),()=>binding);
+      const status=await observedAgentCli(runtime,prepareAgentCliPlan({action:'status',provider:entry.provider,binding,operationId:plan.agentCli.operationId,expectedIntentDigest:plan.agentCli.intentDigest}),()=>binding,value=>t.diagnostic(value));
       t.diagnostic(JSON.stringify({provider:entry.provider,version:entry.version,receiptState:status.data.agentCli.state}));
      }catch{t.diagnostic(entry.provider+' 설치 결과의 영수증도 확인하지 못함');}
      throw error;

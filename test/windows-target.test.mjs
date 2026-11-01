@@ -6,7 +6,8 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { createApplication } from '../app.mjs';
 import { parseTargets, resolveTargets } from '../src/adapters/config/targets.mjs';
-import { classifyForTarget, platformOf, targetCapabilities, wrapWindowsCommand } from '../src/domain/target-platform.mjs';
+import { classifyForTarget, platformOf, targetCapabilities } from '../src/domain/target-platform.mjs';
+import { wrapWindowsCommand } from '../src/adapters/ssh/windows-command.mjs';
 
 // 시험 계획: WIN-CONFIG는 기존 revision 보존, WIN-ENCODE는 OB-IDENTITY/OB-BOUND,
 // WIN-POLICY는 승인 경계, WIN-CAPABILITY는 TEST를 포함한 명시적 인터프리터 조건을 검사한다.

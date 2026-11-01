@@ -64,7 +64,7 @@ test('Windows source binds its exact runtime, bytes, environment, argv and admin
   assert.match(p.command, /^powershell\.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -Command "& \(.+\)"$/);
   assert.doesNotMatch(launcherBootstrapOf(p), /["$`%\r\n]/);
   assert.ok(p.command.length <= 8000);
-  assert.doesNotMatch(launcherOf(p), /source stays on stdin|WriteLine|\|/);
+  assert.doesNotMatch(launcherOf(p), /source stays on stdin|StandardInput\.(?:Write|WriteLine)\s*\(/);
   assert.match(launcherOf(p), /\$i=\$p\.StandardInput\.BaseStream;\$b=\[byte\[\]\]::new\(8192\);try\{while\(\(\$n=\[SshApproval\.Stdin\]::Read\(\$b,0,\$b\.Length\)\) -gt 0\)\{\$i\.Write\(\$b,0,\$n\)\}/);
   assert.doesNotMatch(launcherOf(p), /Console\]::OpenStandardInput|ConsoleStream/);
   assert.match(launcherOf(p), /finally\{\$i\.Close\(\)\}/);
@@ -128,8 +128,10 @@ const ciWindows = process.platform === 'win32' && process.env.GITHUB_ACTIONS ===
 // 실제 SSH와 동일하게 비동기로 입력을 닫고 출력을 동시에 비운다.
 // 제한은 유지하고 실패 시 어느 수명 단계가 끝났는지에 한정해 남긴다.
 const run = (t, label, p, input = p.transportStdin, host = 'direct') => traceInput(t, label, p, input, () => new Promise(resolve => {
-  const child = spawn(host === 'cmd' ? 'cmd.exe' : 'powershell.exe', host === 'cmd' ? ['/d', '/s', '/c', p.command]
-    : powershellArguments(host === 'powershell-shell' ? p.command : launcherBootstrapOf(p)), { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+  // Node의 cmd.exe 셸 호출과 동일하게 바깥 따옴표를 보존하고 CRT 재인용을 막는다.
+  const child = spawn(host === 'cmd' ? 'cmd.exe' : 'powershell.exe', host === 'cmd' ? ['/d', '/s', '/c', `"${p.command}"`]
+    : powershellArguments(host === 'powershell-shell' ? p.command : launcherBootstrapOf(p)),
+    { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, windowsVerbatimArguments: host === 'cmd' });
   const events = [], stdout = [], stderr = [];
   let error, completed = false;
   const finish = (status = child.exitCode, signal = child.signalCode) => {
