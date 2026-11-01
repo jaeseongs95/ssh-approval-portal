@@ -1000,8 +1000,8 @@
     },
     {
       "path": "test/browser/admin-workflow.test.mjs",
-      "size": 14586,
-      "sha256": "dd5d9f4859c4a753ca09ea39478cef1a54ab7132588a0bd68598a0f21dad39db"
+      "size": 15518,
+      "sha256": "7a3c4733d53bc8928b9faf9d56b8bfec9fe6f29364d1a8353774a7e09e4befd0"
     },
     {
       "path": "test/browser/agent-cli.test.mjs",
