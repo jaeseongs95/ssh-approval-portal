@@ -104,9 +104,12 @@ test('Windows 기능 정보를 따라 이름·권한·Python·CLI를 제공하�
 }));
 
 test('대상 개요에 운영체제를 표시하고 Windows 이력의 명령 이름 등록을 제공한다', async () => fixture(async ({ page, origin }) => {
+  let release,entered;const held=new Promise(resolve=>release=resolve),started=new Promise(resolve=>entered=resolve);
+  await page.route('**/api/agent-cli',async route=>{entered();await held;await route.continue().catch(()=>{});});
+  try {
   await page.goto(origin + '/history');
   await page.locator('#target-filter option[value=windows]').waitFor({ state: 'attached' });
-  await page.locator('[data-request-id]').first().waitFor();
+  await page.locator('[data-request-id]').first().waitFor();await page.locator('#server-target option[value=windows]').waitFor({state:'attached'});
   assert.match(await page.locator('.server-card[data-target-id=windows]').textContent(), /Windows/);
   assert.match(await page.locator('.server-card[data-target-id=linux]').textContent(), /Linux/);
   const windows = page.locator('[data-request-id="' + '1'.repeat(48) + '"]');
@@ -116,9 +119,14 @@ test('대상 개요에 운영체제를 표시하고 Windows 이력의 명령 이
   await openRequest(page, '2'.repeat(48));
   assert.equal(await page.locator('#request-detail-body').getByRole('button', { name: '이력의 명령 이름 등록', exact: true }).count(), 1);
   await openRequest(page, '1'.repeat(48));
+  const policyRead=page.waitForResponse(response=>new URL(response.url()).pathname==='/api/command-policy'&&response.request().method()==='GET');
   await page.locator('#request-detail-body').getByRole('button', { name: '이력의 명령 이름 등록', exact: true }).click();
+  await started;await (await policyRead).finished();
   const candidate = page.locator('.command-import').getByRole('checkbox', { name: 'whoami.exe', exact: true , includeHidden:true});
+  assert.equal(await candidate.count(),0,'초기 CLI 연결을 확인하기 전에는 가져오기를 확정하지 않는다');release();
   await candidate.waitFor({ state: 'visible' }); assert.equal(await candidate.isChecked(), false);
+  assert.equal(await page.locator('#server-target').inputValue(),'windows');
+  } finally {release();}
 }));
 
 test('Python 경로가 없거나 CLI가 지원되지 않으면 해당 기능만 비활성화한다', async () => fixture(async ({ page, origin, cliCalls }) => {

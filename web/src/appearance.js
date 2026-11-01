@@ -31,6 +31,6 @@ export function createAppearancePanel({ document, storage, location, choice, kor
     try { storage.setItem(KEY, select.value); location.reload(); }
     catch { error.hidden = false; error.textContent = korean ? '언어 설정을 저장할 수 없습니다. 브라우저 저장소 설정을 확인해 주세요.' : 'Could not save the language preference. Check browser storage settings.'; }
   };
-  (document.querySelector('.policy-form') ?? document.querySelector('#environment-editor') ?? document.querySelector('.grid')).before(root);
+  (document.querySelector('#work-layout') ?? document.querySelector('.policy-form') ?? document.querySelector('#environment-editor') ?? document.querySelector('.grid')).before(root);
   return root;
 }

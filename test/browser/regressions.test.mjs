@@ -271,7 +271,7 @@ test('unified console counts all targets, separates running work, sorts across q
   await page.goto(server.origin+'/fixture/web');await page.locator('#overview-section > summary').click();await page.locator('#server-overview button').first().waitFor();
   assert.equal(await page.locator('#pending-count').textContent(),'3');
   assert.equal(await page.locator('#running-count').textContent(),'1');
-  assert.equal(await page.locator('#history-count').textContent(),'2');
+  await navigate(page,'/history');await historyReady(page);assert.equal(await page.locator('#history-count').textContent(),'2');await navigate(page,'/');
   assert.deepEqual(await page.locator('#jobs .request').evaluateAll(nodes=>nodes.map(n=>n.dataset.requestId)),['alpha-upload','beta-new','alpha-old']);
   const counts=await page.locator('#server-overview button').first().textContent();
   for(const expected of ['Retained 6','Awaiting approval 3','Assessing 0','Running 1','Completed 1','Failed 1'])assert.ok(counts.includes(expected));
@@ -285,7 +285,7 @@ test('unified console counts all targets, separates running work, sorts across q
   assert.deepEqual(server.state.requests.filter(r=>r.method==='POST'),[{method:'POST',id:'beta-new',action:'approve'}]);
   await page.selectOption('#target-filter','alpha');await page.waitForFunction(()=>document.querySelector('#pending-count').textContent==='2');
   await openRequest(page,'alpha-upload','#jobs');await page.locator('#request-detail-body').getByRole('button',{name:'Denied',exact:true}).click();
-  await page.waitForFunction(()=>document.querySelector('#history-count').textContent==='2');
+  await navigate(page,'/history');await historyReady(page);await page.waitForFunction(()=>document.querySelector('#history-count').textContent==='2');
   assert.equal(server.state.jobs.find(j=>j.id==='alpha-upload').state,'denied');
   assert.equal(server.state.jobs.find(j=>j.id==='alpha-old').state,'pending');
   assert.equal(server.state.jobs.find(j=>j.id==='beta-new').state,'running');

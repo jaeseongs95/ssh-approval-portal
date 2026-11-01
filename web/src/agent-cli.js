@@ -32,8 +32,9 @@ export function createAgentCliPanel({document,api,isSignedOut,canLoad,storage,ge
  const storageKey='ssh-approval-cli-requests-v1',validId=v=>typeof v==='string'&&/^[a-f0-9]{48}$/.test(v),validTarget=v=>typeof v==='string'&&/^[a-z][a-z0-9_-]{0,31}$/.test(v);
  const validHint=h=>h&&Object.keys(h).every(k=>['requestKey','requestId','targetId','provider'].includes(k))&&typeof h.requestKey==='string'&&/^[A-Za-z0-9_.:-]{16,128}$/.test(h.requestKey)&&validTarget(h.targetId)&&['codex','claude'].includes(h.provider)&&(!Object.hasOwn(h,'requestId')||validId(h.requestId));
  let hints=[];try{const raw=storage?.getItem(storageKey);if(raw&&raw.length<=24576){const v=JSON.parse(raw);if(Array.isArray(v)&&v.length<=64&&v.every(validHint))hints=v;}}catch{/* disabled or invalid storage never grants execution */}
- let capabilities,preview,job,remoteStatus,historyCursor,busy=false,uncertain=false,generation=0,timer,closed=false,currentScope='',currentBinding;
+ let capabilities,capabilityRead,preview,job,remoteStatus,historyCursor,busy=false,uncertain=false,generation=0,timer,closed=false,currentScope='',currentBinding;
  const drafts=new Map(),blocked=()=>busy||uncertain||['running','evaluating','unknown'].includes(job?.state);
+ const selectedTarget=()=>currentScope.split('\n')[0];
  const active=()=>!closed&&!isSignedOut()&&document.body.dataset.page==='settings';
  const binding=()=>capabilities?.bindings?.find(b=>b.targetId===target.value&&b.enabled===true);
  const supported=()=>Boolean(binding())&&binding().supported!==false;
@@ -129,22 +130,22 @@ if ($executable.EndsWith('.exe')) { & $executable ${p==='codex'?'login':'auth lo
  reconcile.onclick=()=>run(async current=>{const value=await api('/api/agent-cli/reconcile','POST',{requestId:job.id});if(current()){if(value.requestId!==job.id||value.remoteStatus?.provider!==provider.value)throw Error('Invalid CLI receipt');displayJob(job,value.remoteStatus);}});
  readOutput.onclick=()=>run(async current=>{const outputId=job?.result?.structuredContent?.output?.id;if(!validId(outputId))return;const value=await api('/api/outputs/'+outputId+'?format=json&limit=4096');if(current()){if(typeof value.text!=='string')throw Error('Invalid CLI output');output.textContent=value.text;output.hidden=false;output.focus();}});
  recover.onclick=restore;ack.onchange=lock;
- target.onchange=()=>{const requested=target.value;target.value=currentBinding?.targetId??'';if(onRequestTarget)return onRequestTarget(requested);return selectTarget(requested);};
+ target.onchange=()=>{const requested=target.value;target.value=selectedTarget();if(onRequestTarget)return onRequestTarget(requested);return selectTarget(requested);};
  provider.onchange=()=>{const previous=currentScope.split('\n')[1];if(blocked()){provider.value=previous;failure.textContent=t('처리 결과를 확인하기 전에는 CLI를 바꿀 수 없습니다.','The CLI cannot change until the current result is reconciled.');return;}scope();if(supported()&&hint()&&!preview&&!job&&!busy)restore();};
  function selectTarget(id){
-  if(id===target.value)return true;
-  if(blocked()){failure.textContent=t('처리 중이거나 결과 미확인으로 서버를 전환하지 못했습니다. 현재 서버를 유지합니다.','Server switch refused while processing or awaiting reconciliation. The current server is preserved.');return false;}
+  if(id===selectedTarget()){target.value=id;return true;}
+  if(blocked()){target.value=selectedTarget();failure.textContent=t('처리 중이거나 결과 미확인으로 서버를 전환하지 못했습니다. 현재 서버를 유지합니다.','Server switch refused while processing or awaiting reconciliation. The current server is preserved.');return false;}
   if(![...target.options].some(option=>option.value===id)){const option=el('option',id+t(' · CLI 연결 정보 없음',' · CLI binding unavailable'));option.value=id;target.append(option);}
   target.value=id;scope();if(supported()&&hint()&&!preview&&!job&&!busy)restore();return true;
  }
- async function load(){if(capabilities||busy||!active()||!canLoad())return Boolean(capabilities);await run(async current=>{const value=await api('/api/agent-cli');if(!current())return;
+ async function load(){if(capabilityRead)return capabilityRead;if(capabilities||busy||!active()||!canLoad())return Boolean(capabilities);capabilityRead=run(async current=>{const value=await api('/api/agent-cli');if(!current())return;
   if(typeof value?.available!=='boolean'||!Array.isArray(value.bindings)||value.bindings.some(b=>!validTarget(b.targetId)||typeof b.targetRevision!=='string'||typeof b.profile!=='string'))throw Error('Invalid CLI capabilities');
   capabilities=value;target.replaceChildren();const items=value.bindings.filter(b=>b.enabled===true);const option=el('option',t('서버 선택','Choose a server'));option.value='';target.append(option);for(const b of items){const option=el('option',b.displayName+' · '+b.targetId+(b.platform?' · '+(b.platform==='windows'?'Windows':'Linux'):'')+(b.supported===false?t(' · 지원하지 않음',' · Unsupported'):''));option.value=b.targetId;target.append(option);}const requested=getTarget?.();if(requested&&![...target.options].some(option=>option.value===requested)){const option=el('option',requested+t(' · CLI 연결 정보 없음',' · CLI binding unavailable'));option.value=requested;target.append(option);}target.value=requested??'';scope();if(!value.available)message.textContent=t('이 서버는 CLI 설치 연결을 제공하지 않습니다.','CLI installation is unavailable on this bridge.');
- });if(supported()&&hint()&&!preview&&!job&&!busy)await restore();return Boolean(capabilities);}
+ }).then(()=>Boolean(capabilities)).finally(()=>{capabilityRead=undefined;lock();});const ready=await capabilityRead;if(supported()&&hint()&&!preview&&!job&&!busy)await restore();return ready;}
  let page=document.body.dataset.page;
  document.addEventListener('admin-scope-change',()=>{const next=document.body.dataset.page;if(next===page)return;page=next;generation++;clearTimer();lock();if(active()){if(!capabilities)load();else if(supported()&&hint()&&uncertain&&!busy)restore();else poll();}});
  document.addEventListener('visibilitychange',()=>{clearTimer();if(!document.hidden)poll();});
  document.querySelector('#load')?.addEventListener('click',load);
  document.querySelector('#logout')?.addEventListener('click',()=>{closed=true;hints=[];drafts.clear();currentScope='';try{storage?.removeItem(storageKey);}catch{}scope();});
- scope();queueMicrotask(load);return {root,targetControl:target,ensureLoaded:load,selectTarget,scopeState:()=>({targetId:target.value,name:binding()?.displayName,ready:!!capabilities,blocked:blocked(),uncertain}),reloadState:()=>({blocked:busy||uncertain,dirty:preview?[t('CLI 설치 계획','CLI installation plan')]:[]})};
+ scope();queueMicrotask(load);return {root,targetControl:target,ensureLoaded:load,selectTarget,scopeState:()=>({targetId:selectedTarget(),name:capabilities?.bindings?.find(b=>b.targetId===selectedTarget())?.displayName,ready:!!capabilities,blocked:blocked(),readingCapabilities:!!capabilityRead&&busy&&!uncertain&&!['running','evaluating','unknown'].includes(job?.state),uncertain}),reloadState:()=>({blocked:busy||uncertain,dirty:preview?[t('CLI 설치 계획','CLI installation plan')]:[]})};
 }

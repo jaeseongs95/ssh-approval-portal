@@ -90,12 +90,13 @@ async function selectServer(id, tab) {
     refreshServerContext(); return false;
   };
   if (id === currentServer()) { switchMessage.textContent = ''; refreshServerContext(); return true; }
-  if (changingServer || policyEditor?.scopeState().blocked || agentCli.scopeState().blocked) return refused();
+  const cliScope = agentCli.scopeState();
+  if (changingServer || policyEditor?.scopeState().blocked || cliScope.blocked && !cliScope.readingCapabilities) return refused();
   changingServer = true; refreshServerContext();
   try {
     if (policyEditor && !await policyEditor.ensureLoaded()) return refused();
     await agentCli.ensureLoaded();
-    if (state.signedOut || policyEditor?.scopeState().blocked || agentCli.scopeState().blocked) return refused();
+    if (state.signedOut || document.body.dataset.page !== 'settings' || policyEditor?.scopeState().blocked || agentCli.scopeState().blocked) return refused();
     if (policyEditor && ![...policyEditor.targetControl.options].some(option => option.value === id)) return refused();
     // No await between both preflight checks and the two local scope changes.
     if (policyEditor && !policyEditor.selectTarget(id) || !agentCli.selectTarget(id)) return refused();

@@ -15,7 +15,15 @@ const bindings = ['alpha','beta'].map(targetId => ({targetId,targetRevision:revi
 const pending = (id,targetId) => ({id,kind:'command',state:'pending',command:'printf synthetic-review',targetId,targetRevision:revision,profile:targetId+'-write',hostKey:'SHA256:'+targetId,targetDisplayName:'같은 서버 이름',target:'fixture@'+targetId,createdAt:Date.now()-1000,expiresAt:Date.now()+600000});
 async function screenshot(page,width,stage) {
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), stage+' 화면의 가로 넘침');
-  if(process.env.UI_SCREENSHOTS) await page.screenshot({path:join(process.env.UI_SCREENSHOTS,'admin-168-'+width+'-'+stage+'.png'),fullPage:true});
+  assert.deepEqual(await page.locator('#work-layout').evaluate(node=>Array.from(node.children,child=>child.id||child.className)),['grid','request-detail']);
+  const scroll=await page.evaluate(()=>scrollY);await page.evaluate(()=>scrollTo({top:0,behavior:'instant'}));
+  try {
+    if(width>1120&&await page.locator('#request-detail').isVisible()){
+      const geometry=await page.locator('#work-layout').evaluate(node=>{const list=node.querySelector('.grid').getBoundingClientRect(),detail=node.querySelector('#request-detail').getBoundingClientRect();return {listRight:list.right,detailLeft:detail.left,topDifference:Math.abs(list.top-detail.top)};});
+      assert.ok(geometry.detailLeft>=geometry.listRight-2&&geometry.topDifference<32,JSON.stringify(geometry));
+    }
+    if(process.env.UI_SCREENSHOTS) await page.screenshot({path:join(process.env.UI_SCREENSHOTS,'admin-168-'+width+'-'+stage+'.png'),fullPage:true});
+  } finally {await page.evaluate(top=>scrollTo({top,behavior:'instant'}),scroll);}
 }
 
 for(const width of [320,390,760,820,1120,1440]) test('UI168 동일 이름 대상·상태 상세·서버 초안·관리 범위 '+width, {timeout:30000}, async () => {
@@ -55,7 +63,7 @@ for(const width of [320,390,760,820,1120,1440]) test('UI168 동일 이름 대상
     assert.match(await page.locator('#request-announcement').textContent(),/same-name-alpha/);
     const read=page.locator('#request-detail-body').getByRole('button',{name:'출력 보기',exact:true});await read.focus();await page.keyboard.press('Enter');
     const output=page.getByRole('region',{name:'실행 출력',exact:true});await output.waitFor();assert.equal(await output.textContent(),text);assert.equal(await output.evaluate(node=>node===document.activeElement),true);
-    await page.keyboard.press('PageDown');await page.waitForFunction(()=>document.querySelector('#request-output').scrollTop>0);const scroll=await output.evaluate(node=>node.scrollTop);
+    await page.keyboard.press('End');await page.waitForFunction(()=>{const node=document.querySelector('#request-output');return node.scrollTop>0&&node.scrollTop+node.clientHeight>=node.scrollHeight-2;});const scroll=await output.evaluate(node=>node.scrollTop);
     assert.equal(await page.evaluate(()=>window.outputInjected),undefined);await screenshot(page,width,'completed-output');
     await navigate(page,'/settings');assert.equal(await page.locator('#server-target').inputValue(),'');assert.equal(await page.locator('#policy-effective-state').getAttribute('data-test-mode'),'unselected');await page.locator('#request-return').click();await page.waitForURL(url=>url.pathname==='/');
     assert.equal(await output.textContent(),text);assert.equal(await output.evaluate(node=>node===window.savedOutput&&node.scrollTop),scroll);assert.equal(outputReads,1);
@@ -68,7 +76,7 @@ for(const width of [320,390,760,820,1120,1440]) test('UI168 동일 이름 대상
     await screenshot(page,width,'server-cli');
     await navigate(page,'/bridge');await page.locator('#env-BRIDGE_DISPLAY_NAME').waitFor();await environmentGroups(page);
     assert.equal(await page.locator('#server-workspace').isVisible(),false);assert.equal(await page.locator('#environment-editor').isVisible(),true);assert.equal(await page.locator('#appearance-settings').isVisible(),false);
-    assert.match(await page.locator('#environment-editor').textContent(),/모든 대상/);assert.equal(await page.locator('#env-JEV_API_KEY').inputValue(),'');await screenshot(page,width,'bridge');
+    assert.match(await page.locator('#environment-editor').textContent(),/등록된 모든 서버/);assert.equal(await page.locator('#env-JEV_API_KEY').inputValue(),'');await screenshot(page,width,'bridge');
     await navigate(page,'/preferences');assert.equal(await page.locator('#appearance-settings').isVisible(),true);assert.equal(await page.locator('#environment-editor').isVisible(),false);await screenshot(page,width,'preferences');
     await navigate(page,'/history');await historyReady(page);await openRequest(page,'same-name-alpha');assert.match(await page.locator('#history-coverage').textContent(),/파일 이력은 현재 메모리/);await screenshot(page,width,'history');
     await navigate(page,'/');await openRequest(page,'same-name-beta','#jobs');await page.locator('#request-close').focus();await page.keyboard.press('Escape');
@@ -81,7 +89,7 @@ test('UI168 실제 기존 장부의 24시간 초과 기록을 날짜로 조회�
   const directory=await mkdtemp(join(tmpdir(),'ui168-old-journal-'));let app,browser;
   const id='d'.repeat(48),createdAt=Date.parse('2020-01-02T12:00:00Z');
   const journal=createCommandState(directory);
-  try {journal.insert({id,kind:'command',command:'printf OLD_ARCHIVE_CANARY',operation:{kind:'command',command:'printf OLD_ARCHIVE_CANARY'},profile:'aws-local',targetId:'default',target:'fixture',state:'completed',createdAt,finishedAt:createdAt+1000,expiresAt:createdAt+600000,result:{failed:false,texts:['PRIVATE_ARCHIVE_OUTPUT']}},null,'synthetic-digest');} finally {journal.close();}
+  try {journal.insert({id,kind:'command',command:'printf OLD_ARCHIVE_CANARY',operation:{kind:'command',command:'printf OLD_ARCHIVE_CANARY'},profile:'aws-local',commandClass:'privileged',targetId:'default',target:'fixture',state:'completed',createdAt,finishedAt:createdAt+1000,expiresAt:createdAt+600000,result:{failed:false,texts:['PRIVATE_ARCHIVE_OUTPUT']}},null,'synthetic-digest');} finally {journal.close();}
   try {
     let executions=0;app=await createApplication({registry:{getProfile:name=>({host:'127.0.0.1',port:22,user:'fixture',readOnly:name==='aws-readonly'}),closeAll:async()=>{}},classify:()=>({class:'privileged'}),executeCommand:async()=>{executions++;return {texts:[]};},audit:()=>{},transferRoot:directory,uiHtml:'<html></html>',
       env:{BRIDGE_MCP_TOKEN:'fixture-mcp',BRIDGE_ADMIN_TOKEN:'fixture-owner',BRIDGE_ADMIN_ORIGIN:'https://owner.test',BRIDGE_UI_TICKET_KEY:'a'.repeat(64)}});

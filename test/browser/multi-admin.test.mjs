@@ -42,7 +42,7 @@ for(const width of [320,375,390,760,800,820,1440])test('query/policy scopes, dra
   }
   await openRequest(page, 'a-0', '#jobs');
   const approve=page.locator('#request-detail-body').getByRole('button',{name:'승인·실행',exact:true});
-  assert.match(await approve.getAttribute('aria-describedby'),/^request-target-/);
+  assert.equal(await approve.getAttribute('aria-describedby'),'request-detail-target');
   const description=await approve.evaluate(n=>document.getElementById(n.getAttribute('aria-describedby')).textContent);assert.match(description,/alpha/);assert.match(description,/a{64}/);
   await page.selectOption('#target-filter','beta');await page.locator('#jobs article .command').filter({hasText:'beta-only'}).waitFor();
   await openRequest(page, 'beta-only', '#jobs');
@@ -58,7 +58,7 @@ for(const width of [320,375,390,760,800,820,1440])test('query/policy scopes, dra
   const options=await page.getByLabel('편집 대상 서버',{exact:true}).locator('option').allTextContents();assert.ok(options.some(n=>n.includes('[alpha]'))&&options.some(n=>n.includes('[beta]')));
   await page.getByLabel('편집 대상 서버',{exact:true}).selectOption('alpha');await bulk(page);
   assert.equal(await page.getByLabel('자동승인할 명령',{exact:true}).inputValue(),'id\npwd');assert.equal(await page.getByLabel('명령 검색',{exact:true}).inputValue(),'pwd');
-  assert.equal(await page.locator('#environment-editor').isVisible(),false);await navigate(page,'/bridge');assert.equal(await page.locator('#environment-editor').isVisible(),true);assert.match(await page.locator('#environment-editor').textContent(),/모든 대상/);
+  assert.equal(await page.locator('#environment-editor').isVisible(),false);await navigate(page,'/bridge');assert.equal(await page.locator('#environment-editor').isVisible(),true);assert.match(await page.locator('#environment-editor').textContent(),/등록된 모든 서버/);
   await page.locator('[data-page-link][href="/"]').click();await page.selectOption('#target-filter','alpha');
   assert.match(await page.locator('#jobs').textContent(),/a-0/);
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true);
@@ -109,7 +109,7 @@ test('old metrics from A to B to A are discarded by generation including page ch
   await page.goto(server.origin+'/');await page.locator('#target-filter').waitFor();await page.selectOption('#target-filter','alpha');
   let release,entered;const waiting=new Promise(resolve=>entered=resolve);let count=0;
   await page.route('**/api/automation-metrics*',async route=>{count++;if(count===1){entered();await new Promise(resolve=>release=resolve);return route.fulfill({json:{available:true,from:0,to:0,total:999,providers:{}}}).catch(()=>{});}return route.fulfill({json:{available:false,from:count*100000,to:count*100000}});});
-  await page.locator('#automation-metrics summary').click();await waiting;await page.selectOption('#target-filter','beta');await page.selectOption('#target-filter','alpha');await page.locator('[data-page-link][href="/settings"]').click();await selectServer(page,'alpha');
+  await page.locator('#automation-metrics summary').click();await waiting;await page.selectOption('#target-filter','beta');await page.selectOption('#target-filter','alpha');await page.locator('[data-page-link][href="/settings"]').click();await selectServer(page,'alpha');await navigate(page,'/');
   await page.waitForFunction(()=>document.querySelector('#automation-metrics button').disabled===false);release();
   assert.doesNotMatch(await page.locator('#automation-metrics').textContent(),/999|beta/);assert.match(await page.locator('#automation-metrics').textContent(),/alpha/);
 }));

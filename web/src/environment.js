@@ -18,7 +18,7 @@ export function createEnvironmentPanel({ document, api, delay = ms => new Promis
   const setup = el('details'); setup.hidden = true; setup.append(el('summary', tr('ENV 편집 활성화 방법')));
   setup.append(el('p', tr('기능이 포함된 릴리스로 업데이트한 뒤 서버 터미널에서 한 번 실행하세요. 고정 ENV 파일과 이 서비스의 재시작만 허용하는 전용 연결입니다.'), 'policy-help'),
     el('pre', 'sudo bash /var/lib/ssh-mcp/app/approval-bridge/scripts/configure-env-editor.sh'));
-  root.append(setup); document.querySelector('.grid')?.before(root);
+  root.append(setup); (document.querySelector('#work-layout') ?? document.querySelector('.grid'))?.before(root);
   let snapshot, busy = false, uncertain = false, generation = 0;
   const inputs = new Map();
   const changes = () => Object.fromEntries([...inputs].filter(([key, { input, remove, original, type }]) => remove.checked || (type === 'secret' ? input.value !== '' : input.value !== original))

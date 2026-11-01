@@ -1000,8 +1000,8 @@
     },
     {
       "path": "test/browser/admin-workflow.test.mjs",
-      "size": 12748,
-      "sha256": "8b391d41d7b1dbe91e90774178eaa48657464156e1e73d020b362eb7eb255532"
+      "size": 13715,
+      "sha256": "3686327ec2f597f7a29aab93bec7b5dbb4e191aa737381428d60cf44aacbd37d"
     },
     {
       "path": "test/browser/agent-cli.test.mjs",
@@ -1035,8 +1035,8 @@
     },
     {
       "path": "test/browser/command-policy.test.mjs",
-      "size": 66351,
-      "sha256": "1652311c3eddbb72f7e1d2c7b75ac376146469b1ec099c21f372c9eb68108a16"
+      "size": 66740,
+      "sha256": "a6e7cf7f4ff7b376de6541e2573dc496314f9bb0b588f6b8fe626c563cb5e6b5"
     },
     {
       "path": "test/browser/environment.test.mjs",
@@ -1050,18 +1050,18 @@
     },
     {
       "path": "test/browser/history-language.test.mjs",
-      "size": 29103,
-      "sha256": "6c40cf63d7c431e234a15b1ce35a62dbbe945a06770979db31f9fdc3e019ba9d"
+      "size": 29181,
+      "sha256": "58da0b26e4b148abab48b9c3d7b702d1e8e0ee11cfcc92bc35182179c58ae1cf"
     },
     {
       "path": "test/browser/multi-admin.test.mjs",
-      "size": 21347,
-      "sha256": "bd906ef98745238ea208f340e3e29a33e1e40ca8cac9c705c85541b1dcc48a7d"
+      "size": 21387,
+      "sha256": "1724f03396cf62bfff7eee247242710b697ce46bf9e139a1b3c6f03ffea3caa8"
     },
     {
       "path": "test/browser/regressions.test.mjs",
-      "size": 44420,
-      "sha256": "18c24be7ae879d845d7f1d9d60ebd99de5bb713f2cd6e93c33a809499d7a966b"
+      "size": 44559,
+      "sha256": "fae3ba906038d578a6b23055bbf317d62a303c51445ab721377864d6c63d3996"
     },
     {
       "path": "test/browser/run.mjs",
@@ -1070,13 +1070,13 @@
     },
     {
       "path": "test/browser/source-automation.test.mjs",
-      "size": 9508,
-      "sha256": "3b24fc38a44f3625d38f0992a760fd21d6a7d4b0fefc067c4577f81f1e96ac59"
+      "size": 9511,
+      "sha256": "daeb3710b1d1e9a8c5d025484e467515d37d06184d0afb9748b8483deae94a01"
     },
     {
       "path": "test/browser/windows-targets.test.mjs",
-      "size": 13420,
-      "sha256": "79e484c2fc0ec3e54a1b1ddc6e343fb2c48ada5ea5150dd2025dfd3a8b582d93"
+      "size": 14186,
+      "sha256": "2550cbf2d0480a712eca26c351a032357a2b46ed9da1616d7ad80ff4722b06a6"
     },
     {
       "path": "test/cli-entrypoint.test.mjs",
@@ -1925,28 +1925,28 @@
     },
     {
       "path": "web/app.js",
-      "size": 8325,
-      "sha256": "f8893033fb38fe4ed47689926df1a9e64caaf1f01b367111644f7ab74ddff9b5"
+      "size": 8432,
+      "sha256": "83a5fd4429abfd7419be44b27c3832a26c849dfee0cd4f1699d0f0cd20b6c6da"
     },
     {
       "path": "web/dist/app.js",
-      "size": 304382,
-      "sha256": "f60f14dd0111260b75a5202dbc91beab8933b15337b312c553cb967a7d8dfaea"
+      "size": 304891,
+      "sha256": "1836d59e0d5cacaad37696bf407d9f21978a788133314e7fbb46119a86e70a5e"
     },
     {
       "path": "web/index.html",
-      "size": 39828,
-      "sha256": "2d2c831f7b88abe0a788b96c05cc0a9e7f63ea1cce6bcef36ccb0a435cd76582"
+      "size": 39958,
+      "sha256": "40a1af334cbf28237789c20df007188c2f8a45d67cc6e327255fe2adeb4eba20"
     },
     {
       "path": "web/src/agent-cli.js",
-      "size": 29124,
-      "sha256": "7bba0d4b87fe9da468aa782431e478dbb3710f0101df2115db4a80ca3f0ed3a1"
+      "size": 29550,
+      "sha256": "e6cae7d052404e96035b82ffe9f7289f4bdc49b4701e3281334e6ded472082cb"
     },
     {
       "path": "web/src/appearance.js",
-      "size": 3388,
-      "sha256": "be3ab0ad5b92c118b806aa95a578261ea5a1ee40baf94e78ef2a208ea37c538a"
+      "size": 3430,
+      "sha256": "d2ae9e011775c8f35397796ef9111af7cd9327f99dadad2172c61509ac88e84f"
     },
     {
       "path": "web/src/command-line-import.js",
@@ -1970,8 +1970,8 @@
     },
     {
       "path": "web/src/environment.js",
-      "size": 9897,
-      "sha256": "bdcbf8c571b06d386e214f385db50c19eb39d783a5664e4516c8ab376c844068"
+      "size": 9941,
+      "sha256": "55824f0cbae970355226350418c7554882451eaeff4e9dc5b044af988942f804"
     },
     {
       "path": "web/src/http.js",
@@ -1985,8 +1985,8 @@
     },
     {
       "path": "web/src/metrics.js",
-      "size": 4549,
-      "sha256": "a14fc0782fce1b563067af043bcc03b4d61dfb352aeea3130e3838761d023ef5"
+      "size": 4593,
+      "sha256": "c8469d36a5aecea53e6bd9a457283ac3447895f790db0a31b19352ea68f57079"
     },
     {
       "path": "web/src/pages.js",

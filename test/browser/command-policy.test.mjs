@@ -1,5 +1,5 @@
 import test from 'node:test';
-import { permissionsTab, openRequest, historyReady, selectServer } from './admin-ui.mjs';
+import { permissionsTab, openRequest, historyReady, selectServer, navigate } from './admin-ui.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -114,7 +114,7 @@ for (const width of [375, 390]) test('simple registration preserves explicit con
   const { job } = await f.app.targets.commands.run('ls && pwd'); await f.app.targets.drain();
   assert.equal(f.app.queue.get(job.id).state, 'completed'); assert.equal(f.app.queue.get(job.id).approvalMode, 'automatic');
   await page.locator('[data-page-link][href="/"]').click();
-  await page.locator('#load').click(); await page.locator('[data-page-link][href="/history"]').click(); await page.locator('[data-request-id="' + job.id + '"]').getByText('자동승인', { exact: true }).waitFor();
+  await page.locator('#load').click(); await page.locator('[data-page-link][href="/history"]').click(); await page.locator('[data-request-id="' + job.id + '"]').locator('.badge').filter({hasText:'자동승인'}).waitFor();
 }, { width }));
 
 test('Jev 90 percent needs no manual reference and persists exactly the reviewed candidate', async () => fixture(async f => {
@@ -221,11 +221,12 @@ for (const mode of ['edit', 'select', 'target']) test('late review cannot author
   else if (mode === 'select') { await catalog(page); await page.getByLabel('명령 검색', { exact: true }).fill('grep'); await choice(page, 'grep').click(); }
   else {
     const selector = page.getByLabel('편집 대상 서버', { exact: true });
-    await selector.selectOption('beta');
+    await selector.selectOption('beta');assert.equal(await selector.inputValue(),'alpha','처리 중 서버 전환은 거절되어 원 대상에 고정된다');
   }
   release(); await (await response).finished(); await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-  assert.equal(await save(page).isDisabled(), true); assert.equal(await ok(page).isDisabled(), true);
-  assert.equal(await page.getByText('저장 전 확인해 주세요', { exact: true }).count(), 0);
+  assert.equal(await save(page).isDisabled(), true); assert.equal(await ok(page).isDisabled(), mode!=='target');
+  assert.equal(await page.getByText('저장 전 확인해 주세요', { exact: true }).count(), mode==='target'?1:0);
+  if(mode==='target')assert.equal(await page.getByLabel('편집 대상 서버',{exact:true}).inputValue(),'alpha');
 }, { multi: true }));
 
 test('expired feedback clears OK without losing input, and an unobserved save preserves the draft without retry', async () => fixture(async f => {
@@ -311,9 +312,9 @@ test('settings is a separate URL, navigation preserves unsaved input without sto
   assert.equal(await page.getByRole('checkbox', {name:/^파일 자동다운로드 허용/, includeHidden:true}).isVisible(),false);
   await page.locator('[data-page-link][href="/settings"]').click();assert.equal(await names(page).inputValue(),'ls');assert.equal(await page.locator('#token').inputValue(),'fixture-owner');
   assert.deepEqual(await page.evaluate(()=>({local:Object.keys(localStorage),session:Object.keys(sessionStorage)})),{local:[],session:[]});
-  await page.locator('#automation-metrics>summary').click();await page.locator('.metric-card').first().waitFor();assert.equal(await page.locator('.metric-card').count(),5);
+  await navigate(page,'/');await page.locator('#automation-metrics>summary').click();await page.locator('.metric-card').first().waitFor();assert.equal(await page.locator('.metric-card').count(),5);
   assert.match(await page.locator('#automation-metrics').textContent(),/청구금액은 수집하지/);assert.equal(f.calls.length,0);
-  if(process.env.FOLLOWUP_SCREENSHOTS)await page.screenshot({path:process.env.FOLLOWUP_SCREENSHOTS+'/settings-mobile.png',fullPage:true});
+  await navigate(page,'/settings');if(process.env.FOLLOWUP_SCREENSHOTS)await page.screenshot({path:process.env.FOLLOWUP_SCREENSHOTS+'/settings-mobile.png',fullPage:true});
   await page.goBack();assert.ok(page.url().endsWith('/'));assert.equal(await page.locator('#command-policy').isVisible(),false);
 }));
 
@@ -498,7 +499,7 @@ for(const mode of ['commands','approvals'])test('expiration remains announced ou
   const focused=mode==='commands'?tab(page,'명령 관리'):page.locator('[data-page-link][href="/"]');await focused.focus();await focused.press('Enter');
   await page.clock.fastForward(300001);const status=page.locator('#policy-activity');
   assert.match(await status.textContent(),/확인 결과가 만료됐습니다/);
-  assert.equal(await status.isVisible(),mode==='commands');assert.equal(await focused.evaluate(n=>n===document.activeElement),true);assert.equal(await save(page).isDisabled(),true);
+  assert.equal(await status.isVisible(),mode==='commands');assert.equal(await (mode==='commands'?focused:page.locator('#page-title')).evaluate(n=>n===document.activeElement),true);assert.equal(await save(page).isDisabled(),true);
   if(mode==='commands')assert.equal(await page.locator('#settings-panel-3').isVisible(),false);else assert.equal(await page.locator('#command-policy').isVisible(),false);
 }));
 

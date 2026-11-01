@@ -49,7 +49,7 @@ for (const [width, height] of [[375, 812], [390, 844], [768, 1024], [1440, 900],
     const f = await fixture(t, { width, height, ko }), { page } = f;
     await f.open('/settings'); const checkbox = page.getByRole('checkbox', { name: new RegExp('^' + title(ko)) });
     await checkbox.waitFor(); assert.equal(await checkbox.isChecked(), false); await checkbox.check();
-    const target = page.getByLabel(ko ? '편집 대상 서버' : 'Edit target server', { exact: true });
+    const target = page.getByLabel(ko ? '편집 대상 서버' : 'Server editing target', { exact: true });
     await target.selectOption('beta'); assert.equal(await checkbox.isChecked(), false);
     await target.selectOption('alpha'); assert.equal(await checkbox.isChecked(), true);
     await page.getByRole('tab', { name: ko ? '검토·저장' : 'Review and save', exact: true }).click();
