@@ -42,7 +42,7 @@ ENV_LOCK = Path('/var/lib/ssh-approval-env/lock')
 CLEAN = {'PATH': '/opt/ssh-approval/node/bin:/usr/sbin:/usr/bin:/sbin:/bin',
          'HOME': '/root', 'LANG': 'C.UTF-8', 'LC_ALL': 'C.UTF-8'}
 STAGES = ('prepare', 'reserve', 'stop', 'migrate', 'baseline', 'launcher', 'helper', 'bootstrap', 'reload', 'promote',
-          'start', 'compare', 'release', 'final')
+          'enable', 'start', 'compare', 'release', 'final')
 JOB_PATTERN = re.compile(r'deploy-[a-f0-9]{32}')
 HEX = re.compile(r'[a-f0-9]{64}')
 
@@ -217,8 +217,10 @@ def managed_tree(path, key):
 
 
 def protected_inventory(key):
-    paths = [ENVIRONMENT, BASE / '.ssh', BASE / '.config', BASE / '.local/share/ssh-mcp',
+    paths = [ENVIRONMENT, BASE / '.ssh', BASE / '.config', BASE / 'keys', BASE / '.local/share/ssh-mcp/secrets',
              Path('/etc/ssh/ssh_host_ed25519_key'), Path('/etc/ssh/ssh_host_ed25519_key.pub')]
+    secret_store = environment_path('BRIDGE_SECRET_STORE_DIR', BASE / '.local/share/ssh-mcp/secrets')
+    paths.append(secret_store)
     metadata = {}
     for account_name in ('mcpbridge', 'mcpops'):
         try:
@@ -264,6 +266,56 @@ def protected_inventory(key):
             except (ValueError, UnicodeError):
                 raise DeploymentError('CLI_CONFIGURATION_INVALID') from None
     return {str(path): managed_tree(path, key) for path in set(paths)} | {'directoryMetadata': metadata}
+
+
+def environment_path(name, default):
+    value = str(default)
+    for line in trusted_file(ENVIRONMENT, 65536).decode('utf-8').splitlines():
+        match = re.fullmatch(re.escape(name) + r'=(.*)', line)
+        if match:
+            value = match[1].strip()
+            if len(value) >= 2 and value[0] in '\"\'' and value[-1] == value[0]:
+                value = value[1:-1]
+    path = Path(value)
+    need(path.is_absolute() and '..' not in path.parts, 'PROTECTED_PATH_INVALID')
+    return path
+
+
+def audit_baseline(key):
+    path = environment_path('BRIDGE_AUDIT_PATH', BASE / '.local/share/ssh-mcp/approval-bridge-audit.jsonl')
+    baseline = {'path': str(path), 'exists': False, 'bytes': 0,
+                'prefixHmac': hmac.new(key, b'', hashlib.sha256).hexdigest()}
+    if not os.path.lexists(path):
+        return baseline
+    info = path.lstat()
+    need(stat.S_ISREG(info.st_mode) and info.st_nlink == 1, 'AUDIT_FILE_UNSAFE')
+    need(info.st_size <= 512 * 1024 * 1024, 'AUDIT_PREFIX_LIMIT')
+    with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW), 'rb') as stream:
+        opened = os.fstat(stream.fileno())
+        need((info.st_dev, info.st_ino) == (opened.st_dev, opened.st_ino), 'AUDIT_FILE_CHANGED')
+        prefix = stream.read(info.st_size)
+        need(len(prefix) == info.st_size, 'AUDIT_PREFIX_CHANGED')
+    return baseline | {'exists': True, 'bytes': info.st_size, 'uid': info.st_uid,
+        'gid': info.st_gid, 'mode': stat.S_IMODE(info.st_mode),
+        'prefixHmac': hmac.new(key, prefix, hashlib.sha256).hexdigest()}
+
+
+def verify_audit_prefix(baseline, key, uid, gid):
+    path = Path(baseline['path'])
+    if not os.path.lexists(path):
+        need(not baseline['exists'], 'AUDIT_FILE_LOST')
+        return
+    info = path.lstat()
+    expected = (baseline['uid'], baseline['gid'], baseline['mode']) if baseline['exists'] else (uid, gid, 0o600)
+    need(stat.S_ISREG(info.st_mode) and info.st_nlink == 1
+         and (info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode)) == expected
+         and info.st_size >= baseline['bytes'], 'AUDIT_PREFIX_CHANGED')
+    with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW), 'rb') as stream:
+        opened = os.fstat(stream.fileno())
+        need((info.st_dev, info.st_ino) == (opened.st_dev, opened.st_ino), 'AUDIT_FILE_CHANGED')
+        prefix = stream.read(baseline['bytes'])
+        need(len(prefix) == baseline['bytes'] and hmac.new(key, prefix, hashlib.sha256).hexdigest()
+             == baseline['prefixHmac'], 'AUDIT_PREFIX_CHANGED')
 
 
 def verify_manifest(source, manifest_sha256, *, deployment_package=True):
@@ -500,6 +552,7 @@ def create_plan(source, *, manifest_sha256, state_root=STATE_ROOT, import_legacy
                 'helperFingerprint': optional_file_digest(ENV_HELPER),
                 'targetHelperFingerprint': digest(trusted_file(source / 'helper/environment-helper.py')),
                 'protectedInventory': protected_inventory(key),
+                'auditBaseline': audit_baseline(key),
                 'schema': schema, 'minimumFreeBytes': required, 'readinessErrors': readiness,
                 'targetRelease': str(target), 'targetDataRoot': str(destination),
                 'allowedNewPaths': [str(target), str(destination.parent)],
@@ -621,6 +674,8 @@ class SystemBackend:
 
     def protected(self):
         need(protected_inventory(self.key) == self.plan['protectedInventory'], 'PROTECTED_FILES_CHANGED')
+        verify_audit_prefix(self.plan['auditBaseline'], self.key,
+                            self.plan['serviceUid'], self.plan['serviceGid'])
         # Unit publication is a separate, journalled effect, not part of the
         # atomic code+data record. Both known unit states are accepted here.
         need(optional_file_digest(UNIT) in (self.plan['unitFingerprint'], self.plan['targetUnitFingerprint'])
@@ -752,7 +807,8 @@ class SystemBackend:
         if stage == 'stop':
             self.predecessor()
             self.protected()
-            self.command(['/usr/bin/systemctl', 'stop', SERVICE], timeout=90)
+            if not stopped(service_state()):
+                self.command(['/usr/bin/systemctl', 'stop', SERVICE], timeout=90)
             need(stopped(service_state()), 'CLEAN_STOP_UNCONFIRMED')
             # A separate uncooperative process is detected by DB locks during inspect/migrate.
             return {'stopped': True, 'stoppedAtMs': int(time.time() * 1000)}
@@ -872,6 +928,12 @@ class SystemBackend:
             need(digest(trusted_file(UNIT)) == self.plan['targetUnitFingerprint'], 'TARGET_UNIT_CHANGED')
             self.command(['/usr/bin/systemctl', 'daemon-reload'], timeout=30)
             return {'reloaded': True}
+        if stage == 'enable':
+            need(self.active() == self.desired_active(), 'ACTIVE_CHANGED')
+            if self.plan.get('freshInstall'):
+                self.command(['/usr/bin/systemctl', 'enable', SERVICE], timeout=30)
+                return {'enabled': True}
+            return {'existingEnablementPreserved': True}
         if stage == 'start':
             need(self.active() == self.desired_active(), 'START_PRECONDITION_CHANGED')
             if running(service_state()):
@@ -959,6 +1021,13 @@ class SystemBackend:
             if (optional_file_digest(UNIT) == self.plan['targetUnitFingerprint']
                     and fields.get('NeedDaemonReload') == 'no' and fields.get('FragmentPath') == str(UNIT)):
                 return {'reloaded': True}
+        elif stage == 'enable':
+            if not self.plan.get('freshInstall'):
+                return {'existingEnablementPreserved': True}
+            enabled = self.command(['/usr/bin/systemctl', 'is-enabled', SERVICE], timeout=15,
+                                   accepted_codes=(0, 1)).decode().strip()
+            if enabled == 'enabled':
+                return {'enabled': True}
         elif stage == 'reserve':
             if stopped(self.plan['serviceBefore']) and stopped(service_state()):
                 return {'offline': True}

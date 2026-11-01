@@ -94,6 +94,33 @@ def owned_stat():
 
 
 class DeploymentStateMachineTests(unittest.TestCase):
+    def test_audit_prefix_allows_append_and_rejects_replacement(self):
+        if not hasattr(deployment.os, 'O_NOFOLLOW'):
+            self.skipTest('Linux audit preservation test')
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'audit.jsonl'
+            path.write_bytes(b'old-entry\n')
+            path.chmod(0o600)
+            key = b'x' * 32
+            with patch.object(deployment, 'environment_path', return_value=path):
+                baseline = deployment.audit_baseline(key)
+            with path.open('ab') as stream:
+                stream.write(b'new-maintenance-entry\n')
+            deployment.verify_audit_prefix(baseline, key, deployment.os.geteuid(), deployment.os.getegid())
+            path.write_bytes(b'replacement-with-longer-length\n')
+            with self.assertRaisesRegex(deployment.DeploymentError, 'AUDIT_PREFIX_CHANGED'):
+                deployment.verify_audit_prefix(baseline, key, deployment.os.geteuid(), deployment.os.getegid())
+
+    def test_fresh_stop_does_not_stop_a_missing_unit(self):
+        backend = deployment.SystemBackend.__new__(deployment.SystemBackend)
+        backend.predecessor = Mock()
+        backend.protected = Mock()
+        backend.command = Mock(side_effect=AssertionError('stop missing unit'))
+        state = {'ActiveState': 'inactive', 'SubState': 'dead', 'MainPID': '0', 'InvocationID': ''}
+        with patch.object(deployment, 'service_state', return_value=state):
+            self.assertTrue(backend.execute('stop', {})['stopped'])
+        backend.command.assert_not_called()
+
     def test_atomic_public_record_mode_survives_private_umask(self):
         if not hasattr(deployment.os, 'O_NOFOLLOW'):
             self.skipTest('Linux atomic file test')

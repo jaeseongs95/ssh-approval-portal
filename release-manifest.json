@@ -5,8 +5,8 @@
   "files": [
     {
       "path": ".dockerignore",
-      "size": 277,
-      "sha256": "ea0b2c08d9d0131312ba98edc71ac81a388548c8307198fcf1d8e8ec3a50a277"
+      "size": 303,
+      "sha256": "1ccaa1fe329dd3b33753f4f2bd500046637955b9193b2d24cc6d721ca3dfd660"
     },
     {
       "path": "LICENSE",
@@ -51,7 +51,7 @@
     {
       "path": "config/docker.example.env",
       "size": 73,
-      "sha256": "fae521ab0fd83c7974a86f3f0c6dcc56b4b928c838785cc6e13abf077483c75a"
+      "sha256": "7db434f595c5f8cebfae1316a3289be465ceaa6c393d13e19cbcca083ed8b891"
     },
     {
       "path": "config/settings-contract.json",
@@ -86,12 +86,12 @@
     {
       "path": "docker/Dockerfile",
       "size": 1594,
-      "sha256": "cf0bb401f86cb008bcb4555516a97e3735d49290d94c2e45f2577f26b2aef22b"
+      "sha256": "8cfd52cbb1fc3a971372b159b49f3e060aff8b6fa1cd936a452d9a6f4803a624"
     },
     {
       "path": "docker/compose.yaml",
       "size": 1128,
-      "sha256": "1519cae2a8727613a9af9626338874ae3ab21cba1efbf9f414afd4fb6e978d32"
+      "sha256": "ae5fe56d553fa30e382fe009fdb855fe25687da33747aec17bc9feaa2b2bea41"
     },
     {
       "path": "docs/admin-login.en.md",
@@ -340,8 +340,8 @@
     },
     {
       "path": "scripts/deployment-launcher.py",
-      "size": 5321,
-      "sha256": "3259900fd2c6d6c4c2de0788e3fefeb36b7e00bbe692a12e7cf37660c14c1cf5"
+      "size": 5467,
+      "sha256": "68b592559c47d3667822620bd834e3d2fb0913b7b6bd03b9af4bac216adcac1b"
     },
     {
       "path": "scripts/deployment-preservation.mjs",
@@ -350,8 +350,8 @@
     },
     {
       "path": "scripts/deployment.py",
-      "size": 55417,
-      "sha256": "799177590b30907c13768dbffe075178d11385334fb0ebdea40ca4b821dfa712"
+      "size": 59077,
+      "sha256": "323eece3bfb9abe210c92d1fc6e94a7e29c96560e8f121a01e61f5dd1e347d57"
     },
     {
       "path": "scripts/deployment_entry.py",
@@ -1255,8 +1255,8 @@
     },
     {
       "path": "test/deployment-system-fixture.py",
-      "size": 19982,
-      "sha256": "cbef392c8e927a245315b7ca84a4097e82611f371ea404af24f987f2fb179c5b"
+      "size": 21393,
+      "sha256": "75d3032874af836fb7f8651562ec66bb276539db9cc35de77a0e55047cffc139"
     },
     {
       "path": "test/deployment_entry_fixture.py",
@@ -1745,8 +1745,8 @@
     },
     {
       "path": "test/test_deployment_engine.py",
-      "size": 10147,
-      "sha256": "12ffefebc4b00c12af2fd84a68aa94a708d22c3ebd00a56776fafb6cc8f4c7a4"
+      "size": 11740,
+      "sha256": "6109e2c2e75de7f33a5c5e81e5d953727cad7798e9da72d2d0109c3906466a6a"
     },
     {
       "path": "test/test_deployment_entry.py",

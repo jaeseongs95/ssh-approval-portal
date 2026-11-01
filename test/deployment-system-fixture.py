@@ -14,6 +14,7 @@ import json
 import os
 from pathlib import Path
 import pwd
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -74,6 +75,24 @@ class Fixture:
         with (self.results / 'commands.jsonl').open('a', encoding='utf-8') as stream:
             stream.write(json.dumps({'name': name, 'exitCode': result.returncode,
                                      'candidate': self.options.candidate}, ensure_ascii=False) + '\n')
+        if result.returncode:
+            # 출력 원문은 공개하지 않고 코드와 검토된 고정 문구만 허용한다.
+            fixed = ('Node runtime is not a trusted root-owned installation.',
+                     'Cannot confirm Compose state.', 'Unsafe installation lock',
+                     'Run as root.', 'A non-native bridge is running.',
+                     'An externally verified release-manifest.json SHA256 is required.',
+                     'An installation or deployment is already in progress.',
+                     'Unsafe account home', 'Unsafe provisioning parent:',
+                     'Unsafe provisioning destination:', 'Existing installation',
+                     'No space left on device', 'Permission denied',
+                     'Could not resolve host:', 'Failed to connect',
+                     'curl: (', 'npm error code ', 'npm ERR! code ')
+            text = (result.stdout + b'\n' + result.stderr).decode('utf-8', errors='replace')
+            codes = sorted(set(re.findall(r'(?m)^[A-Z][A-Z0-9_]{2,80}$', text)))
+            self.report['failedCommand'] = {'name': name, 'exitCode': result.returncode,
+                'codes': codes, 'markers': [item for item in fixed if item in text],
+                'exceptionTypes': sorted(set(re.findall(r'(?m)^([A-Za-z]+(?:Error|Exception)):', text)))}
+            self.write('result.json', self.report)
         if check:
             require(result.returncode == 0, name + '_COMMAND_FAILED')
         return result

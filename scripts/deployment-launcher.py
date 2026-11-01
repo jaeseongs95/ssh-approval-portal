@@ -102,8 +102,10 @@ def main():
     environment = dict(os.environ)
     environment.pop('NODE_OPTIONS', None)
     environment.pop('NODE_PATH', None)
+    # PID 1 already read the fixed, root-only EnvironmentFile. Re-reading it as
+    # mcpbridge would fail and would let its old transfer path override selection.
+    environment.pop('BRIDGE_SECRET_ENV_FILE', None)
     environment['BRIDGE_TRANSFER_ROOT'] = value['dataRoot']
-    environment['BRIDGE_SECRET_ENV_FILE'] = value['environmentFile']
     os.chdir(value['release'])
     os.execve(NODE, [str(NODE), str(Path(value['release']) / 'bridge.mjs')], environment)
 
