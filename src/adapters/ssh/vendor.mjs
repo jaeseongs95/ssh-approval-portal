@@ -8,15 +8,31 @@ import { preparePythonSource, preparePythonHelper } from './python-source.mjs';
 import { validateAgentCliPlan, projectAgentCliResult } from './agent-cli.mjs';
 
 /** Per-operation view: dispatch authorization follows every connect/retry wait. */
-export function withDispatchGuard(connection, beforeDispatch = async () => {}) {
+export function withDispatchGuard(connection, beforeDispatch = async () => {}, verifyConnection = () => {}) {
   return new Proxy(connection, { get(target, key, receiver) {
     if (key === 'ensureConnected') return async () => {
+      verifyConnection();
       await target.ensureConnected();
       await beforeDispatch();
+    };
+    if (key === 'getClient') return () => {
+      beforeDispatch.verify?.();
+      verifyConnection();
+      return target.getClient();
     };
     const value = Reflect.get(target, key, target);
     return typeof value === 'function' ? value.bind(key === 'exec' ? receiver : target) : value;
   } });
+}
+
+async function guardedConnection(registry, profile, beforeDispatch) {
+  const configured = registry.getProfile && JSON.stringify(registry.getProfile(profile));
+  const connection = await registry.getOrCreate(profile);
+  const snapshot = configured ?? JSON.stringify(connection.profile);
+  const verify = () => {
+    if (JSON.stringify(connection.profile) !== snapshot || registry.getProfile && JSON.stringify(registry.getProfile(profile)) !== snapshot) throw Error('SSH dispatch profile changed');
+  };
+  return withDispatchGuard(connection, beforeDispatch, verify);
 }
 
 const defaultRedact = text => redactText(text, { entropyScan: true });
@@ -97,7 +113,7 @@ export async function createSshRuntime(settings) {
     registry, classify: classifyCommand, auditRedact,
     async executeCommand(profile, command, beforeDispatch = async () => {}, options = {}) {
       if (Object.keys(options).some(key => key !== 'stdin') || options.stdin !== undefined && typeof options.stdin !== 'string') throw Error('Invalid command transport options');
-      const result = await withDispatchGuard(await registry.getOrCreate(profile), beforeDispatch).exec(command, options);
+      const result = await (await guardedConnection(registry, profile, beforeDispatch)).exec(command, options);
       return commandOutcome(result, auditRedact);
     },
     executePythonSource: (plan, verify, beforeDispatch) => executePythonSource(registry, plan, verify, beforeDispatch),
@@ -109,7 +125,7 @@ export async function createSshRuntime(settings) {
 export function createSshTransport(registry) {
   return {
     async connect(profile, { beforeDispatch } = {}) {
-      const connection = withDispatchGuard(await registry.getOrCreate(profile), beforeDispatch);
+      const connection = await guardedConnection(registry, profile, beforeDispatch);
       const idleTimeoutMs = connection.profile.transferTimeoutMs;
       return {
         call(command, payload) { return connection.exec(command, { stdin: JSON.stringify(payload), timeoutMs: idleTimeoutMs }); },

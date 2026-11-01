@@ -30,8 +30,8 @@
     },
     {
       "path": "app.mjs",
-      "size": 29662,
-      "sha256": "6d3a95dc44c5ac13c9ed16658796a617bb5d12decede8e7db017120c6f091ff4"
+      "size": 30775,
+      "sha256": "b0455a98d54d182032da83ddb1927fdcc4ad60c7c0d91a482c40955964ce10b1"
     },
     {
       "path": "bridge.mjs",
@@ -655,8 +655,8 @@
     },
     {
       "path": "src/adapters/ssh/vendor.mjs",
-      "size": 7766,
-      "sha256": "fc1a24d4d643f7a70bb8dab069c92ef71cdf67c0be63a98e7741c6b82050f401"
+      "size": 8512,
+      "sha256": "2c1c7a1d674dfe6ffc3c0a28c578e41868aa0ccd498efdcbf0ceefb0a442b906"
     },
     {
       "path": "src/adapters/ssh/windows-command.mjs",
@@ -1772,6 +1772,11 @@
       "path": "test/windows-command-line.test.mjs",
       "size": 13535,
       "sha256": "44cd23dff6767910247b9d22b31a20cdf41bb315f5659f24bc6a5717117573b7"
+    },
+    {
+      "path": "test/windows-dispatch-binding.test.mjs",
+      "size": 14423,
+      "sha256": "896812fbe2b9b55f37f5cd2e98b0465f5120b5e77a083379fa34628c454b8f9d"
     },
     {
       "path": "test/windows-file-contracts.test.mjs",
