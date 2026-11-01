@@ -72,6 +72,34 @@ test('baseline PASS still cannot grant strict release, nor can strict PASS grant
   } finally { await f.close(); }
 });
 
+test('MAINT-OUTPUT durable reservation retains expired baseline through periodic cleanup and restart, then resumes cleanup after verified release', async t => {
+  let clock = Date.now();
+  t.mock.method(Date, 'now', ()=>clock);
+  t.mock.timers.enable({apis:['setInterval']});
+  const f = await fixture({unavailable:false});
+  try {
+    const path = join(f.root, 'command-outputs', f.ready.id+'.out'), bytes = await readFile(path);
+    clock += 3_600_001;
+    t.mock.timers.tick(30_000);
+    await new Promise(resolve=>setImmediate(resolve));
+    const timed = await (await f.post('preservation/compare', baseline)).json();
+    assert.equal(timed.baselinePreserved, true, 'actual application interval preserves reserved baseline');
+    assert.equal(timed.expiredOutputsRemoved, 0);
+    assert.deepEqual(await readFile(path), bytes);
+    await f.restart();
+    const response = await f.post('preservation/compare', baseline), report = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(report.baselinePreserved, true, 'application opens durable reservation before output constructor cleanup');
+    assert.equal(report.expiredOutputsRemoved, 0);
+    assert.equal(report.outputPayloadsVerified, 1);
+    assert.deepEqual(await readFile(path), bytes);
+    assert.equal((await f.post('release', {...baseline,...verified})).status, 200);
+    t.mock.timers.tick(30_000);
+    await new Promise(resolve=>setImmediate(resolve));
+    await assert.rejects(()=>readFile(path), {code:'ENOENT'}, 'normal application timer reclaims expired output after release');
+  } finally { await f.close(); }
+});
+
 test('failed or unknown-mode recompare revokes earlier same-instance verification', async () => {
   for (const mode of ['strict','baseline']) for (const failure of ['payload','contract']) {
     const f = await fixture({unavailable:mode === 'baseline'}), headers = mode === 'baseline' ? baseline : {};

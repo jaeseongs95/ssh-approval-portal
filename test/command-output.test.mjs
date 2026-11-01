@@ -58,6 +58,30 @@ test('capacity/expiry and interrupted capture remain independent from execution 
   store.close();
 });
 
+test('MAINT-OUTPUT cleanup guard preserves expired rows and bytes at restart, reap and reserve without extending read authority', t => {
+  let now = 100, maintenance = false;
+  const root = directory(t), options = {maxBytes:1024, budget:1024, ttl:50, now:()=>now, canReap:()=>!maintenance};
+  let store = new CommandOutputs(root, options);
+  const ref = store.finish(store.reserve(binding), {failed:false, texts:['preserved across maintenance']}).output;
+  const path = join(root, 'command-outputs', ref.id+'.out'), bytes = readFileSync(path), rows = store.preservationRows();
+  try {
+    maintenance = true; now = 151;
+    store.reap();
+    assert.deepEqual(store.preservationRows(), rows, 'periodic/manual cleanup retains exact expired manifest rows');
+    assert.deepEqual(readFileSync(path), bytes);
+    assert.throws(()=>store.reserve(binding), /capacity/, 'reserve must not free charged expired baseline data');
+    store.close(); store = new CommandOutputs(root, options);
+    assert.deepEqual(store.preservationRows(), rows, 'constructor cleanup retains the fixed baseline after restart');
+    assert.deepEqual(readFileSync(path), bytes);
+    assert.equal(store.describe(store.get(ref.id)).state, 'expired');
+    assert.throws(()=>store.read({outputId:ref.id}, allow), /expired/, 'retention never extends output read authority');
+    maintenance = false; store.reap();
+    assert.deepEqual(store.preservationRows().outputs, []);
+    assert.throws(()=>readFileSync(path), {code:'ENOENT'});
+    assert.ok(store.reserve(binding).id, 'released maintenance resumes normal capacity reclamation');
+  } finally { store.close(); }
+});
+
 test('crash before manifest admission quarantines orphan bytes without blocking startup or replaying', t => {
   let now = 100; const root = directory(t), options = { maxBytes: 1024, budget: 2048, ttl: 50, now: () => now };
   let store = new CommandOutputs(root, options); store.close();
