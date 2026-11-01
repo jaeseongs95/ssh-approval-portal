@@ -1790,13 +1790,13 @@
     },
     {
       "path": "test/windows-ssh-ci.ps1",
-      "size": 20879,
-      "sha256": "4c0dbd2ed8ba163fd930a097188d60b20b64ae4bdf050573e29fbfa27e8f6f85"
+      "size": 20910,
+      "sha256": "427e20ba5415e57af46cf28d6746d73216461cfc5e2a44045bb89958d9a575c0"
     },
     {
       "path": "test/windows-ssh-integration.test.mjs",
-      "size": 31538,
-      "sha256": "cadbeaa901a5228991f6dcfebc19234856e30b0db8855c71b09016779c208702"
+      "size": 34930,
+      "sha256": "2e2633e111d225576d510aef0293d31230b5caf099f652b2c8560a6ba3167646"
     },
     {
       "path": "test/windows-target.test.mjs",

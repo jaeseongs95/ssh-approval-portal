@@ -316,6 +316,7 @@ Subsystem sftp $sftpPath
         pythonExecutable = $pythonExecutable
         cliSmokeIsolation = @{ ephemeral = $true; accountName = $accountName; accountSid = $accountSid; nodeExecutable = @(Get-Command node.exe -CommandType Application -ErrorAction Stop)[0].Source }
         sshClient = $sshClient; nativeClientConfig = $nativeClientConfig
+        serverLog = $serverLog
         adminConfigPath = $adminConfigPath; adminHelper = $adminInstalled.helper
         adminFileRoot = $adminInstalled.fileRoot; adminStageRoot = $adminInstalled.stageRoot
     } | ConvertTo-Json -Compress)
