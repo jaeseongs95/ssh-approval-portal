@@ -1,12 +1,12 @@
 {
-  "version": "1.6.8",
+  "version": "1.7.0",
   "status": "candidate-pending-live-host-verification",
   "runtime": "Node.js 24",
   "files": [
     {
       "path": ".dockerignore",
-      "size": 251,
-      "sha256": "d5ebd4257b38d8f90e66b3e4f2703e111237b6a113a330ac7241da14ec1f58d0"
+      "size": 277,
+      "sha256": "ea0b2c08d9d0131312ba98edc71ac81a388548c8307198fcf1d8e8ec3a50a277"
     },
     {
       "path": "LICENSE",
@@ -16,12 +16,12 @@
     {
       "path": "README.ko.md",
       "size": 22432,
-      "sha256": "cc732642a359a2717ecbc4a65c931437b29896c81f332b5c87d8d6c18976027d"
+      "sha256": "c33a657fcea23dd8f0dbaae3499c89734cb916720c88dc090cbd1487312d7bed"
     },
     {
       "path": "README.md",
       "size": 20608,
-      "sha256": "b418d8340ca53178c1392e17cd60bb8892ba534d733b5c874b0ca09831887822"
+      "sha256": "03b700135c66976c62a13ee313bfefcd60b02027b077571a670a3a4e25e00820"
     },
     {
       "path": "THIRD_PARTY_NOTICES.json",
@@ -51,7 +51,7 @@
     {
       "path": "config/docker.example.env",
       "size": 73,
-      "sha256": "875b6f45abeaf21df71499aeefd52d6d6f54b98dfcb5b6512f7bdee3e6ac65a6"
+      "sha256": "fae521ab0fd83c7974a86f3f0c6dcc56b4b928c838785cc6e13abf077483c75a"
     },
     {
       "path": "config/settings-contract.json",
@@ -86,12 +86,12 @@
     {
       "path": "docker/Dockerfile",
       "size": 1594,
-      "sha256": "e95cf92677d7e6fc7819a9ea5dfeb6595b469504ce4b6138743b23fc35d13108"
+      "sha256": "cf0bb401f86cb008bcb4555516a97e3735d49290d94c2e45f2577f26b2aef22b"
     },
     {
       "path": "docker/compose.yaml",
       "size": 1128,
-      "sha256": "50691169cd6628f4903c5b45663ad4d7eea6462c3a9b02541557642bbc2839a7"
+      "sha256": "1519cae2a8727613a9af9626338874ae3ab21cba1efbf9f414afd4fb6e978d32"
     },
     {
       "path": "docs/admin-login.en.md",
@@ -236,12 +236,12 @@
     {
       "path": "package-lock.json",
       "size": 100104,
-      "sha256": "08217e1fdef154444b100b4b8556ace829880e4525f4aa7179f154e113a3cfe8"
+      "sha256": "27eebf05bf7012c066ded6c9c4144d274a713ee0461cb2d0675b1a6a1001283e"
     },
     {
       "path": "package.json",
       "size": 740,
-      "sha256": "0e0bb0a0ed833281643bc1c4d773174df58a29bec32c14a4db23435900d2cfd1"
+      "sha256": "3c120e176b1ca1902ce364789b20ed181b25dcd2eb6160515c89618c7d97aeb9"
     },
     {
       "path": "scripts/admin-access-config.mjs",
@@ -990,8 +990,8 @@
     },
     {
       "path": "test/browser/admin-ui-1.6.8-plan.md",
-      "size": 3018,
-      "sha256": "e160ce1a35550918c433f11a629ad02088b8aac868ff45bad88b7dda25436842"
+      "size": 3230,
+      "sha256": "b1bde353770683b88691168634810c4d131a2b0cd71434d250c6ab8495388bbb"
     },
     {
       "path": "test/browser/admin-ui.mjs",
