@@ -65,17 +65,25 @@ for(const width of [320,390,760,820,1120,1440]) test('UI168 동일 이름 대상
     const output=page.getByRole('region',{name:'실행 출력',exact:true});await output.waitFor();assert.equal(await output.textContent(),text);assert.equal(await output.evaluate(node=>node===document.activeElement),true);
     // https://drafts.csswg.org/cssom-view/#extension-to-the-element-interface: scrollTop은 실수, 높이는 정수다.
     // 관측된 1 CSS px 표현 차이만 허용하며 끝 위치의 연속 프레임 안정·노드/원문/읽기 횟수 보존은 따로 검사한다.
-    await page.keyboard.press('End');await page.waitForFunction(async()=>{const node=document.querySelector('#request-output'),end=node.scrollHeight-node.clientHeight,position=node.scrollTop;if(end<=0||Math.abs(position-end)>1)return false;for(let frame=0;frame<4;frame++){await new Promise(requestAnimationFrame);if(node.scrollTop!==position||node.scrollHeight-node.clientHeight!==end)return false;}return true;});const outputGeometry=()=>output.evaluate(node=>({scrollTop:node.scrollTop,clientHeight:node.clientHeight,scrollHeight:node.scrollHeight})),beforeNavigation=await outputGeometry(),scroll=beforeNavigation.scrollTop;
+    await page.keyboard.press('End');
+    await page.evaluate(()=>{window.__ui168OutputEnd={last:null,end:null,frames:0};});
+    try {
+      await page.waitForFunction(()=>{const node=document.querySelector('#request-output'),end=node.scrollHeight-node.clientHeight,position=node.scrollTop,state=window.__ui168OutputEnd;
+        state.frames=end>0&&Math.abs(position-end)<=1&&state.last===position&&state.end===end?state.frames+1:0;
+        state.last=position;state.end=end;return state.frames>=4;
+      },undefined,{polling:'raf'});
+    } finally {await page.evaluate(()=>{delete window.__ui168OutputEnd;});}const outputGeometry=()=>output.evaluate(node=>({scrollTop:node.scrollTop,clientHeight:node.clientHeight,scrollHeight:node.scrollHeight})),beforeNavigation=await outputGeometry(),scroll=beforeNavigation.scrollTop;assert.ok(scroll>0&&Math.abs(scroll-(beforeNavigation.scrollHeight-beforeNavigation.clientHeight))<=1,'끝 위치의 실제 측정값: '+JSON.stringify(beforeNavigation));
     assert.equal(await page.evaluate(()=>window.outputInjected),undefined);
+    await page.evaluate(()=>{document.addEventListener('admin-before-scope-change',()=>{const node=document.querySelector('#request-output');window.__ui168Departure={scrollTop:node.scrollTop,clientHeight:node.clientHeight,scrollHeight:node.scrollHeight,innerWidth,innerHeight,detailScrollTop:document.querySelector('#request-detail').scrollTop};},{once:true});});
     await navigate(page,'/settings');assert.equal(await page.locator('#server-target').inputValue(),'');assert.equal(await page.locator('#policy-effective-state').getAttribute('data-test-mode'),'unselected');await page.locator('#request-return').click();await page.waitForURL(url=>url.pathname==='/');
-    const returned=await outputGeometry();let preservationError;
+    const returned=await outputGeometry(),departure=await page.evaluate(()=>{const value=window.__ui168Departure;delete window.__ui168Departure;return value;});let preservationError;
     try {
       assert.equal(await output.textContent(),text);assert.equal(await output.evaluate(node=>node===window.savedOutput),true);
       assert.ok(Math.abs(returned.scrollTop-scroll)<=1,'같은 출력의 복귀 위치는 표현 차이 1 CSS px 이내여야 한다');assert.equal(outputReads,1);
     } catch(error) {preservationError=error;}
     // 사용자 복귀의 보존 판정을 먼저 끝내고, 결과 갈무리의 별도 레이아웃 영향을 측정한다.
     const beforeScreenshot=await outputGeometry();await screenshot(page,width,'completed-output');const afterScreenshot=await outputGeometry();
-    const geometry={expected:scroll,actual:returned.scrollTop,beforeNavigation,returned,beforeScreenshot,afterScreenshot,outputReads};
+    const geometry={expected:scroll,actual:returned.scrollTop,beforeNavigation,departure,returned,beforeScreenshot,afterScreenshot,outputReads};
     if(process.env.UI_SCREENSHOTS){const fs=await import('node:fs/promises');await fs.writeFile(join(process.env.UI_SCREENSHOTS,'admin-168-'+width+'-output-scroll.json'),JSON.stringify(geometry,null,2));}
     if(preservationError){preservationError.message+='\n'+JSON.stringify(geometry);throw preservationError;}
     await navigate(page,'/settings');await page.locator('#server-target option[value=alpha]').waitFor({state:'attached'});await page.locator('#server-target').selectOption('alpha');await permissionsTab(page);
