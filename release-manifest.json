@@ -1515,8 +1515,8 @@
     },
     {
       "path": "test/retained-history.test.mjs",
-      "size": 13521,
-      "sha256": "8878d389304506e529617b348721e24d3c9c8d8ccddf85eaafbdf32b3f945f89"
+      "size": 22767,
+      "sha256": "d3bb88abeb784ffa4d4ce035058460db4107200b2eead20cf49ef7c6eacf089e"
     },
     {
       "path": "test/rollback-stopped-fixture.sh",

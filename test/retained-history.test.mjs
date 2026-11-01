@@ -11,6 +11,8 @@ import { openDormantCommandState } from '../src/adapters/storage/offline-preserv
 import { presentJob } from '../src/adapters/presentation/results.mjs';
 import { authorizeAdminRequest } from '../src/adapters/security/admin-policy.mjs';
 import { AGENT_CLI_CONTRACT, agentCliProviders } from '../src/domain/agent-cli.mjs';
+import { hash } from '../src/domain/validation.mjs';
+import { createApplication } from '../app.mjs';
 
 const id = n => n.toString(16).padStart(48, '0');
 const target = { id: 'alpha', revision: 'a'.repeat(64), enabled: true, writeProfile: 'alpha-write' };
@@ -185,4 +187,115 @@ test('HIST-AUTH 기존 관리자 인증·브라우저 세션·출처를 보존�
   const access = { ...options, adminAccess: { mode: 'access', identity: async () => ({ id: 'synthetic-admin' }) }, browserSessions: { authenticated: () => false } };
   assert.equal((await authorizeAdminRequest(request(), access)).status, 401);
   for (const path of ['/settings', '/bridge', '/preferences', '/servers']) assert.deepEqual(await authorizeAdminRequest(request(path), options), { allowed: true, routeKind: 'static' });
+});
+
+// OB-COST·OB-READONLY·OB-BOUNDS의 실제 HTTP 비교 계측 계획이다.
+// 기준 75c4dfd의 /api/requests 처리행, queue.listAll/get, target-router, presentJob은
+// b1612ab와 같다(git show와 해당 파일 diff로 확인). 같은 앱·같은 N개 복원 자료를 사용한다.
+// 기존 조회는 전체 큐, 보관 조회는 첫 20개이므로 속도 개선이나 같은 기능의 비교를 주장하지 않는다.
+// seed·기동·검증·JSON 해석은 지연 측정 밖이다. 지연은 응답 본문을 모두 읽을 때까지다.
+// RSS/heap은 서버·클라이언트가 같은 프로세스인 전후 관측값이며 호출별 최고점은 아니다.
+// 비교 경로의 순서를 번갈아 쓰며 강제 GC·인위적 배수 문턱을 넣지 않는다.
+// 독립 기대값: N개 보관 행 불변, 추가 대기 요청 1개, 보관 첫 페이지 20개,
+// 읽기만으로 감사·실행 0회, 함께 보낸 승인은 202 후 실행 1회·완료한다.
+// 실행: 지정 시험 환경에서 node --test --test-name-pattern=HIST-MEASURE test/retained-history.test.mjs
+// 로컬 제품 시험·표적 변이는 미실행이며 원시 숫자는 node:test 진단 JSON으로 남긴다.
+const memorySample = () => {
+  const { rss, heapUsed, heapTotal, external, arrayBuffers } = process.memoryUsage();
+  return { rssBytes: rss, heapUsedBytes: heapUsed, heapTotalBytes: heapTotal, externalBytes: external, arrayBufferBytes: arrayBuffers };
+};
+const sampleSummary = samples => {
+  const sorted = samples.map(sample => sample.elapsedMs).sort((a, b) => a - b);
+  return { repetitions: samples.length, sampleMedianMs: sorted[Math.ceil(sorted.length * 0.5) - 1], sampleP95Ms: sorted[Math.ceil(sorted.length * 0.95) - 1], sampleMaxMs: sorted.at(-1),
+    observedMaxRssBytes: Math.max(...samples.flatMap(sample => [sample.before.rssBytes, sample.after.rssBytes])),
+    observedMaxHeapUsedBytes: Math.max(...samples.flatMap(sample => [sample.before.heapUsedBytes, sample.after.heapUsedBytes])) };
+};
+
+for (const records of [100, 1000, 10000]) test('HIST-MEASURE 기존 조회·보관 조회와 동시 승인 응답 계측 '+records, { timeout: 120000 }, async t => {
+  const root = await storageFixture(t), createdAt = Date.now() - 1000;
+  const fixtureJob = (key, state = 'completed') => ({ id: key, kind: 'command', command: 'printf history-measure', operation: { kind: 'command', command: 'printf history-measure' },
+    targetId: 'default', profile: 'aws-local', commandClass: 'privileged', target: 'fixture@127.0.0.1:22', state, createdAt,
+    expiresAt: createdAt + 600000, ...(state === 'completed' ? { finishedAt: createdAt + 1 } : {}) });
+  const retained = Array.from({ length: records }, (_, index) => fixtureJob(id(index + 1)));
+  // 기존 생성자가 만든 스키마에 한 트랜잭션으로 합성 자료만 넣는다. seed 비용은 측정하지 않는다.
+  createCommandState(root).close();
+  const db = new DatabaseSync(join(root, 'command-automation.sqlite'));
+  try {
+    db.exec('BEGIN'); const insert = db.prepare('INSERT INTO requests VALUES (?,?,?,?)');
+    for (const value of retained) insert.run(value.id, null, 'b'.repeat(64), JSON.stringify(value));
+    db.exec('COMMIT');
+  } finally { db.close(); }
+  let app, executions = 0, audits = 0, release = () => {}, executionGate;
+  try {
+    app = await createApplication({ registry: { getProfile: name => ({ host: '127.0.0.1', port: 22, user: 'fixture', readOnly: name === 'aws-readonly' }), closeAll: async () => {} },
+      classify: () => ({ class: 'privileged' }), executeCommand: async () => { executions++; await executionGate; return { failed: false, texts: [] }; }, audit: () => { audits++; },
+      transferRoot: root, uiHtml: '<html></html>', env: { BRIDGE_MCP_TOKEN: 'fixture-mcp', BRIDGE_ADMIN_TOKEN: 'fixture-admin', BRIDGE_ADMIN_ORIGIN: 'https://example.test', BRIDGE_UI_TICKET_KEY: 'd'.repeat(64) } });
+    const queue = app.targets.select('default').queue;
+    // 승인 서비스의 정상 복원 포트를 사용한다. 생성·입장 상한 변경은 시험 범위가 아니다.
+    for (const value of retained) queue.restore(value);
+    await new Promise(resolve => app.adminHttp.listen(0, '127.0.0.1', resolve));
+    const base = 'http://127.0.0.1:'+app.adminHttp.address().port, headers = { Authorization: 'Bearer fixture-admin' };
+    const databasePath = join(root, 'command-automation.sqlite'), databaseBefore = hash(await readFile(databasePath));
+    const retainedSnapshot = () => hash(JSON.stringify(retained.map(value => queue.jobs.get(value.id))));
+    const retainedBefore = retainedSnapshot(), filesBefore = await readdir(root);
+    let pendingId, sequence = 0;
+    const installPending = () => {
+      if (pendingId) queue.jobs.delete(pendingId);
+      pendingId = id(1000000 + sequence++); queue.restore(fixtureJob(pendingId, 'pending'));
+      executionGate = new Promise(resolve => { release = resolve; });
+    };
+    const requestSample = async (path, approve = false) => {
+      const before = memorySample(), startedMs = performance.now();
+      const response = await fetch(base+path, { method: approve ? 'POST' : 'GET', headers: { ...headers, ...(approve ? { Origin: 'https://example.test', Prefer: 'respond-async' } : {}) }, signal: AbortSignal.timeout(30000) });
+      const bytes = Buffer.from(await response.arrayBuffer()), finishedMs = performance.now(), after = memorySample();
+      const sample = { startedMs, finishedMs, elapsedMs: finishedMs - startedMs, responseBytes: bytes.length, status: response.status, before, after };
+      assert.equal(response.status, approve ? 202 : 200);
+      const value = JSON.parse(bytes.toString('utf8'));
+      if (approve) { assert.equal(value.id, pendingId); assert.equal(value.state, 'running'); }
+      else if (path === '/api/requests') assert.equal(value.length, records + 1);
+      else { assert.equal(value.items.length, 20); assert.ok(sample.responseBytes <= HISTORY_RESPONSE_BYTES); assert.equal(value.coverage.snapshot, false); }
+      return sample;
+    };
+    installPending();
+    const requests = [], history = [];
+    for (let index = 0; index < 7; index++) for (const path of index % 2 ? ['/api/history', '/api/requests'] : ['/api/requests', '/api/history']) {
+      const beforeAudits = audits, beforeExecutions = executions;
+      (path === '/api/requests' ? requests : history).push(await requestSample(path));
+      assert.equal(audits, beforeAudits); assert.equal(executions, beforeExecutions);
+    }
+    assert.equal(retainedSnapshot(), retainedBefore); assert.equal(hash(await readFile(databasePath)), databaseBefore);
+    assert.deepEqual(await readdir(root), filesBefore);
+    const approval = [], requestsWithApproval = [], historyWithApproval = [];
+    const approveSample = async path => {
+      installPending(); const executionBefore = executions, auditBefore = audits;
+      let read, accepted;
+      try {
+        // 두 fetch를 기다림 없이 함께 보낸다. 단일 서버 이벤트 루프의 대기 영향도 응답에 포함한다.
+        const reading = path ? requestSample(path) : undefined;
+        const approving = requestSample('/api/'+pendingId+'/approve', true);
+        [read, accepted] = await Promise.all([reading, approving]);
+      } finally { release(); }
+      await app.queue.wait(pendingId);
+      assert.equal(queue.jobs.get(pendingId).state, 'completed'); assert.equal(executions, executionBefore + 1); assert.equal(audits, auditBefore + 2);
+      assert.equal(retainedSnapshot(), retainedBefore);
+      if (!path) return accepted;
+      const inFlightOverlap = Number(read.startedMs <= accepted.finishedMs && accepted.startedMs <= read.finishedMs);
+      assert.equal(inFlightOverlap, 1, '조회와 승인 HTTP 요청의 대기 구간이 겹쳐야 한다');
+      return { read, approval: accepted, inFlightOverlap };
+    };
+    for (let index = 0; index < 3; index++) {
+      approval.push(await approveSample());
+      for (const path of index % 2 ? ['/api/history', '/api/requests'] : ['/api/requests', '/api/history']) {
+        (path === '/api/requests' ? requestsWithApproval : historyWithApproval).push(await approveSample(path));
+      }
+    }
+    assert.equal(hash(await readFile(databasePath)), databaseBefore);
+    // 원문·토큰·요청 식별자를 출력하지 않는다. 표본 상위값은 모집단 지연 보장이 아니다.
+    t.diagnostic(JSON.stringify({ historyMeasurement: 1, retainedRecords: records, pendingRecords: 1, sameProcessClientAndServer: 1,
+      requests: { samples: requests, summary: sampleSummary(requests) }, history: { samples: history, summary: sampleSummary(history) },
+      approvalAlone: { samples: approval, summary: sampleSummary(approval) },
+      requestsWithApproval: { samples: requestsWithApproval, approvalSummary: sampleSummary(requestsWithApproval.map(value => value.approval)) },
+      historyWithApproval: { samples: historyWithApproval, approvalSummary: sampleSummary(historyWithApproval.map(value => value.approval)) },
+      retainedUnchanged: 1, databaseUnchanged: 1, executions, audits }));
+  } finally { release(); await app?.close(); }
 });
