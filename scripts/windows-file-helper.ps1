@@ -65,15 +65,21 @@ try {
     $code = 'OPERATION_FAILED'
     $nativeStep = $null
     $nativeError = 0
+    $securityControl = $null
     $failure = $_.Exception
     while ($null -ne $failure) {
         if ($failure.PSObject.Properties['Code'] -and $failure.Code -cin $codes) {
             $code = $failure.Code
             if ($failure.PSObject.Properties['NativeStep'] -and $failure.NativeStep -cin @('native', 'create_directory',
-                'inspect', 'open', 'filesystem', 'final_path', 'read_security', 'remove', 'rename_replace', 'rename_new', 'write_security', 'write_times', 'verify_security', 'verify_times', 'read_label', 'write_label', 'verify_label') -and
+                'inspect', 'open', 'filesystem', 'final_path', 'read_security', 'remove', 'rename_replace', 'rename_new', 'write_security', 'write_times', 'verify_security', 'verify_owner', 'verify_dacl', 'verify_control', 'verify_times', 'read_label', 'write_label', 'verify_label') -and
                 $failure.NativeError -is [int] -and $failure.NativeError -ge 0) {
                 $nativeStep = $failure.NativeStep
                 $nativeError = $failure.NativeError
+                if ($nativeStep -cin @('verify_owner', 'verify_dacl', 'verify_control') -and
+                    $failure.SecurityControlBefore -is [int] -and $failure.SecurityControlBefore -ge 0 -and $failure.SecurityControlBefore -le 5388 -and
+                    $failure.SecurityControlAfter -is [int] -and $failure.SecurityControlAfter -ge 0 -and $failure.SecurityControlAfter -le 5388) {
+                    $securityControl = @{ before = $failure.SecurityControlBefore; after = $failure.SecurityControlAfter }
+                }
             }
             break
         }
@@ -82,6 +88,7 @@ try {
     }
     $response = @{ error = 'File operation refused or failed'; errorCode = $code }
     if ($null -ne $nativeStep) { $response.nativeStep = $nativeStep; $response.nativeError = $nativeError }
+    if ($null -ne $securityControl) { $response.securityControl = $securityControl }
     [Console]::Out.WriteLine(($response | ConvertTo-Json -Compress))
     exit 1
 } finally {

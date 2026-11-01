@@ -73,10 +73,16 @@ function Describe-Result($result) {
         'UNSAFE_PATH', 'STAGING_UNAVAILABLE', 'FILE_CHANGED', 'FILE_TOO_LARGE', 'INVALID_REQUEST', 'OPERATION_FAILED')) { $code = $result.data.errorCode }
     $step = 'none'
     if ($result.data.nativeStep -cin @('native', 'create_directory', 'inspect', 'open', 'filesystem', 'final_path', 'read_security',
-        'remove', 'rename_replace', 'rename_new', 'write_security', 'write_times', 'verify_security', 'verify_times', 'read_label', 'write_label', 'verify_label')) { $step = $result.data.nativeStep }
+        'remove', 'rename_replace', 'rename_new', 'write_security', 'write_times', 'verify_security', 'verify_owner', 'verify_dacl', 'verify_control', 'verify_times', 'read_label', 'write_label', 'verify_label')) { $step = $result.data.nativeStep }
     $number = 0
     if ($result.data.nativeError -is [int] -and $result.data.nativeError -gt 0) { $number = $result.data.nativeError }
-    return ('exit=' + [int]$result.exitCode + '; code=' + $code + '; step=' + $step + '; native=' + $number)
+    $control = ''
+    if ($step -cin @('verify_owner', 'verify_dacl', 'verify_control') -and
+        $result.data.securityControl.before -is [int] -and $result.data.securityControl.before -ge 0 -and $result.data.securityControl.before -le 5388 -and
+        $result.data.securityControl.after -is [int] -and $result.data.securityControl.after -ge 0 -and $result.data.securityControl.after -le 5388) {
+        $control = '; controlBefore=' + $result.data.securityControl.before + '; controlAfter=' + $result.data.securityControl.after
+    }
+    return ('exit=' + [int]$result.exitCode + '; code=' + $code + '; step=' + $step + '; native=' + $number + $control)
 }
 function Refused($request, [string]$code) {
     $result = Call $request
@@ -218,12 +224,19 @@ public static class RestrictedAdministratorTest {
     $reader = [IO.File]::Open($script:target, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
     try { Refused $request 'PERMISSION_DENIED' } finally { $reader.Dispose() }
     Assert-True ([Convert]::ToBase64String([IO.File]::ReadAllBytes($script:target)) -ceq [Convert]::ToBase64String($script:bytes)) 'blocked overwrite preserves destination bytes'
+    $customAcl = Get-Acl -LiteralPath $script:target
+    $customAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($users,
+        [Security.AccessControl.FileSystemRights]::ReadAttributes, [Security.AccessControl.AccessControlType]::Allow))
+    Set-Acl -LiteralPath $script:target -AclObject $customAcl
+    $customSddl = (Get-Acl -LiteralPath $script:target).Sddl
+    $result = Call $request
+    Assert-True ($result.exitCode -eq 0 -and (Get-Acl -LiteralPath $script:target).Sddl -ceq $customSddl) ('overwrite copies a differing explicit safe DACL with inheritance enabled; ' + (Describe-Result $result))
     $protectedAcl = Get-Acl -LiteralPath $script:target
     $protectedAcl.SetAccessRuleProtection($true, $true)
     Set-Acl -LiteralPath $script:target -AclObject $protectedAcl
     $protectedSddl = (Get-Acl -LiteralPath $script:target).Sddl
     $result = Call $request
-    Assert-True ($result.exitCode -eq 0 -and (Get-Acl -LiteralPath $script:target).Sddl -ceq $protectedSddl) 'overwrite retains protected destination DACL'
+    Assert-True ($result.exitCode -eq 0 -and (Get-Acl -LiteralPath $script:target).Sddl -ceq $protectedSddl) ('overwrite copies a differing protected destination DACL; ' + (Describe-Result $result))
     $null = & icacls.exe $script:target /setintegritylevel 'L'
     Assert-True ($LASTEXITCODE -eq 0) 'fixture mandatory low integrity label is set'
     $labelBefore = (& icacls.exe $script:target) -join "`n"

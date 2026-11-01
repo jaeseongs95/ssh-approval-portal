@@ -69,7 +69,10 @@ test('WIN-JEV-APP 등록·실행·관측이 실제 target 플랫폼에 결속되
   const env = { BRIDGE_MCP_TOKEN: 'fixture-mcp', BRIDGE_ADMIN_TOKEN: 'fixture-owner', BRIDGE_ADMIN_ORIGIN: 'https://owner.example.test',
     BRIDGE_UI_TICKET_KEY: 'c'.repeat(64), BRIDGE_COMMAND_AUTOMATION: 'true', BRIDGE_TARGETS: JSON.stringify(targets), BRIDGE_DEFAULT_TARGET: 'windows', BRIDGE_JEV_ENABLED: 'true' };
   const app = await createApplication({ env, transferRoot: root, uiHtml: '<html>합성 시험</html>',
-    registry: { getProfile: name => ({ host: 'synthetic.example.test', port: 22, user: 'synthetic', readOnly: name.endsWith('-read'), trustedHostKey: 'SHA256:synthetic-host' }), closeAll: async () => {} },
+    registry: { getProfile(name) {
+      const target = name.split('-')[0];
+      return { host: `${target}.example.test`, port: 22, user: 'synthetic', readOnly: name.endsWith('-read'), trustedHostKey: `SHA256:synthetic-${target}-host` };
+    }, closeAll: async () => {} },
     classify: () => ({ class: 'safe' }), audit: () => {}, policyRiskAssessor: makeAssessor('registration'), riskEvaluators: { jev: makeAssessor('execution') }, riskAssessor: makeAssessor('observation'),
     executeCommand: async (_profile, _command, beforeDispatch) => { await beforeDispatch(); executed.push(true); return { failed: false, texts: ['synthetic'] }; },
   });

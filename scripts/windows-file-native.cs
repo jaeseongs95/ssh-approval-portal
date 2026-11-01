@@ -14,8 +14,12 @@ namespace SshApproval {
         public string Code { get; private set; }
         public string NativeStep { get; private set; }
         public int NativeError { get; private set; }
-        public FileFailure(string code) : base(code) { Code = code; }
-        public FileFailure(string code, string step, int error) : this(code) { NativeStep = step; NativeError = error; }
+        public int SecurityControlBefore { get; private set; }
+        public int SecurityControlAfter { get; private set; }
+        public FileFailure(string code) : base(code) { Code = code; SecurityControlBefore = -1; SecurityControlAfter = -1; }
+        public FileFailure(string code, string step, int error, int controlBefore = -1, int controlAfter = -1) : this(code) {
+            NativeStep = step; NativeError = error; SecurityControlBefore = controlBefore; SecurityControlAfter = controlAfter;
+        }
     }
 
     // All pathname components stay open without write/delete sharing until completion.
@@ -266,20 +270,38 @@ namespace SshApproval {
             // Other SACL entries and ADS are not copied.
             byte[] security = Security(previous);
             RawSecurityDescriptor before = new RawSecurityDescriptor(security, 0);
+            if (before.Owner == null || before.DiscretionaryAcl == null) Fail("PERMISSION_DENIED");
+            string expectedSecurity = before.GetSddlForm(AccessControlSections.Owner | AccessControlSections.Access);
             bool protectedAcl = (before.ControlFlags & ControlFlags.DiscretionaryAclProtected) != 0;
-            GCHandle pin = GCHandle.Alloc(security, GCHandleType.Pinned);
-            try {
-                IntPtr owner, dacl;
-                bool defaulted, present;
-                if (!GetSecurityDescriptorOwner(pin.AddrOfPinnedObject(), out owner, out defaulted)) NativeFailure("OPERATION_FAILED", "read_security");
-                if (!GetSecurityDescriptorDacl(pin.AddrOfPinnedObject(), out present, out dacl, out defaulted)) NativeFailure("OPERATION_FAILED", "read_security");
-                if (owner == IntPtr.Zero || !present || dacl == IntPtr.Zero) Fail("PERMISSION_DENIED");
-                uint error = SetSecurityInfo(destination, 1, 5u | (protectedAcl ? 0x80000000u : 0x20000000u), owner, IntPtr.Zero, dacl, IntPtr.Zero);
-                if (error != 0) throw new FileFailure(error == 5 || error == 1307 || error == 1314 ? "PERMISSION_DENIED" : "OPERATION_FAILED", "write_security", (int)error);
-            } finally { pin.Free(); }
+            // A new file in the same parent can already have exactly the required
+            // owner/DACL/control flags. Avoid reapplying inheritance in that case.
+            if (expectedSecurity != new RawSecurityDescriptor(Security(destination), 0).GetSddlForm(AccessControlSections.Owner | AccessControlSections.Access)) {
+                GCHandle pin = GCHandle.Alloc(security, GCHandleType.Pinned);
+                try {
+                    IntPtr owner, dacl;
+                    bool defaulted, present;
+                    if (!GetSecurityDescriptorOwner(pin.AddrOfPinnedObject(), out owner, out defaulted)) NativeFailure("OPERATION_FAILED", "read_security");
+                    if (!GetSecurityDescriptorDacl(pin.AddrOfPinnedObject(), out present, out dacl, out defaulted)) NativeFailure("OPERATION_FAILED", "read_security");
+                    if (owner == IntPtr.Zero || !present || dacl == IntPtr.Zero) Fail("PERMISSION_DENIED");
+                    uint error = SetSecurityInfo(destination, 1, 5u | (protectedAcl ? 0x80000000u : 0x20000000u), owner, IntPtr.Zero, dacl, IntPtr.Zero);
+                    if (error != 0) throw new FileFailure(error == 5 || error == 1307 || error == 1314 ? "PERMISSION_DENIED" : "OPERATION_FAILED", "write_security", (int)error);
+                } finally { pin.Free(); }
+            }
             RawSecurityDescriptor after = new RawSecurityDescriptor(Security(destination), 0);
-            if (before.GetSddlForm(AccessControlSections.Owner | AccessControlSections.Access) !=
-                after.GetSddlForm(AccessControlSections.Owner | AccessControlSections.Access)) throw new FileFailure("FILE_CHANGED", "verify_security", 0);
+            if (expectedSecurity != after.GetSddlForm(AccessControlSections.Owner | AccessControlSections.Access)) {
+                string step = "verify_control";
+                if (after.Owner == null || !before.Owner.Equals(after.Owner)) step = "verify_owner";
+                else if (after.DiscretionaryAcl == null) step = "verify_dacl";
+                else {
+                    byte[] expectedAcl = new byte[before.DiscretionaryAcl.BinaryLength];
+                    byte[] actualAcl = new byte[after.DiscretionaryAcl.BinaryLength];
+                    before.DiscretionaryAcl.GetBinaryForm(expectedAcl, 0);
+                    after.DiscretionaryAcl.GetBinaryForm(actualAcl, 0);
+                    if (!SameBytes(expectedAcl, actualAcl)) step = "verify_dacl";
+                }
+                // Only DACL control bits are diagnostic; never return owner SIDs or ACEs.
+                throw new FileFailure("FILE_CHANGED", step, 0, (int)before.ControlFlags & 0x150C, (int)after.ControlFlags & 0x150C);
+            }
             PreserveLabel(previous, destination);
             if (!SetFileTime(destination, ref old.Created, ref old.Accessed, ref old.Written)) NativeFailure("OPERATION_FAILED", "write_times");
             // Suppress deferred access/write updates when the copied-data handle closes.

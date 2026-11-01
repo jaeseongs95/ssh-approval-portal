@@ -500,13 +500,13 @@
     },
     {
       "path": "scripts/windows-file-helper.ps1",
-      "size": 5061,
-      "sha256": "79c809b6724543b1eda1fcffacf46aa027d9baff831d85cdda019e561f6e1dd6"
+      "size": 5759,
+      "sha256": "3bd2efb1fdf417c2b0f451b1c6f5f9294052412ae1c91b932a5d61d8bbe7181f"
     },
     {
       "path": "scripts/windows-file-native.cs",
-      "size": 30098,
-      "sha256": "dbd39efc407f772a91333b20abd63cfd91debdeee9853087554398b608cb0749"
+      "size": 31797,
+      "sha256": "bb48b80cb514a6470185c01cf732b7271045ba5a52e66a59161211c00a921a1a"
     },
     {
       "path": "src/adapters/aik/ssh-tool.mjs",
@@ -965,8 +965,8 @@
     },
     {
       "path": "test/browser/agent-cli.test.mjs",
-      "size": 28906,
-      "sha256": "b7bf5e1560ee61d5f8b6b27212c54315a26f773a152b62a0b60320f7dccbe09b"
+      "size": 28947,
+      "sha256": "f4b979de0f2304255a86ada31959004cbde5fb8208c8a7e5a9458a14b6550373"
     },
     {
       "path": "test/browser/async-approval.test.mjs",
@@ -1765,8 +1765,8 @@
     },
     {
       "path": "test/windows-file-helper.tests.ps1",
-      "size": 21842,
-      "sha256": "4b01a64a4221af1f0007a425ae2cb7b5509c2a274dd531afd237c2f6ff459197"
+      "size": 23108,
+      "sha256": "cc3f0b0fa34ea678e8e1867adb417cc0c40ddc0eee21a915a765e0a0070e17dc"
     },
     {
       "path": "test/windows-full-application.test.mjs",
@@ -1775,23 +1775,23 @@
     },
     {
       "path": "test/windows-jev-contract.test.mjs",
-      "size": 11111,
-      "sha256": "011fb38ef89111ee7f5a2eb7889e76b150ef23cd977555ed2a82a1a5ff1ee8e4"
+      "size": 11179,
+      "sha256": "ed77668ac6c9cae5298a13a712a8cd41aab1cb995e868bb5a189062160fa5c75"
     },
     {
       "path": "test/windows-python-source.test.mjs",
-      "size": 15909,
-      "sha256": "0d11aca8532d52683e8a09215fc22c094681369ae7f4368b4022f4dbbd79343b"
+      "size": 17718,
+      "sha256": "85627bce3bea80520af30d47d471b69f2599ccd24d0a2da145a5ccbd7786c25f"
     },
     {
       "path": "test/windows-ssh-ci.ps1",
-      "size": 18024,
-      "sha256": "108ccf06de370e602af38d59f5a93537b7004d757ebe722bd3482cc6b5d8f4e1"
+      "size": 20392,
+      "sha256": "cd8a2dc4627abeee7a93211b6ea5ee1878ce30d0f6649381f49c9718ffbbb279"
     },
     {
       "path": "test/windows-ssh-integration.test.mjs",
-      "size": 24216,
-      "sha256": "22388868e235fd1d6f820bbefecad29b64fd7373654de3cf6697ee27a3345025"
+      "size": 28893,
+      "sha256": "520a29aff5687d01bc8be0be3b39f6c6321b6a0b36dcfd60727d0b081ba9e22b"
     },
     {
       "path": "test/windows-target.test.mjs",

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { mkdtemp, readFile, access, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -95,8 +95,37 @@ test('Windows source rejects ambiguous runtime/platform, invalid input and comma
 
 const pythonExecutable = process.env.SOLID_PYTHON ?? process.env.PYTHON;
 const ciWindows = process.platform === 'win32' && process.env.GITHUB_ACTIONS === 'true';
-const run = (p, input = p.transportStdin) => spawnSync('powershell.exe', p.command.split(' ').slice(1), {
-  input, encoding: 'utf8', windowsHide: true, timeout: 20_000,
+// 실제 SSH와 동일하게 비동기로 입력을 닫고 출력을 동시에 비운다.
+// 제한은 유지하고 실패 시 어느 수명 단계가 끝났는지에 한정해 남긴다.
+const run = (t, p, input = p.transportStdin) => new Promise(resolve => {
+  const child = spawn('powershell.exe', p.command.split(' ').slice(1), { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+  const events = [], stdout = [], stderr = [];
+  let error, completed = false;
+  const finish = (status = child.exitCode, signal = child.signalCode) => {
+    if (completed) return;
+    completed = true;
+    clearTimeout(deadline);
+    const result = { status, signal, error, stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8') };
+    if (error) t.diagnostic(JSON.stringify({ 진단: 'Python 직접 실행 수명', 사건: events,
+      stdoutBytes: Buffer.byteLength(result.stdout), stderrBytes: Buffer.byteLength(result.stderr), errorCode: error.code }));
+    resolve(result);
+  };
+  const deadline = setTimeout(() => {
+    events.push('20초 제한 도달');
+    error = Object.assign(Error('Python direct process timed out'), { code: 'ETIMEDOUT' });
+    child.kill();
+    child.stdin.destroy(); child.stdout.destroy(); child.stderr.destroy();
+    finish();
+  }, 20_000);
+  child.once('spawn', () => events.push('프로세스 시작'));
+  child.once('error', failure => { error = failure; events.push('프로세스 오류'); });
+  child.once('exit', () => events.push('프로세스 종료'));
+  child.once('close', (status, signal) => { events.push('스트림 닫힘'); finish(status, signal); });
+  child.stdout.on('data', bytes => stdout.push(bytes));
+  child.stderr.on('data', bytes => stderr.push(bytes));
+  child.stdin.once('error', failure => { error ??= failure; events.push('입력 오류'); });
+  child.stdin.once('finish', () => events.push('입력 종료 전달'));
+  child.stdin.end(input);
 });
 
 test('Windows PowerShell 5.1 forwards source bytes and literal arguments without BOM or newline transformation', {
@@ -109,22 +138,22 @@ test('Windows PowerShell 5.1 forwards source bytes and literal arguments without
   const attackMarker = join(cwd, 'injection.txt');
   const literal = ['한글', "a'b", 'a"b', 'C:\\tail\\', '', '‘’“”', quotePayload(attackMarker)];
   const source = "import json,os,sys\r\nassert sys.stdin.buffer.read()==b''\r\nassert '__file__' not in globals()\r\nassert __package__ is None and __spec__ is None\r\nprint(json.dumps([sys.argv[1:],os.getcwd(),__name__],ensure_ascii=False))\r\n";
-  const good = run(plan(source, { ...options, argv: literal }));
+  const good = await run(t, plan(source, { ...options, argv: literal }));
   assert.ifError(good.error);
   assert.equal(good.status, 0, good.stderr);
   assert.deepEqual(JSON.parse(good.stdout), [literal, cwd, '__main__']);
   await assert.rejects(access(attackMarker), { code: 'ENOENT' });
-  const maximum = run(plan(source, { ...options, argv: maximumArgv }));
+  const maximum = await run(t, plan(source, { ...options, argv: maximumArgv }));
   assert.ifError(maximum.error);
   assert.equal(maximum.status, 0, maximum.stderr);
   assert.deepEqual(JSON.parse(maximum.stdout), [maximumArgv, cwd, '__main__']);
   const helperBase = '# 한글 원본\r\nprint("helper exact bytes")\n#';
   const longSource = helperBase + 'x'.repeat(65_536 - Buffer.byteLength(helperBase));
-  const helper = run(preparePythonHelper({ ...binding, ...options, source: longSource }));
+  const helper = await run(t, preparePythonHelper({ ...binding, ...options, source: longSource }));
   assert.ifError(helper.error);
   assert.equal(helper.status, 0, helper.stderr);
   assert.match(helper.stdout, /helper exact bytes/);
-  const missing = run(plan('pass', { ...options, pythonExecutable: join(cwd, 'missing', 'python.exe') }));
+  const missing = await run(t, plan('pass', { ...options, pythonExecutable: join(cwd, 'missing', 'python.exe') }));
   assert.ifError(missing.error);
   assert.equal(missing.status, 127);
   assert.match(missing.stderr, /Python executable unavailable/);
@@ -142,7 +171,7 @@ test('Windows source rejects truncated, altered and trailing bytes before effect
   const bytes = Buffer.from(p.transportStdin), altered = Buffer.from(bytes);
   altered[0] = 'x'.charCodeAt(0);
   for (const input of [Buffer.from(prefix), altered, Buffer.concat([bytes, Buffer.from('\n')]), Buffer.alloc(0)]) {
-    const result = run(p, input);
+    const result = await run(t, p, input);
     assert.ifError(result.error);
     assert.equal(result.status, 125, result.stderr);
     await assert.rejects(access(marker), { code: 'ENOENT' });
@@ -177,7 +206,7 @@ test('실제 Windows SSH의 Python 실행·비관리자 상승 거부·전송 �
     profile: fixed.profile, platform: fixed.platform, pythonExecutable: fixed.pythonExecutable });
   const result = await runtime.executePythonSource(prepare("print('원문 실행 성공')\n"), verify);
   assert.equal(result.failed, false);
-  assert.deepEqual(result.texts, ['원문 실행 성공\n']);
+  assert.deepEqual(result.texts, ['원문 실행 성공\r\n']);
 
   const marker = join(fixture.fileRoot, 'python-source-effect.txt');
   const effect = 'import pathlib,sys\npathlib.Path(sys.argv[1]).write_text("executed",encoding="utf-8")\n';
@@ -217,7 +246,7 @@ test('실제 Windows SSH의 Python 실행·비관리자 상승 거부·전송 �
   const helper = preparePythonHelper({ ...fixed, source: longSource });
   const raw = await connection.exec(helper.command, { stdin: helper.transportStdin });
   assert.equal(raw.exitCode, 0, raw.stderr);
-  assert.equal(raw.stdout, 'SSH helper bytes intact\n');
+  assert.equal(raw.stdout, 'SSH helper bytes intact\r\n');
 
   assert.ok(fixture.adminConfigPath && fixture.adminFileRoot, '관리자 SSH 시험 경로가 필요합니다.');
   const admin = await createSshRuntime({ BRIDGE_CONFIG_PATH: fixture.adminConfigPath, BRIDGE_HOST_KEY_MODE: 'strict' });
@@ -227,5 +256,5 @@ test('실제 Windows SSH의 Python 실행·비관리자 상승 거부·전송 �
   });
   const elevated = await admin.executePythonSource(adminPlan, () => ({ ...verify(), profile: 'admin-write' }));
   assert.equal(elevated.failed, false);
-  assert.deepEqual(elevated.texts, ['administrator token verified\n']);
+  assert.deepEqual(elevated.texts, ['administrator token verified\r\n']);
 });

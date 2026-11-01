@@ -25,9 +25,11 @@ $registeredTask = $false
 $createdUser = $false
 $createdAdmin = $false
 $testsPassed = $false
+$cleanupErrors = [Collections.Generic.List[string]]::new()
 $utf8 = [Text.UTF8Encoding]::new($false)
 $sshd = Join-Path $env:WINDIR 'System32/OpenSSH/sshd.exe'
 $keygen = Join-Path $env:WINDIR 'System32/OpenSSH/ssh-keygen.exe'
+$sshClient = Join-Path $env:WINDIR 'System32/OpenSSH/ssh.exe'
 $serverLog = Join-Path $fixtureRoot 'sshd.log'
 
 function Write-Utf8([string] $Path, [string] $Text) {
@@ -45,11 +47,21 @@ function Write-ServerLogTail([int] $Lines = 60) {
         $stream = [IO.FileStream]::new($serverLog, [IO.FileMode]::Open, [IO.FileAccess]::Read, $sharing)
         $reader = [IO.StreamReader]::new($stream, $utf8, $true)
         $tail = [Collections.Generic.Queue[string]]::new()
+        $channelEvents = [Collections.Generic.Queue[string]]::new()
         while (-not $reader.EndOfStream) {
-            $tail.Enqueue($reader.ReadLine())
+            $line = $reader.ReadLine()
+            # DEBUG2 원문에는 명령이 포함될 수 있으므로 고정 채널 사건만 따로 추출한다.
+            if ($line -match 'channel [0-9]+: (rcvd eof|send eof|input drain -> closed|output drain -> closed)') {
+                $channelEvents.Enqueue($Matches[0])
+                if ($channelEvents.Count -gt 512) { $null = $channelEvents.Dequeue() }
+            }
+            if ($line -notmatch 'Accepted publickey|Starting session:|Close session:|Disconnected from|Connection closed|error:|fatal:') { continue }
+            $tail.Enqueue($line)
             if ($tail.Count -gt $Lines) { $null = $tail.Dequeue() }
         }
         foreach ($line in $tail) { Write-Output $line }
+        Write-Output '격리 서버 채널 EOF 사건(명령·입력 원문 제외):'
+        foreach ($line in $channelEvents) { Write-Output $line }
     } catch {
         # 진단 실패가 일회 계정·키·서버 정리를 중단하거나 원래 시험 실패를 가리면 안 된다.
         Write-Output ('서버 로그 읽기 실패: ' + $_.Exception.GetType().Name + ', ' + $_.Exception.HResult)
@@ -129,7 +141,7 @@ try {
         $capability = Add-WindowsCapability -Online -Name 'OpenSSH.Server~~~~0.0.1.0'
         if ($capability.RestartNeeded) { throw 'OpenSSH 설치가 재부팅을 요구하여 시험을 진행할 수 없습니다.' }
     }
-    if (-not (Test-Path -LiteralPath $sshd) -or -not (Test-Path -LiteralPath $keygen)) {
+    if (-not (Test-Path -LiteralPath $sshd) -or -not (Test-Path -LiteralPath $keygen) -or -not (Test-Path -LiteralPath $sshClient)) {
         throw '실제 Windows OpenSSH 실행 파일이 없습니다.'
     }
     New-Item -ItemType Directory -Path $fixtureRoot | Out-Null
@@ -215,6 +227,23 @@ try {
     $listener.Start()
     $port = $listener.LocalEndpoint.Port
     $listener.Stop()
+    $knownHosts = Join-Path $clientRoot 'known_hosts'
+    $nativeClientConfig = Join-Path $clientRoot 'ssh_config'
+    Write-Utf8 $knownHosts ("[127.0.0.1]:$port " + [IO.File]::ReadAllText($hostKey + '.pub').Trim() + "`n")
+    Write-Utf8 $nativeClientConfig @"
+Host ags-fixture
+    HostName 127.0.0.1
+    Port $port
+    User $accountName
+    IdentityFile "$($clientKey.Replace('\', '/'))"
+    UserKnownHostsFile "$($knownHosts.Replace('\', '/'))"
+    StrictHostKeyChecking yes
+    IdentitiesOnly yes
+    BatchMode yes
+    LogLevel ERROR
+"@
+    Set-FixtureAcl $knownHosts ''
+    Set-FixtureAcl $nativeClientConfig ''
     $serverConfig = Join-Path $fixtureRoot 'sshd_config'
     $hostPath = $hostKey.Replace('\', '/')
     $authPath = $authorizedKeys.Replace('\', '/')
@@ -236,7 +265,7 @@ AllowAgentForwarding no
 X11Forwarding no
 PermitTunnel no
 GatewayPorts no
-LogLevel VERBOSE
+LogLevel DEBUG2
 Subsystem sftp $sftpPath
 "@
     Set-FixtureAcl $serverConfig '' -MachineOnly
@@ -283,6 +312,7 @@ Subsystem sftp $sftpPath
         artifactRoot = $artifactRoot; outsideFile = $outsideFile
         modulesRoot = $modulesRoot; moduleMarkers = $moduleMarkers
         pythonExecutable = $pythonExecutable
+        sshClient = $sshClient; nativeClientConfig = $nativeClientConfig
         adminConfigPath = $adminConfigPath; adminHelper = $adminInstalled.helper
         adminFileRoot = $adminInstalled.fileRoot; adminStageRoot = $adminInstalled.stageRoot
     } | ConvertTo-Json -Compress)
@@ -305,7 +335,17 @@ Subsystem sftp $sftpPath
         $fixtureNames = @($accountName, $adminName)
         foreach ($process in (Get-CimInstance Win32_Process)) {
             if ($process.Name -notin @('sshd.exe', 'sshd-session.exe', 'powershell.exe', 'pwsh.exe', 'python.exe', 'node.exe', 'cmd.exe', 'sftp-server.exe')) { continue }
-            $owner = Invoke-CimMethod -InputObject $process -MethodName GetOwner -ErrorAction Continue
+            try {
+                $owner = Invoke-CimMethod -InputObject $process -MethodName GetOwner -ErrorAction Stop
+            } catch [Microsoft.Management.Infrastructure.CimException] {
+                if ($_.Exception.StatusCode -eq [Microsoft.Management.Infrastructure.CimStatusCode]::NotFound) {
+                    Write-Output '격리 계정 정리: 이미 종료된 프로세스 스냅샷을 건너뜁니다.'
+                    continue
+                }
+                $cleanupErrors.Add(('프로세스 소유자 조회 실패: ' + $_.Exception.StatusCode))
+                Write-Output $cleanupErrors[$cleanupErrors.Count - 1]
+                continue
+            }
             if ($owner.ReturnValue -eq 0 -and $owner.User -in $fixtureNames) {
                 & taskkill.exe /PID $process.ProcessId /T /F 2>$null | Out-Null
             }
@@ -329,4 +369,5 @@ Subsystem sftp $sftpPath
         if (Test-Path -LiteralPath $junction) { [IO.Directory]::Delete($junction) }
         Remove-Item -LiteralPath $resolved -Recurse -Force
     }
+    if ($testsPassed -and $cleanupErrors.Count -gt 0) { throw '격리 시험 정리에서 프로세스 소유자 조회 오류가 발생했습니다.' }
 }

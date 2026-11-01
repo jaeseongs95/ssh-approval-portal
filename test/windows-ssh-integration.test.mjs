@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, writeFile, access, readdir, mkdir } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import { spawn } from 'node:child_process';
 import { join, dirname, win32 } from 'node:path';
 import { createSshRuntime, createSshTransport } from '../src/adapters/ssh/vendor.mjs';
 import { Artifacts } from '../src/adapters/storage/artifacts.mjs';
@@ -19,7 +20,9 @@ const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 const absent = async path => assert.rejects(access(path), { code: 'ENOENT' });
 
 test('실제 Windows SSH 명령·승인·파일 전송 경계', {
-  skip: !fixturePath, timeout: 180_000,
+  // 제품 요청과 원시험 제한은 유지한다. 실패시 native EOF 60초와 관리자 60+10초
+  // 판별 자료가 중간에 취소되지 않게 180초+60초+70초와 정리 20초를 배정한다.
+  skip: !fixturePath, timeout: 330_000,
 }, async t => {
   assert.equal(process.platform, 'win32');
   assert.equal(process.env.GITHUB_ACTIONS, 'true');
@@ -35,12 +38,15 @@ test('실제 Windows SSH 명령·승인·파일 전송 경계', {
       if (result.exitCode !== 0) {
         let data;
         try { data = JSON.parse(result.stdout); } catch { data = {}; }
-        const steps = ['write_security', 'write_times', 'verify_security', 'verify_times'];
+        const steps = ['write_security', 'write_times', 'verify_security', 'verify_owner', 'verify_dacl', 'verify_control', 'verify_times', 'read_label', 'write_label', 'verify_label'];
         const codes = ['PARENT_NOT_FOUND', 'FILE_NOT_FOUND', 'PERMISSION_DENIED', 'DESTINATION_EXISTS', 'UNSAFE_PATH', 'STAGING_UNAVAILABLE', 'FILE_CHANGED', 'FILE_TOO_LARGE', 'INVALID_REQUEST', 'OPERATION_FAILED'];
         helperFailures.push({ ...(['authorize', 'publish', 'snapshot', 'cleanup'].includes(payload.action) ? { action: payload.action } : {}),
           ...(codes.includes(data.errorCode) ? { errorCode: data.errorCode } : {}),
           ...(steps.includes(data.nativeStep) ? { nativeStep: data.nativeStep } : {}),
-          ...(Number.isSafeInteger(data.nativeError) && data.nativeError >= 0 && data.nativeError <= 0xffffffff ? { nativeError: data.nativeError } : {}) });
+          ...(Number.isSafeInteger(data.nativeError) && data.nativeError >= 0 && data.nativeError <= 0xffffffff ? { nativeError: data.nativeError } : {}),
+          ...(['verify_owner', 'verify_dacl', 'verify_control'].includes(data.nativeStep) &&
+            [data.securityControl?.before, data.securityControl?.after].every(value => Number.isSafeInteger(value) && value >= 0 && value <= 5388)
+            ? { securityControl: { before: data.securityControl.before, after: data.securityControl.after } } : {}) });
       }
       return result;
     } };
@@ -55,6 +61,44 @@ test('실제 Windows SSH 명령·승인·파일 전송 경계', {
   const remote = name => win32.join(fixture.fileRoot, name).replaceAll('\\', '/');
   const connection = await runtime.registry.getOrCreate('windows-write');
   const call = script => connection.exec(wrapWindowsCommand(script));
+  // 제품의 고정 stdin→즉시 end 경로와 별개인 지연 EOF 실패 때만 클라이언트를 바꿔 판별한다.
+  const nativeEofDiagnostic = async (prepared, marker) => {
+    const events = [], started = Date.now();
+    let stdout = '', stderr = '', timer, beforeEofAbsent = false;
+    const child = spawn(fixture.sshClient, ['-F', fixture.nativeClientConfig, '-T', 'ags-fixture', prepared.command], { windowsHide: true });
+    child.stdout.on('data', bytes => { stdout += bytes.toString('utf8'); });
+    child.stderr.on('data', bytes => { stderr += bytes.toString('utf8'); });
+    child.stdin.on('finish', () => events.push('로컬 EOF 전송 완료'));
+    child.stdin.on('error', error => events.push('로컬 입력 오류: ' + error.code));
+    const finished = new Promise((resolve, reject) => {
+      child.on('error', reject);
+      child.on('exit', () => events.push('클라이언트 종료'));
+      child.on('close', (code, signal) => resolve({ code, signal }));
+    });
+    finished.catch(() => {});
+    try {
+      child.stdin.write(Buffer.from(prepared.stdin));
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      beforeEofAbsent = await access(marker).then(() => false, error => {
+        if (error.code === 'ENOENT') return true;
+        throw error;
+      });
+      child.stdin.end();
+      const result = await Promise.race([finished, new Promise((_, reject) => {
+        timer = setTimeout(() => reject(Error('기본 SSH 지연 EOF 진단 시간초과')), 60_000);
+      })]);
+      t.diagnostic(JSON.stringify({ 진단: '기본 SSH 지연 EOF 비교', 경과밀리초: Date.now() - started,
+        사건: events, ...result, stdout, stderr, EOF이전무효과: beforeEofAbsent,
+        효과확인: await readFile(marker, 'utf8').then(value => value === 'once', () => false) }));
+    } catch (error) {
+      t.diagnostic(JSON.stringify({ 진단: '기본 SSH 지연 EOF 비교', 경과밀리초: Date.now() - started,
+        사건: events, 오류: error.message, stdout, stderr, EOF이전무효과: beforeEofAbsent }));
+    } finally {
+      clearTimeout(timer);
+      child.stdin.destroy();
+      if (child.exitCode === null) child.kill();
+    }
+  };
   // 실패 때만 동일 합성 명령의 원시 결과와 준비 후 재실행을 관측한다. 원시험 제한은 유지한다.
   const directDiagnostic = async (label, command, profile = 'windows-write') => {
     const started = Date.now();
@@ -231,6 +275,7 @@ test('실제 Windows SSH 명령·승인·파일 전송 경계', {
           // 이 시험 프로세스에서만 쓰는 연결이다. 실패 채널이 Node 종료를 붙들지 않게 정리한다.
           try { connection.getClient().destroy(); }
           catch (error) { t.diagnostic('시험 연결 정리: ' + error.message); }
+          await nativeEofDiagnostic(prepared, marker);
         }
         channel.close();
       }
@@ -294,8 +339,35 @@ test('실제 Windows SSH 명령·승인·파일 전송 경계', {
           size: bytes.length, sha256: digest(bytes), overwrite: false, elevate: true };
         const item = await adminStore.begin(meta);
         await adminStore.append(item.id, 0, bytes); await adminStore.finish(item.id);
-        const uploaded = await adminTransfers.upload({ kind: 'upload', artifactId: item.id, ...meta });
-        assert.equal(uploaded.failed, false, JSON.stringify(uploaded.data));
+        let uploaded;
+        try {
+          uploaded = await adminTransfers.upload({ kind: 'upload', artifactId: item.id, ...meta });
+          assert.equal(uploaded.failed, false, JSON.stringify(uploaded.data));
+        } catch (error) {
+          // 원시험의 10초 실패는 보존한다. 파일을 바꾸지 않는 같은 helper authorize로
+          // 첫 계정/컴파일 준비 지연과 계속되는 stdin 수명 문제를 다음 후보에서 구분한다.
+          const direct = await admin.registry.getOrCreate('admin-write');
+          for (const timeoutMs of [60_000, 10_000]) {
+            const started = Date.now();
+            try {
+              const result = await direct.exec(`powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "${fixture.adminHelper}"`, {
+                stdin: JSON.stringify({ action: 'authorize', id: 'd'.repeat(48), remotePath: meta.remotePath, elevate: true }), timeoutMs,
+              });
+              let data;
+              try { data = JSON.parse(result.stdout); } catch { data = {}; }
+              t.diagnostic(JSON.stringify({ 진단: '관리자 helper authorize 준비 지연', timeoutMs,
+                경과밀리초: Date.now() - started, exitCode: result.exitCode, signal: result.signal,
+                stdoutBytes: Buffer.byteLength(result.stdout ?? ''), stderrBytes: Buffer.byteLength(result.stderr ?? ''),
+                authorized: data.authorized === true, elevated: data.elevated === true }));
+              if (result.exitCode !== 0 || result.signal) break;
+            } catch (probeError) {
+              t.diagnostic(JSON.stringify({ 진단: '관리자 helper authorize 준비 지연', timeoutMs,
+                경과밀리초: Date.now() - started, 오류: probeError.message }));
+              break;
+            }
+          }
+          throw error;
+        }
         assert.deepEqual(await readFile(meta.remotePath), bytes);
         const downloaded = await adminTransfers.download({ kind: 'download', remotePath: meta.remotePath, elevate: true });
         assert.equal(downloaded.failed, false, JSON.stringify(downloaded.data));
