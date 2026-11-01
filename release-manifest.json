@@ -395,8 +395,8 @@
     },
     {
       "path": "scripts/manage-agent-cli-windows.ps1",
-      "size": 35797,
-      "sha256": "cd4db70674096dc8dc62f11c11e3afe091f5a42327845691319cf72e6ec1e6b9"
+      "size": 35864,
+      "sha256": "13ee4fca73f8c68f19ac7e1349a38c7c2e769eac024222cdac9595d1d8037378"
     },
     {
       "path": "scripts/manage-agent-cli.py",
@@ -1750,8 +1750,8 @@
     },
     {
       "path": "test/windows-agent-cli-fixture.mjs",
-      "size": 13072,
-      "sha256": "a572d3975d708b0f954dbcb1f4173d5b9a2d8d207bcce6ea0d159786540fb63d"
+      "size": 13863,
+      "sha256": "5141a4f8d859b9d50593b3f62e58b9e30e491a1ee7bc35d9963cd1ede6a4d62c"
     },
     {
       "path": "test/windows-agent-cli-helper.test.mjs",
@@ -1761,12 +1761,12 @@
     {
       "path": "test/windows-agent-cli-smoke.test.mjs",
       "size": 15466,
-      "sha256": "67f80176439b4834afb7ab02949b43d6b3350f8b650f944765e25d51d879a8f3"
+      "sha256": "aff4934fe7c62df2f8d020b4d90f1db75a8c32564f3ec70dc1fb4a31e924e11e"
     },
     {
       "path": "test/windows-agent-cli.test.mjs",
-      "size": 4943,
-      "sha256": "06c1743e0b17e7afed92fd14d85ed0988a541492b432de13984f12ff4fcb738e"
+      "size": 5321,
+      "sha256": "07799b812edc422c58a2409d8cef572c6e2360ea215112baefd14f4536781ac1"
     },
     {
       "path": "test/windows-command-line.test.mjs",

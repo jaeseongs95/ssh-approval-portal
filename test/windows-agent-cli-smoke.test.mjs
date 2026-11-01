@@ -148,10 +148,10 @@ try{
     // Compare the actual plan's canonical bytes using the unmodified helper
     // functions before any install. This probe only serializes public inputs.
     const [action,provider,version,integrity,expected,expires]=JSON.parse(plan.manifest.argvJson);
-    const canonical=JSON.stringify({action,expires:Number(expires),expected,integrity,provider,version});
+    const canonical=JSON.stringify({action,expected,expires:Number(expires),integrity,provider,version});
     const intentProbePath=win32.join(fixture.fileRoot,'cli-intent-preflight-'+entry.provider+'.ps1');
     await writeFile(intentProbePath,library+'\n'+accountGuard+`
-$intent=[ordered]@{action=${literal(action)};expires=[long]${literal(expires)};expected=${literal(expected)};integrity=${literal(integrity)};provider=${literal(provider)};version=${literal(version)}}
+$intent=[ordered]@{action=${literal(action)};expected=${literal(expected)};expires=[long]${literal(expires)};integrity=${literal(integrity)};provider=${literal(provider)};version=${literal(version)}}
 [Console]::Out.WriteLine((Json @{canonical=(Json $intent);digest=(Digest $intent)}))
 `,'utf8');
     const intentRaw=await probeConnection.exec(`powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "${intentProbePath}"`,{timeoutMs:30_000});

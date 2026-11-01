@@ -1,8 +1,12 @@
 import {readFileSync} from 'node:fs';
+import {createHash} from 'node:crypto';
 
 export function buildWindowsCliFixtureScript(){
  const source=readFileSync(new URL('../scripts/manage-agent-cli-windows.ps1',import.meta.url),'utf8');
  const library=source.slice(source.indexOf('$ErrorActionPreference'),source.indexOf('function Main'));
+ const firstRevision=createHash('sha256').update('{"active":null,"installed":false,"login":"not_checked","managed":false,"provider":"codex","version":null}\n').digest('hex');
+ const firstIntegrity='sha512-'+createHash('sha512').update('{"provider":"codex","version":"1.2.3"}').digest('base64');
+ const firstIntentDigest=createHash('sha256').update('{"action":"install","expected":"'+firstRevision+'","expires":1900000000000,"integrity":"'+firstIntegrity+'","provider":"codex","version":"1.2.3"}\n').digest('hex');
  return `${library}
 function Assert($ok,$name) { if(-not $ok) { throw $name } }
 $testRoot=Join-Path ([IO.Path]::GetTempPath()) ('cli-helper-test-'+[Guid]::NewGuid().ToString('N'))
@@ -80,10 +84,13 @@ if(fixture.provider==='claude'){
  [IO.File]::WriteAllText($credentialFixture,'credential-fixture-unchanged',$utf8)
  $before=Inspect $root 'codex'
  $fixtureStage='install'
- $expiry=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()+60000
+ $expiry=1900000000000L
  $operation='a'*48
+ Assert ($before.installationRevision -ceq '${firstRevision}') 'cross-language-initial-revision'
+ Assert ((Integrity) -ceq '${firstIntegrity}') 'cross-language-package-integrity'
  $receipt=Install $root 'install' 'codex' '1.2.3' (Integrity) $before.installationRevision $expiry $operation
  Assert ($receipt.state -eq 'completed') 'fixture-install'
+ Assert ($receipt.intentDigest -ceq '${firstIntentDigest}') 'cross-language-install-intent-digest'
  Assert ((Inspect $root 'codex').version -eq '1.2.3') 'fixture-active'
  $executions=ExecutionCount
  Assert ($executions -eq 1) 'first-install-executed-once'

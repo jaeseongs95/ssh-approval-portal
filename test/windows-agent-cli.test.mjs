@@ -8,6 +8,11 @@ const binding={targetId:'windows',targetRevision:'a'.repeat(64),profile:'windows
 const release=validateAgentRelease('codex',{name:'@openai/codex',version:'1.2.3',dist:{tarball:'https://registry.npmjs.org/@openai/codex/-/codex-1.2.3.tgz',integrity:'sha512-'+Buffer.alloc(64).toString('base64')}});
 const install=()=>prepareAgentCliPlan({action:'install',provider:'codex',binding,release,expectedInstallationRevision:'b'.repeat(64),expiresAt:1900000000000,operationId:'c'.repeat(48)});
 
+test('CLI 의도 해시는 expected를 expires 앞에 둔 고정 JSON과 LF에 결속된다',()=>{
+ const canonical='{"action":"install","expected":"'+ 'b'.repeat(64)+'","expires":1900000000000,"integrity":"'+release.integrity+'","provider":"codex","version":"1.2.3"}\n';
+ assert.equal(install().agentCli.intentDigest,createHash('sha256').update(canonical).digest('hex'));
+});
+
 test('Windows 고정 CLI 계획은 Python 없이 전체 인수와 소스에 결속된다',()=>{
  const plan=install();
  assert.equal(plan.manifest.contract,'agent-cli-powershell-v1');

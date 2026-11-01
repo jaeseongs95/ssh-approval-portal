@@ -357,7 +357,8 @@ function Install([string]$root, [string]$action, [string]$provider, [string]$ver
     Require ($integrity -cmatch '^sha512-[A-Za-z0-9+/]{86}==$') 'INVALID_INTEGRITY'
     Require ([Convert]::ToBase64String([Convert]::FromBase64String($integrity.Substring(7))) -ceq $integrity.Substring(7)) 'INVALID_INTEGRITY'
     Require ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() -lt $expires) 'PLAN_EXPIRED'
-    $intent = [ordered]@{action=$action;expires=$expires;expected=$expected;integrity=$integrity;provider=$provider;version=$version}
+    # Match ordinal JSON key order: expected sorts before expires.
+    $intent = [ordered]@{action=$action;expected=$expected;expires=$expires;integrity=$integrity;provider=$provider;version=$version}
     $digest = Digest $intent
     $null = Trusted $homeDirectory
     foreach ($directory in @((Join-Path $homeDirectory '.ssh-approval-cli'),$root,(Join-Path $root 'versions'),(Join-Path $root 'operations'))) { PrivateDirectory $directory }
