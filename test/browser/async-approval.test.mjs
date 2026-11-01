@@ -32,7 +32,10 @@ for (const failed of [false, true]) test(`owner approval releases the browser wh
       return route.continue();
     });
     page.setDefaultTimeout(10000);
-    await page.clock.install(); await page.clock.pauseAt(new Date());
+    const clockTime = new Date();
+    // No application timers exist before navigation; the 60s margin exceeds this test's 30s timeout.
+    await page.clock.install({ time: new Date(clockTime.getTime() - 60000) });
+    await page.clock.pauseAt(clockTime);
     await page.goto(origin); await page.locator('#token').fill('synthetic-owner'); await page.locator('#load').click();
     const card = id => page.locator(`#jobs [data-request-id="${id}"]`);
     await card(first.id).waitFor();

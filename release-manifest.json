@@ -1020,8 +1020,8 @@
     },
     {
       "path": "test/browser/async-approval.test.mjs",
-      "size": 4749,
-      "sha256": "c4d511f07711b9f1d12941654d7eb84fde38c381f4ea33f40b1c3ea0020be932"
+      "size": 4935,
+      "sha256": "fb88c695cd51aec5d5a1d2110d08fec99339a401e085e7a0b42536bc402ba588"
     },
     {
       "path": "test/browser/browser.mjs",
