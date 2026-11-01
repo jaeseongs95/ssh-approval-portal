@@ -1,3 +1,4 @@
+import { requireStorageVersion } from './schema-version.mjs';
 import {randomBytes} from 'node:crypto';
 import {lstatSync, realpathSync} from 'node:fs';
 import {resolve, join} from 'node:path';
@@ -15,6 +16,7 @@ function openReadOnly(path) {
   }
   const db = new DatabaseSync(path, {readOnly: true});
   try {
+    requireStorageVersion(db);
     db.exec('PRAGMA query_only=ON');
     const result = db.prepare('PRAGMA integrity_check').all();
     if (result.length !== 1 || result[0].integrity_check !== 'ok') throw Error('Offline database integrity check failed');

@@ -1,0 +1,38 @@
+name: Deployment system integration
+
+on:
+  push:
+    branches: [feat/deploy-1.8.0-20261101]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-deployment:
+    name: native-${{ matrix.predecessor }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        predecessor: [fresh, legacy-1.7.0]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.21.0'
+      - name: 실제 systemd 신규 설치·데이터 이전·재개 시험
+        run: bash test/deployment-ci.sh '${{ matrix.predecessor }}'
+        env:
+          DEPLOYMENT_RESULTS: ${{ runner.temp }}/deployment-results
+      - name: 비밀을 제외한 판정과 영수증 보관
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: deployment-${{ matrix.predecessor }}
+          path: ${{ runner.temp }}/deployment-results
+          if-no-files-found: error
+          retention-days: 7

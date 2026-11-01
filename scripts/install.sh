@@ -1,193 +1,97 @@
 #!/usr/bin/env bash
+# Provision a new host only. All release/data activation belongs to deployment.py.
 set -euo pipefail
 [[ $(id -u) == 0 ]] || { echo 'Run as root.' >&2; exit 1; }
 source_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
-. "$source_dir/scripts/maintenance-owner.sh"
 admin_origin=
+manifest_sha256=
 grant_sudo=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --admin-origin) admin_origin=${2:?}; shift 2 ;;
+    --manifest-sha256) manifest_sha256=${2:?}; shift 2 ;;
     --grant-sudo-all) grant_sudo=1; shift ;;
-    *) echo 'Usage: sudo bash scripts/install.sh [--admin-origin https://your-admin-domain] [--grant-sudo-all]' >&2; exit 1 ;;
+    *) echo 'Usage: sudo bash scripts/install.sh --manifest-sha256 SHA256 [--admin-origin https://your-admin-domain] [--grant-sudo-all]' >&2; exit 1 ;;
   esac
 done
+[[ "$manifest_sha256" =~ ^[a-f0-9]{64}$ ]] || { echo 'An externally verified release-manifest.json SHA256 is required.' >&2; exit 1; }
+command -v python3 >/dev/null || { echo 'Install Python 3 before verifying the installation package.' >&2; exit 1; }
+bootstrap=$source_dir/scripts/deployment-bootstrap.py
+python3 -I -B "$bootstrap" preflight --source "$source_dir" --manifest-sha256 "$manifest_sha256"
 . /etc/os-release
 [[ "$ID" == ubuntu && "$VERSION_ID" =~ ^(22.04|24.04)$ ]] || { echo 'Supported Ubuntu versions: 22.04, 24.04' >&2; exit 1; }
-case "$(uname -m)" in x86_64) architecture=x64;; aarch64) architecture=arm64;; *) echo 'Unsupported CPU' >&2; exit 1;; esac
+case "$(uname -m)" in x86_64|aarch64) ;; *) echo 'Unsupported CPU' >&2; exit 1;; esac
+if systemctl is-active --quiet ssh-approval-bridge.service; then
+  echo 'Existing service: use portal.py deploy plan/apply/status/resume.' >&2; exit 1
+fi
+# A Compose bridge is also an existing installation; never replace it in-place.
+if command -v docker >/dev/null; then
+  compose_bridge=$(docker ps --filter label=com.docker.compose.project=ssh-approval-portal --filter label=com.docker.compose.service=bridge -q) || { echo 'Cannot confirm Compose state.' >&2; exit 1; }
+  [[ -z "$compose_bridge" ]] || { echo 'Existing Compose service: use the explicit deployment import workflow.' >&2; exit 1; }
+fi
 base=/var/lib/ssh-mcp
-app=$base/app
-active=$app/approval-bridge
 env_file=/etc/ssh-mcp-approval-bridge.env
-unit=/etc/systemd/system/ssh-approval-bridge.service
-helper=/usr/local/libexec/ssh-approval-file-helper
 grant=/etc/sudoers.d/90-mcpops-approval-bridge
 runtime=/opt/ssh-approval/node
-. "$source_dir/scripts/install-state-guard.sh"
-if ! systemctl is-active --quiet ssh-approval-bridge.service; then
-  require_fresh_installation "$active" "$unit" "$env_file"
+# util-linux is present on supported Ubuntu hosts. Do not install anything before fencing.
+command -v flock >/dev/null || { echo 'Install util-linux before running installation.' >&2; exit 1; }
+install -d -o root -g root -m 0755 "$base"
+umask 077
+[[ ! -L "$base/.portal-install.lock" && (! -e "$base/.portal-install.lock" || ( -f "$base/.portal-install.lock" && $(stat -c '%u:%h:%a' "$base/.portal-install.lock") == 0:1:600 )) ]] || { echo 'Unsafe installation lock' >&2; exit 1; }
+exec 9>"$base/.portal-install.lock"
+flock -n 9 || { echo 'An installation or deployment is already in progress.' >&2; exit 1; }
+# Recheck after acquiring the same lock used by the deployment worker.
+python3 -I -B "$bootstrap" preflight --source "$source_dir" --manifest-sha256 "$manifest_sha256"
+if systemctl is-active --quiet ssh-approval-bridge.service; then
+  echo 'Existing service: use portal.py deploy plan/apply/status/resume.' >&2; exit 1
 fi
-for executable in curl xz python3 ssh-keygen sshd sudo flock; do
+for executable in curl xz ssh-keygen sshd sudo; do
   if ! command -v "$executable" >/dev/null; then
     apt-get update
     DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl xz-utils python3 openssh-server sudo util-linux
     break
   fi
 done
-for secret_file in "$env_file" /etc/ssh-approval-portal/docker-secrets.env; do
-  probe_port=$(python3 "$source_dir/scripts/settings_contract.py" port "$secret_file" mcp)
-  if ! systemctl is-active --quiet ssh-approval-bridge.service && curl -fsS "http://127.0.0.1:$probe_port/health" >/dev/null 2>&1; then
-    echo 'A non-native bridge is running. Reserve maintenance and stop Compose before native installation.' >&2; exit 1
-  fi
-done
-if command -v docker >/dev/null && [[ -n $(docker ps --filter label=com.docker.compose.project=ssh-approval-portal --filter label=com.docker.compose.service=bridge -q) ]]; then
-  echo 'Compose bridge is running: stop it safely before native installation.' >&2; exit 1
+if id mcpops >/dev/null 2>&1; then
+  python3 -I -B "$bootstrap" check-home "$(getent passwd mcpops | cut -d: -f6)"
 fi
-install -d -m 0755 "$app" /opt/ssh-approval
-exec 9>"$base/.portal-install.lock"
-flock -n 9 || { echo 'An installation is already in progress' >&2; exit 1; }
-maintenance_reserved=0
 source "$source_dir/scripts/ensure-node-runtime.sh"
-maintenance_node=$runtime/bin/node
-release_maintenance() {
-  if [[ "$maintenance_reserved" == 1 ]]; then
-    "$maintenance_node" "$source_dir/scripts/maintenance.mjs" release < "$maintenance_owner_file" || return 1
-    maintenance_forget_owner
-    maintenance_reserved=0
-  fi
-}
-if systemctl is-active --quiet ssh-approval-bridge.service; then
-  [[ -x "$maintenance_node" ]] || { echo 'Stop the legacy service in the administrator terminal before updating' >&2; exit 1; }
-  maintenance_new_owner
-  "$maintenance_node" "$source_dir/scripts/maintenance.mjs" reserve < "$maintenance_owner_file"
-  maintenance_reserved=1
-  # A lost/failed capture is not followed by an automatic release or rollback.
-  "$maintenance_node" "$source_dir/scripts/maintenance.mjs" capture < "$maintenance_owner_file" || { echo 'Preservation capture unconfirmed; maintenance retained.' >&2; exit 1; }
-else
-  # Recheck under the installation lock in case the existing service stopped meanwhile.
-  require_fresh_installation "$active" "$unit" "$env_file"
-fi
-trap 'release_maintenance || echo "Maintenance release not confirmed; retain recovery file." >&2' EXIT
 node "$source_dir/scripts/verify.mjs" "$source_dir"
-stamp=$(date -u +%Y%m%dT%H%M%SZ)-$$
-backup=$app/backups/$stamp
-release=$app/releases/$(node "$source_dir/scripts/release-id.mjs" "$source_dir")
-install -d -m 0700 "$app/backups" "$backup"
-for path in "$env_file" "$unit" "$helper"; do
-  if [[ -e "$path" ]]; then [[ -f "$path" && ! -L "$path" ]] || { echo 'Expected a regular managed file' >&2; exit 1; }; cp -a -- "$path" "$backup/$(basename "$path")"; fi
-done
-old_active=
-if [[ -L "$active" ]]; then old_active=$(readlink -f -- "$active");
-elif [[ -d "$active" ]]; then old_active=$app/approval-bridge.legacy.$stamp;
-elif [[ -e "$active" ]]; then echo 'Unexpected active path' >&2; exit 1; fi
-printf '%s\n' "$old_active" > "$backup/previous-active"
-systemctl is-enabled --quiet ssh-approval-bridge.service && touch "$backup/was-enabled" || true
-systemctl is-active --quiet ssh-approval-bridge.service && touch "$backup/was-running" || true
-grant_created=0
-activated=0
-wait_healthy() {
-  local mcp_port
-  mcp_port=$(python3 "$source_dir/scripts/settings_contract.py" port "$env_file" mcp) || return 1
-  for attempt in {1..20}; do
-    if curl -fsS "http://127.0.0.1:$mcp_port/health" >/dev/null 2>&1 && systemctl is-active --quiet ssh-approval-bridge.service; then return 0; fi
-    sleep 1
-  done
-  return 1
-}
-restore() {
-  rc=$?
-  [[ "$rc" == 0 ]] && return
-  set +e
-  failed=0
-  if [[ "$activated" == 1 ]]; then
-    rm -f -- "$active"
-    if [[ -n "$old_active" ]]; then ln -s -- "$old_active" "$active" || failed=1; fi
-  fi
-  for path in "$env_file" "$unit" "$helper"; do
-    saved=$backup/$(basename "$path")
-    if [[ -f "$saved" ]]; then cp -a -- "$saved" "$path" || failed=1; else rm -f -- "$path" || failed=1; fi
-  done
-  if [[ "$grant_created" == 1 ]]; then rm -f -- "$grant" || failed=1; fi
-  systemctl daemon-reload || failed=1
-  if [[ -f "$backup/was-running" ]]; then
-    if [[ -n "$old_active" && -f "$old_active/scripts/maintenance.mjs" ]] && grep -Fq 'durable-v1' "$old_active/scripts/maintenance.mjs"; then
-      systemctl restart ssh-approval-bridge.service && wait_healthy || failed=1
-    else
-      systemctl stop ssh-approval-bridge.service || true
-      echo 'Previous release cannot enforce durable maintenance; service stopped for manual recovery.' >&2
-      failed=1
-    fi
-  else systemctl stop ssh-approval-bridge.service || true; fi
-  if [[ -f "$backup/was-enabled" ]]; then systemctl enable ssh-approval-bridge.service || failed=1; else systemctl disable ssh-approval-bridge.service || true; fi
-  if [[ "$failed" == 0 && "$maintenance_reserved" == 1 ]]; then
-    "$maintenance_node" "$source_dir/scripts/maintenance.mjs" compare < "$maintenance_owner_file" || failed=1
-  fi
-  if [[ "$failed" == 0 ]]; then release_maintenance || failed=1; fi
-  echo "Installation failed. Restore attempted; failures=$failed; backup=$backup" >&2
-  exit "$rc"
-}
-trap restore EXIT
 if ! id mcpbridge >/dev/null 2>&1; then useradd --system --home-dir "$base" --shell /usr/sbin/nologin mcpbridge; fi
 if ! id mcpops >/dev/null 2>&1; then useradd --create-home --shell /bin/bash --password '*' mcpops; fi
+install -d -o root -g root -m 0755 "$base/app" "$base/app/releases" /usr/local/libexec
 install -d -o mcpbridge -g mcpbridge -m 0700 "$base/.config/ssh-mcp" "$base/.ssh" "$base/.local/share/ssh-mcp" "$base/transfers"
-install -d -o root -g root -m 0755 /var/lib/ssh-approval-transfer /usr/local/libexec
+install -d -o root -g root -m 0755 /var/lib/ssh-approval-transfer
 install -d -o mcpops -g mcpops -m 0700 /var/lib/ssh-approval-transfer/incoming
-config=$base/.config/ssh-mcp/config.toml
-if [[ ! -e "$config" ]]; then
-  if [[ ! -e "$base/.ssh/id_ed25519" ]]; then sudo -u mcpbridge ssh-keygen -q -t ed25519 -N '' -f "$base/.ssh/id_ed25519"; fi
-  ssh-keygen -A
-  pin=$(ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub | awk '{print $2}')
-  cp -- "$source_dir/config/config.example.toml" "$config"
-  sed -i "s|HOST_KEY_FINGERPRINT|$pin|g" "$config"
-  chown mcpbridge:mcpbridge "$config"; chmod 0600 "$config"
-  home_ops=$(getent passwd mcpops | cut -d: -f6)
-  install -d -o mcpops -g mcpops -m 0700 "$home_ops/.ssh"
-  public_key=$(cat "$base/.ssh/id_ed25519.pub")
-  auth_keys=$home_ops/.ssh/authorized_keys
-  if [[ -e "$auth_keys" && (! -f "$auth_keys" || -L "$auth_keys") ]]; then echo 'Unsafe authorized_keys' >&2; exit 1; fi
-  touch "$auth_keys"; chown mcpops:mcpops "$auth_keys"; chmod 0600 "$auth_keys"
-  grep -Fqx -- "$public_key" "$auth_keys" || printf '%s\n' "$public_key" >> "$auth_keys"
+key=$base/.ssh/id_ed25519
+if [[ ! -e "$key" ]]; then sudo -u mcpbridge ssh-keygen -q -t ed25519 -N '' -f "$key"; fi
+public_key=$(sudo -u mcpbridge ssh-keygen -y -P '' -f "$key" | cut -d' ' -f1,2)
+if [[ -e "$key.pub" ]]; then
+  [[ $(cut -d' ' -f1,2 "$key.pub") == "$public_key" ]] || { echo 'Existing SSH key pair does not match.' >&2; exit 1; }
+else
+  printf '%s\n' "$public_key" | sudo -u mcpbridge tee "$key.pub" >/dev/null
+  sudo -u mcpbridge chmod 0644 "$key.pub"
 fi
+ssh-keygen -A
+pin=$(ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub | awk '{print $2}')
+config=$base/.config/ssh-mcp/config.toml
+sudo -u mcpbridge tee "$config" < "$source_dir/config/config.example.toml" >/dev/null
+sudo -u mcpbridge sed -i "s|HOST_KEY_FINGERPRINT|$pin|g" "$config"
+sudo -u mcpbridge chmod 0600 "$config"
+home_ops=$(getent passwd mcpops | cut -d: -f6)
+python3 -I -B "$bootstrap" check-home "$home_ops"
+install -d -o mcpops -g mcpops -m 0700 "$home_ops/.ssh"
+auth_keys=$home_ops/.ssh/authorized_keys
+sudo -u mcpops touch "$auth_keys"; sudo -u mcpops chmod 0600 "$auth_keys"
+# Preserve restrictions on an already authorized key instead of adding a wider duplicate.
+sudo -u mcpops awk -v key="$public_key" '!/^[[:space:]]*#/ { for (i=1; i<NF; i++) if ($i " " $(i+1) == key) found=1 } END { exit !found }' "$auth_keys" || printf '%s\n' "$public_key" | sudo -u mcpops tee -a "$auth_keys" >/dev/null
 node "$source_dir/scripts/generate-secrets.mjs" "$env_file" "$admin_origin"
+install -o root -g root -m 0755 "$source_dir/helper/file-helper.py" /usr/local/libexec/ssh-approval-file-helper
 if [[ "$grant_sudo" == 1 && ! -e "$grant" ]]; then
   printf '%s\n' 'mcpops ALL=(ALL:ALL) NOPASSWD: ALL' > "$grant"
-  chmod 0440 "$grant"; visudo -cf "$grant" >/dev/null; grant_created=1
+  chmod 0440 "$grant"; visudo -cf "$grant" >/dev/null
 fi
-if [[ ! -d "$release" ]]; then
-  stage=$(mktemp -d "$app/.portal-release.XXXXXXXX")
-  cp -a -- "$source_dir"/. "$stage"/
-  (cd "$stage"; npm ci --omit=dev --ignore-scripts)
-  node --check "$stage/bridge.mjs"
-  node "$stage/scripts/check-package-imports.mjs"
-  chown -R root:mcpbridge "$stage"
-  find "$stage" -type d -exec chmod 0750 {} +
-  find "$stage" -type f -exec chmod 0640 {} +
-  install -d -m 0755 "$app/releases"
-  mv -- "$stage" "$release"
-fi
-if [[ -d "$active" && ! -L "$active" ]]; then mv -- "$active" "$old_active"; fi
-next=$app/.approval-bridge-next.$stamp
-ln -s -- "$release" "$next"
-mv -Tf -- "$next" "$active"
-activated=1
-install -o root -g root -m 0755 "$source_dir/helper/file-helper.py" "$helper"
-if [[ -e "$unit" ]]; then
-  grep -Fqx 'ExecStart=/usr/bin/node /var/lib/ssh-mcp/app/approval-bridge/bridge.mjs' "$unit" || grep -Fqx "ExecStart=$runtime/bin/node /var/lib/ssh-mcp/app/approval-bridge/bridge.mjs" "$unit" || { echo 'Custom ExecStart: update the unit explicitly' >&2; exit 1; }
-  sed -i "s|^ExecStart=/usr/bin/node |ExecStart=$runtime/bin/node |" "$unit"
-else install -o root -g root -m 0644 "$source_dir/config/ssh-approval-bridge.service" "$unit"; fi
-systemd-analyze verify "$unit"
-systemctl daemon-reload
 systemctl enable --now ssh.service
-systemctl enable ssh-approval-bridge.service
-systemctl restart ssh-approval-bridge.service
-wait_healthy
-trap - EXIT
-if [[ "$maintenance_reserved" == 1 ]]; then
-  "$maintenance_node" "$source_dir/scripts/maintenance.mjs" compare < "$maintenance_owner_file" || { echo 'Post-restart preservation unconfirmed; maintenance retained.' >&2; exit 1; }
-else
-  echo 'Post-restart preservation was not verified: no running durable predecessor was captured.' >&2
-fi
-release_maintenance || { echo 'Installation succeeded but maintenance release is unconfirmed; manual recovery required.' >&2; exit 1; }
-echo "Installed release: $release"
-echo "Rollback backup: $backup"
-echo 'UI approval remains governed by BRIDGE_UI_ENABLED. Run the harmless host probe before enabling it.'
+# The executor owns the lock from here. No old symlink, backup or rollback path exists.
+exec 9>&-
+exec python3 -I -B "$bootstrap" start --source "$source_dir" --manifest-sha256 "$manifest_sha256"

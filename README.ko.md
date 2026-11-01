@@ -1,4 +1,4 @@
-# SSH Approval Portal 1.7.0
+# SSH Approval Portal 1.8.0
 
 [English](README.md) · [관리자 작업 공간](docs/admin-workspace.ko.md) · [관리자 로그인](docs/admin-login.ko.md) · [에이전트 파일 업로드](docs/agent-upload.ko.md) · [구조와 호환성](docs/architecture.ko.md)
 
@@ -72,16 +72,16 @@ Linux 대상은 기존 파일의 소유권·모드·확장 속성을 보존할 �
 이전 릴리스는 Ubuntu 22.04/24.04 x86_64에서 검증했습니다. ARM64 설치 경로는 남아 있지만 검증은 후속 고도화로 보류했습니다. 인터넷 연결과 서버 관리자 터미널이 필요합니다. 런타임은 Node 24.2 이상, 25 미만을 요구합니다. Node 24는 전용 경로에 설치하며 시스템 Node를 교체하지 않습니다.
 
 ```sh
-tar -xzf ssh-approval-portal-1.7.0.tar.gz
-cd ssh-approval-portal-1.7.0
-sudo bash scripts/install.sh --admin-origin https://ssh-approve.example.com --grant-sudo-all
+tar -xzf ssh-approval-portal-1.8.0.tar.gz
+cd ssh-approval-portal-1.8.0
+sudo python3 scripts/portal.py install --manifest-sha256 <공개된_manifest_SHA256> --admin-origin https://ssh-approve.example.com
 ```
 
 `--grant-sudo-all`은 `mcpops`에 비밀번호 없는 전체 sudo 권한을 부여합니다. 이 권한은 승인 중계기뿐 아니라 해당 SSH 계정의 다른 세션에도 적용됩니다. 옵션을 생략하면 일반 계정 권한으로 동작합니다. 기존 sudo 설정은 재작성하거나 삭제하지 않습니다.
 
-기존 서버는 유지보수와 복구 절차를 확인한 뒤 새 패키지에서 `sudo bash scripts/install.sh`를 실행합니다. 기존 설정·토큰·SSH 키를 보존하며, UI 서명 키가 없는 설치에는 첫 업데이트 때 추가합니다. 영속 유지보수를 적용하지 않는 이전 버전으로는 자동 복구하지 않습니다. 구버전에서 처음 전환할 때는 별도로 검증된 오프라인 절차가 필요합니다.
+1.8.0의 갱신은 [배포·데이터 이전 안내](docs/deployment.ko.md)에 따라 `deploy plan → apply → status`로 진행합니다. 기존 1.7.0 설치는 계획 단계에 `--import-legacy`를 명시합니다. 새 코드와 별도 데이터 사본을 검증한 뒤 활성 세대를 선택하며 원본 데이터는 보존합니다. 실행 중 연결이 끊겨도 작업은 서버에서 계속되며, 불명확한 효과를 자동 반복하거나 이전 데이터베이스를 자동 복원하지 않습니다. 기존 `update`·`rollback` 명령은 지원하지 않습니다.
 
-기존 unit의 사용자 변경은 보존합니다. 관리 중인 ExecStart 패턴과 다르면 자동으로 덮어쓰지 않습니다. 원본 `ssh-mcp.service`는 설치하지 않습니다.
+서비스 기동은 고정 실행기가 활성 세대 기록을 읽는 방식으로 바뀝니다. 변경 전 서비스 파일은 작업별로 보관하며, 설정·키·정책·CLI 인증 파일은 별도로 보존 검증합니다. 원본 `ssh-mcp.service`는 설치하지 않습니다.
 
 유지보수 예약에는 소유자 토큰이 필요하며, 해당 규약을 따르는 경로의 새 작업을 차단합니다. 실행·대기 요청이나 미완성 업로드가 있으면 예약을 거부합니다. 설치가 중단되거나 결과가 불명확하면 보호된 소유자 파일을 보존하고 실제 상태를 확인한 뒤 복구하세요. 예약을 무조건 해제하지 않습니다. 규약을 따르지 않는 root 작업과 구버전은 이 보호를 우회할 수 있습니다. [유지보수 검증·복구 안내](docs/maintenance-test-and-recovery.ko.md)를 참고하세요.
 

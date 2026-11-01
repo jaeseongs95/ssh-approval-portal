@@ -8,7 +8,7 @@ on:
         type: boolean
         default: false
   push:
-    branches: [feat/windows-ssh-targets-20261101, feat/windows-full-support-20261101]
+    branches: [feat/windows-ssh-targets-20261101, feat/windows-full-support-20261101, feat/deploy-1.8.0-20261101]
 
 permissions:
   contents: read

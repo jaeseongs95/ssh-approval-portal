@@ -1,3 +1,4 @@
+import { initializeStorageSchema } from './schema-version.mjs';
 import { createHash } from 'node:crypto';
 import { openSync, closeSync, lstatSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
@@ -6,12 +7,14 @@ import { join } from 'node:path';
 // One live bridge owns this database. Reservation survives process replacement.
 export function createMaintenanceState(root) {
   const path = join(root, 'maintenance.sqlite');
-  try { closeSync(openSync(path, 'wx', 0o600)); } catch (error) { if (error.code !== 'EEXIST') throw error; }
+  let created = false;
+  try { closeSync(openSync(path, 'wx', 0o600)); created = true; } catch (error) { if (error.code !== 'EEXIST') throw error; }
   const st = lstatSync(path);
   if (!st.isFile() || st.isSymbolicLink() || st.nlink !== 1 || (process.platform !== 'win32' && ((st.mode & 0o077) || st.uid !== process.getuid()))) throw Error('Unsafe maintenance state');
   const db = new DatabaseSync(path);
   try {
-    db.exec('PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL; PRAGMA locking_mode=EXCLUSIVE; BEGIN EXCLUSIVE; COMMIT; CREATE TABLE IF NOT EXISTS reservation (id INTEGER PRIMARY KEY CHECK(id=1), owner_hash TEXT NOT NULL, baseline TEXT); CREATE TABLE IF NOT EXISTS last_release (id INTEGER PRIMARY KEY CHECK(id=1), owner_hash TEXT NOT NULL);');
+    initializeStorageSchema(db, created, 'CREATE TABLE IF NOT EXISTS reservation (id INTEGER PRIMARY KEY CHECK(id=1), owner_hash TEXT NOT NULL, baseline TEXT); CREATE TABLE IF NOT EXISTS last_release (id INTEGER PRIMARY KEY CHECK(id=1), owner_hash TEXT NOT NULL);');
+    db.exec('PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL; PRAGMA locking_mode=EXCLUSIVE; BEGIN EXCLUSIVE; COMMIT;');
   } catch (error) { db.close(); throw error; }
   const digest = owner => {
     if (typeof owner !== 'string' || !/^[a-f0-9]{64}$/.test(owner)) throw Error('Valid maintenance owner required');

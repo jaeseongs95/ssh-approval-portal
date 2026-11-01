@@ -228,19 +228,7 @@ export async function createApplication({ registry, classify, executeCommand, ex
   const { queue, commands, files } = targets;
   for (const job of commandState?.list() ?? []) {
     const runtime = runtimes.find(runtime => runtime.id === (job.targetId ?? 'default'));
-    if (runtime && job.kind === 'command' && job.result && !job.result.output) {
-      // Publish before replacing the legacy body. On failure the original DB body survives;
-      // presenters still refuse to expose it. Execution/replay identity is never changed.
-      let migrated = { failed: job.result.failed, texts: [], output: { state: 'unavailable', captureSource: 'redacted-adapter-outcome', sshCompleteness: 'unknown', version: 1 } };
-      // A reserved restart must retain the baseline row; only sanitize the in-memory view.
-      if (!maintenanceState.occupied()) {
-        try {
-          migrated = outputs.finish(outputs.reserve({ executionId: job.id, targetId: runtime.id, targetRevision: job.targetRevision ?? runtime.revision, profile: job.profile, operationDigest: hash(job.command) }), job.result);
-          if (migrated.output.state === 'ready') commandState.save({ ...job, result: migrated });
-        } catch { /* Preserve the legacy journal; no raw fallback or SSH replay. */ }
-      }
-      job.result = migrated;
-    }
+    if (job.kind === 'command' && job.result && !job.result.output) throw Error('Legacy command result requires explicit offline migration');
     runtime?.queue.restore(job, value => commandState.save(value));
   }
   for(const job of cliState?.list() ?? []){

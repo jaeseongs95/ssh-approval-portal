@@ -1,3 +1,4 @@
+import { initializeStorageSchema } from './schema-version.mjs';
 import {DatabaseSync} from 'node:sqlite';
 import {openSync,closeSync,lstatSync} from 'node:fs';
 import {join} from 'node:path';
@@ -8,7 +9,8 @@ import {journalHistoryReader} from './history-query.mjs';
 /** Dedicated private journal; does not enable or write the command-automation policy. */
 export function createAgentCliState(root){
  const path=join(root,'agent-cli.sqlite');
- try{closeSync(openSync(path,'wx',0o600));}catch(error){if(error.code!=='EEXIST')throw error;}
+ let created=false;
+ try{closeSync(openSync(path,'wx',0o600));created=true;}catch(error){if(error.code!=='EEXIST')throw error;}
  const st=lstatSync(path);
  if(!st.isFile()||st.isSymbolicLink()||st.nlink!==1||(process.platform!=='win32'&&((st.mode&0o077)||st.uid!==process.getuid())))throw Error('Unsafe CLI journal');
  const db=new DatabaseSync(path);
@@ -17,7 +19,8 @@ export function createAgentCliState(root){
   const body=JSON.stringify(job);if(Buffer.byteLength(body)>65536)throw Error('CLI journal request too large');return body;
  };
  try{
-  db.exec('PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL; PRAGMA locking_mode=EXCLUSIVE; BEGIN EXCLUSIVE; COMMIT; CREATE TABLE IF NOT EXISTS requests (id TEXT PRIMARY KEY, request_key TEXT UNIQUE NOT NULL, digest TEXT NOT NULL, body TEXT NOT NULL, remote_status TEXT);');
+  initializeStorageSchema(db,created,'CREATE TABLE IF NOT EXISTS requests (id TEXT PRIMARY KEY, request_key TEXT UNIQUE NOT NULL, digest TEXT NOT NULL, body TEXT NOT NULL, remote_status TEXT);');
+  db.exec('PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL; PRAGMA locking_mode=EXCLUSIVE; BEGIN EXCLUSIVE; COMMIT;');
   for(const row of db.prepare('SELECT id,body FROM requests').all()){
    const job=JSON.parse(row.body);
    if(['pending','evaluating','running'].includes(job.state)){

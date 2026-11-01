@@ -1,4 +1,4 @@
-# SSH Approval Portal 1.7.0
+# SSH Approval Portal 1.8.0
 
 [한국어](README.ko.md) · [Administrator sign-in](docs/admin-login.en.md) · [Agent file uploads](docs/agent-upload.en.md) · [Architecture and compatibility](docs/architecture.en.md)
 
@@ -72,16 +72,16 @@ For Linux targets, an overwrite is not reported as complete if the existing file
 The previous release was validated for Ubuntu 22.04/24.04 on x86_64. The ARM64 installation path remains available, but validation is deferred to a later enhancement. An internet connection and an administrator terminal on the server are required. The runtime requires Node 24.2 or later within the 24.x series. Node 24 is installed in a dedicated path without replacing the system Node installation.
 
 ```sh
-tar -xzf ssh-approval-portal-1.7.0.tar.gz
-cd ssh-approval-portal-1.7.0
-sudo bash scripts/install.sh --admin-origin https://ssh-approve.example.com --grant-sudo-all
+tar -xzf ssh-approval-portal-1.8.0.tar.gz
+cd ssh-approval-portal-1.8.0
+sudo python3 scripts/portal.py install --manifest-sha256 <공개된_manifest_SHA256> --admin-origin https://ssh-approve.example.com
 ```
 
 `--grant-sudo-all` grants `mcpops` unrestricted passwordless sudo. This applies to other sessions using that SSH account as well as the approval bridge. Omit the option to use ordinary account permissions. Existing sudo configuration is neither rewritten nor removed.
 
-For an existing server, use `sudo bash scripts/install.sh` from the new package after checking the maintenance and recovery procedure. Existing settings, tokens, and SSH keys are preserved; the first update adds a UI signing key if the installation has none. The installer does not automatically roll back to a version that cannot enforce durable maintenance. First upgrades from older versions need a separate verified offline procedure.
+1.8.0의 갱신은 [배포·데이터 이전 안내](docs/deployment.ko.md)에 따라 `deploy plan → apply → status`로 진행합니다. 기존 1.7.0 설치는 계획 단계에 `--import-legacy`를 명시합니다. 새 코드와 별도 데이터 사본을 검증한 뒤 활성 세대를 선택하며 원본 데이터는 보존합니다. 실행 중 연결이 끊겨도 작업은 서버에서 계속되며, 불명확한 효과를 자동 반복하거나 이전 데이터베이스를 자동 복원하지 않습니다. 기존 `update`·`rollback` 명령은 지원하지 않습니다.
 
-User changes to an existing unit are preserved. An ExecStart outside the managed pattern is not overwritten automatically. The original `ssh-mcp.service` is not installed.
+서비스 기동은 고정 실행기가 활성 세대 기록을 읽는 방식으로 바뀝니다. 변경 전 서비스 파일은 작업별로 보관하며, 설정·키·정책·CLI 인증 파일은 별도로 보존 검증합니다. 원본 `ssh-mcp.service`는 설치하지 않습니다.
 
 Maintenance reservation requires an owner token and blocks new work on cooperating paths. Running or pending requests and incomplete uploads prevent reservation. If the installer is interrupted or the result is unknown, retain its protected owner file and inspect the actual state before recovery; do not blindly release the reservation. Non-cooperating root processes and older versions can bypass this protection. See [maintenance testing and recovery](docs/maintenance-test-and-recovery.ko.md).
 

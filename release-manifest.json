@@ -1,6 +1,6 @@
 {
-  "version": "1.7.0",
-  "status": "release",
+  "version": "1.8.0",
+  "status": "candidate-pending-live-host-verification",
   "runtime": "Node.js 24",
   "files": [
     {
@@ -15,13 +15,13 @@
     },
     {
       "path": "README.ko.md",
-      "size": 22432,
-      "sha256": "c33a657fcea23dd8f0dbaae3499c89734cb916720c88dc090cbd1487312d7bed"
+      "size": 22692,
+      "sha256": "a88ed5f5ee29bde88ec4b027f5bcebadadcd5a370807bc75f7ef2586d86b2eb8"
     },
     {
       "path": "README.md",
-      "size": 20608,
-      "sha256": "03b700135c66976c62a13ee313bfefcd60b02027b077571a670a3a4e25e00820"
+      "size": 20906,
+      "sha256": "d697f19b513a829d73bafb59d7d68db26a856c9f575da6868431e8342dc137e1"
     },
     {
       "path": "THIRD_PARTY_NOTICES.json",
@@ -30,8 +30,8 @@
     },
     {
       "path": "app.mjs",
-      "size": 31747,
-      "sha256": "219f2cfd3fdf7e366112ac6172ab158a36fbb8589ea7d464d88d4c1628343b48"
+      "size": 30842,
+      "sha256": "1de668c96d99ed0bd8884ad1f917d88b55531b4a3e79336ad3734ac0b9e69d54"
     },
     {
       "path": "bridge.mjs",
@@ -60,8 +60,8 @@
     },
     {
       "path": "config/ssh-approval-bridge.service",
-      "size": 421,
-      "sha256": "39e468d9e00bb2b92d2199eea7b4b4bb8650d70033885935886493b83f08b198"
+      "size": 405,
+      "sha256": "f754f7827821bc319272e39cf596b99452a7ce1be63620e1dd1574879e32e837"
     },
     {
       "path": "config/ssh-approval-env.socket",
@@ -164,14 +164,19 @@
       "sha256": "c1da4a426947aa7e0c02c959c4646085afff0ea9236da3942b4c2ec4f7d368ac"
     },
     {
+      "path": "docs/deployment.ko.md",
+      "size": 5328,
+      "sha256": "7eccf1269afd2744c15cb17665d1d15bc41dd6d7aa319cd374a567aa3f8e5a89"
+    },
+    {
       "path": "docs/environment-editor.md",
       "size": 3918,
       "sha256": "d945d8509725e9d315414707975ea39f97de698b7022705d0825e025b3edffe4"
     },
     {
       "path": "docs/install-workflow.ko.md",
-      "size": 15605,
-      "sha256": "e2c11d5abfbea200f635f0c4d49ec96246f87d466af4f6f74dc3c8b18f251fd6"
+      "size": 15954,
+      "sha256": "32c921f27174dd33f0d1a0c3fa006aa6ff823266889095df6f3efe5d15cc7f0f"
     },
     {
       "path": "docs/jev-observation.ko.md",
@@ -200,8 +205,8 @@
     },
     {
       "path": "docs/non-cloudflare-https.ko.md",
-      "size": 2499,
-      "sha256": "9b0dffb4413a92274596518c46914e6a72ad357ba2acba00d1515a3df0a05ef2"
+      "size": 2571,
+      "sha256": "a11fd0d6c3001e2da4a7ff432b49f6e19ecb19f3ee6e70a73769b6a85bb63625"
     },
     {
       "path": "docs/oidc-https.ko.md",
@@ -225,8 +230,8 @@
     },
     {
       "path": "helper/environment-helper.py",
-      "size": 16195,
-      "sha256": "35f7ec988fcf2027067826496a1e8880c5e1fc8d73736f0b2a8bec06ff4dee51"
+      "size": 18163,
+      "sha256": "7df3c76230d43ab8989db1153d6a2e8f183e1c3c4b03c80b03d9b12e60c9d684"
     },
     {
       "path": "helper/file-helper.py",
@@ -236,12 +241,12 @@
     {
       "path": "package-lock.json",
       "size": 100104,
-      "sha256": "27eebf05bf7012c066ded6c9c4144d274a713ee0461cb2d0675b1a6a1001283e"
+      "sha256": "73409d47d11045159c41df9aab700c13df362910a3fe2fd5a993a5c61fe019d7"
     },
     {
       "path": "package.json",
       "size": 740,
-      "sha256": "3c120e176b1ca1902ce364789b20ed181b25dcd2eb6160515c89618c7d97aeb9"
+      "sha256": "194d095c4a48210d0d5e7831e66d22319cd2eca5e746793079b87d45bb2253b1"
     },
     {
       "path": "scripts/admin-access-config.mjs",
@@ -329,6 +334,36 @@
       "sha256": "4da1e47813f33edef9dbd6bce97799ff3d47e3036b599af68d5948ce31e9d61d"
     },
     {
+      "path": "scripts/deployment-bootstrap.py",
+      "size": 4758,
+      "sha256": "64caea42b5b20a9d6689ae71510e0bdccf66fd0369aff22c2d358c3571368ea8"
+    },
+    {
+      "path": "scripts/deployment-launcher.py",
+      "size": 5321,
+      "sha256": "3259900fd2c6d6c4c2de0788e3fefeb36b7e00bbe692a12e7cf37660c14c1cf5"
+    },
+    {
+      "path": "scripts/deployment-preservation.mjs",
+      "size": 5190,
+      "sha256": "1037a9492cbcb8aeff701af8286ff9cd9fb2d775284a1108599f801b2cda64dd"
+    },
+    {
+      "path": "scripts/deployment.py",
+      "size": 55417,
+      "sha256": "799177590b30907c13768dbffe075178d11385334fb0ebdea40ca4b821dfa712"
+    },
+    {
+      "path": "scripts/deployment_entry.py",
+      "size": 7587,
+      "sha256": "b34fa31c53418cc9d24be6750e41a4e666a99fe32017c76940ea6e154bc410a2"
+    },
+    {
+      "path": "scripts/deployment_migration.py",
+      "size": 31790,
+      "sha256": "066192f8987a4589f581f022f9b9b6998197eda9d85f9557f7adddc194584664"
+    },
+    {
       "path": "scripts/docker-secrets.py",
       "size": 1481,
       "sha256": "426af209fb281f8fb5b39bda5e0eb45b44734d86d2645f509751e3eed63b40c9"
@@ -375,8 +410,8 @@
     },
     {
       "path": "scripts/install.sh",
-      "size": 10249,
-      "sha256": "13c826ae74a5f2dc8baacfae949fc3b8e6a39f5c216ade5c3352793c5fe46efb"
+      "size": 5999,
+      "sha256": "18358adf204de51b882b960571e29cfaae114a85036ccb01d8c6cca4050822d3"
     },
     {
       "path": "scripts/jev-shadow-protocol.mjs",
@@ -414,6 +449,11 @@
       "sha256": "0b28c89b834c1529604bed8c0f27ca42d032ef3bc6dbdda32a09ec31f56a7b02"
     },
     {
+      "path": "scripts/migrate-state.mjs",
+      "size": 4407,
+      "sha256": "d080b21be0b0af6aaf157a4eef66cad8c31a06c7fe0cdd3d0b58302e887e951b"
+    },
+    {
       "path": "scripts/node-runtime.py",
       "size": 1864,
       "sha256": "67c3041c5c8773de9b1ca689b96038c960d0ee9d0b06b5dc13da5d22549eda69"
@@ -440,8 +480,8 @@
     },
     {
       "path": "scripts/portal.py",
-      "size": 9791,
-      "sha256": "5c76c70d3140ab2453585625aaaeb5461da685fd10da92b6282c873965c5528c"
+      "size": 13224,
+      "sha256": "f38be92ef333a2d6d4db0425a2c7f4844ff99fb9d193c9483809ffb0130cd415"
     },
     {
       "path": "scripts/prepare-docker.sh",
@@ -465,8 +505,8 @@
     },
     {
       "path": "scripts/rollback.sh",
-      "size": 3100,
-      "sha256": "c3112d68546006567326817e154647f4e21b9942c132eebb31000e6a1076babb"
+      "size": 286,
+      "sha256": "bcd0840c9475849720193771231e8a626506cfdf80e63adf167a678247422771"
     },
     {
       "path": "scripts/settings_contract.py",
@@ -680,8 +720,8 @@
     },
     {
       "path": "src/adapters/storage/agent-cli-state.mjs",
-      "size": 6180,
-      "sha256": "a6d3c2fa9d7fc5245e0e75d94f64026dca9749fa2abb2b40fb86011ecd3cc98a"
+      "size": 6318,
+      "sha256": "c1952d9871f5438f6ff63fca22a8dea476887f7a666b622e617c4cb9570874cb"
     },
     {
       "path": "src/adapters/storage/artifacts.mjs",
@@ -690,13 +730,13 @@
     },
     {
       "path": "src/adapters/storage/command-output.mjs",
-      "size": 12248,
-      "sha256": "be7d9f0265b80fdeded46f1084463c13dc7dde93510dff0444b386ff69e1fd0e"
+      "size": 12430,
+      "sha256": "5562f3581172c7a2cf448da31169c1e1a9f6faeca0607ed4bb2c60a2022a2f05"
     },
     {
       "path": "src/adapters/storage/command-state.mjs",
-      "size": 4752,
-      "sha256": "cc88a9df1d0e432352127bce4b2bf498d23d90f9e926e0410f54da4b2153389a"
+      "size": 4853,
+      "sha256": "6fcfce9ac5ac1aa70371ecceecba702f7357caef362af858e058980881feb5a6"
     },
     {
       "path": "src/adapters/storage/history-query.mjs",
@@ -705,18 +745,23 @@
     },
     {
       "path": "src/adapters/storage/maintenance-state.mjs",
-      "size": 3226,
-      "sha256": "6ea3f0b71ea12f481ab41f5cd8cb998c48ac1c7e902374c356a2e6ebc6b59e33"
+      "size": 3374,
+      "sha256": "3c300fdf02de88cecb93004ceb642e19e94b3fabd8a387f16ca61bee3b079aff"
     },
     {
       "path": "src/adapters/storage/offline-preservation.mjs",
-      "size": 4903,
-      "sha256": "a1efccb356a5f1c27c7ac5a4cd88f3d23b0094fa094f55ef3052d06b623be64e"
+      "size": 4996,
+      "sha256": "b156a6f54135306331b07c4a9c51b9630ae6ec4c464972bc12cb1836f60647cb"
     },
     {
       "path": "src/adapters/storage/preservation-verification.mjs",
       "size": 6839,
       "sha256": "71be04b4ad8d8c613c22177507a2f653f1c3e1b16abedc09de284700bbb11774"
+    },
+    {
+      "path": "src/adapters/storage/schema-version.mjs",
+      "size": 1174,
+      "sha256": "60517b3fe036e649e7d97d5c5c1ae0cb4839574edf28e2adab050688cfac0408"
     },
     {
       "path": "src/adapters/storage/scoped-artifacts.mjs",
@@ -1204,6 +1249,21 @@
       "sha256": "6a4ffbca1f201f20b726ed9f2da08b4e7330583234d883366a63ccdb1117509a"
     },
     {
+      "path": "test/deployment-ci.sh",
+      "size": 752,
+      "sha256": "c9d220756848cb181f8913750d9ae4d7e9035c98bae81fd3e3a6de682b64ecd2"
+    },
+    {
+      "path": "test/deployment-system-fixture.py",
+      "size": 19982,
+      "sha256": "cbef392c8e927a245315b7ca84a4097e82611f371ea404af24f987f2fb179c5b"
+    },
+    {
+      "path": "test/deployment_entry_fixture.py",
+      "size": 1090,
+      "sha256": "204dd07be7501054f94f77c5b7e5bc56a9ca6d09fcdf3649cf41c2416b7e6574"
+    },
+    {
       "path": "test/dispatch-failure.test.mjs",
       "size": 4985,
       "sha256": "0619a0f1ce7f38d807e6502e5565d476bbad1ebf3feae853cd350540f6c7c0d4"
@@ -1295,8 +1355,8 @@
     },
     {
       "path": "test/install-state-guard.test.mjs",
-      "size": 1517,
-      "sha256": "11cc85fc827a5ac1a2f448d543f8a135bba8a2473c7677fa7d93d723616bcba3"
+      "size": 1995,
+      "sha256": "13acb74940686dededbfdd51e2788734407036bc149b28f0cf0af48d6a390332"
     },
     {
       "path": "test/jev-binary-contract.test.mjs",
@@ -1525,8 +1585,8 @@
     },
     {
       "path": "test/rollback-stopped.test.mjs",
-      "size": 531,
-      "sha256": "6600267fce877680d92320a049a2930355dde4010b05264830cded92029672ff"
+      "size": 1598,
+      "sha256": "775911d634b81c9e8e8ab24726f16baa34abc263d9c86b31f567e4f1183539fe"
     },
     {
       "path": "test/safety-http.test.mjs",
@@ -1679,6 +1739,31 @@
       "sha256": "6073afc216de8bab23e0cb19368165a54d5f6ddbc6e41fa16dc290a17db4474c"
     },
     {
+      "path": "test/test_deployment_bootstrap.py",
+      "size": 6204,
+      "sha256": "ed3ce7e585414a6456751300591e5e6c23ec6789430117b0ed755a90de696d21"
+    },
+    {
+      "path": "test/test_deployment_engine.py",
+      "size": 10147,
+      "sha256": "12ffefebc4b00c12af2fd84a68aa94a708d22c3ebd00a56776fafb6cc8f4c7a4"
+    },
+    {
+      "path": "test/test_deployment_entry.py",
+      "size": 10341,
+      "sha256": "9a045daa4278dc9dfa21af6b0510a2ecbc833ce9d902e2795a3cda67a661767f"
+    },
+    {
+      "path": "test/test_deployment_launcher.py",
+      "size": 9269,
+      "sha256": "0e30f70997dbaa33bde103f783385c2bf8a01058a0ca52e690b65712e3dcda68"
+    },
+    {
+      "path": "test/test_deployment_migration.py",
+      "size": 15213,
+      "sha256": "d2122d64ece278dddbab7ed5bc13e3bdf81ed657c2b7421e9eced6f20250f4bb"
+    },
+    {
       "path": "test/test_env_editor_lock.py",
       "size": 1496,
       "sha256": "135a93486aa2ec463bcab3f3973849c1f1b9e3585cdb5f5f5823e9fa13a17194"
@@ -1720,8 +1805,8 @@
     },
     {
       "path": "test/test_portal_setup.py",
-      "size": 6383,
-      "sha256": "bc5538f897ae53054edbe7279a3364f919ea5b2506975aa0e30c1389ef3cdf7a"
+      "size": 10567,
+      "sha256": "436cabce98f71ff217eefe2c551daa31b7111bb4e779af13e2af9251e4e06c18"
     },
     {
       "path": "test/test_release_update.py",

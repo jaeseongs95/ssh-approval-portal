@@ -129,9 +129,43 @@ def clean_run(args, timeout=40, **kwargs):
                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=timeout, check=True, **kwargs)
 
 
+def active_release():
+    # The broker consumes the same committed selection as systemd. Configuration
+    # stays in its authoritative ENV file; code no longer follows a legacy link.
+    active = Path('/var/lib/ssh-mcp/deployments/active.json')
+    for parent in reversed(active.parents):
+        info = parent.lstat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+            raise Refused('unsafe-active-generation')
+    descriptor = os.open(active, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(descriptor, 'rb') as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_nlink != 1 or info.st_mode & 0o022 or info.st_size > LIMIT:
+            raise Refused('unsafe-active-generation')
+        selected = json.loads(stream.read(LIMIT + 1))
+    release = Path(selected.get('release', ''))
+    if (selected.get('schemaVersion') != 1 or not release.is_absolute()
+            or release.parent != Path('/var/lib/ssh-mcp/app/releases') or '..' in release.parts
+            or not re.fullmatch(r'deploy-[a-f0-9]{32}', str(selected.get('generation', '')))):
+        raise Refused('unsafe-active-generation')
+    for parent in [*reversed(release.parents), release]:
+        info = parent.lstat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+            raise Refused('unsafe-active-generation')
+    manifest = release / 'release-manifest.json'
+    descriptor = os.open(manifest, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(descriptor, 'rb') as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_nlink != 1 or info.st_mode & 0o022 or info.st_size > 4 * 1024 * 1024:
+            raise Refused('unsafe-active-generation')
+        raw = stream.read(4 * 1024 * 1024 + 1)
+    if hashlib.sha256(raw).hexdigest() != selected.get('manifestSha256'):
+        raise Refused('unsafe-active-generation')
+    return release
+
+
 def validate(data):
-    # The active release is root-owned, fixed by the native installer.
-    result = subprocess.run(['/opt/ssh-approval/node/bin/node', '/var/lib/ssh-mcp/app/approval-bridge/scripts/validate-environment.mjs'],
+    result = subprocess.run(['/opt/ssh-approval/node/bin/node', str(active_release() / 'scripts/validate-environment.mjs')],
                             input=data, env={'PATH': '/usr/bin:/bin'}, stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL, timeout=8, check=False)
     if result.returncode:
@@ -235,7 +269,7 @@ class Editor:
 
     @staticmethod
     def maintenance_action(action, owner):
-        subprocess.run(['/opt/ssh-approval/node/bin/node', '/var/lib/ssh-mcp/app/approval-bridge/scripts/maintenance.mjs', action],
+        subprocess.run(['/opt/ssh-approval/node/bin/node', str(active_release() / 'scripts/maintenance.mjs'), action],
                        input=owner, env={'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'},
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15, check=True)
 

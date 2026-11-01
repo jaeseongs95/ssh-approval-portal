@@ -1,3 +1,4 @@
+import { initializeStorageSchema } from './schema-version.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { constants, mkdirSync, lstatSync, openSync, closeSync, fstatSync, readSync, writeSync, fsyncSync, renameSync, unlinkSync, readdirSync, statfsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -28,11 +29,13 @@ export class CommandOutputs {
     this.canReap = canReap;
     mkdirSync(this.root, { recursive: true, mode: 0o700 }); this.checkRoot();
     const path = join(this.root, 'manifest.sqlite');
-    try { closeSync(openSync(path, 'wx', 0o600)); } catch (error) { if (error.code !== 'EEXIST') throw error; }
+    let created = false;
+    try { closeSync(openSync(path, 'wx', 0o600)); created = true; } catch (error) { if (error.code !== 'EEXIST') throw error; }
     if (!safe(lstatSync(path))) throw Error('Unsafe output manifest');
     this.db = new DatabaseSync(path);
     try {
-      this.db.exec('PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL; PRAGMA locking_mode=EXCLUSIVE; CREATE TABLE IF NOT EXISTS outputs (id TEXT PRIMARY KEY, body TEXT NOT NULL, digest TEXT NOT NULL, charge INTEGER NOT NULL);');
+      initializeStorageSchema(this.db, created, 'CREATE TABLE IF NOT EXISTS outputs (id TEXT PRIMARY KEY, body TEXT NOT NULL, digest TEXT NOT NULL, charge INTEGER NOT NULL);');
+      this.db.exec('PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL; PRAGMA locking_mode=EXCLUSIVE; BEGIN EXCLUSIVE; COMMIT;');
       this.db.prepare('SELECT id FROM outputs').all();
       const ids = new Set(this.db.prepare('SELECT id FROM outputs').all().map(row => row.id));
       for (const name of readdirSync(this.root)) {

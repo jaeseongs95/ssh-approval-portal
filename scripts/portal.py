@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""One native lifecycle entry point; existing scripts retain all mutation authority."""
+"""Native setup and pinned, independently running deployment jobs."""
 import argparse
 import json
+import importlib.util
 import os
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 import subprocess
 import sys
 from urllib.parse import urlsplit
@@ -14,14 +15,15 @@ NODE = '/opt/ssh-approval/node/bin/node'
 
 
 def arguments(argv=None):
-    parser = argparse.ArgumentParser(description='SSH Portal 설치·설정·검증·복구')
+    parser = argparse.ArgumentParser(description='SSH Portal 설치·배포·설정·검증')
     commands = parser.add_subparsers(dest='action', required=True)
-    for action in ['install', 'update', 'connect', 'policy', 'verify', 'status', 'rollback']:
+    for action in ['install', 'connect', 'policy', 'verify', 'status']:
         command = commands.add_parser(action)
         command.add_argument('--dry-run', action='store_true', help='실행 없이 계획만 JSON으로 표시')
         if action in ['install', 'policy']:
             command.add_argument('--admin-origin', required=action == 'policy')
         if action == 'install':
+            command.add_argument('--manifest-sha256', required=True, help='별도 확인한 릴리스 manifest SHA256')
             command.add_argument('--grant-sudo-all', action='store_true', help='mcpops NOPASSWD ALL 명시적 선택')
         if action == 'connect':
             command.add_argument('component', choices=['access', 'oidc', 'upload-sources', 'env-editor', 'cloudflare'])
@@ -38,8 +40,17 @@ def arguments(argv=None):
             binary = command.add_mutually_exclusive_group()
             binary.add_argument('--cloudflared', help='설치된 root 소유 cloudflared 절대 경로')
             binary.add_argument('--install-cloudflared', action='store_true', help='공식 cloudflared를 전용 경로에 검증·설치')
-        if action == 'rollback':
-            command.add_argument('backup')
+    deployment = commands.add_parser('deploy', help='고정 계획·독립 실행·상태 조회·명시적 재개')
+    actions = deployment.add_subparsers(dest='deployment_action', required=True)
+    prepare = actions.add_parser('plan')
+    prepare.add_argument('--source', required=True, help='검증할 root 소유 릴리스 디렉터리')
+    prepare.add_argument('--manifest-sha256', required=True)
+    prepare.add_argument('--import-legacy', action='store_true', help='기존 1.7.0 설치의 명시적 데이터 이전')
+    apply = actions.add_parser('apply')
+    apply.add_argument('--plan', required=True, help='plan이 저장한 고정 계획 파일')
+    for name in ('status', 'resume'):
+        item = actions.add_parser(name)
+        item.add_argument('--job-id', required=True)
     return parser.parse_args(argv)
 
 
@@ -58,13 +69,18 @@ def plan(options, source=SOURCE):
     verify = [step('package', [NODE, str(source / 'scripts/verify.mjs'), str(source)]),
               step('health', [NODE, str(source / 'scripts/healthcheck.mjs'), ENV])]
     steps = []
-    if action in ['install', 'update']:
-        argv = script('install.sh')
+    if action == 'install':
+        pin = options.manifest_sha256
+        if len(pin) != 64 or any(c not in '0123456789abcdef' for c in pin):
+            raise ValueError('릴리스 manifest SHA256이 필요합니다.')
+        argv = script('install.sh', '--manifest-sha256', pin)
         if origin:
             argv += ['--admin-origin', origin]
         if getattr(options, 'grant_sudo_all', False):
             argv += ['--grant-sudo-all']
-        steps = [step(action, argv), *verify]
+        # Installation only accepts a job. Health is the worker's final stage;
+        # verifying here would race the independently running service transition.
+        steps = [step(action, argv)]
     elif action == 'connect':
         if options.component == 'cloudflare':
             argv = [sys.executable, str(source / 'scripts/cloudflare_setup.py')]
@@ -92,15 +108,8 @@ def plan(options, source=SOURCE):
         steps = verify
     elif action == 'status':
         steps = [step('status', script('status.sh'))]
-    elif action == 'rollback':
-        backup = PurePosixPath(options.backup)
-        base = PurePosixPath('/var/lib/ssh-mcp/app/backups')
-        if not backup.is_absolute() or backup.parent != base or '..' in backup.parts:
-            raise ValueError('관리되는 backups 바로 아래의 백업 경로를 지정하세요.')
-        # Verify the restored service, not this potentially newer source package.
-        steps = [step('rollback', script('rollback.sh', str(backup))), verify[1]]
     return {'action': action, 'steps': steps, 'policyUrl': origin + '/settings' if action == 'policy' else None,
-            'settingsPreserved': action in ['update', 'verify', 'status'],
+            'settingsPreserved': action in ['verify', 'status'],
             'interactive': action == 'connect' and options.component != 'env-editor',
             'sudoGrantRequested': bool(getattr(options, 'grant_sudo_all', False))}
 
@@ -110,13 +119,59 @@ def execute(work, runner=subprocess.run):
         try:
             runner(item['argv'], check=True)
         except subprocess.CalledProcessError as error:
-            # Never retry a mutation: install/rollback/configure scripts own recovery.
+            # An uncertain side effect must be inspected, never resubmitted here.
             return {'status': 'FAILED', 'step': item['name'], 'exitCode': error.returncode}
-    return {'status': 'PASS', 'action': work['action']}
+    return {'status': 'ACCEPTED' if work['action'] == 'install' else 'PASS', 'action': work['action']}
+
+
+def deployment_command(options):
+    if sys.platform != 'linux' or os.geteuid() != 0:
+        raise ValueError('배포는 Ubuntu 관리자 터미널에서 sudo로 실행하세요.')
+    sys.dont_write_bytecode = True
+    spec = importlib.util.spec_from_file_location('ssh_portal_deployment_entry', SOURCE / 'scripts/deployment_entry.py')
+    entry = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(entry)
+    action = options.deployment_action
+    if action == 'plan':
+        engine = entry.install_executor(Path(options.source), options.manifest_sha256)
+        work = engine.create_plan(Path(options.source), manifest_sha256=options.manifest_sha256,
+                                  import_legacy=options.import_legacy)
+        plans = engine.STATE_ROOT / 'plans'
+        if not plans.exists():
+            plans.mkdir(mode=0o700)
+            engine.sync_directory(plans.parent)
+        engine.trusted_directory(plans)
+        path = plans / (work['jobId'] + '.json')
+        if os.path.lexists(path):
+            raise ValueError('동일 작업의 계획이 이미 있습니다. 원래 파일을 확인하세요.')
+        engine.atomic_json(path, work)
+        return {'state': 'PLANNED', 'jobId': work['jobId'], 'planPath': str(path),
+                'planSha256': work['planSha256'], 'targetVersion': work['targetVersion'],
+                'readinessErrors': work['readinessErrors'], 'serviceChanged': False}
+    if action == 'apply':
+        path = Path(options.plan)
+        if not path.is_absolute() or path.parent != Path('/var/lib/ssh-mcp/deployments/plans'):
+            raise ValueError('plan이 저장한 고정 계획 경로를 지정하세요.')
+        value = json.loads(entry.read_file(path, 8 * 1024 * 1024))
+        if path.name != value.get('jobId', '') + '.json':
+            raise ValueError('계획 파일 이름과 작업 번호가 다릅니다.')
+        engine = entry.executor_for_plan(value)
+        return engine.apply_plan(value)
+    engine = entry.executor_for_job(options.job_id)
+    return engine.status(options.job_id) if action == 'status' else engine.resume(options.job_id)
 
 
 def main(argv=None):
     options = arguments(argv)
+    if options.action == 'deploy':
+        try:
+            result = deployment_command(options)
+        except (ValueError, OSError, RuntimeError) as error:
+            print(json.dumps({'state': 'REFUSED', 'errorCode': getattr(error, 'code', type(error).__name__),
+                              'message': '요청을 실행하지 못했습니다. 원래 작업 상태와 고정 계획을 확인하세요.'}, ensure_ascii=False))
+            return 1
+        print(json.dumps(result, ensure_ascii=False))
+        return 1 if result.get('state') in ('NEEDS_REVIEW', 'FAILED') else 0
     if options.action == 'connect' and options.component == 'cloudflare':
         # A read-only dry run must not populate scripts/__pycache__ on a new install.
         sys.dont_write_bytecode = True
@@ -145,7 +200,7 @@ def main(argv=None):
         raise ValueError('실행은 Ubuntu 관리자 터미널에서 sudo로 진행하세요. 계획 조회에는 --dry-run을 사용하세요.')
     result = execute(work)
     print(json.dumps(result, ensure_ascii=False))
-    return 0 if result['status'] == 'PASS' else 1
+    return 0 if result['status'] in ('PASS', 'ACCEPTED') else 1
 
 
 if __name__ == '__main__':

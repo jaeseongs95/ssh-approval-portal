@@ -5,8 +5,8 @@
 서버의 관리자 터미널에서 실제 관리자 HTTPS origin으로 설치합니다.
 
 ```bash
-python3 scripts/portal.py install --admin-origin https://approve.example.com --dry-run
-sudo python3 scripts/portal.py install --admin-origin https://approve.example.com
+python3 scripts/portal.py install --manifest-sha256 <manifest_SHA256> --admin-origin https://approve.example.com --dry-run
+sudo python3 scripts/portal.py install --manifest-sha256 <manifest_SHA256> --admin-origin https://approve.example.com
 ```
 
 HTTPS 종료와 인증서는 운영 환경에서 준비합니다. MCP 호스트는 loopback MCP 포트(기본 39124), 관리자 호스트는 loopback 관리자 포트(기본 39125)로 전달합니다. 역방향 프록시는 `Authorization`과 `Origin`을 보존하며 관리자 origin은 `BRIDGE_ADMIN_ORIGIN`과 정확히 일치해야 합니다. 인증서의 신뢰 체인과 호스트명을 검증하는 클라이언트를 사용합니다.
