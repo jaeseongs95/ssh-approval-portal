@@ -30,8 +30,8 @@
     },
     {
       "path": "app.mjs",
-      "size": 31003,
-      "sha256": "c938b6e3be8455c2d775c4398532009c333a23dfd93297aa37fdb18c5c394444"
+      "size": 31135,
+      "sha256": "e2b6e4faa90926d01085f51459d653ae9e89f6987aef346442fdfb286111007d"
     },
     {
       "path": "bridge.mjs",
@@ -685,8 +685,8 @@
     },
     {
       "path": "src/adapters/storage/command-output.mjs",
-      "size": 11982,
-      "sha256": "62932d7bec4d2344a13dc1ae7e5cc507425e151013305e3305ef5018d54a84c0"
+      "size": 12248,
+      "sha256": "be7d9f0265b80fdeded46f1084463c13dc7dde93510dff0444b386ff69e1fd0e"
     },
     {
       "path": "src/adapters/storage/command-state.mjs",
@@ -1090,8 +1090,8 @@
     },
     {
       "path": "test/command-output.test.mjs",
-      "size": 15517,
-      "sha256": "7190888f9029b4db08270bc1d7677a25a8a1a60bbe376b571d252b0ae5285a7d"
+      "size": 17152,
+      "sha256": "e315f86c05b09eb7ca767fa77da8788faf1ec30ae21d786cf3669e07fd9710eb"
     },
     {
       "path": "test/command-policy-review.test.mjs",
@@ -1310,8 +1310,8 @@
     },
     {
       "path": "test/maintenance-durable.test.mjs",
-      "size": 6349,
-      "sha256": "27285bdc2e41a8dfc25294af6243fd3bff8337125832c25fc7d7fc3ad52999c6"
+      "size": 7571,
+      "sha256": "68ca3b4285e2b01547156b5b666b92a95f0c7eb517c53dd141e7491ea1de3a7f"
     },
     {
       "path": "test/maintenance.test.mjs",
@@ -1435,8 +1435,8 @@
     },
     {
       "path": "test/preservation-baseline.test.mjs",
-      "size": 11773,
-      "sha256": "c8b69d492d6171659caac3aaeff716bbf035cad9f4e142ef723bddde82b4e938"
+      "size": 13386,
+      "sha256": "02269c6a98a933b3a46f100a2ccbac105f26d5d5a7d594b10717542b6d19e9ac"
     },
     {
       "path": "test/preservation-integration.test.mjs",
