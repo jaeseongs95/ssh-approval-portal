@@ -5,7 +5,7 @@ import { mkdtemp, readFile, access, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
-import { gunzipSync } from 'node:zlib';
+import { gunzipSync, gzipSync } from 'node:zlib';
 import { preparePythonSource, preparePythonHelper, WINDOWS_PYTHON_SOURCE_ENVIRONMENT_REVISION } from '../src/adapters/ssh/python-source.mjs';
 
 const binding = { platform: 'windows', cwd: 'C:\\', pythonExecutable: 'C:\\Program Files\\Python\\python.exe',
@@ -21,6 +21,35 @@ const launcherOf = p => {
   return launcher;
 };
 const receiverOf = p => p.args[6];
+const replaceOnce = (text, before, after) => {
+  assert.equal(text.split(before).length, 2, '진단 계측점은 원문에서 한 번만 나타나야 합니다.');
+  return text.replace(before, after);
+};
+// 승인 계획이나 제품 코드를 바꾸지 않는 별도 무부작용 진단용 복사본이다.
+// 원시험의 시간초과를 재시도하거나 이 결과로 원시험의 실패를 덮지 않는다.
+const diagnosticBootstrapOf = p => {
+  const pyStage = name => `sys.stderr.write('AGS_PY_STAGE|'+str(time.time_ns()//1000000)+'|${name}\\n');sys.stderr.flush()\n`;
+  let receiver = replaceOnce(receiverOf(p), 'n=int(sys.argv[1])', `import time\n${pyStage('receiver-start')}n=int(sys.argv[1])`);
+  receiver = replaceOnce(receiver, 'b=sys.stdin.buffer.read(n+1)\n', `b=sys.stdin.buffer.read(n+1)\n${pyStage('receiver-read-complete')}`);
+  receiver = replaceOnce(receiver, "if v['elevate']:", `${pyStage('frame-verified')}if v['elevate']:`);
+  receiver = replaceOnce(receiver, "sys.argv=['<ssh-python-source-v1>',*v['argv']]", `${pyStage('source-compiled')}sys.argv=['<ssh-python-source-v1>',*v['argv']]`);
+  receiver = replaceOnce(receiver, 'exec(c,m.__dict__)\n', `${pyStage('source-start')}exec(c,m.__dict__)\n${pyStage('source-complete')}`);
+  const psStage = name => `psstage '${name}';`;
+  let launcher = launcherOf(p);
+  launcher = replaceOnce(launcher, receiverOf(p).replaceAll("'", "''"), receiver.replaceAll("'", "''"));
+  launcher = replaceOnce(launcher, "$ErrorActionPreference='Stop';", "$ErrorActionPreference='Stop';function psstage([string]$stage){[Console]::Error.WriteLine('AGS_PY_STAGE|'+[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()+'|'+$stage)};" + psStage('launcher-start'));
+  launcher = replaceOnce(launcher, 'Microsoft.PowerShell.Core\\Import-Module', psStage('module-start') + 'Microsoft.PowerShell.Core\\Import-Module');
+  launcher = replaceOnce(launcher, 'Microsoft.PowerShell.Utility\\Add-Type', psStage('module-complete') + psStage('add-type-start') + 'Microsoft.PowerShell.Utility\\Add-Type');
+  launcher = replaceOnce(launcher, '-ErrorAction Stop};$s=', '-ErrorAction Stop;' + psStage('add-type-complete') + '};$s=');
+  launcher = replaceOnce(launcher, '$p=[Diagnostics.Process]::Start($s);', psStage('child-start') + '$p=[Diagnostics.Process]::Start($s);' + psStage('child-started'));
+  launcher = replaceOnce(launcher, 'try{while(($n=', "$total=0;$hash=[Security.Cryptography.SHA256]::Create();try{" + psStage('native-read-start') + 'while(($n=');
+  launcher = replaceOnce(launcher, '{$i.Write($b,0,$n)}}finally{$i.Close()};$p.WaitForExit();',
+    "{[void]$hash.TransformBlock($b,0,$n,$b,0);$total+=$n;psstage ('native-read-bytes:'+$n+':'+$total);$i.Write($b,0,$n);psstage ('child-written:'+$total)}[void]$hash.TransformFinalBlock([byte[]]::new(0),0,0);psstage ('native-eof:'+$total+':'+[BitConverter]::ToString($hash.Hash).Replace('-','').ToLowerInvariant())}finally{" + psStage('child-input-close') + '$i.Close();$hash.Dispose()};' + psStage('child-wait-start') + '$p.WaitForExit();' + psStage('child-exited'));
+  const bootstrap = `& ([scriptblock]::Create([IO.StreamReader]::new([IO.Compression.GZipStream]::new([IO.MemoryStream]::new([Convert]::FromBase64String('${gzipSync(launcher, { level: 9 }).toString('base64')}')),[IO.Compression.CompressionMode]0)).ReadToEnd()))`;
+  assert.doesNotMatch(bootstrap, /["$`%\r\n]/);
+  assert.ok(bootstrap.length + p.command.length - launcherBootstrapOf(p).length <= 8000);
+  return { bootstrap, launcherSha256: createHash('sha256').update(launcher).digest('hex'), receiverSha256: createHash('sha256').update(receiver).digest('hex') };
+};
 const quotePayload = marker => `’;[IO.File]::WriteAllText('${marker.replaceAll("'", "''")}','injected');}catch{};#`;
 const maximumArgv = Array.from({ length: 8 }, (_, index) => 'x'.repeat(index === 7 ? 508 : 509));
 const traceInput = async (t, label, p, input, execute) => {
@@ -127,37 +156,39 @@ const pythonExecutable = process.env.SOLID_PYTHON ?? process.env.PYTHON;
 const ciWindows = process.platform === 'win32' && process.env.GITHUB_ACTIONS === 'true';
 // 실제 SSH와 동일하게 비동기로 입력을 닫고 출력을 동시에 비운다.
 // 제한은 유지하고 실패 시 어느 수명 단계가 끝났는지에 한정해 남긴다.
-const run = (t, label, p, input = p.transportStdin, host = 'direct') => traceInput(t, label, p, input, () => new Promise(resolve => {
+const run = (t, label, p, input = p.transportStdin, host = 'direct', diagnosticBootstrap) => traceInput(t, label, p, input, () => new Promise(resolve => {
   // Node의 cmd.exe 셸 호출과 동일하게 바깥 따옴표를 보존하고 CRT 재인용을 막는다.
   const child = spawn(host === 'cmd' ? 'cmd.exe' : 'powershell.exe', host === 'cmd' ? ['/d', '/s', '/c', `"${p.command}"`]
-    : powershellArguments(host === 'powershell-shell' ? p.command : launcherBootstrapOf(p)),
+    : powershellArguments(host === 'powershell-shell' ? p.command : diagnosticBootstrap ?? launcherBootstrapOf(p)),
     { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, windowsVerbatimArguments: host === 'cmd' });
   const events = [], stdout = [], stderr = [];
+  const started = Date.now();
+  const event = stage => events.push({ 단계: stage, 경과밀리초: Date.now() - started });
   let error, completed = false;
   const finish = (status = child.exitCode, signal = child.signalCode) => {
     if (completed) return;
     completed = true;
     clearTimeout(deadline);
     const result = { status, signal, error, stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8') };
-    if (error) t.diagnostic(JSON.stringify({ 진단: 'Python 직접 실행 수명', 사건: events,
+    if (error) t.diagnostic(JSON.stringify({ 진단: 'Python 직접 실행 수명', 프로세스번호: child.pid, 사건: events,
       stdoutBytes: Buffer.byteLength(result.stdout), stderrBytes: Buffer.byteLength(result.stderr), errorCode: error.code }));
     resolve(result);
   };
   const deadline = setTimeout(() => {
-    events.push('20초 제한 도달');
+    event('20초 제한 도달');
     error = Object.assign(Error('Python direct process timed out'), { code: 'ETIMEDOUT' });
     child.kill();
     child.stdin.destroy(); child.stdout.destroy(); child.stderr.destroy();
     finish();
   }, 20_000);
-  child.once('spawn', () => events.push('프로세스 시작'));
-  child.once('error', failure => { error = failure; events.push('프로세스 오류'); });
-  child.once('exit', () => events.push('프로세스 종료'));
-  child.once('close', (status, signal) => { events.push('스트림 닫힘'); finish(status, signal); });
+  child.once('spawn', () => event('프로세스 시작'));
+  child.once('error', failure => { error = failure; event('프로세스 오류'); });
+  child.once('exit', () => event('프로세스 종료'));
+  child.once('close', (status, signal) => { event('스트림 닫힘'); finish(status, signal); });
   child.stdout.on('data', bytes => stdout.push(bytes));
   child.stderr.on('data', bytes => stderr.push(bytes));
-  child.stdin.once('error', failure => { error ??= failure; events.push('입력 오류'); });
-  child.stdin.once('finish', () => events.push('입력 종료 전달'));
+  child.stdin.once('error', failure => { error ??= failure; event('입력 오류'); });
+  child.stdin.once('finish', () => event('입력 종료 전달'));
   child.stdin.end(input);
 }));
 
@@ -232,6 +263,31 @@ test('Windows source rejects truncated, altered and trailing bytes before effect
   });
   assert.equal(closed, 0);
   assert.equal(await readFile(marker, 'utf8'), 'once');
+});
+
+test('별도 무부작용 Python 진단은 준비·네이티브 입력·검증·자식 실행 단계를 구분한다', {
+  skip: !ciWindows, timeout: 30_000,
+}, async t => {
+  assert.ok(pythonExecutable);
+  const cwd = await mkdtemp(join(tmpdir(), 'windows-source-stages-'));
+  t.after(() => rm(cwd, { recursive: true, force: true }));
+  // 원 실패의 사용자 소스·효과는 다시 실행하지 않고 공개 경계의 고정 사례를 쓴다.
+  const p = plan('import sys\nassert sys.stdin.buffer.read()==b""\nprint("diagnostic source completed")\n', { pythonExecutable, cwd });
+  const instrumented = diagnosticBootstrapOf(p);
+  t.diagnostic(JSON.stringify({ 진단: 'Python 별도 단계 계측', 기준계획Digest: p.planDigest,
+    계측LauncherSha256: instrumented.launcherSha256, 계측ReceiverSha256: instrumented.receiverSha256 }));
+  const result = await run(t, '별도 진단: 준비·정확 입력·자식 수명', p, p.transportStdin, 'direct', instrumented.bootstrap);
+  const stages = result.stderr.split(/\r?\n/).filter(line => line.startsWith('AGS_PY_STAGE|'));
+  t.diagnostic(JSON.stringify({ 진단: 'Python 별도 단계 계측', 관측단계: stages, 원시험대체: false }));
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, 'diagnostic source completed\r\n');
+  assert.ok(stages.some(line => line.endsWith(`|native-eof:${p.manifest.transportBytes}:${p.manifest.transportSha256}`)));
+  for (const stage of ['launcher-start', 'module-start', 'module-complete', 'add-type-start', 'add-type-complete',
+    'child-start', 'child-started', 'receiver-start', 'receiver-read-complete', 'frame-verified', 'source-compiled',
+    'source-start', 'source-complete', 'child-input-close', 'child-wait-start', 'child-exited']) {
+    assert.ok(stages.some(line => line.endsWith('|' + stage)), `관측 누락: ${stage}`);
+  }
 });
 
 test('실제 Windows SSH의 Python 실행·비관리자 상승 거부·전송 전 승인·원문 무결성', {

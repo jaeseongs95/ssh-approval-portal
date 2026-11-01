@@ -8,6 +8,7 @@ import { Duplex, PassThrough, Readable, Writable } from 'node:stream';
 import { SSHConnection } from 'ssh-mcp/build/ssh/connection.js';
 import { createApplication } from '../app.mjs';
 import { createSshRuntime } from '../src/adapters/ssh/vendor.mjs';
+import { presentJob } from '../src/adapters/presentation/results.mjs';
 
 // 실제 앱·pinned SSHConnection.exec·SftpClient·전송 guard를 사용한다.
 // 네트워크만 결정적 대기로 대체하며 콜백을 무시하는 별도 executor는 쓰지 않는다.
@@ -37,7 +38,8 @@ transferTimeoutMs=3000
   const profiles = new Map(['win-read', 'win-write'].map(name => [name, { ...runtime.registry.getProfile(name) }]));
   const effects = { command: 0, sftp: 0, publish: 0, snapshot: 0, cleanup: 0 };
   const remote = new Map([['C:/approved/input.bin', bytes]]);
-  let barrier, flow, ensureCalls = 0, refused = false, lastChecks = 0, loseReply = false;
+  const stages = new Set();
+  let barrier, flow, ensureCalls = 0, refused = false, lastChecks = 0, loseReply = false, cleanupReply;
   const enter = async phase => {
     if (barrier?.phase === phase && !barrier.entered) {
       barrier.entered = true; barrier.arrived.resolve(); await barrier.release.promise;
@@ -48,17 +50,18 @@ transferTimeoutMs=3000
     const connection = new SSHConnection(structuredClone(profile), {}, new Map(), 'strict');
     connection.ensureConnected = async () => {
       ensureCalls++;
+      if (!connection.connected) throw Error('Synthetic connection loss');
       await enter(refused ? 'retry' : 'connect');
     };
-    connection.getClient = () => ({
+    connection.client = {
       exec(command, options, callback) {
         if (barrier?.phase === 'retry' && !refused) { refused = true; callback(Error('Synthetic channel refusal')); return; }
         const input = [];
         const stream = new Duplex({ read() {}, write(chunk, encoding, done) { input.push(Buffer.from(chunk)); done(); } });
         stream.stderr = new PassThrough(); stream.signal = () => {}; stream.close = () => stream.destroy();
         callback(null, stream);
-        setImmediate(() => {
-          let stdout = 'ok';
+        setImmediate(async () => {
+          let stdout = 'ok', exitCode = 0;
           if (command.includes('-File ')) {
             const payload = JSON.parse(Buffer.concat(input).toString('utf8'));
             effects[payload.action]++;
@@ -68,11 +71,16 @@ transferTimeoutMs=3000
               stdout = JSON.stringify({ published: true });
             } else if (payload.action === 'snapshot') {
               const body = remote.get(payload.remotePath); remote.set(stage, body);
+              stages.add(stage); await enter('staged-download');
               stdout = JSON.stringify({ size: body.length, sha256: sha(body) });
-            } else { remote.delete(stage); stdout = '{}'; }
+            } else {
+              assert.equal(payload.action, 'cleanup');
+              if (cleanupReply) { stdout = JSON.stringify(cleanupReply.data); exitCode = cleanupReply.exitCode; }
+              else { remote.delete(stage); stdout = JSON.stringify({ cleaned: true }); }
+            }
           } else effects.command++;
           if (loseReply) { stream.push(null); stream.emit('close', undefined); return; }
-          stream.push(Buffer.from(stdout)); stream.push(null); stream.emit('exit', 0); stream.emit('close', 0);
+          stream.push(Buffer.from(stdout)); stream.push(null); stream.emit('exit', exitCode); stream.emit('close', exitCode);
         });
       },
       sftp(callback) {
@@ -82,12 +90,14 @@ transferTimeoutMs=3000
           stat(path, done) { const body = remote.get(path); done(body ? null : Object.assign(Error('Missing fixture'), { code: 2 }), body && { size: body.length, mode: 0o100600 }); },
           createWriteStream(path) { const chunks = []; return new Writable({ write(chunk, encoding, done) { chunks.push(Buffer.from(chunk)); done(); }, final(done) { remote.set(path, Buffer.concat(chunks)); done(); } }); },
           createReadStream(path) { return Readable.from([remote.get(path)]); },
-          ext_openssh_hardlink(from, to, done) { remote.set(to, remote.get(from)); done(); },
+          ext_openssh_hardlink(from, to, done) { remote.set(to, remote.get(from)); stages.add(to); void enter('staged-upload').then(() => done()); },
           unlink(path, done) { remote.delete(path); done(); },
           end() {},
         });
       },
-    });
+    };
+    connection.connected = true;
+    connection.getClient = () => { if (!connection.client) throw Error('Synthetic connection loss'); return connection.client; };
     connections.set(name, connection);
   }
   runtime.registry.getProfile = name => profiles.get(name);
@@ -130,7 +140,7 @@ transferTimeoutMs=3000
       return result;
     };
   }
-  return { app, target, effects, remote, profiles, connections, policy,
+  return { app, target, effects, remote, profiles, connections, policy, stages,
     arm(phase, change) { ensureCalls = 0; refused = false; lastChecks = 0; barrier = { phase, change, arrived: deferred(), release: deferred() }; return barrier; },
     async submit(kind) {
       flow = kind;
@@ -147,6 +157,7 @@ transferTimeoutMs=3000
     },
     resetEffects() { for (const key of Object.keys(effects)) effects[key] = 0; },
     loseReply() { loseReply = true; },
+    failCleanup(mode) { cleanupReply = mode === 'refused' ? { exitCode: 1, data: { errorCode: 'OPERATION_FAILED' } } : { exitCode: 0, data: {} }; },
   };
 }
 
@@ -224,4 +235,69 @@ test('DISPATCH-BIND 원격 효과 뒤 응답 유실은 자동 재실행하지 �
   const f = await fixture(t); f.loseReply(); const id = await f.submit('names');
   assert.equal((await f.app.queue.wait(id)).state, 'failed');
   assert.equal(f.effects.command, 1); assert.throws(() => f.app.queue.start(id)); assert.equal(f.effects.command, 1);
+});
+
+test('DISPATCH-CLEANUP 부분 전송 뒤 승인 철회는 게시·수신을 막고 자기 part만 정리한다', { timeout: 30000 }, async t => {
+  for (const flow of ['upload', 'download']) for (const change of ['policy', 'expiry', 'maintenance']) await t.test(flow + '/' + change, async t => {
+    const f = await fixture(t), foreign = 'C:/ProgramData/ssh-approval-transfer/incoming/' + 'f'.repeat(48) + '.part';
+    const foreignBytes = Buffer.from('다른 작업의 임시자료'); f.remote.set(foreign, foreignBytes);
+    const gate = f.arm('staged-' + flow), id = await f.submit(flow);
+    await gate.arrived.promise;
+    const [ownStage] = [...f.stages]; assert.equal(f.stages.size, 1); assert.deepEqual(f.remote.get(ownStage), bytes);
+    if (change === 'policy') await f.policy();
+    if (change === 'expiry') { const deadline = f.target.queue.get(id).expiresAt; f.target.queue.now = () => deadline; }
+    if (change === 'maintenance') f.target.queue.maintenance = true;
+    gate.release.resolve();
+    const result = await f.app.queue.wait(id);
+    assert.equal(result.state, 'failed'); assert.equal(f.effects.publish, 0);
+    assert.equal(f.effects.sftp, flow === 'upload' ? 1 : 0);
+    assert.equal(f.effects.snapshot, flow === 'download' ? 1 : 0);
+    assert.equal(f.effects.cleanup, 1); assert.equal(f.remote.has(ownStage), false);
+    assert.deepEqual(f.remote.get(foreign), foreignBytes); assert.deepEqual(f.remote.get('C:/approved/input.bin'), bytes);
+    assert.equal(f.remote.has('C:/approved/output.bin'), false); assert.throws(() => f.app.queue.start(id));
+    f.target.queue.maintenance = false;
+  });
+});
+
+test('DISPATCH-CLEANUP 원래 대상·연결이 달라지면 삭제하지 않고 잔존 확인 필요를 남긴다', { timeout: 30000 }, async t => {
+  for (const flow of ['upload', 'download']) for (const change of ['target', 'connection-profile', 'host-key', 'disconnect', 'replaced-client']) await t.test(flow + '/' + change, async t => {
+    const f = await fixture(t), foreign = 'C:/ProgramData/ssh-approval-transfer/incoming/' + 'e'.repeat(48) + '.part';
+    const foreignBytes = Buffer.from('보존할 다른 임시자료'); f.remote.set(foreign, foreignBytes);
+    const gate = f.arm('staged-' + flow), id = await f.submit(flow); await gate.arrived.promise;
+    const [ownStage] = [...f.stages]; assert.equal(f.stages.size, 1);
+    // 새 publish/수신 권한은 철회하고 정리의 연결 결속만 독립 대조한다.
+    await f.policy();
+    const connection = f.connections.get(flow === 'download' ? 'win-read' : 'win-write');
+    if (change === 'target') f.profiles.get('win-write').host = 'changed.example.test';
+    if (change === 'connection-profile') connection.profile.user = 'changed-user';
+    if (change === 'host-key') f.profiles.get('win-write').trustedHostKey = 'SHA256:changed';
+    if (change === 'disconnect') { connection.connected = false; connection.client = null; }
+    if (change === 'replaced-client') connection.client = { ...connection.client };
+    gate.release.resolve();
+    const result = await f.app.queue.wait(id);
+    assert.equal(result.state, 'failed'); assert.equal(result.result.data.remoteCleanup, 'unconfirmed');
+    const transferId = ownStage.split('/').at(-1).slice(0, -5);
+    assert.equal(result.result.data.transferId, transferId);
+    const presented = presentJob(result);
+    assert.equal(presented.targetId, 'windows'); assert.equal(presented.result.structuredContent.transferId, transferId);
+    assert.match(result.result.texts[0], /원래 대상.*확인/);
+    assert.equal(f.effects.publish, 0); assert.equal(f.effects.sftp, flow === 'upload' ? 1 : 0); assert.equal(f.effects.cleanup, 0);
+    assert.deepEqual(f.remote.get(ownStage), bytes); assert.deepEqual(f.remote.get(foreign), foreignBytes);
+    assert.deepEqual(f.remote.get('C:/approved/input.bin'), bytes); assert.equal(f.remote.has('C:/approved/output.bin'), false);
+    assert.throws(() => f.app.queue.start(id));
+  });
+});
+
+test('DISPATCH-CLEANUP 본 작업 뒤 정리 응답이 거부·불완전이면 성공을 단정하지 않는다', async t => {
+  for (const flow of ['upload', 'download']) for (const mode of ['refused', 'missing-confirmation']) await t.test(flow + '/' + mode, async t => {
+    const f = await fixture(t); f.failCleanup(mode); const id = await f.submit(flow);
+    const result = await f.app.queue.wait(id), [ownStage] = [...f.stages];
+    assert.equal(result.state, 'failed'); assert.equal(result.result.data.remoteCleanup, 'unconfirmed');
+    assert.equal(presentJob(result).result.structuredContent.transferId, ownStage.split('/').at(-1).slice(0, -5));
+    assert.match(result.result.texts[0], /이미 반영됐거나.*남아 있을 수/);
+    assert.equal(f.effects[flow === 'upload' ? 'publish' : 'snapshot'], 1); assert.equal(f.effects.sftp, 1);
+    assert.equal(f.effects.cleanup, 1); assert.deepEqual(f.remote.get(ownStage), bytes);
+    if (flow === 'upload') assert.deepEqual(f.remote.get('C:/approved/output.bin'), bytes);
+    assert.throws(() => f.app.queue.start(id));
+  });
 });

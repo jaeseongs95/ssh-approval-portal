@@ -30,8 +30,8 @@
     },
     {
       "path": "app.mjs",
-      "size": 30775,
-      "sha256": "b0455a98d54d182032da83ddb1927fdcc4ad60c7c0d91a482c40955964ce10b1"
+      "size": 31003,
+      "sha256": "c938b6e3be8455c2d775c4398532009c333a23dfd93297aa37fdb18c5c394444"
     },
     {
       "path": "bridge.mjs",
@@ -215,8 +215,8 @@
     },
     {
       "path": "docs/windows-targets.ko.md",
-      "size": 14678,
-      "sha256": "f6dcb86231f64d088ef12a77eb6f23ff7027f13f0dc7f9eb9f2eabce9f2046bf"
+      "size": 15249,
+      "sha256": "4ec96f51508fca380519291c5fbd9f850f9ca2ea0c14b722b402a5461fbaaacf"
     },
     {
       "path": "helper/environment-helper.py",
@@ -650,13 +650,13 @@
     },
     {
       "path": "src/adapters/ssh/transfers.mjs",
-      "size": 7939,
-      "sha256": "144e37372636ecc297bef2e905ba6798bf03bbb97aebf35bd197ba9797a8b41e"
+      "size": 8939,
+      "sha256": "b4e497fe4d695e5c627bfc7b04560293cb18e27ee91befe049585e4a10614b31"
     },
     {
       "path": "src/adapters/ssh/vendor.mjs",
-      "size": 8512,
-      "sha256": "2c1c7a1d674dfe6ffc3c0a28c578e41868aa0ccd498efdcbf0ceefb0a442b906"
+      "size": 11422,
+      "sha256": "661e92f20888f2a4bbd3729a05dd0900b6a38b3bcc8f04668a9ca82fc4816b4c"
     },
     {
       "path": "src/adapters/ssh/windows-command.mjs",
@@ -1770,13 +1770,13 @@
     },
     {
       "path": "test/windows-command-line.test.mjs",
-      "size": 13535,
-      "sha256": "44cd23dff6767910247b9d22b31a20cdf41bb315f5659f24bc6a5717117573b7"
+      "size": 18980,
+      "sha256": "298c960400408e52a9b1f4f3cf5d44aa12d3982c42b089d79d296b31430b7f41"
     },
     {
       "path": "test/windows-dispatch-binding.test.mjs",
-      "size": 14450,
-      "sha256": "d7a72b17d0eb4a628a3277883bdf9bd82aab48d732f059f96d74b0feeb1024ac"
+      "size": 20406,
+      "sha256": "c68381346c187263bf7d132c1b9731ffb245160f12ac7b407446e875fc7b09f9"
     },
     {
       "path": "test/windows-file-contracts.test.mjs",
@@ -1800,8 +1800,8 @@
     },
     {
       "path": "test/windows-python-source.test.mjs",
-      "size": 21804,
-      "sha256": "41e97e3018cc6d9c5844cbc15af4c143d94438288d9d4ec3a0e8aa5b81995b49"
+      "size": 27514,
+      "sha256": "1967008be9bb55af04c073344aabd3686fe158efc8054202672c607dd075be13"
     },
     {
       "path": "test/windows-ssh-ci.ps1",

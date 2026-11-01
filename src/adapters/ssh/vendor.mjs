@@ -6,33 +6,37 @@ import { SftpClient } from 'ssh-mcp/build/ssh/sftp.js';
 import { redactText } from 'ssh-mcp/build/guard/redactor.js';
 import { preparePythonSource, preparePythonHelper } from './python-source.mjs';
 import { validateAgentCliPlan, projectAgentCliResult } from './agent-cli.mjs';
+import { windowsRemotePath } from '../../domain/validation.mjs';
 
 /** Per-operation view: dispatch authorization follows every connect/retry wait. */
-export function withDispatchGuard(connection, beforeDispatch = async () => {}, verifyConnection = () => {}) {
+export function withDispatchGuard(connection, beforeDispatch = async () => {}, verifyConnection = () => {}, { connectedOnly = false, clientView = client => client } = {}) {
   return new Proxy(connection, { get(target, key, receiver) {
     if (key === 'ensureConnected') return async () => {
       verifyConnection();
-      await target.ensureConnected();
+      if (connectedOnly) {
+        if (!target.isConnected()) throw Error('Original cleanup connection unavailable');
+      } else await target.ensureConnected();
       await beforeDispatch();
     };
     if (key === 'getClient') return () => {
       beforeDispatch.verify?.();
       verifyConnection();
-      return target.getClient();
+      const client = target.getClient();
+      return clientView(client);
     };
     const value = Reflect.get(target, key, target);
     return typeof value === 'function' ? value.bind(key === 'exec' ? receiver : target) : value;
   } });
 }
 
-async function guardedConnection(registry, profile, beforeDispatch) {
+async function connectionBinding(registry, profile) {
   const configured = registry.getProfile && JSON.stringify(registry.getProfile(profile));
   const connection = await registry.getOrCreate(profile);
   const snapshot = configured ?? JSON.stringify(connection.profile);
   const verify = () => {
     if (JSON.stringify(connection.profile) !== snapshot || registry.getProfile && JSON.stringify(registry.getProfile(profile)) !== snapshot) throw Error('SSH dispatch profile changed');
   };
-  return withDispatchGuard(connection, beforeDispatch, verify);
+  return { connection, verify };
 }
 
 const defaultRedact = text => redactText(text, { entropyScan: true });
@@ -113,7 +117,8 @@ export async function createSshRuntime(settings) {
     registry, classify: classifyCommand, auditRedact,
     async executeCommand(profile, command, beforeDispatch = async () => {}, options = {}) {
       if (Object.keys(options).some(key => key !== 'stdin') || options.stdin !== undefined && typeof options.stdin !== 'string') throw Error('Invalid command transport options');
-      const result = await (await guardedConnection(registry, profile, beforeDispatch)).exec(command, options);
+      const binding = await connectionBinding(registry, profile);
+      const result = await withDispatchGuard(binding.connection, beforeDispatch, binding.verify).exec(command, options);
       return commandOutcome(result, auditRedact);
     },
     executePythonSource: (plan, verify, beforeDispatch) => executePythonSource(registry, plan, verify, beforeDispatch),
@@ -124,10 +129,51 @@ export async function createSshRuntime(settings) {
 /** Connections expose a narrow transport contract, never vendor profile objects. */
 export function createSshTransport(registry) {
   return {
-    async connect(profile, { beforeDispatch } = {}) {
-      const connection = await guardedConnection(registry, profile, beforeDispatch);
+    async connect(profile, { beforeDispatch, cleanup } = {}) {
+      // Cleanup is a single fixed helper action, never a caller-supplied command/path.
+      let cleanupCommand, cleanupInput;
+      if (cleanup !== undefined) {
+        if (!cleanup || Object.keys(cleanup).some(key => !['platform', 'helper', 'id'].includes(key)) || !/^[a-f0-9]{48}$/.test(cleanup.id)) throw Error('Invalid cleanup binding');
+        if (cleanup.platform === 'windows') {
+          windowsRemotePath(cleanup.helper);
+          if (!/^[A-Za-z]:[\\/][A-Za-z0-9_./\\ -]+$/.test(cleanup.helper)) throw Error('Invalid cleanup helper');
+          cleanupCommand = `powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "${cleanup.helper}"`;
+        } else if (cleanup.platform === 'linux' && /^\/[A-Za-z0-9_./-]+$/.test(cleanup.helper)) cleanupCommand = cleanup.helper;
+        else throw Error('Invalid cleanup helper');
+        cleanupInput = JSON.stringify({ action: 'cleanup', id: cleanup.id });
+      }
+      const binding = await connectionBinding(registry, profile);
+      let originalClient, attempted = false;
+      const connection = withDispatchGuard(binding.connection, beforeDispatch, binding.verify, { clientView: client => new Proxy(client, { get(target, key) {
+        if (key === 'exec' || key === 'sftp') return (...args) => {
+          const callback = args.pop();
+          attempted = true;
+          return target[key](...args, (error, channel) => {
+            if (!error) originalClient ??= target;
+            callback(error, channel);
+          });
+        };
+        const value = Reflect.get(target, key, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      } }) });
       const idleTimeoutMs = connection.profile.transferTimeoutMs;
+      const verifyCleanup = () => {
+        beforeDispatch?.cleanup?.();
+        binding.verify();
+        if (!originalClient || !binding.connection.isConnected() || binding.connection.getClient() !== originalClient) throw Error('Original cleanup connection changed');
+      };
+      const cleanupGuard = async () => verifyCleanup();
+      cleanupGuard.verify = verifyCleanup;
+      const cleanupConnection = withDispatchGuard(binding.connection, cleanupGuard, binding.verify, { connectedOnly: true });
       return {
+        ...(cleanupCommand === undefined ? {} : { cleanup() {
+          if (!originalClient) {
+            // A request with no confirmed channel can still have reached the host.
+            if (attempted) throw Error('Remote staging outcome unconfirmed');
+            return Promise.resolve({ exitCode: 0, stdout: '{"cleaned":true}' });
+          }
+          return cleanupConnection.exec(cleanupCommand, { stdin: cleanupInput, timeoutMs: idleTimeoutMs });
+        } }),
         call(command, payload) { return connection.exec(command, { stdin: JSON.stringify(payload), timeoutMs: idleTimeoutMs }); },
         upload(source, remotePath, { maxBytes }) {
           return new SftpClient(connection).uploadFile(source, remotePath, { maxBytes, idleTimeoutMs, overwrite: false, mode: 0o600 });

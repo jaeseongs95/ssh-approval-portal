@@ -132,6 +132,9 @@ export async function createApplication({ registry, classify, executeCommand, ex
       };
       // The adapter also calls this synchronously at getClient(), after the final await.
       beforeDispatch.verify = verify;
+      // Only the transfer adapter's fixed own-stage cleanup uses this authority.
+      // Revocation stops new work, while the original target identity stays mandatory.
+      beforeDispatch.cleanup = () => definition.verify();
       return beforeDispatch;
     };
     const checkedExecute = async (profile, command, id = randomBytes(24).toString('hex'), beforeDispatch = dispatchGuard(id)) => {

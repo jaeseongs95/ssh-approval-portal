@@ -24,6 +24,10 @@ function fileFailure(error) {
   return { failed: true, texts: [`${error.code}: ${fileFailures.get(error.code)}`], data: { errorCode: error.code } };
 }
 
+const cleanupUnconfirmed = transferId => ({ failed: true,
+  texts: [`원격 임시파일 정리를 확인하지 못했습니다. 작업이 이미 반영됐거나 원래 대상에 임시자료가 남아 있을 수 있습니다. 관리자가 원래 대상과 전송 상태를 확인하기 전 재전송하지 마세요. 자동으로 재시도하지 않습니다. 전송 식별자: ${transferId}`],
+  data: { errorCode: 'OPERATION_FAILED', remoteCleanup: 'unconfirmed', transferId } });
+
 export class Transfers {
   constructor(registry, store, { platform = 'linux', helper = platform === 'windows' ? 'C:/ProgramData/ssh-approval-portal/windows-file-helper.ps1' : '/usr/local/libexec/ssh-approval-file-helper', remoteStage = platform === 'windows' ? 'C:/ProgramData/ssh-approval-transfer/incoming' : '/var/lib/ssh-approval-transfer/incoming', readProfile = 'aws-readonly', writeProfile = 'aws-local', transport = createSshTransport(registry) } = {}) {
     if (!['linux', 'windows'].includes(platform)) throw Error('Unsupported remote platform');
@@ -40,7 +44,7 @@ export class Transfers {
   }
   async call(session, action, op) {
     const command = this.platform === 'windows' ? `powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "${this.helper}"` : `${op.elevate ? 'sudo -n ' : ''}${this.helper}`;
-    const result = await session.call(command, { action, id: op.artifactId, remotePath: op.remotePath, overwrite: op.overwrite, sha256: op.sha256, size: op.size, maxBytes: this.store.maxBytes,
+    const result = action === 'cleanup' && session.cleanup ? await session.cleanup() : await session.call(command, { action, id: op.artifactId, remotePath: op.remotePath, overwrite: op.overwrite, sha256: op.sha256, size: op.size, maxBytes: this.store.maxBytes,
       ...(this.platform === 'windows' ? { elevate: op.elevate === true } : {}) });
     let data;
     try { data = JSON.parse(result.stdout); } catch { throw new RemoteFileError(); }
@@ -49,6 +53,7 @@ export class Transfers {
       throw new RemoteFileError(result.exitCode === 1 && !result.signal && fileFailures.has(data?.errorCode) ? data.errorCode : undefined);
     }
     if (!data || typeof data !== 'object' || Array.isArray(data) || data.error || data.errorCode) throw new RemoteFileError();
+    if (action === 'cleanup' && session.cleanup && data.cleaned !== true) throw new RemoteFileError();
     return data;
   }
   async upload(op, beforeDispatch) {
@@ -57,7 +62,7 @@ export class Transfers {
     const binding = fileTargetBinding(op);
     if (binding ? item.fileTargetBound !== true || item.targetId !== binding.targetId || item.targetRevision !== binding.targetRevision : item.fileTargetBound === true) throw Error('Upload target does not match frozen operation');
     if (item.sha256 !== op.sha256 || item.size !== op.size || item.remotePath !== op.remotePath || item.overwrite !== op.overwrite || item.elevate !== op.elevate) throw Error('Upload does not match frozen operation');
-    const session = await this.transport.connect(this.writeProfile, { beforeDispatch });
+    const session = await this.transport.connect(this.writeProfile, { beforeDispatch, cleanup: { platform: this.platform, helper: this.helper, id: item.id } });
     const fd = await this.store.verified(item.id);
     const staged = { ...op, artifactId: item.id };
     let needsCleanup = false;
@@ -76,7 +81,12 @@ export class Transfers {
       return fileFailure(error);
     } finally {
       try { await fd.close(); }
-      finally { if (needsCleanup) await this.call(session, 'cleanup', { ...staged, elevate: false }).catch(() => {}); }
+      finally {
+        if (needsCleanup) {
+          try { await this.call(session, 'cleanup', { ...staged, elevate: false }); }
+          catch { if (session.cleanup) return cleanupUnconfirmed(item.id); }
+        }
+      }
     }
   }
   async download(op, beforeDispatch) {
@@ -87,12 +97,17 @@ export class Transfers {
     let session;
     const staged = { ...op, artifactId: item.id };
     try {
-      session = await this.transport.connect(op.elevate ? this.writeProfile : this.readProfile, { beforeDispatch });
+      session = await this.transport.connect(op.elevate ? this.writeProfile : this.readProfile, { beforeDispatch, cleanup: { platform: this.platform, helper: this.helper, id: item.id } });
       const metadata = await this.call(session, 'snapshot', staged);
       const ready = await this.store.receiveDownload(item.id, metadata, destination => session.download(`${this.remoteStage}/${item.id}.part`, destination, { maxBytes: this.store.maxBytes }));
       return { failed: false, texts: ['Server file ready. It has not been saved to your device or delivered to the agent. Use the file card or the administrator page to save it.'], data: { artifactId: ready.id, fileName: ready.fileName, size: ready.size, sha256: ready.sha256 } };
     } catch (err) { await this.store.remove(item.id); return fileFailure(err); }
-    finally { if (session) await this.call(session, 'cleanup', { ...staged, elevate: false }).catch(() => {}); }
+    finally {
+      if (session) {
+        try { await this.call(session, 'cleanup', { ...staged, elevate: false }); }
+        catch { if (session.cleanup) return cleanupUnconfirmed(item.id); }
+      }
+    }
   }
 }
 
