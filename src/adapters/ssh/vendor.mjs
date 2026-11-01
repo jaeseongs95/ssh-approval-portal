@@ -39,6 +39,7 @@ async function executeSourcePlan(registry, plan, verify, options = {}, prepare =
   const exact = prepare({ source: plan.stdin, argv: JSON.parse(submitted.argvJson), cwd: submitted.cwd, elevate: submitted.elevate,
     targetId: submitted.targetId, targetRevision: submitted.targetRevision, profile: submitted.profile, environmentRevision: submitted.environmentRevision, ...(submitted.platform === 'windows' ? { platform: 'windows', pythonExecutable: submitted.interpreter } : {}) });
   if (exact.command !== plan.command || exact.planDigest !== plan.planDigest
+    || exact.transportStdin !== plan.transportStdin
     || JSON.stringify(exact.manifest) !== JSON.stringify(submitted) || JSON.stringify(exact.args) !== JSON.stringify(plan.args)) throw Error('Source execution plan changed');
   const m = exact.manifest;
   const check = () => {
@@ -65,7 +66,7 @@ async function executeSourcePlan(registry, plan, verify, options = {}, prepare =
     return typeof value === 'function' ? value.bind(target) : value;
   } });
   let result;
-  try { result = await connection.exec.call(guarded, exact.command, { stdin: exact.stdin, ...options }); }
+  try { result = await connection.exec.call(guarded, exact.command, { stdin: exact.transportStdin ?? exact.stdin, ...options }); }
   catch { throw Error('Source execution result unknown; do not retry automatically'); }
   return result;
 }

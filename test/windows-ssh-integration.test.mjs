@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, writeFile, access, readdir } from 'node:fs/promises';
+import { readFile, writeFile, access, readdir, mkdir } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { join, dirname, win32 } from 'node:path';
 import { createSshRuntime, createSshTransport } from '../src/adapters/ssh/vendor.mjs';
@@ -24,14 +24,33 @@ test('실제 Windows SSH 명령·승인·파일 전송 경계', {
   assert.equal(process.platform, 'win32');
   assert.equal(process.env.GITHUB_ACTIONS, 'true');
   const fixture = JSON.parse(await readFile(fixturePath, 'utf8'));
-  const { wrapWindowsCommand, prepareWindowsCommand } = await import('../src/domain/target-platform.mjs');
+  const { wrapWindowsCommand, prepareWindowsCommand, commandNamesForTarget } = await import('../src/domain/target-platform.mjs');
   const runtime = await createSshRuntime({ BRIDGE_CONFIG_PATH: fixture.configPath, BRIDGE_HOST_KEY_MODE: 'strict' });
   const transport = createSshTransport(runtime.registry);
+  const helperFailures = [];
+  const observedTransport = { async connect(...args) {
+    const session = await transport.connect(...args);
+    return { ...session, async call(command, payload) {
+      const result = await session.call(command, payload);
+      if (result.exitCode !== 0) {
+        let data;
+        try { data = JSON.parse(result.stdout); } catch { data = {}; }
+        const steps = ['write_security', 'write_times', 'verify_security', 'verify_times'];
+        const codes = ['PARENT_NOT_FOUND', 'FILE_NOT_FOUND', 'PERMISSION_DENIED', 'DESTINATION_EXISTS', 'UNSAFE_PATH', 'STAGING_UNAVAILABLE', 'FILE_CHANGED', 'FILE_TOO_LARGE', 'INVALID_REQUEST', 'OPERATION_FAILED'];
+        helperFailures.push({ ...(['authorize', 'publish', 'snapshot', 'cleanup'].includes(payload.action) ? { action: payload.action } : {}),
+          ...(codes.includes(data.errorCode) ? { errorCode: data.errorCode } : {}),
+          ...(steps.includes(data.nativeStep) ? { nativeStep: data.nativeStep } : {}),
+          ...(Number.isSafeInteger(data.nativeError) && data.nativeError >= 0 && data.nativeError <= 0xffffffff ? { nativeError: data.nativeError } : {}) });
+      }
+      return result;
+    } };
+  } };
   const store = new Artifacts(fixture.artifactRoot, { maxBytes: 1_048_576, budget: 8_388_608 });
   await store.init();
   const transfers = createTransferExecutor(runtime.registry, store, {
     platform: 'windows', helper: fixture.helper, remoteStage: fixture.stageRoot,
     readProfile: 'windows-read', writeProfile: 'windows-write',
+    transport: observedTransport,
   });
   const remote = name => win32.join(fixture.fileRoot, name).replaceAll('\\', '/');
   const connection = await runtime.registry.getOrCreate('windows-write');
@@ -139,6 +158,25 @@ test('실제 Windows SSH 명령·승인·파일 전송 경계', {
       assert.equal(result.stdout, '한글 작업 폴더:' + fixture.fileRoot);
     });
 
+    await t.test('곡선 따옴표는 실제 PowerShell 구문 분석과 명령 이름 승인에서 보수적으로 처리한다', async () => {
+      const text = "whoami.exe 'ok’; calc.exe; #'";
+      assert.equal(commandNamesForTarget({ platform: 'windows' }, text).complete, false);
+      const encoded = Buffer.from(text, 'utf16le').toString('base64');
+      const script = `$source=[Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('${encoded}'));$tokens=$null;$errors=$null;$ast=[System.Management.Automation.Language.Parser]::ParseInput($source,[ref]$tokens,[ref]$errors);$commands=$ast.FindAll({param($node)$node -is [System.Management.Automation.Language.CommandAst]},$true);foreach($node in $commands){[Console]::WriteLine($node.GetCommandName())}`;
+      const result = await call(script);
+      assert.equal(result.exitCode, 0, result.stderr);
+      assert.deepEqual(result.stdout.trim().split(/\r?\n/), ['whoami.exe', 'calc.exe']);
+    });
+
+    await t.test('한글·작은따옴표·네 곡선 따옴표 작업 폴더는 데이터로 복원된다', async () => {
+      const cwd = win32.join(fixture.fileRoot, "한글 owner's ‘왼쪽’ “오른쪽”");
+      await mkdir(cwd);
+      const prepared = prepareWindowsCommand('[Console]::Write((Microsoft.PowerShell.Management\\Get-Location).Path+"|"+[IO.Directory]::GetCurrentDirectory())', { workdir: cwd });
+      const result = await connection.exec(prepared.command, { stdin: prepared.stdin });
+      assert.equal(result.exitCode, 0, result.stderr);
+      assert.equal(result.stdout, cwd + '|' + cwd);
+    });
+
     await t.test('명령 수신기는 입력 손상·추가·잘림을 거부하고 EOF 전에는 실행하지 않는다', async () => {
       const marker = remote('command-eof-marker.txt');
       const raw = `[IO.File]::WriteAllText('${marker}', 'once');[Console]::Write('EOF 완료')`;
@@ -153,10 +191,17 @@ test('실제 Windows SSH 명령·승인·파일 전송 경계', {
       await connection.ensureConnected();
       const channel = await new Promise((resolve, reject) => connection.getClient().exec(prepared.command,
         (error, stream) => error ? reject(error) : resolve(stream)));
+      const events = [];
+      let stdout = '', stderr = '', exitCode, signal, outputEnded = false;
+      const closeAfterExit = () => { if (exitCode !== undefined && outputEnded) channel.close(); };
       const finished = new Promise((resolve, reject) => {
         channel.on('error', reject);
-        channel.resume(); channel.stderr.resume();
-        channel.on('close', (code, signal) => resolve({ code, signal }));
+        channel.on('data', bytes => { stdout += bytes.toString('utf8'); });
+        channel.stderr.on('data', bytes => { stderr += bytes.toString('utf8'); });
+        channel.on('finish', () => events.push('로컬 EOF 전송 완료'));
+        channel.on('exit', (code, value) => { events.push('원격 종료 코드'); exitCode = code; signal = value; closeAfterExit(); });
+        channel.on('end', () => { events.push('원격 표준출력 EOF'); outputEnded = true; closeAfterExit(); });
+        channel.on('close', (code, value) => { events.push('SSH 채널 닫힘'); resolve({ code: code ?? exitCode, signal: value ?? signal }); });
       });
       finished.catch(() => {});
       let deadline;
@@ -164,6 +209,7 @@ test('실제 Windows SSH 명령·승인·파일 전송 경계', {
         deadline = setTimeout(() => reject(Error('명령 EOF 수신기 응답 시간초과')), 60_000);
       })]);
       bounded.catch(() => {});
+      let complete = false;
       try {
         channel.write(exact);
         await new Promise(resolve => setTimeout(resolve, 1500));
@@ -171,8 +217,23 @@ test('실제 Windows SSH 명령·승인·파일 전송 경계', {
         channel.end();
         const result = await bounded;
         assert.equal(result.code, 0); assert.ok(!result.signal);
+        assert.equal(stdout, 'EOF 완료'); assert.equal(stderr, '');
+        assert.ok(outputEnded, '원격 표준출력 EOF가 확인되지 않음');
         assert.equal(await readFile(marker, 'utf8'), 'once');
-      } finally { clearTimeout(deadline); channel.end(); channel.close(); }
+        complete = true;
+      } finally {
+        t.diagnostic(JSON.stringify({ 진단: '명령 EOF 수명', 사건: events, exitCode, signal, stdout, stderr,
+          효과확인: await readFile(marker, 'utf8').then(value => value === 'once', () => false) }));
+        clearTimeout(deadline); channel.end();
+        if (!complete) {
+          try { channel.signal('KILL'); }
+          catch (error) { t.diagnostic('시험 채널 중단: ' + error.message); }
+          // 이 시험 프로세스에서만 쓰는 연결이다. 실패 채널이 Node 종료를 붙들지 않게 정리한다.
+          try { connection.getClient().destroy(); }
+          catch (error) { t.diagnostic('시험 연결 정리: ' + error.message); }
+        }
+        channel.close();
+      }
     });
 
     await t.test('대기·거부 요청은 파일을 만들지 않고 승인 요청은 정확한 바이트를 왕복한다', async () => {
@@ -208,7 +269,8 @@ test('실제 Windows SSH 명령·승인·파일 전송 경계', {
       assert.equal(refused.failed, true);
       assert.equal(refused.data.errorCode, 'DESTINATION_EXISTS');
       assert.deepEqual(await readFile(op.remotePath), Buffer.alloc(0));
-      assert.equal((await transfers.upload(await uploadOperation('empty.bin', Buffer.from('승인된 교체'), true))).failed, false);
+      const replaced = await transfers.upload(await uploadOperation('empty.bin', Buffer.from('승인된 교체'), true));
+      assert.equal(replaced.failed, false, JSON.stringify({ errorCode: replaced.data?.errorCode, helper: helperFailures.slice(-3) }));
       assert.deepEqual(await readFile(op.remotePath), Buffer.from('승인된 교체'));
     });
 

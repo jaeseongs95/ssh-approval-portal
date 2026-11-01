@@ -73,7 +73,7 @@ function Describe-Result($result) {
         'UNSAFE_PATH', 'STAGING_UNAVAILABLE', 'FILE_CHANGED', 'FILE_TOO_LARGE', 'INVALID_REQUEST', 'OPERATION_FAILED')) { $code = $result.data.errorCode }
     $step = 'none'
     if ($result.data.nativeStep -cin @('native', 'create_directory', 'inspect', 'open', 'filesystem', 'final_path', 'read_security',
-        'remove', 'rename_replace', 'rename_new', 'write_security', 'write_times')) { $step = $result.data.nativeStep }
+        'remove', 'rename_replace', 'rename_new', 'write_security', 'write_times', 'verify_security', 'verify_times', 'read_label', 'write_label', 'verify_label')) { $step = $result.data.nativeStep }
     $number = 0
     if ($result.data.nativeError -is [int] -and $result.data.nativeError -gt 0) { $number = $result.data.nativeError }
     return ('exit=' + [int]$result.exitCode + '; code=' + $code + '; step=' + $step + '; native=' + $number)
@@ -97,45 +97,47 @@ using System;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
+using Microsoft.Win32.SafeHandles;
 public static class RestrictedAdministratorTest {
     [StructLayout(LayoutKind.Sequential)]
     struct SidAndAttributes { public IntPtr Sid; public uint Attributes; }
     [DllImport("advapi32.dll", SetLastError = true)]
     static extern bool CreateRestrictedToken(IntPtr token, uint flags, uint disableCount, ref SidAndAttributes disable,
-        uint privilegeCount, IntPtr privileges, uint restrictCount, IntPtr restrict, out IntPtr result);
-    [DllImport("kernel32.dll")]
-    static extern bool CloseHandle(IntPtr handle);
-    public static WindowsImpersonationContext Impersonate() {
+        uint privilegeCount, IntPtr privileges, uint restrictCount, IntPtr restrict, out SafeAccessTokenHandle result);
+    public static SafeAccessTokenHandle CreateToken() {
         byte[] bytes = new byte[68];
         SecurityIdentifier admin = new SecurityIdentifier("S-1-5-32-544");
         admin.GetBinaryForm(bytes, 0);
         GCHandle pin = GCHandle.Alloc(bytes, GCHandleType.Pinned);
-        IntPtr restricted = IntPtr.Zero;
+        SafeAccessTokenHandle restricted = null;
         try {
             SidAndAttributes sid = new SidAndAttributes { Sid = pin.AddrOfPinnedObject(), Attributes = 0 };
             using (WindowsIdentity current = WindowsIdentity.GetCurrent()) {
                 if (!CreateRestrictedToken(current.Token, 0, 1, ref sid, 0, IntPtr.Zero, 0, IntPtr.Zero, out restricted))
                     throw new Win32Exception(Marshal.GetLastWin32Error());
             }
-            return WindowsIdentity.Impersonate(restricted);
-        } finally { if (restricted != IntPtr.Zero) CloseHandle(restricted); pin.Free(); }
+            return restricted;
+        } catch { if (restricted != null) restricted.Dispose(); throw; }
+        finally { pin.Free(); }
     }
 }
 '@ | Out-Null
     [SshApproval.WindowsFiles]::RequireAdministrator()
-    $restrictedContext = [RestrictedAdministratorTest]::Impersonate()
+    $restrictedToken = [RestrictedAdministratorTest]::CreateToken()
     try {
-        $denied = $false
-        try { [SshApproval.WindowsFiles]::RequireAdministrator() }
-        catch {
-            $failure = $_.Exception
-            while ($null -ne $failure) {
-                if ($failure.PSObject.Properties['Code'] -and $failure.Code -ceq 'PERMISSION_DENIED') { $denied = $true; break }
-                $failure = $failure.InnerException
+        [Security.Principal.WindowsIdentity]::RunImpersonated($restrictedToken, [Action] {
+            $denied = $false
+            try { [SshApproval.WindowsFiles]::RequireAdministrator() }
+            catch {
+                $failure = $_.Exception
+                while ($null -ne $failure) {
+                    if ($failure.PSObject.Properties['Code'] -and $failure.Code -ceq 'PERMISSION_DENIED') { $denied = $true; break }
+                    $failure = $failure.InnerException
+                }
             }
-        }
-        Assert-True $denied 'deny-only Administrators token cannot request elevation'
-    } finally { $restrictedContext.Dispose() }
+            Assert-True $denied 'deny-only Administrators token cannot request elevation'
+        })
+    } finally { $restrictedToken.Dispose() }
     $fixtureSddl = 'D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;' + $sid + ')'
     [SshApproval.WindowsFiles]::CreatePrivateDirectory($WorkRoot, $fixtureSddl, $sid, $sid, $false)
     $fixtureCreated = $true
@@ -222,6 +224,14 @@ public static class RestrictedAdministratorTest {
     $protectedSddl = (Get-Acl -LiteralPath $script:target).Sddl
     $result = Call $request
     Assert-True ($result.exitCode -eq 0 -and (Get-Acl -LiteralPath $script:target).Sddl -ceq $protectedSddl) 'overwrite retains protected destination DACL'
+    $null = & icacls.exe $script:target /setintegritylevel 'L'
+    Assert-True ($LASTEXITCODE -eq 0) 'fixture mandatory low integrity label is set'
+    $labelBefore = (& icacls.exe $script:target) -join "`n"
+    Assert-True ($LASTEXITCODE -eq 0) 'fixture mandatory label can be read'
+    $result = Call $request
+    Assert-True ($result.exitCode -eq 0 -and $result.data.published) ('overwrite retains mandatory label; ' + (Describe-Result $result))
+    $labelAfter = (& icacls.exe $script:target) -join "`n"
+    Assert-True ($LASTEXITCODE -eq 0 -and $labelAfter -ceq $labelBefore) 'overwrite cannot replace a mandatory low integrity label with its default label'
     $request.action = 'cleanup'
     $result = Call $request
     Assert-True ($result.exitCode -eq 0 -and $result.data.cleaned) 'cleanup staged data'

@@ -2,7 +2,7 @@ import { safetyFailureDetails, validateAssessment } from '../domain/safety.mjs';
 import { assessmentContext, callerContext } from '../domain/execution-context.mjs';
 
 /** Observation only. No execution, decision, or credential ports. Process-local cache. */
-export function createRequestSafety({ queue, assessor, maxCalls = 100, now = () => Date.now() }) {
+export function createRequestSafety({ queue, assessor, targetPlatform = () => 'linux', maxCalls = 100, now = () => Date.now() }) {
   if (!Number.isSafeInteger(maxCalls) || maxCalls < 1 || maxCalls > 10000) throw Error('Invalid Jev call budget');
   const observations = new Map();
   let calls = 0;
@@ -12,10 +12,13 @@ export function createRequestSafety({ queue, assessor, maxCalls = 100, now = () 
       if (!job || job.kind !== 'command') throw Error('Select a command request');
       // This legacy observation path has no source disclosure grant or private body.
       if (job.operation.sourceContract) throw Error('Use the recorded source evaluation; receiver-only observation is unavailable');
+      const platform = targetPlatform(job);
+      if (!['linux', 'windows'].includes(platform)) throw Error('Invalid target platform');
       const situation = [callerContext(job.operation?.context), callerContext(context)].filter(Boolean).join('\n\n');
       const detailedContext = assessmentContext(situation, { targetId: job.targetId ?? 'default',
         targetDisplayName: job.targetDisplayName, targetRevision: job.targetRevision,
-        profile: job.profile, sshTarget: job.target, commandClass: job.commandClass, requestState: job.state }, 'Observe risk only; owner approval remains required and no command is executed by this assessment');
+        profile: job.profile, sshTarget: job.target, commandClass: job.commandClass, requestState: job.state,
+        ...(platform === 'windows' ? { targetPlatform: 'windows', commandLanguage: 'windows-powershell-5.1' } : {}) }, 'Observe risk only; owner approval remains required and no command is executed by this assessment');
       const cached = observations.get(id);
       if (cached) {
         const result = structuredClone(await cached.result);
@@ -41,7 +44,7 @@ export function createRequestSafety({ queue, assessor, maxCalls = 100, now = () 
         let result;
         try { result = await assessor.assess({ command: job.command, target: base.targetId,
           environment: job.targetDisplayName || 'SSH target; operating system unspecified',
-          context: detailedContext }); }
+          context: detailedContext }, { targetPlatform: platform }); }
         catch { result = { status: 'unavailable', reason: 'request_failed' }; }
         const assessment = validateAssessment(result) ?? { status: 'unavailable',
           ...safetyFailureDetails(result) };

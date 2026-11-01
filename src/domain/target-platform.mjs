@@ -33,8 +33,9 @@ function workingDirectoryPrelude(workdir) {
   if (workdir === undefined) return '';
   if (!utf8WithinLimit(workdir, 512) || !/^[a-z]:[\\/]/i.test(workdir) || /[\u0000-\u001f\u007f-\u009f\u061c\u200b\u200e\u200f\u2028-\u202e\u2060-\u2064\u2066-\u2069\ufeff<>"|?*]/.test(workdir)
     || workdir.slice(2).includes(':') || workdir.split(/[\\/]/).slice(1).some(part => part === '.' || part === '..' || /[. ]$/.test(part))) throw Error('Invalid Windows working directory');
-  const literal = workdir.replaceAll("'", "''");
-  return `${importModule('Microsoft.PowerShell.Management', false)}$workdir='${literal}';Microsoft.PowerShell.Management\\Set-Location -LiteralPath $workdir -ErrorAction Stop;[IO.Directory]::SetCurrentDirectory($workdir);`;
+  // 경로의 곡선 따옴표도 PowerShell 구문으로 해석되지 않도록 데이터로 복원한다.
+  const encoded = Buffer.from(workdir, 'utf16le').toString('base64');
+  return `${importModule('Microsoft.PowerShell.Management', false)}$workdir=[Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('${encoded}'));Microsoft.PowerShell.Management\\Set-Location -LiteralPath $workdir -ErrorAction Stop;[IO.Directory]::SetCurrentDirectory($workdir);`;
 }
 
 export function wrapWindowsCommand(command) {

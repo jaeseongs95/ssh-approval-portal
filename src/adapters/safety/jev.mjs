@@ -1,6 +1,6 @@
 import { SAFETY_PROTOCOL, SAFETY_QUESTION, safetyInput, validateAssessment, isJevModel, assessmentDiagnostic } from '../../domain/safety.mjs';
 import { COMMAND_REQUEST_MAX_BYTES } from '../../contracts/ports.mjs';
-import { explicitUserApproval, approvedCommandNames } from '../../domain/command-policy.mjs';
+import { explicitUserApproval, approvedCommandNames, COMMAND_SET_QUESTION, WINDOWS_COMMAND_SET_QUESTION } from '../../domain/command-policy.mjs';
 
 export const JEV_ENDPOINT = 'https://api.typesafe.ai/v1/systemone';
 const RESPONSE_LIMIT = 64 * 1024;
@@ -32,21 +32,27 @@ export function createJevAssessor({ apiKey, fetchImpl = globalThis.fetch, timeou
       try { return await Promise.race([request, new Promise((_, reject) => { timer = setTimeout(() => { controller.abort(); if (reader) void reader.cancel().catch(() => {}); reject(Error('Models unavailable')); }, 5000); })]); }
       finally { clearTimeout(timer); controller.abort(); }
     },
-    async assess(input, { sourcePlan } = {}) {
+    async assess(input, { sourcePlan, targetPlatform = 'linux' } = {}) {
       if (typeof apiKey !== 'string' || !apiKey.trim()) return unavailable('not_configured');
       if (admission.busy) return unavailable('busy');
       let state;
       try {
+        // This option is bound by the server to its selected target, never read from caller state.
+        if (!['linux', 'windows'].includes(targetPlatform)) throw Error('Invalid target platform');
         state = safetyInput(input, { sourcePlan: inputKind === 'execution' ? sourcePlan : undefined });
+        if (targetPlatform === 'windows') {
+          state.targetPlatform = 'windows'; state.commandLanguage = 'windows-powershell-5.1';
+        }
         if (inputKind === 'execution') {
-          const approval = explicitUserApproval(state.command, input.preapprovedCommands);
+          const approval = explicitUserApproval(state.command, input.preapprovedCommands, targetPlatform);
           if (!input.userApproval || Object.keys(input.userApproval).length !== 4
             || !Object.entries(approval).every(([key, value]) => input.userApproval[key] === value)) throw Error('Invalid user approval');
           state.preapprovedCommands = [...input.preapprovedCommands]; state.userApproval = approval;
         }
-        if (inputKind === 'registration') state.proposedCommands = approvedCommandNames(input.proposedCommands);
+        if (inputKind === 'registration') state.proposedCommands = approvedCommandNames(input.proposedCommands, targetPlatform);
       } catch { return unavailable('invalid_input'); }
-      const body = JSON.stringify({ model, state, questions: { risk: question } });
+      const riskQuestion = targetPlatform === 'windows' && inputKind === 'registration' && question === COMMAND_SET_QUESTION ? WINDOWS_COMMAND_SET_QUESTION : question;
+      const body = JSON.stringify({ model, state, questions: { risk: riskQuestion } });
       if (Buffer.byteLength(body) > COMMAND_REQUEST_MAX_BYTES) return unavailable('input_too_large');
       admission.busy = true;
       const controller = new AbortController();

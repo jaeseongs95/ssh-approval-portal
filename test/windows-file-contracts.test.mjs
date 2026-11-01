@@ -81,8 +81,9 @@ test('공유 저장소는 두 대상 문법을 받아들이고 메타데이터�
 
 test('파일 서비스는 대상 문법을 검사하고 Windows 관리자 토큰 요청을 보존한다', async () => {
   const effects = [];
+  const submitted = [];
   const store = { begin: async meta => { effects.push('begin'); return meta; } };
-  const queue = { submitOperation: op => { effects.push('submit'); return { id: 'job', operation: op }; },
+  const queue = { submitOperation: (operation, level) => { effects.push('submit'); submitted.push({ operation, level }); return { id: 'job' }; },
     startDownload: () => {}, get: () => ({ id: 'job' }) };
   const windows = createFileService({ store, queue, platform: 'windows' });
   const linux = createFileService({ store, queue });
@@ -99,7 +100,9 @@ test('파일 서비스는 대상 문법을 검사하고 Windows 관리자 토큰
   assert.equal(windows.requestDownload({ remotePath: path, elevate: false }, binding).id, 'job');
   const elevated = await windows.beginUpload({ ...metadata(), elevate: true }, binding);
   assert.equal(elevated.elevate, true);
-  assert.equal(windows.requestDownload({ remotePath: path, elevate: true }, binding).operation.elevate, true);
+  assert.equal(windows.requestDownload({ remotePath: path, elevate: true }, binding).id, 'job');
+  assert.equal(submitted[1].operation.elevate, true);
+  assert.equal(submitted[1].level, 'privileged');
   assert.deepEqual(effects, ['begin', 'submit', 'begin', 'submit']);
   await windows.close(); await linux.close();
 });

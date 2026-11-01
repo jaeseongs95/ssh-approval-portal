@@ -51,6 +51,8 @@ namespace SshApproval {
         static extern bool GetSecurityDescriptorOwner(IntPtr descriptor, out IntPtr owner, out bool defaulted);
         [DllImport("advapi32.dll", SetLastError = true)]
         static extern bool GetSecurityDescriptorDacl(IntPtr descriptor, out bool present, out IntPtr dacl, out bool defaulted);
+        [DllImport("advapi32.dll", SetLastError = true)]
+        static extern bool GetSecurityDescriptorSacl(IntPtr descriptor, out bool present, out IntPtr sacl, out bool defaulted);
         [DllImport("kernel32.dll", SetLastError = true)]
         static extern bool SetFileTime(SafeFileHandle handle, ref System.Runtime.InteropServices.ComTypes.FILETIME created,
             ref System.Runtime.InteropServices.ComTypes.FILETIME accessed, ref System.Runtime.InteropServices.ComTypes.FILETIME written);
@@ -172,12 +174,13 @@ namespace SshApproval {
             try { chain.CheckTrust(account, installer, trustAccount); return chain; }
             catch { chain.Dispose(); throw; }
         }
-        static byte[] Security(SafeFileHandle handle) {
+        static byte[] Security(SafeFileHandle handle, uint information = 5, string step = "read_security") {
             uint size;
-            GetKernelObjectSecurity(handle, 5, null, 0, out size);
-            if (size == 0 || size > 65536) Fail("PERMISSION_DENIED");
+            GetKernelObjectSecurity(handle, information, null, 0, out size);
+            if (size == 0) NativeFailure("OPERATION_FAILED", step);
+            if (size > 65536) Fail("PERMISSION_DENIED");
             byte[] descriptor = new byte[size];
-            if (!GetKernelObjectSecurity(handle, 5, descriptor, size, out size)) NativeFailure("OPERATION_FAILED", "read_security");
+            if (!GetKernelObjectSecurity(handle, information, descriptor, size, out size)) NativeFailure("OPERATION_FAILED", step);
             return descriptor;
         }
         static bool Trusted(string sid, string account, string installer, bool trustAccount) {
@@ -221,8 +224,46 @@ namespace SshApproval {
         static bool SameTime(System.Runtime.InteropServices.ComTypes.FILETIME a, System.Runtime.InteropServices.ComTypes.FILETIME b) {
             return a.dwHighDateTime == b.dwHighDateTime && a.dwLowDateTime == b.dwLowDateTime;
         }
+        static byte[] LabelAcl(byte[] descriptor) {
+            GCHandle pin = GCHandle.Alloc(descriptor, GCHandleType.Pinned);
+            try {
+                IntPtr acl;
+                bool present, defaulted;
+                if (!GetSecurityDescriptorSacl(pin.AddrOfPinnedObject(), out present, out acl, out defaulted)) NativeFailure("OPERATION_FAILED", "read_label");
+                if (!present || acl == IntPtr.Zero || Marshal.ReadInt16(acl, 4) == 0) return new byte[0];
+                int length = (ushort)Marshal.ReadInt16(acl, 2);
+                if (length < 8 || length > descriptor.Length) Fail("PERMISSION_DENIED");
+                byte[] bytes = new byte[length];
+                Marshal.Copy(acl, bytes, 0, length);
+                return bytes;
+            } finally { pin.Free(); }
+        }
+        static bool SameBytes(byte[] a, byte[] b) {
+            if (a.Length != b.Length) return false;
+            for (int n = 0; n < a.Length; n++) if (a[n] != b[n]) return false;
+            return true;
+        }
+        static void PreserveLabel(SafeFileHandle previous, SafeFileHandle destination) {
+            // LABEL_SECURITY_INFORMATION reads only mandatory labels with READ_CONTROL;
+            // WRITE_OWNER sets them. Never request or enable SeSecurity/SeRelabel privileges.
+            byte[] label = Security(previous, 0x10, "read_label");
+            byte[] expected = LabelAcl(label);
+            if (!SameBytes(expected, LabelAcl(Security(destination, 0x10, "read_label")))) {
+                GCHandle pin = GCHandle.Alloc(label, GCHandleType.Pinned);
+                try {
+                    IntPtr acl;
+                    bool present, defaulted;
+                    if (!GetSecurityDescriptorSacl(pin.AddrOfPinnedObject(), out present, out acl, out defaulted)) NativeFailure("OPERATION_FAILED", "read_label");
+                    uint error = SetSecurityInfo(destination, 1, 0x10, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, present ? acl : IntPtr.Zero);
+                    if (error != 0) throw new FileFailure(error == 5 || error == 1314 ? "PERMISSION_DENIED" : "OPERATION_FAILED", "write_label", (int)error);
+                } finally { pin.Free(); }
+            }
+            if (!SameBytes(expected, LabelAcl(Security(previous, 0x10, "read_label"))) ||
+                !SameBytes(expected, LabelAcl(Security(destination, 0x10, "read_label")))) throw new FileFailure("FILE_CHANGED", "verify_label", 0);
+        }
         static void PreserveMetadata(SafeFileHandle previous, SafeFileHandle destination, Info old) {
-            // This contract covers owner, DACL and three basic times only; not SACL or ADS.
+            // This contract covers owner, DACL, mandatory label and three basic times.
+            // Other SACL entries and ADS are not copied.
             byte[] security = Security(previous);
             RawSecurityDescriptor before = new RawSecurityDescriptor(security, 0);
             bool protectedAcl = (before.ControlFlags & ControlFlags.DiscretionaryAclProtected) != 0;
@@ -238,14 +279,15 @@ namespace SshApproval {
             } finally { pin.Free(); }
             RawSecurityDescriptor after = new RawSecurityDescriptor(Security(destination), 0);
             if (before.GetSddlForm(AccessControlSections.Owner | AccessControlSections.Access) !=
-                after.GetSddlForm(AccessControlSections.Owner | AccessControlSections.Access)) Fail("FILE_CHANGED");
+                after.GetSddlForm(AccessControlSections.Owner | AccessControlSections.Access)) throw new FileFailure("FILE_CHANGED", "verify_security", 0);
+            PreserveLabel(previous, destination);
             if (!SetFileTime(destination, ref old.Created, ref old.Accessed, ref old.Written)) NativeFailure("OPERATION_FAILED", "write_times");
             // Suppress deferred access/write updates when the copied-data handle closes.
             System.Runtime.InteropServices.ComTypes.FILETIME unchanged = new System.Runtime.InteropServices.ComTypes.FILETIME();
             System.Runtime.InteropServices.ComTypes.FILETIME frozen = new System.Runtime.InteropServices.ComTypes.FILETIME { dwHighDateTime = -1, dwLowDateTime = -1 };
             if (!SetFileTime(destination, ref unchanged, ref frozen, ref frozen)) NativeFailure("OPERATION_FAILED", "write_times");
             Info actual = Inspect(destination, false);
-            if (!SameTime(old.Created, actual.Created) || !SameTime(old.Accessed, actual.Accessed) || !SameTime(old.Written, actual.Written)) Fail("FILE_CHANGED");
+            if (!SameTime(old.Created, actual.Created) || !SameTime(old.Accessed, actual.Accessed) || !SameTime(old.Written, actual.Written)) throw new FileFailure("FILE_CHANGED", "verify_times", 0);
         }
         static FileStream Stream(SafeFileHandle handle, FileAccess access) {
             // FileStream owns only this non-owning wrapper; the operation retains the real handle.

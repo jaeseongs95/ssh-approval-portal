@@ -176,7 +176,10 @@ try {
     $fileRoot = $installed.fileRoot
     $stageRoot = $installed.stageRoot
     $adminInstalled = Install-FixtureHelper $adminSid 'admin-'
-    $pythonExecutable = (Get-Command python.exe -CommandType Application -ErrorAction Stop).Source
+    $pythonCandidate = @(Get-Command python.exe -CommandType Application -ErrorAction Stop)[0]
+    [string] $pythonExecutable = [IO.Path]::GetFullPath([string]$pythonCandidate.Source)
+    if (-not [IO.File]::Exists($pythonExecutable)) { throw '명시한 Python 실행 파일이 없습니다.' }
+    @{ pythonExecutable = $pythonExecutable; valueType = $pythonExecutable.GetType().FullName } | ConvertTo-Json -Compress
     $env:SOLID_PYTHON = $pythonExecutable
     $outsideRoot = Join-Path $fixtureRoot 'outside'
     New-Item -ItemType Directory -Path $outsideRoot | Out-Null
@@ -293,11 +296,20 @@ Subsystem sftp $sftpPath
     Remove-Item Env:AGS_WINDOWS_SSH_FIXTURE -ErrorAction SilentlyContinue
     Remove-Item Env:SOLID_PYTHON -ErrorAction SilentlyContinue
     if ($registeredTask) {
-        Stop-ScheduledTask -TaskName $taskName -ErrorAction Continue
-        # 예약 작업의 잔존 자식도 해당 격리 설정 경로를 기준으로만 정리한다.
+        # 살아 있는 부모를 먼저 종료하면 자식 트리를 놓친다. 루트가 살아 있을 때 트리를 정리한다.
         Get-CimInstance Win32_Process -Filter "Name = 'sshd.exe'" | Where-Object {
             $_.CommandLine -and $_.CommandLine.Contains($fixtureRoot)
         } | ForEach-Object { & taskkill.exe /PID $_.ProcessId /T /F 2>$null | Out-Null }
+        Stop-ScheduledTask -TaskName $taskName -ErrorAction Continue
+        # SSH가 분리한 하위 프로세스도 이 시험 전용 계정 소유일 때만 종료한다.
+        $fixtureNames = @($accountName, $adminName)
+        foreach ($process in (Get-CimInstance Win32_Process)) {
+            if ($process.Name -notin @('sshd.exe', 'sshd-session.exe', 'powershell.exe', 'pwsh.exe', 'python.exe', 'node.exe', 'cmd.exe', 'sftp-server.exe')) { continue }
+            $owner = Invoke-CimMethod -InputObject $process -MethodName GetOwner -ErrorAction Continue
+            if ($owner.ReturnValue -eq 0 -and $owner.User -in $fixtureNames) {
+                & taskkill.exe /PID $process.ProcessId /T /F 2>$null | Out-Null
+            }
+        }
         Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction Continue
     }
     if (-not $testsPassed) {

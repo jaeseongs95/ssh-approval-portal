@@ -70,8 +70,8 @@ try {
         if ($failure.PSObject.Properties['Code'] -and $failure.Code -cin $codes) {
             $code = $failure.Code
             if ($failure.PSObject.Properties['NativeStep'] -and $failure.NativeStep -cin @('native', 'create_directory',
-                'inspect', 'open', 'filesystem', 'final_path', 'read_security', 'remove', 'rename_replace', 'rename_new', 'write_security', 'write_times') -and
-                $failure.NativeError -is [int] -and $failure.NativeError -gt 0) {
+                'inspect', 'open', 'filesystem', 'final_path', 'read_security', 'remove', 'rename_replace', 'rename_new', 'write_security', 'write_times', 'verify_security', 'verify_times', 'read_label', 'write_label', 'verify_label') -and
+                $failure.NativeError -is [int] -and $failure.NativeError -ge 0) {
                 $nativeStep = $failure.NativeStep
                 $nativeError = $failure.NativeError
             }

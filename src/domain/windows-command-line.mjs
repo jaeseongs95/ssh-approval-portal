@@ -3,9 +3,12 @@ import { COMMAND_MAX_BYTES, utf8WithinLimit } from '../contracts/ports.mjs';
 const moduleCommand = /^[a-z0-9_][a-z0-9_.-]*\\[a-z][a-z0-9]*-[a-z][a-z0-9]*$/i;
 const executable = /^[a-z0-9_][a-z0-9_.+-]*\.(?:exe|com|cmd|bat)$/i;
 const absoluteExecutable = /^[a-z]:[\\/].+\.(?:exe|com|cmd|bat|ps1)$/i;
+// PowerShell은 ASCII와 혼합된 곡선 따옴표도 문자열 구분자로 해석한다.
+// 원문을 정규화하지 않고 전체 명령 평가에 맡긴다.
+const curvedQuote = /[\u2018\u2019\u201c\u201d]/;
 
 export function windowsPolicyName(value) {
-  if (!utf8WithinLimit(value, 512) || value !== value.trim() || /[\u0000-\u001f\u007f-\u009f\u061c\u200b\u200e\u200f\u2028-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/.test(value)) return null;
+  if (!utf8WithinLimit(value, 512) || value !== value.trim() || curvedQuote.test(value) || /[\u0000-\u001f\u007f-\u009f\u061c\u200b\u200e\u200f\u2028-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/.test(value)) return null;
   if (moduleCommand.test(value) || executable.test(value)) return value.toLowerCase();
   if (!absoluteExecutable.test(value) || /[<>"|?*`$]/.test(value) || value.slice(2).includes(':')
     || value.split(/[\\/]/).slice(1).some(part => !part || part === '.' || part === '..' || /[. ]$/.test(part))) return null;
@@ -47,7 +50,7 @@ export function windowsCommandLineNames(source) {
     return { text, quoted: Boolean(quote) };
   }
   try {
-    if (!utf8WithinLimit(source, COMMAND_MAX_BYTES) || !source.trim() || /[\u0000-\u001f\u007f-\u009f]/.test(source)) unknown();
+    if (!utf8WithinLimit(source, COMMAND_MAX_BYTES) || !source.trim() || curvedQuote.test(source) || /[\u0000-\u001f\u007f-\u009f]/.test(source)) unknown();
     while (i < source.length) {
       whitespace();
       let callOperator = false;

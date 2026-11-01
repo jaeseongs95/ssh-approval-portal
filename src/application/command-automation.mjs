@@ -1,5 +1,4 @@
 import { safetyFailureDetails } from '../domain/safety.mjs';
-import { windowsPolicyName } from '../domain/windows-command-line.mjs';
 import { inspectCommand, commandDigest, validatedRisk, deniedCommand, explicitUserApproval, AUTOMATION_QUESTION_VERSION, AUTOMATION_QUESTION, AUTOMATION_PROMPT_REVISION, AUTOMATION_PROMPT_SHA256, SAFETY_PROBABILITY_BASIS } from '../domain/command-policy.mjs';
 import { assessmentContext, callerContext, sensitiveText, credentialText } from '../domain/execution-context.mjs';
 import { dispatchStep, dispatchRefusal, dispatchFailureDetails } from '../domain/dispatch-failure.mjs';
@@ -49,9 +48,7 @@ export function createCommandAutomation({ queue, state, definition, classify, ev
     catch (error) { if (plan) return { reasonCode: 'source_evidence_too_large' }; throw error; }
     const approved = plan ? [] : windows ? [...rule.commands] : [...rule.commands.filter(name => name !== 'sudo'), ...(rule.automaticSudo === true ? ['sudo'] : [])];
     const input = { command, target: definition.id, environment: definition.displayName, context: detailedContext,
-      preapprovedCommands: approved, userApproval: windows
-        ? { explicit: false, statement: 'This PowerShell command did not match the complete approved Windows literal command-name grammar.', scope: 'command-name', commandName: null }
-        : explicitUserApproval(command, approved) };
+      preapprovedCommands: approved, userApproval: explicitUserApproval(command, approved, platformOf(definition)) };
     const attempts = [];
     let evaluation;
     const provenance = () => evaluation ? { evaluation: { ...evaluation, latencyMs: Math.max(0, now() - evaluation.assessedAt) } } : {};
@@ -74,7 +71,7 @@ export function createCommandAutomation({ queue, state, definition, classify, ev
           if (budget.used >= maxCalls) { exhausted = true; return null; }
           budget.used++;
           evaluation = { purpose: 'execution', promptRevision: AUTOMATION_PROMPT_REVISION, promptSha256: AUTOMATION_PROMPT_SHA256, assessedAt: startedAt, callerContextProvided: Boolean(context), modelCalled: true };
-          return evaluator.assess(structuredClone(input), { signal: controller.signal, question: AUTOMATION_QUESTION, questionVersion: AUTOMATION_QUESTION_VERSION, ...(plan ? { sourcePlan: plan } : {}) });
+          return evaluator.assess(structuredClone(input), { signal: controller.signal, targetPlatform: platformOf(definition), question: AUTOMATION_QUESTION, questionVersion: AUTOMATION_QUESTION_VERSION, ...(plan ? { sourcePlan: plan } : {}) });
         }),
         new Promise(resolve => { timer = setTimeout(() => { controller.abort(); resolve({ status: 'unavailable', reason: 'timeout' }); }, 10000); })]); }
       catch { raw = { status: 'unavailable', reason: 'request_failed' }; } finally { clearTimeout(timer); }
@@ -141,7 +138,7 @@ export function createCommandAutomation({ queue, state, definition, classify, ev
         if (rule?.testServer === true) result = { reasonCode: 'test_server_bypass' };
         else if (plan && sourceReview(rule)) result = { reasonCode: sourceReview(rule) };
         else if (!plan && !windows && line.usesSudo && rule?.automaticSudo !== true) result = { reasonCode: 'sudo_not_enabled' };
-        else if (!plan && line.complete && rule && line.names.every(name => !windows && name === 'sudo' ? rule.automaticSudo === true : rule.commands.some(approved => windows ? windowsPolicyName(approved) === name : approved === name))) result = { reasonCode: 'command_set', commandNames: line.names };
+        else if (!plan && line.complete && rule && (windows ? explicitUserApproval(command, rule.commands, 'windows').explicit : line.names.every(name => name === 'sudo' ? rule.automaticSudo === true : rule.commands.includes(name)))) result = { reasonCode: 'command_set', commandNames: line.names };
         else result = await assess(command, rule, context, policy.revision, plan);
         // No await between freshness check, decision record and execution claim.
         definition.verify();

@@ -266,6 +266,10 @@ export async function createApplication({ registry, classify, executeCommand, ex
   const policyReview = commandState && createCommandPolicyReview({ state: commandState, audit, nonce: () => randomBytes(24).toString('hex'),
     evaluator: policyRiskAssessor ?? (settings.jevEnabled ? createJevAssessor({ apiKey, question: COMMAND_SET_QUESTION, inputKind: 'registration' }) : undefined),
     maxCalls: settings.jevMaxCalls, budget: automationBudget,
+    targetPlatform(rule) {
+      const runtime = targets.select(rule.targetId); runtime.verify();
+      return platformOf(runtime);
+    },
     validateTargets(value) {
       for (const rule of value.targets) {
         const runtime = targets.select(rule.targetId); runtime.verify();
@@ -285,6 +289,11 @@ export async function createApplication({ registry, classify, executeCommand, ex
     },
   };
   const requestSafety = createRequestSafety({ queue, maxCalls: settings.jevMaxCalls,
+    targetPlatform(job) {
+      const runtime = targets.select(job.targetId); runtime.verify();
+      if (job.targetRevision && job.targetRevision !== runtime.revision) throw Error('Stale command target');
+      return platformOf(runtime);
+    },
     assessor: settings.jevEnabled ? risk : undefined });
   let protocols;
   const lifecycle = createLifecycleService({ queue, store, commands, files, maintenanceState, closeConnections: async () => { await targets.drain(); await registry.closeAll(); },

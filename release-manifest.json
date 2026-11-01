@@ -15,13 +15,13 @@
     },
     {
       "path": "README.ko.md",
-      "size": 22322,
-      "sha256": "9146bd52753cbb366539bc9d04d9c9b361c12a8be0dcadc71c185acf8e2d35ae"
+      "size": 22375,
+      "sha256": "ed92182def91fd3bff691b6c09286e9f980cf6359907221f9292c79f4257f34e"
     },
     {
       "path": "README.md",
-      "size": 20548,
-      "sha256": "87d63d280a4db45fe3253a268b624b1ca06d457b880421a53c6453b743782b88"
+      "size": 20608,
+      "sha256": "b418d8340ca53178c1392e17cd60bb8892ba534d733b5c874b0ca09831887822"
     },
     {
       "path": "THIRD_PARTY_NOTICES.json",
@@ -30,8 +30,8 @@
     },
     {
       "path": "app.mjs",
-      "size": 29221,
-      "sha256": "718eee80bfa0efc869bc9febe74506a9d09f3d66d2ab2bb1c97c96341631f073"
+      "size": 29607,
+      "sha256": "3ddb0fd086443285cc92d48393d455cb9ba1f9c72eb942f06a6f75e738e6e296"
     },
     {
       "path": "bridge.mjs",
@@ -215,8 +215,8 @@
     },
     {
       "path": "docs/windows-targets.ko.md",
-      "size": 14593,
-      "sha256": "45b69a1e5824323ebeca327fd44ae4d758865259f9578bf576f95f16b1f98044"
+      "size": 14678,
+      "sha256": "f6dcb86231f64d088ef12a77eb6f23ff7027f13f0dc7f9eb9f2eabce9f2046bf"
     },
     {
       "path": "helper/environment-helper.py",
@@ -395,8 +395,8 @@
     },
     {
       "path": "scripts/manage-agent-cli-windows.ps1",
-      "size": 28666,
-      "sha256": "912eca152aed5024ce29db67f1a203650f508387b3294f315cc1e51934d69885"
+      "size": 35797,
+      "sha256": "cd4db70674096dc8dc62f11c11e3afe091f5a42327845691319cf72e6ec1e6b9"
     },
     {
       "path": "scripts/manage-agent-cli.py",
@@ -500,13 +500,13 @@
     },
     {
       "path": "scripts/windows-file-helper.ps1",
-      "size": 4981,
-      "sha256": "8f04d6882362e22bcc8d99c6d740feca8426ca3cc3f08b9010140293cece1a81"
+      "size": 5061,
+      "sha256": "79c809b6724543b1eda1fcffacf46aa027d9baff831d85cdda019e561f6e1dd6"
     },
     {
       "path": "scripts/windows-file-native.cs",
-      "size": 27165,
-      "sha256": "b521dea73f757d5f15e6213714c0ba57792501d126b56f146e2a6a0da56dddda"
+      "size": 30098,
+      "sha256": "dbd39efc407f772a91333b20abd63cfd91debdeee9853087554398b608cb0749"
     },
     {
       "path": "src/adapters/aik/ssh-tool.mjs",
@@ -550,8 +550,8 @@
     },
     {
       "path": "src/adapters/config/targets.mjs",
-      "size": 5105,
-      "sha256": "7f00678c5af24c8b7dea86d0e5a0feed90bb64607db829e55518c9388241f605"
+      "size": 5134,
+      "sha256": "fec40a32909be5c0a8a6887b4c61bd62cd7e2326b32056787ce9818352e8a960"
     },
     {
       "path": "src/adapters/config/upload-hosts.mjs",
@@ -590,8 +590,8 @@
     },
     {
       "path": "src/adapters/safety/jev.mjs",
-      "size": 7188,
-      "sha256": "326c738a593cf48e6e6187df025f4f001f8b09f5a9f42f566d10112bed323624"
+      "size": 7818,
+      "sha256": "912cbe9485c3553fd23ebbee72f25005db73fd942d2bc9daf890b006a03152f9"
     },
     {
       "path": "src/adapters/secrets/hidden-input.mjs",
@@ -655,13 +655,13 @@
     },
     {
       "path": "src/adapters/ssh/vendor.mjs",
-      "size": 7690,
-      "sha256": "eed4f33f3cac833e1aa05b4fb9268e27d1bce22307aaac6dabc17477309b3938"
+      "size": 7766,
+      "sha256": "fc1a24d4d643f7a70bb8dab069c92ef71cdf67c0be63a98e7741c6b82050f401"
     },
     {
       "path": "src/adapters/ssh/windows-python-source.mjs",
-      "size": 5697,
-      "sha256": "2416a906b4b0355c7a905620bff4e3e45653a35b80984f9ca7d98c837417dbe3"
+      "size": 6552,
+      "sha256": "969e38dc0ad6eb2e75da44cff1cb2ee3135d21f32116909fca4fe048dc56fcf7"
     },
     {
       "path": "src/adapters/storage/agent-cli-state.mjs",
@@ -720,13 +720,13 @@
     },
     {
       "path": "src/application/command-automation.mjs",
-      "size": 15859,
-      "sha256": "3a536fad5e5845de202c8c973c1a6c4aaafb4a6c977d96a2b3a4a6f31e97cd60"
+      "size": 15643,
+      "sha256": "02a800dc5fba8801390e416e52da5df0fbacbe713c91e3913d544602c69a5919"
     },
     {
       "path": "src/application/command-policy-review.mjs",
-      "size": 10981,
-      "sha256": "63b913d61367f31d1e32c5750f72ade4e830ee7ec804775c159a892c9134dce0"
+      "size": 15038,
+      "sha256": "7e1a6a23dd72a4bcff4ecf17da39b9631c9d064cd3e1a714a4ca44de03b2d8c1"
     },
     {
       "path": "src/application/commands.mjs",
@@ -750,8 +750,8 @@
     },
     {
       "path": "src/application/request-safety.mjs",
-      "size": 3746,
-      "sha256": "7b54b065876ea6fd9c2bd94d154c9c3eb6feeaba50c57c7174eae538092b179d"
+      "size": 4061,
+      "sha256": "0897c1de901539d9d1591b6196025f76f0f30502ac34bad03f8e7bf9ba9058a7"
     },
     {
       "path": "src/application/safety-evaluation.mjs",
@@ -800,8 +800,8 @@
     },
     {
       "path": "src/domain/command-policy.mjs",
-      "size": 8226,
-      "sha256": "92713ed1e2579e41247420823f61b8ca6965fba94b0e309fe425c4a2637586b1"
+      "size": 9608,
+      "sha256": "863908bb939bec4b73e09cece02a28c52ee6e868efde360b1c6df765046297d7"
     },
     {
       "path": "src/domain/command-risks.json",
@@ -830,8 +830,8 @@
     },
     {
       "path": "src/domain/target-platform.mjs",
-      "size": 6509,
-      "sha256": "763275351a3ed3311aeea9f9fb276ff1fc5dacdf5907d6c3cdf201b208e9c91f"
+      "size": 6704,
+      "sha256": "338186cc45ef41d55e61a17b47f8f172f8716df7fdaab3526368c002f4eb420e"
     },
     {
       "path": "src/domain/validation.mjs",
@@ -840,8 +840,8 @@
     },
     {
       "path": "src/domain/windows-command-line.mjs",
-      "size": 3308,
-      "sha256": "6daf8c5b933dd2d7b3d04912b2c82cefc296542ebfdb724a5e86784a5c40168a"
+      "size": 3577,
+      "sha256": "4deae48a94d957b0357332f15260f8de47895e8b6bd36dc4000f8e44743378f5"
     },
     {
       "path": "test/Dockerfile",
@@ -1740,8 +1740,8 @@
     },
     {
       "path": "test/windows-agent-cli-fixture.mjs",
-      "size": 6201,
-      "sha256": "884c223f89ae4a0181ed8ffd989fb293d015429896c37182c678f4e059f48ae7"
+      "size": 8039,
+      "sha256": "6597e53546d88708f4489e5609bd865dc70ddf58a2628b5c4c7fe413157e641b"
     },
     {
       "path": "test/windows-agent-cli-helper.test.mjs",
@@ -1755,38 +1755,43 @@
     },
     {
       "path": "test/windows-command-line.test.mjs",
-      "size": 5406,
-      "sha256": "a4f2c893fdaf1a7b34115c2d338bb9e45b8624dd700269280447622cbc26c793"
+      "size": 7640,
+      "sha256": "36c298de3ee39ac14bfd1dd7931bae1eacf3753d0e930d92f602d40bcaba84a5"
     },
     {
       "path": "test/windows-file-contracts.test.mjs",
-      "size": 13505,
-      "sha256": "4c8648f9a0780428b8994f31343e66eee027bcb6b7b637b3de631513d0165066"
+      "size": 13658,
+      "sha256": "84bc3aa10a8e7379b74af7369a8ad60a90a2ec9a5eecc6fe54c302861c719281"
     },
     {
       "path": "test/windows-file-helper.tests.ps1",
-      "size": 21006,
-      "sha256": "4c5cb6e3feef7709797470ef2373e42365a2a958bfa43148e16f33554b4d3b4f"
+      "size": 21842,
+      "sha256": "4b01a64a4221af1f0007a425ae2cb7b5509c2a274dd531afd237c2f6ff459197"
     },
     {
       "path": "test/windows-full-application.test.mjs",
-      "size": 7970,
-      "sha256": "7ef12ae57f720b62ce1e4233456197d2d965d08b82a7303c98874e4c9581415c"
+      "size": 8464,
+      "sha256": "f12485a83cd559acdd72609a9ece35905f2a04b66700e321af42dc4de66efcd0"
+    },
+    {
+      "path": "test/windows-jev-contract.test.mjs",
+      "size": 11111,
+      "sha256": "011fb38ef89111ee7f5a2eb7889e76b150ef23cd977555ed2a82a1a5ff1ee8e4"
     },
     {
       "path": "test/windows-python-source.test.mjs",
-      "size": 10405,
-      "sha256": "ef065cb4ee3c3dced3ecbb98c2b6a9930068e9a6efe737fd1e70c77f9e70e7e2"
+      "size": 15686,
+      "sha256": "16f95134b49e6f4e3cb15d3a75776e2e6afd19976ce6c79c2df9fc901b1d308d"
     },
     {
       "path": "test/windows-ssh-ci.ps1",
-      "size": 16997,
-      "sha256": "3048b22833157a59139561d067f1241f15cf9313d0bd248a56ca2bd17eb77e20"
+      "size": 18024,
+      "sha256": "108ccf06de370e602af38d59f5a93537b7004d757ebe722bd3482cc6b5d8f4e1"
     },
     {
       "path": "test/windows-ssh-integration.test.mjs",
-      "size": 19643,
-      "sha256": "f37371ef85acc0cb9e87dac9892261404a77f1d10b29db430da86ef158b81903"
+      "size": 24216,
+      "sha256": "22388868e235fd1d6f820bbefecad29b64fd7373654de3cf6697ee27a3345025"
     },
     {
       "path": "test/windows-target.test.mjs",

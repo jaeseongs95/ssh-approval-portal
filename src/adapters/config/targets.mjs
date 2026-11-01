@@ -28,7 +28,7 @@ export function parseTargets(value, defaultTarget) {
       if (entry.workdir !== undefined) windowsDirectory(entry.workdir);
       if (entry.pythonExecutable !== undefined) {
         windowsDirectory(entry.pythonExecutable);
-        if (!/\.exe$/i.test(entry.pythonExecutable)) throw Error('Use an absolute Windows Python executable');
+        if (!/[\\/]python(?:\d+(?:\.\d+)*)?\.exe$/i.test(entry.pythonExecutable)) throw Error('Use an absolute Windows Python executable');
       }
     }
     for (const profile of [entry.readProfile, entry.writeProfile]) {

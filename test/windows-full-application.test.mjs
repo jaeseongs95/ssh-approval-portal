@@ -19,7 +19,7 @@ test('Windows 런타임 설정은 대상 revision에 결속되고 TTY·POSIX 작
   const original = definition({}), configured = definition({ pythonExecutable: 'C:/Python313/python.exe', workdir: 'C:/work' });
   assert.notEqual(configured.revision, original.revision);
   assert.notEqual(configured.revision, definition({ pythonExecutable: 'C:/Python313/python.exe', workdir: 'C:/other' }).revision);
-  for (const patch of [{ platform: 'linux', pythonExecutable: 'C:/Python313/python.exe' }, { pythonExecutable: 'python.exe' }, { pythonExecutable: 'C:/Python313/python.cmd' }, { workdir: 'C:/work/../other' }, { workdir: 'C:/work\u202e' }]) assert.throws(() => definition(patch));
+  for (const patch of [{ platform: 'linux', pythonExecutable: 'C:/Python313/python.exe' }, { pythonExecutable: 'python.exe' }, { pythonExecutable: 'C:/Python313/python.cmd' }, { pythonExecutable: 'C:/Python313/other.exe' }, { workdir: 'C:/work/../other' }, { workdir: 'C:/work\u202e' }]) assert.throws(() => definition(patch));
   for (const name of profiles.keys()) {
     profiles.get(name).tty = true;
     try { assert.throws(() => definition({}), /non-TTY/); }
@@ -43,13 +43,17 @@ test('Windows source와 CLI 고정 계획은 같은 SSH 검증 경계를 통과�
   const fake = { getProfile: () => connection.profile, getOrCreate: async () => connection };
   const source = preparePythonSource({ ...binding, source: "print('한글')\n", cwd: 'C:/', pythonExecutable: 'C:/Python313/python.exe' });
   assert.equal((await executePythonSource(fake, source, () => binding)).failed, false);
-  assert.equal(calls[0].options.stdin, source.stdin);
+  assert.equal(calls[0].options.stdin, source.transportStdin);
   const cli = prepareAgentCliPlan({ action: 'inspect', provider: 'codex', binding });
   stdout = JSON.stringify({ provider: 'codex', installed: false, managed: false, version: null, active: null, installationRevision: 'b'.repeat(64), login: 'not_checked' });
   assert.equal((await executeAgentCli(fake, cli, () => binding)).data.agentCli.installed, false);
   assert.equal(calls[1].options.stdin, cli.stdin);
   await assert.rejects(executeAgentCli(fake, { ...cli, stdin: cli.stdin + '# changed' }, () => binding));
   await assert.rejects(executePythonSource(fake, { ...source, manifest: { ...source.manifest, interpreter: 'C:/other/python.exe' } }, () => binding));
+  await assert.rejects(executePythonSource(fake, { ...source, transportStdin: source.transportStdin + 'x' }, () => binding));
+  await assert.rejects(executePythonSource(fake, { ...source, transportStdin: undefined }, () => binding));
+  const linux = preparePythonSource({ ...binding, platform: 'linux', source: 'pass', cwd: '/' });
+  await assert.rejects(executePythonSource(fake, { ...linux, transportStdin: 'extra' }, () => binding));
   assert.equal(calls.length, 2);
 });
 

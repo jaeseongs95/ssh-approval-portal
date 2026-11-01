@@ -64,12 +64,23 @@ function ReadJson([string]$path) {
     Require ($value -is [pscustomobject]) 'INVALID_STATE'
     return $value
 }
+function NewPrivateFile([string]$path) {
+    $acl=[Security.AccessControl.FileSecurity]::new()
+    $acl.SetAccessRuleProtection($true,$false)
+    $acl.SetOwner([Security.Principal.SecurityIdentifier]::new($accountSid))
+    foreach ($value in @($accountSid,'S-1-5-18','S-1-5-32-544')) {
+        $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($value),'FullControl','Allow'))
+    }
+    # CreateNew preserves the no-overwrite boundary; an elevated token's default
+    # Administrators owner must not replace the selected account's explicit owner.
+    return [IO.FileStream]::new($path,[IO.FileMode]::CreateNew,([Security.AccessControl.FileSystemRights]::Read -bor [Security.AccessControl.FileSystemRights]::Write),[IO.FileShare]::None,4096,[IO.FileOptions]::None,$acl)
+}
 function AtomicJson([string]$path, $value) {
     if (Test-Path -LiteralPath $path) { $null = Trusted $path $true }
     $temporary = Join-Path ([IO.Path]::GetDirectoryName($path)) ('.state-' + [Guid]::NewGuid().ToString('N'))
-    $stream = [IO.File]::Open($temporary, 'CreateNew', 'Write', 'None')
+    $stream = NewPrivateFile $temporary
     try { $bytes = $utf8.GetBytes((Json $value) + "`n"); $stream.Write($bytes, 0, $bytes.Length); $stream.Flush($true) } finally { $stream.Dispose() }
-    if ([IO.File]::Exists($path)) { [IO.File]::Replace($temporary, $path, $null) } else { [IO.File]::Move($temporary, $path) }
+    if ([IO.File]::Exists($path)) { [AgentCliState]::Replace($temporary, $path) } else { [IO.File]::Move($temporary, $path) }
 }
 function RemovePrivateEntry([string]$path, [string]$boundary) {
     $resolved=[IO.Path]::GetFullPath($path); $base=[IO.Path]::GetFullPath($boundary).TrimEnd('\')+'\'
@@ -104,40 +115,105 @@ using System.Text;
 using System.Diagnostics;
 using System.Threading;
 using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+public static class AgentCliState {
+ // Keep the backup argument a real CLR null: PowerShell 5.1 converts an untyped
+ // $null string argument to an empty path before invoking File.Replace.
+ public static void Replace(string source,string destination) { File.Replace(source,destination,null); }
+}
 public static class AgentCliProcess {
  [StructLayout(LayoutKind.Sequential)] struct Basic { public long a,b; public uint flags; public UIntPtr c,d; public uint e; public UIntPtr f; public uint g,h; }
  [StructLayout(LayoutKind.Sequential)] struct Io { public ulong a,b,c,d,e,f; }
  [StructLayout(LayoutKind.Sequential)] struct Extended { public Basic basic; public Io io; public UIntPtr a,b,c,d; }
+ [StructLayout(LayoutKind.Sequential)] struct Attributes { public int length; public IntPtr descriptor; [MarshalAs(UnmanagedType.Bool)] public bool inherit; }
+ [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)] struct Startup {
+  public int size; public string reserved,desktop,title; public uint x,y,xSize,ySize,xChars,yChars,fill,flags;
+  public ushort show,reservedSize; public IntPtr reservedBytes,input,output,error;
+ }
+ [StructLayout(LayoutKind.Sequential)] struct StartupExtended { public Startup startup; public IntPtr attributes; }
+ [StructLayout(LayoutKind.Sequential)] struct ProcessInformation { public IntPtr process,thread; public uint processId,threadId; }
  [DllImport("kernel32.dll", CharSet=CharSet.Unicode)] static extern IntPtr CreateJobObject(IntPtr a,string b);
  [DllImport("kernel32.dll")] static extern bool SetInformationJobObject(IntPtr a,int b,ref Extended c,uint d);
  [DllImport("kernel32.dll")] static extern bool AssignProcessToJobObject(IntPtr a,IntPtr b);
  [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr a);
+ [DllImport("kernel32.dll", SetLastError=true)] static extern bool CreatePipe(out IntPtr read,out IntPtr write,ref Attributes attributes,uint size);
+ [DllImport("kernel32.dll", SetLastError=true)] static extern bool SetHandleInformation(IntPtr handle,uint mask,uint flags);
+ [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern IntPtr CreateFile(string path,uint access,uint share,ref Attributes attributes,uint disposition,uint flags,IntPtr template);
+ [DllImport("kernel32.dll", SetLastError=true)] static extern bool InitializeProcThreadAttributeList(IntPtr list,int count,uint flags,ref IntPtr size);
+ [DllImport("kernel32.dll", SetLastError=true)] static extern bool UpdateProcThreadAttribute(IntPtr list,uint flags,IntPtr attribute,IntPtr value,IntPtr size,IntPtr previous,IntPtr returnedSize);
+ [DllImport("kernel32.dll")] static extern void DeleteProcThreadAttributeList(IntPtr list);
+ [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern bool CreateProcess(string application,StringBuilder command,IntPtr processAttributes,IntPtr threadAttributes,bool inherit,uint flags,IntPtr environment,string directory,ref StartupExtended startup,out ProcessInformation process);
+ [DllImport("kernel32.dll", SetLastError=true)] static extern uint ResumeThread(IntPtr thread);
+ [DllImport("kernel32.dll")] static extern bool TerminateProcess(IntPtr process,uint code);
+ [DllImport("kernel32.dll")] static extern uint WaitForSingleObject(IntPtr handle,uint milliseconds);
+ [DllImport("kernel32.dll")] static extern bool GetExitCodeProcess(IntPtr process,out uint code);
  public static string Quote(string s) {
   var result=new StringBuilder("\""); int slashes=0;
   foreach(char c in s) { if(c=='\\') { slashes++; continue; } if(c=='"') { result.Append('\\',slashes*2+1); result.Append(c); } else { result.Append('\\',slashes); result.Append(c); } slashes=0; }
   result.Append('\\',slashes*2); result.Append('"'); return result.ToString();
  }
  public static object[] Run(string exe,string[] args,string cwd,string[] environment,int timeout,int limit) {
-  var info=new ProcessStartInfo(exe); info.Arguments=String.Join(" ",Array.ConvertAll(args,Quote));
-  info.UseShellExecute=false; info.CreateNoWindow=true; info.WindowStyle=ProcessWindowStyle.Hidden;
-  info.WorkingDirectory=cwd; info.RedirectStandardInput=true; info.RedirectStandardOutput=true; info.RedirectStandardError=true;
-  info.EnvironmentVariables.Clear(); foreach(var item in environment) { int n=item.IndexOf('='); info.EnvironmentVariables[item.Substring(0,n)]=item.Substring(n+1); }
-  var job=CreateJobObject(IntPtr.Zero,null); if(job==IntPtr.Zero) throw new Exception("PROCESS_FAILED");
-  var limits=new Extended(); limits.basic.flags=0x2000;
-  if(!SetInformationJobObject(job,9,ref limits,(uint)Marshal.SizeOf(limits))) { CloseHandle(job); throw new Exception("PROCESS_FAILED"); }
-  using(var process=new Process()) { process.StartInfo=info; var output=new MemoryStream(); var error=new MemoryStream(); int overflow=0; int count=0;
-   try { if(!process.Start()) throw new Exception("PROCESS_FAILED");
-    if(!AssignProcessToJobObject(job,process.Handle)) { process.Kill(); throw new Exception("PROCESS_FAILED"); }
-    process.StandardInput.Close();
-    ThreadStart readOut=()=>{ try { int b; while((b=process.StandardOutput.BaseStream.ReadByte())>=0) { if(Interlocked.Increment(ref count)>limit) { Interlocked.Exchange(ref overflow,1); break; } output.WriteByte((byte)b); } } catch { Interlocked.Exchange(ref overflow,1); } };
-    ThreadStart readErr=()=>{ try { int b; while((b=process.StandardError.BaseStream.ReadByte())>=0) { if(Interlocked.Increment(ref count)>limit) { Interlocked.Exchange(ref overflow,1); break; } error.WriteByte((byte)b); } } catch { Interlocked.Exchange(ref overflow,1); } };
-    var a=new Thread(readOut); var bthread=new Thread(readErr); a.IsBackground=bthread.IsBackground=true; a.Start(); bthread.Start();
-    var watch=Stopwatch.StartNew(); while(!process.WaitForExit(25)) { if(overflow!=0) throw new Exception("OUTPUT_LIMIT"); if(watch.ElapsedMilliseconds>=timeout) throw new Exception("PROCESS_TIMEOUT"); }
-    int remaining=Math.Max(1,timeout-(int)watch.ElapsedMilliseconds);
-    if(!a.Join(remaining)||!bthread.Join(Math.Max(1,timeout-(int)watch.ElapsedMilliseconds))) throw new Exception("PROCESS_TIMEOUT");
-    if(overflow!=0) throw new Exception("OUTPUT_LIMIT");
-    return new object[]{process.ExitCode,new UTF8Encoding(false,true).GetString(output.ToArray()),new UTF8Encoding(false,true).GetString(error.ToArray())};
-   } finally { CloseHandle(job); }
+  if(timeout<=0||limit<=0||!Path.IsPathRooted(exe)||!Path.IsPathRooted(cwd)) throw new Exception("PROCESS_FAILED");
+  IntPtr job=IntPtr.Zero,outRead=IntPtr.Zero,outWrite=IntPtr.Zero,errRead=IntPtr.Zero,errWrite=IntPtr.Zero,input=IntPtr.Zero;
+  IntPtr attributeList=IntPtr.Zero,handleList=IntPtr.Zero,environmentBlock=IntPtr.Zero;
+  var process=new ProcessInformation(); bool assigned=false,attributesReady=false;
+  FileStream stdout=null,stderr=null; Thread a=null,bthread=null;
+  using(var output=new MemoryStream()) using(var error=new MemoryStream()) {
+   int overflow=0,count=0;
+   try {
+    job=CreateJobObject(IntPtr.Zero,null); if(job==IntPtr.Zero) throw new Exception("PROCESS_FAILED");
+    var limits=new Extended(); limits.basic.flags=0x2000;
+    if(!SetInformationJobObject(job,9,ref limits,(uint)Marshal.SizeOf(limits))) throw new Exception("PROCESS_FAILED");
+    var security=new Attributes(); security.length=Marshal.SizeOf(security); security.inherit=true;
+    if(!CreatePipe(out outRead,out outWrite,ref security,0)||!CreatePipe(out errRead,out errWrite,ref security,0)
+       ||!SetHandleInformation(outRead,1,0)||!SetHandleInformation(errRead,1,0)) throw new Exception("PROCESS_FAILED");
+    input=CreateFile("NUL",0x80000000,3,ref security,3,0,IntPtr.Zero);
+    if(input==new IntPtr(-1)) { input=IntPtr.Zero; throw new Exception("PROCESS_FAILED"); }
+    IntPtr attributeBytes=IntPtr.Zero; InitializeProcThreadAttributeList(IntPtr.Zero,1,0,ref attributeBytes);
+    if(attributeBytes.ToInt64()<=0||attributeBytes.ToInt64()>65536) throw new Exception("PROCESS_FAILED");
+    attributeList=Marshal.AllocHGlobal(attributeBytes);
+    if(!InitializeProcThreadAttributeList(attributeList,1,0,ref attributeBytes)) throw new Exception("PROCESS_FAILED");
+    attributesReady=true; handleList=Marshal.AllocHGlobal(IntPtr.Size*3);
+    Marshal.WriteIntPtr(handleList,0,input); Marshal.WriteIntPtr(handleList,IntPtr.Size,outWrite); Marshal.WriteIntPtr(handleList,IntPtr.Size*2,errWrite);
+    if(!UpdateProcThreadAttribute(attributeList,0,new IntPtr(0x20002),handleList,new IntPtr(IntPtr.Size*3),IntPtr.Zero,IntPtr.Zero)) throw new Exception("PROCESS_FAILED");
+    var variables=(string[])environment.Clone(); Array.Sort(variables,StringComparer.OrdinalIgnoreCase);
+    foreach(var variable in variables) if(variable.IndexOf('=')<=0||variable.IndexOf('\0')>=0) throw new Exception("PROCESS_FAILED");
+    environmentBlock=Marshal.StringToHGlobalUni(String.Join("\0",variables)+"\0\0");
+    var startup=new StartupExtended(); startup.startup.size=Marshal.SizeOf(startup); startup.startup.flags=0x100;
+    startup.startup.input=input; startup.startup.output=outWrite; startup.startup.error=errWrite; startup.attributes=attributeList;
+    var command=new StringBuilder(Quote(exe)+" "+String.Join(" ",Array.ConvertAll(args,Quote)));
+    // No program instruction runs before the job owns the suspended process.
+    const uint createSuspended=0x4,unicodeEnvironment=0x400,extendedStartup=0x80000,noWindow=0x08000000;
+    if(!CreateProcess(exe,command,IntPtr.Zero,IntPtr.Zero,true,createSuspended|unicodeEnvironment|extendedStartup|noWindow,environmentBlock,cwd,ref startup,out process)) throw new Exception("PROCESS_FAILED");
+    if(!AssignProcessToJobObject(job,process.process)) throw new Exception("PROCESS_FAILED");
+    assigned=true;
+    if(ResumeThread(process.thread)==UInt32.MaxValue) throw new Exception("PROCESS_FAILED");
+    CloseHandle(process.thread); process.thread=IntPtr.Zero;
+    CloseHandle(outWrite); outWrite=IntPtr.Zero; CloseHandle(errWrite); errWrite=IntPtr.Zero; CloseHandle(input); input=IntPtr.Zero;
+    stdout=new FileStream(new SafeFileHandle(outRead,true),FileAccess.Read); outRead=IntPtr.Zero;
+    stderr=new FileStream(new SafeFileHandle(errRead,true),FileAccess.Read); errRead=IntPtr.Zero;
+    ThreadStart readOut=()=>{ try { int value; while((value=stdout.ReadByte())>=0) { if(Interlocked.Increment(ref count)>limit) { Interlocked.Exchange(ref overflow,1); break; } output.WriteByte((byte)value); } } catch { Interlocked.Exchange(ref overflow,1); } };
+    ThreadStart readErr=()=>{ try { int value; while((value=stderr.ReadByte())>=0) { if(Interlocked.Increment(ref count)>limit) { Interlocked.Exchange(ref overflow,1); break; } error.WriteByte((byte)value); } } catch { Interlocked.Exchange(ref overflow,1); } };
+    a=new Thread(readOut); bthread=new Thread(readErr); a.IsBackground=bthread.IsBackground=true; a.Start(); bthread.Start();
+    var watch=Stopwatch.StartNew();
+    while(true) {
+     uint state=WaitForSingleObject(process.process,25); if(state==0) break; if(state!=258) throw new Exception("PROCESS_FAILED");
+     if(overflow!=0) throw new Exception("OUTPUT_LIMIT"); if(watch.ElapsedMilliseconds>=timeout) throw new Exception("PROCESS_TIMEOUT");
+    }
+    if(!a.Join(Math.Max(1,timeout-(int)watch.ElapsedMilliseconds))||!bthread.Join(Math.Max(1,timeout-(int)watch.ElapsedMilliseconds))) throw new Exception("PROCESS_TIMEOUT");
+    if(overflow!=0) throw new Exception("OUTPUT_LIMIT"); uint code;
+    if(!GetExitCodeProcess(process.process,out code)) throw new Exception("PROCESS_FAILED");
+    return new object[]{unchecked((int)code),new UTF8Encoding(false,true).GetString(output.ToArray()),new UTF8Encoding(false,true).GetString(error.ToArray())};
+   } finally {
+    if(process.process!=IntPtr.Zero&&!assigned) { TerminateProcess(process.process,125); WaitForSingleObject(process.process,5000); }
+    if(job!=IntPtr.Zero) CloseHandle(job);
+    if(stdout!=null) stdout.Dispose(); if(stderr!=null) stderr.Dispose();
+    if(a!=null&&a.IsAlive) a.Join(5000); if(bthread!=null&&bthread.IsAlive) bthread.Join(5000);
+    foreach(var handle in new IntPtr[]{outRead,outWrite,errRead,errWrite,input,process.thread,process.process}) if(handle!=IntPtr.Zero) CloseHandle(handle);
+    if(attributesReady) DeleteProcThreadAttributeList(attributeList);
+    if(attributeList!=IntPtr.Zero) Marshal.FreeHGlobal(attributeList); if(handleList!=IntPtr.Zero) Marshal.FreeHGlobal(handleList);
+    if(environmentBlock!=IntPtr.Zero) Marshal.FreeHGlobal(environmentBlock);
+   }
   }
  }
 }
@@ -285,8 +361,13 @@ function Install([string]$root, [string]$action, [string]$provider, [string]$ver
     $digest = Digest $intent
     $null = Trusted $homeDirectory
     foreach ($directory in @((Join-Path $homeDirectory '.ssh-approval-cli'),$root,(Join-Path $root 'versions'),(Join-Path $root 'operations'))) { PrivateDirectory $directory }
-    $lockPath=Join-Path $root '.lock'; if (Test-Path -LiteralPath $lockPath) { $null=Trusted $lockPath $true }
-    try { $lock=[IO.File]::Open($lockPath,'OpenOrCreate','ReadWrite','None') } catch { throw 'BUSY' }
+    $lockPath=Join-Path $root '.lock'
+    if (Test-Path -LiteralPath $lockPath) {
+        $null=Trusted $lockPath $true
+        try { $lock=[IO.File]::Open($lockPath,'Open','ReadWrite','None') } catch { throw 'BUSY' }
+    } else {
+        try { $lock=NewPrivateFile $lockPath } catch { throw 'BUSY' }
+    }
     try {
         $lock.SetLength(0); $bytes=$utf8.GetBytes($operation); $lock.Write($bytes,0,$bytes.Length); $lock.Flush($true)
         $work=Join-Path $root ('operations\' + $operation)
