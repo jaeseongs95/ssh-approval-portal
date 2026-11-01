@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {readFile} from 'node:fs/promises';
+import {readFile,writeFile} from 'node:fs/promises';
+import {readFileSync} from 'node:fs';
 import {randomBytes} from 'node:crypto';
 import {win32} from 'node:path';
 import {createSshRuntime} from '../src/adapters/ssh/vendor.mjs';
@@ -57,8 +58,44 @@ test('고정 공식 npm 패키지를 격리 Windows SSH 계정에 설치하고 �
   const prepared=await raw(accountGuard+`if(-not [IO.File]::Exists(${literal(isolation.nodeExecutable)})){throw '지정 Node 실행 파일 없음'};$old=[Environment]::GetEnvironmentVariable('Path','User');[Environment]::SetEnvironmentVariable('Path',${literal(nodeDirectory+';')}+$old,'User');[Console]::WriteLine((@{previousUserPath=$old}|ConvertTo-Json -Compress))`);
   previousUserPath=prepared.previousUserPath??null;pathPrepared=true;
   await runtime.registry.closeAll();runtime=await createSshRuntime(settings);
-  const resolved=await raw(accountGuard+`$node=(Get-Command node.exe -CommandType Application -ErrorAction Stop).Source;[Console]::WriteLine((@{node=$node}|ConvertTo-Json -Compress))`);
-  assert.equal(win32.normalize(resolved.node).toLowerCase(),win32.normalize(isolation.nodeExecutable).toLowerCase(),'새 SSH 연결이 선택 계정의 Node 경로를 적용하지 않음');
+  // Observe the production runtime selector without replacing any helper function.
+  // Installation below still enters the complete fixed helper through Main/SSH.
+  const helper=readFileSync(new URL('../scripts/manage-agent-cli-windows.ps1',import.meta.url),'utf8');
+  const library=helper.slice(helper.indexOf('$ErrorActionPreference'),helper.indexOf('function Main'));
+  const probePath=win32.join(fixture.fileRoot,'cli-runtime-preflight.ps1');
+  await writeFile(probePath,library+'\n'+accountGuard+`
+$selected=NodeRuntime
+$ordered=@(@{origin='system';node=(Join-Path $env:ProgramFiles 'nodejs/node.exe')},@{origin='user';node=(Join-Path $homeDirectory 'AppData/Local/Programs/nodejs/node.exe')})
+foreach($directory in ($env:PATH -split ';')){if($directory -and [IO.Path]::IsPathRooted($directory)){$ordered+=@{origin='path';node=(Join-Path $directory 'node.exe')}}}
+$seen=@{};$candidates=@()
+foreach($candidate in $ordered){
+ $key=[IO.Path]::GetFullPath($candidate.node).ToLowerInvariant()
+ if($seen.ContainsKey($key)){continue};$seen[$key]=$true
+ $npm=Join-Path ([IO.Path]::GetDirectoryName($candidate.node)) 'node_modules/npm/bin/npm-cli.js'
+ if([IO.File]::Exists($candidate.node) -and [IO.File]::Exists($npm)){$candidates+=@{origin=$candidate.origin;node=$candidate.node}}
+}
+$firstCommand=@(Get-Command node.exe -CommandType Application -ErrorAction Stop)[0].Source
+$prepared=${literal(isolation.nodeExecutable)}
+$temporary=Join-Path ([IO.Path]::GetTempPath()) ('cli-runtime-probe-'+[Guid]::NewGuid().ToString('N'));PrivateDirectory $temporary
+try{
+ $selectedResult=[AgentCliProcess]::Run($selected[0],@('--version'),$temporary,(EnvironmentFor $temporary ([IO.Path]::GetDirectoryName($selected[0]))),10000,256)
+ $preparedResult=[AgentCliProcess]::Run($prepared,@('--version'),$temporary,(EnvironmentFor $temporary ([IO.Path]::GetDirectoryName($prepared))),10000,256)
+ Require ($selectedResult[0] -eq 0 -and -not $selectedResult[2] -and $preparedResult[0] -eq 0 -and -not $preparedResult[2]) 'NODE_VERSION_UNAVAILABLE'
+ [Console]::Out.WriteLine((Json @{selected=$selected[0];selectedVersion=$selectedResult[1].Trim();prepared=$prepared;preparedVersion=$preparedResult[1].Trim();firstCommand=$firstCommand;candidates=$candidates}))
+}finally{Remove-Item -LiteralPath $temporary -Recurse -Force}
+`,'utf8');
+  const probeConnection=await runtime.registry.getOrCreate(binding.profile);
+  const probe=await probeConnection.exec(`powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "${probePath}"`,{timeoutMs:30_000});
+  assert.equal(probe.exitCode,0,probe.stderr);assert.equal(probe.stderr,'');
+  const resolved=JSON.parse(probe.stdout),normalize=value=>win32.normalize(value).toLowerCase();
+  assert.equal(typeof resolved.selected,'string');assert.equal(typeof resolved.firstCommand,'string');
+  assert.ok(Array.isArray(resolved.candidates)&&resolved.candidates.length>0);
+  assert.equal(normalize(resolved.selected),normalize(resolved.candidates[0].node),'생산 NodeRuntime 선택이 실제 후보 우선순위와 다름');
+  const preparedIndex=resolved.candidates.findIndex(candidate=>normalize(candidate.node)===normalize(isolation.nodeExecutable));
+  assert.ok(preparedIndex>=0,'새 SSH 계정 환경에 준비한 Node/npm 후보가 없음');
+  t.diagnostic(JSON.stringify({runtimeSelected:resolved.selected,runtimeVersion:resolved.selectedVersion,runtimeOrigin:resolved.candidates[0].origin,preparedNode:resolved.prepared,preparedVersion:resolved.preparedVersion,preparedCandidateIndex:preparedIndex,firstShellCommand:resolved.firstCommand}));
+  assert.match(resolved.selectedVersion,/^v(?:2[2-9]|[3-9][0-9])\.[0-9]+\.[0-9]+$/);
+  assert.match(resolved.preparedVersion,/^v(?:2[2-9]|[3-9][0-9])\.[0-9]+\.[0-9]+$/);
   for(const entry of releases){
    await t.test(entry.provider+' 고정 배포물 설치·버전·로그인 진단',async()=>{
     const tarball='https://registry.npmjs.org/'+entry.name+'/-/'+entry.name.split('/')[1]+'-'+entry.version+'.tgz';

@@ -5,16 +5,9 @@ $installLease = $null
 try {
     [Console]::InputEncoding = [Text.UTF8Encoding]::new($false, $true)
     [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
-    $buffer = New-Object char[] 16385
-    $count = 0
+    Add-Type -Path (Join-Path $PSScriptRoot 'windows-file-native.cs') -ErrorAction Stop | Out-Null
+    $raw = [SshApproval.WindowsFiles]::ReadMetadataInput()
     try {
-        while ($count -lt $buffer.Length) {
-            $read = [Console]::In.Read($buffer, $count, $buffer.Length - $count)
-            if ($read -eq 0) { break }
-            $count += $read
-        }
-        $raw = [string]::new($buffer, 0, $count)
-        if ([Text.Encoding]::UTF8.GetByteCount($raw) -gt 16384) { throw 'INVALID_REQUEST' }
         $request = ConvertFrom-Json -InputObject $raw
     } catch { throw 'INVALID_REQUEST' }
     if ($null -eq $request -or $request -isnot [pscustomobject] -or
@@ -48,7 +41,6 @@ try {
         $config.installerSid -isnot [string] -or $config.installerSid -notmatch '^S-1-5-21-[0-9-]+$') { throw 'OPERATION_FAILED' }
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     if ($identity.User.Value -ne $config.accountSid) { throw 'PERMISSION_DENIED' }
-    Add-Type -Path (Join-Path $PSScriptRoot 'windows-file-native.cs') -ErrorAction Stop | Out-Null
     if ($elevate) { [SshApproval.WindowsFiles]::RequireAdministrator() }
     $installLease = [SshApproval.WindowsFiles]::PinTrustedDirectory($PSScriptRoot, $config.accountSid, $config.installerSid, $false)
     if ($request.action -eq 'authorize') {
@@ -71,7 +63,7 @@ try {
         if ($failure.PSObject.Properties['Code'] -and $failure.Code -cin $codes) {
             $code = $failure.Code
             if ($failure.PSObject.Properties['NativeStep'] -and $failure.NativeStep -cin @('native', 'create_directory',
-                'inspect', 'open', 'filesystem', 'final_path', 'read_security', 'remove', 'rename_replace', 'rename_new', 'write_security', 'write_times', 'verify_security', 'verify_owner', 'verify_dacl', 'verify_control', 'verify_times', 'read_label', 'write_label', 'verify_label') -and
+                'inspect', 'open', 'filesystem', 'final_path', 'read_input', 'read_security', 'remove', 'rename_replace', 'rename_new', 'write_security', 'write_times', 'verify_security', 'verify_owner', 'verify_dacl', 'verify_control', 'verify_times', 'read_label', 'write_label', 'verify_label') -and
                 $failure.NativeError -is [int] -and $failure.NativeError -ge 0) {
                 $nativeStep = $failure.NativeStep
                 $nativeError = $failure.NativeError

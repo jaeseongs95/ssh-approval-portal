@@ -14,7 +14,7 @@ function Assert-True($condition, [string]$label) {
     if (!$condition) { throw $label }
     $script:passed++
 }
-function Start-Script([string]$scriptPath, [string]$arguments, [string]$inputText = '') {
+function Start-Script([string]$scriptPath, [string]$arguments, [string]$inputText = '', [byte[]]$inputBytes = $null, [switch]$KeepInputOpen) {
     $start = [Diagnostics.ProcessStartInfo]::new()
     $start.FileName = $PowerShellExe
     $start.Arguments = '-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $scriptPath + '" ' + $arguments
@@ -31,9 +31,11 @@ function Start-Script([string]$scriptPath, [string]$arguments, [string]$inputTex
         $null = $process.Start()
         $stdout = $process.StandardOutput.ReadToEndAsync()
         $stderr = $process.StandardError.ReadToEndAsync()
-        $process.StandardInput.Write($inputText)
-        $process.StandardInput.Close()
-        return @{ process = $process; stdout = $stdout; stderr = $stderr }
+        if ($null -eq $inputBytes) { $inputBytes = [Text.UTF8Encoding]::new($false, $true).GetBytes($inputText) }
+        $inputStream = $process.StandardInput.BaseStream
+        $inputStream.Write($inputBytes, 0, $inputBytes.Length)
+        if ($KeepInputOpen) { $inputStream.Flush() } else { $inputStream.Close() }
+        return @{ process = $process; stdout = $stdout; stderr = $stderr; inputStream = $inputStream }
     } catch { $process.Dispose(); throw }
 }
 function Complete-Script($pending) {
@@ -72,7 +74,7 @@ function Describe-Result($result) {
     if ($result.data.errorCode -cin @('PARENT_NOT_FOUND', 'FILE_NOT_FOUND', 'PERMISSION_DENIED', 'DESTINATION_EXISTS',
         'UNSAFE_PATH', 'STAGING_UNAVAILABLE', 'FILE_CHANGED', 'FILE_TOO_LARGE', 'INVALID_REQUEST', 'OPERATION_FAILED')) { $code = $result.data.errorCode }
     $step = 'none'
-    if ($result.data.nativeStep -cin @('native', 'create_directory', 'inspect', 'open', 'filesystem', 'final_path', 'read_security',
+    if ($result.data.nativeStep -cin @('native', 'create_directory', 'inspect', 'open', 'filesystem', 'final_path', 'read_input', 'read_security',
         'remove', 'rename_replace', 'rename_new', 'write_security', 'write_times', 'verify_security', 'verify_owner', 'verify_dacl', 'verify_control', 'verify_times', 'read_label', 'write_label', 'verify_label')) { $step = $result.data.nativeStep }
     $number = 0
     if ($result.data.nativeError -is [int] -and $result.data.nativeError -gt 0) { $number = $result.data.nativeError }
@@ -194,6 +196,22 @@ public static class RestrictedAdministratorTest {
     $sha = [Security.Cryptography.SHA256]::Create()
     try { $script:digest = [BitConverter]::ToString($sha.ComputeHash($script:bytes)).Replace('-', '').ToLowerInvariant() } finally { $sha.Dispose() }
 
+    $eofRequest = Request 'publish' (Join-Path $root 'eof-probe.bin')
+    Stage $eofRequest
+    $pending = Start-Script $script:helper '' ($eofRequest | ConvertTo-Json -Compress) -KeepInputOpen
+    try {
+        Start-Sleep -Milliseconds 500
+        Assert-True (!$pending.process.HasExited -and !(Test-Path -LiteralPath $eofRequest.remotePath)) 'valid metadata cannot publish before stdin EOF'
+        $pending.inputStream.Close()
+        $result = Complete-Script $pending
+        $pending = $null
+        Assert-True ($result.exitCode -eq 0 -and $result.data.published) 'valid metadata publishes only after stdin EOF'
+    } finally {
+        if ($null -ne $pending) {
+            if (!$pending.process.HasExited) { $pending.process.Kill() }
+            $pending.process.Dispose()
+        }
+    }
     $request = Request
     Stage $request
     $result = Call $request
@@ -306,6 +324,26 @@ public static class RestrictedAdministratorTest {
     Refused $invalid 'INVALID_REQUEST'
     $result = Invoke-Script $script:helper '' ('x' * 16385)
     Assert-True ($result.exitCode -eq 1 -and $result.data.errorCode -ceq 'INVALID_REQUEST') 'bounded input'
+    $boundary = Request 'cleanup'
+    $boundary.padding = ''
+    $boundaryLength = [Text.Encoding]::UTF8.GetByteCount(($boundary | ConvertTo-Json -Compress))
+    $boundary.padding = 'a' * (16384 - $boundaryLength)
+    Assert-True ([Text.Encoding]::UTF8.GetByteCount(($boundary | ConvertTo-Json -Compress)) -eq 16384) 'boundary fixture has exactly the maximum input byte count'
+    Assert-True ((Call $boundary).exitCode -eq 0) 'exact maximum metadata is accepted after EOF'
+    $trailing = ($boundary | ConvertTo-Json -Compress) + ' '
+    $result = Invoke-Script $script:helper '' $trailing
+    Assert-True ($result.exitCode -eq 1 -and $result.data.errorCode -ceq 'INVALID_REQUEST') 'one byte beyond the limit is refused'
+    $trailing = (Request | ConvertTo-Json -Compress) + 'x'
+    $result = Invoke-Script $script:helper '' $trailing
+    Assert-True ($result.exitCode -eq 1 -and $result.data.errorCode -ceq 'INVALID_REQUEST') 'trailing bytes after JSON are refused'
+    $invalidBytes = [byte[]]@(0xc3, 0x28)
+    $result = Complete-Script (Start-Script $script:helper '' '' $invalidBytes)
+    Assert-True ($result.exitCode -eq 1 -and $result.data.errorCode -ceq 'INVALID_REQUEST') 'malformed UTF8 is refused before JSON parsing'
+    $oversized = Request
+    $oversized.padding = [string]::new([char]0xd55c, 6000)
+    $oversizedJson = $oversized | ConvertTo-Json -Compress
+    Assert-True ($oversizedJson.Length -lt 16385 -and [Text.Encoding]::UTF8.GetByteCount($oversizedJson) -gt 16384) 'multibyte fixture isolates the byte bound from the character bound'
+    Refused $oversized 'INVALID_REQUEST'
 
     $originalParentAcl = Get-Acl -LiteralPath $WorkRoot
     $weakenedParentAcl = Get-Acl -LiteralPath $WorkRoot

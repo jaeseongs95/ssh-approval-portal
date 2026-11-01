@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
-import { deflateSync } from 'node:zlib';
+import { gzipSync } from 'node:zlib';
+import { WINDOWS_STDIN_READER } from '../../domain/windows-stdin.mjs';
 
 const digest = value => createHash('sha256').update(value).digest('hex');
-const decodePowerShell = value => `(d '${Buffer.from(value, 'utf8').toString('base64')}')`;
+const decodePowerShell = value => `[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${Buffer.from(value, 'utf8').toString('base64')}'))`;
 // CreateProcess 인수는 문자열이므로 따옴표와 마지막 역슬래시까지 인용한다.
 const quoteArgument = value => '"' + value.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/g, '$1$1') + '"';
 const environmentPolicy = JSON.stringify({
@@ -72,22 +73,28 @@ export function prepareWindowsPythonSource({ source, argv = [], cwd, elevate = f
   const receiver = receiverFor(maxBytes);
   const header = JSON.stringify({ sourceBytes: Buffer.byteLength(source), sourceSha256: digest(source), argv, cwd, elevate });
   const transportStdin = `${Buffer.byteLength(header)}\n${header}${source}`;
-  // 고정 수신기만 압축해 명령줄 한도를 지키고 모든 가변 인자는 입력 프레임에 둔다.
-  const bootstrap = `import base64,zlib;exec(zlib.decompress(base64.b64decode('${deflateSync(receiver).toString('base64')}')))`;
-  const args = Object.freeze(['-I', '-B', '-S', '-X', 'utf8', '-c', bootstrap, String(Buffer.byteLength(transportStdin)), digest(transportStdin)]);
+  const args = Object.freeze(['-I', '-B', '-S', '-X', 'utf8', '-c', receiver, String(Buffer.byteLength(transportStdin)), digest(transportStdin)]);
+  // 이 문자열에는 서버 소유 수신기와 생성한 길이·해시만 있다. 사용자 인자·cwd·원문은 프레임에만 존재한다.
+  const fixedArguments = args.map(quoteArgument).join(' ');
+  if (!/^[\t\r\n\x20-\x7e]+$/.test(fixedArguments)) throw Error('Invalid fixed source receiver arguments');
+  const argumentLiteral = `'${fixedArguments.replaceAll("'", "''")}'`;
   // 원문은 문자열 파이프와 StreamWriter를 피하고 바이트로만 복사한다.
   // 표준 출력·오류는 SSH 핸들을 상속하고 표준 입력만 별도로 연결한다.
-  const launcher = `$ErrorActionPreference='Stop';$PSModuleAutoLoadingPreference='None';function d($b){[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($b))};try{`
-    + `$s=[Diagnostics.ProcessStartInfo]::new();$s.FileName=${decodePowerShell(pythonExecutable)};$s.Arguments=${decodePowerShell(args.map(quoteArgument).join(' '))};`
+  const launcher = `$ErrorActionPreference='Stop';$PSModuleAutoLoadingPreference='None';try{`
+    + WINDOWS_STDIN_READER
+    + `$s=[Diagnostics.ProcessStartInfo]::new();$s.FileName=${decodePowerShell(pythonExecutable)};$s.Arguments=${argumentLiteral};`
     + `if(-not [IO.File]::Exists($s.FileName)){[Console]::Error.Write('Python executable unavailable');exit 127};`
     + `$s.UseShellExecute=$false;$s.CreateNoWindow=$true;$s.RedirectStandardInput=$true;$p=[Diagnostics.Process]::Start($s);`
-    + `$i=$p.StandardInput.BaseStream;try{[Console]::OpenStandardInput().CopyTo($i)}finally{$i.Close()};$p.WaitForExit();exit $p.ExitCode`
+    + `$i=$p.StandardInput.BaseStream;$b=[byte[]]::new(8192);try{while(($n=[SshApproval.Stdin]::Read($b,0,$b.Length)) -gt 0){$i.Write($b,0,$n)}}finally{$i.Close()};$p.WaitForExit();exit $p.ExitCode`
     + `}catch{[Console]::Error.Write('Python launcher failed');exit 125}`;
-  const command = 'powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand '
-    + Buffer.from(launcher, 'utf16le').toString('base64');
+  // 바깥 식에는 고정 문법과 Base64만 있어 cmd와 PowerShell의 추가 확장이 없다.
+  const launcherBootstrap = `& ([scriptblock]::Create([IO.StreamReader]::new([IO.Compression.GZipStream]::new([IO.MemoryStream]::new([Convert]::FromBase64String('${gzipSync(launcher, { level: 9 }).toString('base64')}')),[IO.Compression.CompressionMode]0)).ReadToEnd()))`;
+  if (/["$`%\r\n]/.test(launcherBootstrap)) throw Error('Invalid fixed launcher bootstrap');
+  const command = 'powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -Command "'
+    + launcherBootstrap + '"';
   if (command.length > 8000) throw Error('Source execution command too large');
   const manifest = Object.freeze({ contract: 'python-source-v1', platform, interpreter: pythonExecutable,
-    startupFlags: '-I -B -S -X utf8', receiverSha256: digest(receiver), bootstrapSha256: digest(bootstrap), launcherSha256: digest(launcher),
+    startupFlags: '-I -B -S -X utf8', receiverSha256: digest(receiver), launcherSha256: digest(launcher), launcherBootstrapSha256: digest(launcherBootstrap),
     sourceSha256: digest(source), sourceBytes: Buffer.byteLength(source), argvJson: JSON.stringify(argv),
     transportSha256: digest(transportStdin), transportBytes: Buffer.byteLength(transportStdin),
     cwd, elevate, targetId, targetRevision, profile, environmentRevision, environmentPolicy });

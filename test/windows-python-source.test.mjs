@@ -5,14 +5,22 @@ import { mkdtemp, readFile, access, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
-import { inflateSync } from 'node:zlib';
+import { gunzipSync } from 'node:zlib';
 import { preparePythonSource, preparePythonHelper, WINDOWS_PYTHON_SOURCE_ENVIRONMENT_REVISION } from '../src/adapters/ssh/python-source.mjs';
 
 const binding = { platform: 'windows', cwd: 'C:\\', pythonExecutable: 'C:\\Program Files\\Python\\python.exe',
   targetId: 'fixture', targetRevision: 'a'.repeat(64), profile: 'fixture-write' };
 const plan = (source, options = {}) => preparePythonSource({ ...binding, source, ...options });
-const launcherOf = p => Buffer.from(p.command.split(' ').at(-1), 'base64').toString('utf16le');
-const receiverOf = p => inflateSync(Buffer.from(p.args[6].match(/b64decode\('([^']+)'\)/)[1], 'base64')).toString('utf8');
+const launcherBootstrapOf = p => p.command.slice(p.command.indexOf('-Command "') + 10, -1);
+const powershellArguments = command => ['-NoLogo', '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', command];
+const launcherOf = p => {
+  const bootstrap = launcherBootstrapOf(p);
+  assert.equal(createHash('sha256').update(bootstrap).digest('hex'), p.manifest.launcherBootstrapSha256);
+  const launcher = gunzipSync(Buffer.from(bootstrap.match(/FromBase64String\('([^']+)'\)/)[1], 'base64')).toString('utf8');
+  assert.equal(createHash('sha256').update(launcher).digest('hex'), p.manifest.launcherSha256);
+  return launcher;
+};
+const receiverOf = p => p.args[6];
 const quotePayload = marker => `’;[IO.File]::WriteAllText('${marker.replaceAll("'", "''")}','injected');}catch{};#`;
 const maximumArgv = Array.from({ length: 8 }, (_, index) => 'x'.repeat(index === 7 ? 508 : 509));
 const traceInput = async (t, label, p, input, execute) => {
@@ -53,10 +61,12 @@ test('Windows source binds its exact runtime, bytes, environment, argv and admin
   assert.equal(p.manifest.platform, 'windows');
   assert.equal(p.manifest.interpreter, binding.pythonExecutable);
   assert.equal(p.manifest.environmentRevision, WINDOWS_PYTHON_SOURCE_ENVIRONMENT_REVISION);
-  assert.match(p.command, /^powershell\.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand [A-Za-z0-9+/=]+$/);
+  assert.match(p.command, /^powershell\.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -Command "& \(.+\)"$/);
+  assert.doesNotMatch(launcherBootstrapOf(p), /["$`%\r\n]/);
   assert.ok(p.command.length <= 8000);
   assert.doesNotMatch(launcherOf(p), /source stays on stdin|WriteLine|\|/);
-  assert.match(launcherOf(p), /\$i=\$p\.StandardInput\.BaseStream;try\{\[Console\]::OpenStandardInput\(\)\.CopyTo\(\$i\)/);
+  assert.match(launcherOf(p), /\$i=\$p\.StandardInput\.BaseStream;\$b=\[byte\[\]\]::new\(8192\);try\{while\(\(\$n=\[SshApproval\.Stdin\]::Read\(\$b,0,\$b\.Length\)\) -gt 0\)\{\$i\.Write\(\$b,0,\$n\)\}/);
+  assert.doesNotMatch(launcherOf(p), /Console\]::OpenStandardInput|ConsoleStream/);
   assert.match(launcherOf(p), /finally\{\$i\.Close\(\)\}/);
   assert.doesNotMatch(launcherOf(p), /StandardInput\.Close\(\)/);
   assert.doesNotMatch(JSON.stringify(p.manifest), /source stays on stdin/);
@@ -73,9 +83,8 @@ test('Windows source binds its exact runtime, bytes, environment, argv and admin
   assert.equal(Object.isFrozen(p.manifest), true);
   const smart = plan('pass', { pythonExecutable: 'C:\\‘’“”\\python.exe', cwd: 'C:\\‘’“”', argv: ['‘’“”', '’; calc.exe; }catch{};#'] });
   assert.doesNotMatch(launcherOf(smart), /[‘’“”]|calc\.exe/);
-  assert.match(launcherOf(smart), /function d\(\$b\)\{\[Text\.Encoding\]::UTF8\.GetString\(\[Convert\]::FromBase64String\(\$b\)\)\}/);
-  assert.match(launcherOf(smart), /\$s\.FileName=\(d '[A-Za-z0-9+/=]+'\)/);
-  assert.match(launcherOf(smart), /\$s\.Arguments=\(d '[A-Za-z0-9+/=]+'\)/);
+  assert.match(launcherOf(smart), /\$s\.FileName=\[Text\.Encoding\]::UTF8\.GetString\(\[Convert\]::FromBase64String\('[A-Za-z0-9+/=]+'\)\)/);
+  assert.match(launcherOf(smart), /\$s\.Arguments='/);
   for (const path of ['C:\\hostedtoolcache\\windows\\Python\\3.12.10\\x64\\python.exe',
     'C:/hostedtoolcache/windows/Python/3.13.9/x64/python.exe']) {
     assert.equal(plan('pass', { pythonExecutable: path }).manifest.interpreter, path);
@@ -118,8 +127,9 @@ const pythonExecutable = process.env.SOLID_PYTHON ?? process.env.PYTHON;
 const ciWindows = process.platform === 'win32' && process.env.GITHUB_ACTIONS === 'true';
 // 실제 SSH와 동일하게 비동기로 입력을 닫고 출력을 동시에 비운다.
 // 제한은 유지하고 실패 시 어느 수명 단계가 끝났는지에 한정해 남긴다.
-const run = (t, label, p, input = p.transportStdin) => traceInput(t, label, p, input, () => new Promise(resolve => {
-  const child = spawn('powershell.exe', p.command.split(' ').slice(1), { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+const run = (t, label, p, input = p.transportStdin, host = 'direct') => traceInput(t, label, p, input, () => new Promise(resolve => {
+  const child = spawn(host === 'cmd' ? 'cmd.exe' : 'powershell.exe', host === 'cmd' ? ['/d', '/s', '/c', p.command]
+    : powershellArguments(host === 'powershell-shell' ? p.command : launcherBootstrapOf(p)), { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
   const events = [], stdout = [], stderr = [];
   let error, completed = false;
   const finish = (status = child.exitCode, signal = child.signalCode) => {
@@ -164,6 +174,13 @@ test('Windows PowerShell 5.1 forwards source bytes and literal arguments without
   assert.equal(good.status, 0, good.stderr);
   assert.deepEqual(JSON.parse(good.stdout), [literal, cwd, '__main__']);
   await assert.rejects(access(attackMarker), { code: 'ENOENT' });
+  for (const host of ['cmd', 'powershell-shell']) {
+    const throughShell = await run(t, `기본 셸 ${host}: 한글·따옴표 인자`, plan(source, { ...options, argv: literal }), undefined, host);
+    assert.ifError(throughShell.error);
+    assert.equal(throughShell.status, 0, throughShell.stderr);
+    assert.deepEqual(JSON.parse(throughShell.stdout), [literal, cwd, '__main__']);
+    await assert.rejects(access(attackMarker), { code: 'ENOENT' });
+  }
   const maximum = await run(t, '직접 실행: 최대 인자 4096바이트', plan(source, { ...options, argv: maximumArgv }));
   assert.ifError(maximum.error);
   assert.equal(maximum.status, 0, maximum.stderr);
@@ -199,7 +216,7 @@ test('Windows source rejects truncated, altered and trailing bytes before effect
     await assert.rejects(access(marker), { code: 'ENOENT' });
   }
   const closed = await traceInput(t, '직접 실행: 지연 입력 종료', p, p.transportStdin, async () => {
-    const child = spawn('powershell.exe', p.command.split(' ').slice(1), { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    const child = spawn('powershell.exe', powershellArguments(launcherBootstrapOf(p)), { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     child.stdout.resume(); child.stderr.resume();
     const finished = new Promise((resolve, reject) => { child.once('error', reject); child.once('close', resolve); });
     const deadline = setTimeout(() => child.kill(), 20_000);

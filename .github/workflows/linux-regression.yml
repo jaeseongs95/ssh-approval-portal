@@ -20,6 +20,20 @@ jobs:
         with:
           node-version: '24.21.0'
       - run: npm ci --ignore-scripts
+      - name: 브라우저 의존 패키지 저장소 연결 진단
+        shell: bash
+        run: |
+          set -u
+          . /etc/os-release
+          for host in azure.archive.ubuntu.com archive.ubuntu.com; do
+            timeout 10s getent ahosts "$host" || true
+            for scheme in http https; do
+              curl --silent --show-error --output /dev/null --range 0-0 \
+                --connect-timeout 5 --max-time 10 \
+                --write-out "저장소=$scheme://$host 상태=%{http_code} 원격주소=%{remote_ip} 연결초=%{time_connect} 전체초=%{time_total}\n" \
+                "$scheme://$host/ubuntu/dists/$VERSION_CODENAME/InRelease" || true
+            done
+          done
       - run: npx playwright install --with-deps chromium
       - name: 관리자 화면 회귀 시험
         run: npm run test:browser

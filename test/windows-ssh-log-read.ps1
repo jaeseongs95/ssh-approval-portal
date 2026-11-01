@@ -33,7 +33,10 @@ try {
     }
     [Console]::Out.WriteLine((@{ lineCount = $lineCount; events = @($events.ToArray()) } | ConvertTo-Json -Depth 4 -Compress))
 } catch {
-    [Console]::Out.WriteLine((@{ errorCode = 'LOG_READ_FAILED'; errorType = $_.Exception.GetType().Name; hresult = $_.Exception.HResult } | ConvertTo-Json -Compress))
+    $cause = $_.Exception.GetBaseException()
+    $report = @{ errorCode = 'LOG_READ_FAILED'; errorType = $cause.GetType().Name; hresult = $cause.HResult }
+    if (($cause.HResult -shr 16 -band 8191) -eq 7) { $report.nativeError = $cause.HResult -band 65535 }
+    [Console]::Out.WriteLine(($report | ConvertTo-Json -Compress))
     exit 1
 } finally {
     if ($null -ne $reader) { $reader.Dispose() }

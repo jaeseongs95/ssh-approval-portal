@@ -2,6 +2,7 @@ import {readFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import {preparePythonHelper} from './python-source.mjs';
 import {agentCliProvider,validateAgentRelease,AGENT_CLI_CONTRACT} from '../../domain/agent-cli.mjs';
+import {WINDOWS_STDIN_READER} from '../../domain/windows-stdin.mjs';
 
 const source=readFileSync(new URL('../../../scripts/manage-agent-cli.py',import.meta.url),'utf8');
 const loginSource=readFileSync(new URL('../../../scripts/check-agent-cli-login.py',import.meta.url),'utf8');
@@ -13,10 +14,12 @@ function prepareWindowsHelper({argv,binding}){
  const sourceBytes=Buffer.byteLength(windowsSource),sourceSha256=sha256(windowsSource);
  if(sourceBytes>65536)throw Error('Windows CLI helper exceeds transport limit');
  const argumentsLiteral=argv.map(value=>`'${value.replaceAll("'","''")}'`).join(',');
- const receiver=`$ErrorActionPreference='Stop';[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);$inputStream=[Console]::OpenStandardInput();$b=[Array]::CreateInstance([byte],${sourceBytes+1});$n=0;while($n -lt $b.Length){$r=$inputStream.Read($b,$n,$b.Length-$n);if($r -eq 0){break};$n+=$r};if($n -ne ${sourceBytes}){exit 125};$hash=[Security.Cryptography.SHA256]::Create();try{$h=([BitConverter]::ToString($hash.ComputeHash($b,0,$n))).Replace('-','').ToLowerInvariant()}finally{$hash.Dispose()};if($h -cne '${sourceSha256}'){exit 125};$s=[Text.UTF8Encoding]::new($false,$true).GetString($b,0,$n);[IO.Directory]::SetCurrentDirectory('C:\\');& ([scriptblock]::Create($s)) -CliArguments ([string[]]@(${argumentsLiteral}))`;
+ const receiver=`$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);${WINDOWS_STDIN_READER}$b=[Array]::CreateInstance([byte],${sourceBytes+1});$n=0;while($n -lt $b.Length){$r=[SshApproval.Stdin]::Read($b,$n,$b.Length-$n);if($r -eq 0){break};$n+=$r};if($n -ne ${sourceBytes}){exit 125};$hash=[Security.Cryptography.SHA256]::Create();try{$h=([BitConverter]::ToString($hash.ComputeHash($b,0,$n))).Replace('-','').ToLowerInvariant()}finally{$hash.Dispose()};if($h -cne '${sourceSha256}'){exit 125};$s=[Text.UTF8Encoding]::new($false,$true).GetString($b,0,$n);[IO.Directory]::SetCurrentDirectory('C:\\');& ([scriptblock]::Create($s)) -CliArguments ([string[]]@(${argumentsLiteral}))`;
  const manifest=Object.freeze({contract:windowsContract,interpreter:'powershell.exe',startupFlags:'-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass',receiverSha256:sha256(receiver),sourceSha256,sourceBytes,argvJson:JSON.stringify(argv),cwd:'C:/',elevate:false,targetId:binding.targetId,targetRevision:binding.targetRevision,profile:binding.profile,environmentRevision:sha256('windows-cli-clean-environment-v1'),environmentPolicy:'windows-cli-clean-environment-v1'});
  const args=Object.freeze(['-NoLogo','-NoProfile','-NonInteractive','-WindowStyle','Hidden','-ExecutionPolicy','Bypass','-EncodedCommand',Buffer.from(receiver,'utf16le').toString('base64')]);
- return Object.freeze({manifest,planDigest:sha256(JSON.stringify(manifest)),command:['powershell.exe',...args].join(' '),args,stdin:windowsSource});
+ const command=['powershell.exe',...args].join(' ');
+ if(command.length>8000)throw Error('Windows CLI startup command exceeds the encoded shell limit');
+ return Object.freeze({manifest,planDigest:sha256(JSON.stringify(manifest)),command,args,stdin:windowsSource});
 }
 const id=value=>typeof value==='string'&&/^[a-f0-9]{48}$/.test(value);
 const hex=value=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);

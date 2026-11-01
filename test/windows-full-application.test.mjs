@@ -50,6 +50,8 @@ test('Windows source와 CLI 고정 계획은 같은 SSH 검증 경계를 통과�
   assert.equal(calls[1].options.stdin, cli.stdin);
   await assert.rejects(executeAgentCli(fake, { ...cli, stdin: cli.stdin + '# changed' }, () => binding));
   await assert.rejects(executePythonSource(fake, { ...source, manifest: { ...source.manifest, interpreter: 'C:/other/python.exe' } }, () => binding));
+  await assert.rejects(executePythonSource(fake, { ...source, command: source.command + '; altered' }, () => binding), /plan changed/);
+  await assert.rejects(executePythonSource(fake, { ...source, manifest: { ...source.manifest, launcherBootstrapSha256: '0'.repeat(64) } }, () => binding), /plan changed/);
   await assert.rejects(executePythonSource(fake, { ...source, transportStdin: source.transportStdin + 'x' }, () => binding));
   await assert.rejects(executePythonSource(fake, { ...source, transportStdin: undefined }, () => binding));
   const linux = preparePythonSource({ ...binding, platform: 'linux', source: 'pass', cwd: '/' });

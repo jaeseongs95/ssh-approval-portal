@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {createHash} from 'node:crypto';
 import {prepareAgentCliPlan,validateAgentCliPlan,prepareAgentCliStatus,projectAgentCliResult} from '../src/adapters/ssh/agent-cli.mjs';
 import {validateAgentRelease} from '../src/domain/agent-cli.mjs';
 
@@ -19,6 +20,21 @@ test('Windows 로그인 진단도 고정 helper와 7개 인수만 허용한다',
  const plan=prepareAgentCliPlan({action:'login-status',provider:'claude',binding});
  assert.deepEqual(JSON.parse(plan.manifest.argvJson),['login-status','claude','','','','','']);
  assert.equal(validateAgentCliPlan(plan).planDigest,plan.planDigest);
+});
+test('Windows CLI의 모든 계획은 원문·수신기 해시와 시작 명령 상한에 결속된다',()=>{
+ for(const provider of ['codex','claude'])for(const action of ['inspect','login-status','install','update','status']){
+  const name=provider==='codex'?'@openai/codex':'@anthropic-ai/claude-code';
+  const pinned=validateAgentRelease(provider,{name,version:'999999.999999.999999',dist:{tarball:'https://registry.npmjs.org/'+name+'/-/'+name.split('/')[1]+'-999999.999999.999999.tgz',integrity:release.integrity}});
+  const options=['install','update'].includes(action)?{release:pinned,expectedInstallationRevision:'b'.repeat(64),expiresAt:Number.MAX_SAFE_INTEGER,operationId:'c'.repeat(48)}:action==='status'?{operationId:'c'.repeat(48),expectedIntentDigest:'d'.repeat(64)}:{};
+  const plan=prepareAgentCliPlan({action,provider,binding,...options});
+  assert.ok(plan.command.length<=8000);
+  const receiver=Buffer.from(plan.args.at(-1),'base64').toString('utf16le');
+  assert.equal(createHash('sha256').update(receiver).digest('hex'),plan.manifest.receiverSha256);
+  assert.equal(createHash('sha256').update(plan.stdin).digest('hex'),plan.manifest.sourceSha256);
+  assert.equal(Buffer.byteLength(plan.stdin),plan.manifest.sourceBytes);
+  assert.equal(validateAgentCliPlan(plan).planDigest,plan.planDigest);
+  assert.throws(()=>validateAgentCliPlan({...plan,manifest:{...plan.manifest,receiverSha256:'0'.repeat(64)}}));
+ }
 });
 test('Windows 응답 유실 뒤에는 기존 intent의 읽기 전용 상태 계획을 만든다',()=>{
  const plan=install();

@@ -38,6 +38,10 @@ namespace SshApproval {
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         static extern SafeFileHandle CreateFile(string path, uint access, uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
         [DllImport("kernel32.dll", SetLastError = true)]
+        static extern IntPtr GetStdHandle(int standardHandle);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool ReadFile(SafeFileHandle handle, [Out] byte[] buffer, uint length, out uint read, IntPtr overlapped);
+        [DllImport("kernel32.dll", SetLastError = true)]
         static extern bool GetFileInformationByHandle(SafeFileHandle handle, out Info info);
         [DllImport("kernel32.dll", SetLastError = true)]
         static extern uint GetFileType(SafeFileHandle handle);
@@ -66,6 +70,38 @@ namespace SshApproval {
         static extern bool CreateDirectory(string path, ref SecurityAttributes security);
 
         static void Fail(string code) { throw new FileFailure(code); }
+        public static string ReadMetadataInput() {
+            const int maximumBytes = 16384, maximumChars = 16384;
+            IntPtr input = GetStdHandle(-10);
+            if (input == IntPtr.Zero || input == new IntPtr(-1)) Fail("INVALID_REQUEST");
+            // Console.In's text reader can keep waiting after an SSH pipe closes.
+            // ReadFile distinguishes pipe EOF (error 109) from a zero-byte write.
+            // This wrapper never owns the process's standard input handle.
+            using (SafeFileHandle handle = new SafeFileHandle(input, false))
+            using (MemoryStream bytes = new MemoryStream()) {
+                byte[] buffer = new byte[4096];
+                while (true) {
+                    uint count;
+                    uint requested = (uint)Math.Min(buffer.Length, maximumBytes + 1 - (int)bytes.Length);
+                    if (!ReadFile(handle, buffer, requested, out count, IntPtr.Zero)) {
+                        int error = Marshal.GetLastWin32Error();
+                        if (error == 109) break;
+                        throw new FileFailure("OPERATION_FAILED", "read_input", error);
+                    }
+                    if (count == 0) continue;
+                    if (count > requested) Fail("INVALID_REQUEST");
+                    bytes.Write(buffer, 0, (int)count);
+                    if (bytes.Length > maximumBytes) Fail("INVALID_REQUEST");
+                }
+                string text;
+                try { text = new UTF8Encoding(false, true).GetString(bytes.ToArray()); }
+                catch (DecoderFallbackException) { throw new FileFailure("INVALID_REQUEST"); }
+                // The old 16,385-character buffer used its final character as an
+                // over-limit sentinel. Keep the accepted 16,384-character bound too.
+                if (text.Length > maximumChars) Fail("INVALID_REQUEST");
+                return text;
+            }
+        }
         public static void RequireAdministrator() {
             // IsInRole checks the effective token, including disabled/deny-only UAC groups.
             // Never acquire another token or enable a privilege on the caller's behalf.
