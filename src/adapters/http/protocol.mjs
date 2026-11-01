@@ -7,36 +7,73 @@ import { createMcpAdapter } from '../mcp/server.mjs';
 import { createCapabilities } from '../presentation/capabilities.mjs';
 import { presentJob } from '../presentation/results.mjs';
 import { BASELINE_PRESERVATION_CONTRACT } from '../storage/preservation-verification.mjs';
+import { createRequestAdmission, RequestAdmissionError } from '../../application/request-admission.mjs';
 
 const json = (res, status, value) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }); res.end(JSON.stringify(value)); };
 
 const escapeHtml = value => value.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
 
-export function createProtocolAdapters({ queue, commands, files, store, lifecycle, settings, signer, adminAccess, browserSessions, authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal, targets, requestSafety, commandPolicy, commandOutputs, automationMetrics, environmentEditor,agentCli, preservation, retainedHistory }) {
+function requestScope(req, res) {
+  const controller = new AbortController();
+  const aborted = () => controller.abort();
+  const closed = () => { if (!res.writableFinished) aborted(); };
+  req.once('aborted', aborted); res.once('close', closed);
+  if (req.aborted || res.destroyed) aborted();
+  return { signal: controller.signal, cleanup() { req.off('aborted', aborted); res.off('close', closed); } };
+}
+
+function admissionRefusal(res, error) {
+  if (res.destroyed || res.writableEnded) return;
+  // Do not retain or drain an unadmitted body on a reusable connection.
+  res.setHeader('Retry-After', '1'); res.setHeader('Connection', 'close');
+  json(res, 503, { error: error.code, executionAttempted: false, requestSubmitted: false, retryAfterMs: 1000 });
+}
+
+async function responseFinished(res) {
+  if (res.writableFinished || res.destroyed) return;
+  await new Promise(resolve => {
+    const done = () => { res.off('finish', done); res.off('close', done); resolve(); };
+    res.once('finish', done); res.once('close', done);
+  });
+}
+
+export function createProtocolAdapters({ queue, commands, files, store, lifecycle, settings, signer, adminAccess, browserSessions, authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal, targets, requestSafety, commandPolicy, commandOutputs, automationMetrics, environmentEditor,agentCli, preservation, retainedHistory, requestAdmission }) {
   const capabilities = createCapabilities({ queue, store, signer, settings, targets, adminAuthMode: adminAccess.mode });
   const mcpServer = createMcpAdapter({ queue, commands, files, settings, capabilities, uiHtml, bindFileSource, shutdownSignal, targets, requestSafety, commandOutputs });
+  const admission = {
+    mcp: createRequestAdmission(requestAdmission?.mcp),
+    admin: createRequestAdmission({ maxActive: 4, maxQueued: 16, maxWaitMs: 5000, maxDetached: 8, ...requestAdmission?.admin }),
+  };
+  const closeAdmission = () => { admission.mcp.close(); admission.admin.close(); };
+  if (shutdownSignal?.aborted) closeAdmission();
+  else shutdownSignal?.addEventListener('abort', closeAdmission, { once: true });
   const mcpHttp = createServer(async (req, res) => {
-    let server, disconnect, aborted, closed;
+    let server, scope, lease;
     try {
-      if (req.url === '/health' && req.method === 'GET') return json(res, 200, { healthy: true, version: metadata.version, uiEnabled: settings.uiEnabled, adminAuthMode: adminAccess.mode, ...lifecycle.snapshot() });
+      if (req.url === '/health' && req.method === 'GET') return json(res, 200, { healthy: true, version: metadata.version, uiEnabled: settings.uiEnabled, adminAuthMode: adminAccess.mode, ...lifecycle.snapshot(), requestAdmission: { mcp: admission.mcp.snapshot(), admin: admission.admin.snapshot() } });
       if (req.url !== '/mcp' || !authenticated(req, settings.mcpToken)) return json(res, 401, { error: 'Unauthorized' });
       if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
+      scope = requestScope(req, res);
+      lease = await admission.mcp.acquire({ signal: scope.signal });
+      if (scope.signal.aborted) return;
       const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true, maxRequestBodySize: 1024 * 1024 });
-      disconnect = new AbortController();
-      aborted = () => disconnect.abort(); closed = () => { if (!res.writableEnded) aborted(); };
-      req.once('aborted', aborted); res.once('close', closed);
-      server = mcpServer(disconnect.signal);
+      server = mcpServer(scope.signal, lease);
       await server.connect(transport); await transport.handleRequest(req, res);
-    } catch {
-      if (!res.headersSent) json(res, req.url === '/health' ? 503 : 500, { error: req.url === '/health' ? 'Health check unavailable' : 'MCP request failed' });
+    } catch (error) {
+      if (error instanceof RequestAdmissionError) admissionRefusal(res, error);
+      else if (!res.headersSent && !res.destroyed) json(res, req.url === '/health' ? 503 : 500, { error: req.url === '/health' ? 'Health check unavailable' : 'MCP request failed' });
     } finally {
-      if (aborted) req.off('aborted', aborted);
-      if (closed) res.off('close', closed);
-      await server?.close().catch(() => {});
+      try { await server?.close().catch(() => {}); await responseFinished(res); }
+      finally { scope?.cleanup(); lease?.release(); }
     }
   });
   const adminHttp = createServer(async (req, res) => {
+    const scope = requestScope(req, res);
+    let lease;
     try {
+      // Separate from MCP saturation, including before potentially async identity verification.
+      lease = await admission.admin.acquire({ signal: scope.signal });
+      if (scope.signal.aborted) return;
       const authorize = () => authorizeAdminRequest(req, { adminAccess, adminToken: settings.adminToken, adminOrigin: settings.adminOrigin, browserSessions });
       const authorization = await authorize();
       if (!authorization.allowed) return json(res, authorization.status ?? 403, { error: authorization.status === 401 ? 'Unauthorized' : authorization.status === 409 ? 'Request refused, expired, busy or unavailable' : 'Forbidden' });
@@ -162,9 +199,23 @@ export function createProtocolAdapters({ queue, commands, files, store, lifecycl
         res.setHeader('Preference-Applied', 'respond-async');
         return json(res, 202, presentJob(accepted));
       }
-      const result = action[2] === 'approve' ? await queue.approve(action[1]) : queue.deny(action[1]);
+      let result;
+      if (action[2] === 'approve') {
+        // A synchronous approval response may outlive the request-admission slot.
+        // The existing queue still owns authorization, execution and its completion.
+        lease.detach();
+        result = await queue.approve(action[1]);
+      } else result = queue.deny(action[1]);
       json(res, 200, presentJob(result));
-    } catch { if (!res.headersSent) json(res, 409, { error: 'Request refused, expired, busy or unavailable' }); }
+    } catch (error) {
+      if (error instanceof RequestAdmissionError) admissionRefusal(res, error);
+      else if (!res.headersSent && !res.destroyed) json(res, 409, { error: 'Request refused, expired, busy or unavailable' });
+    } finally {
+      try { await responseFinished(res); }
+      finally { scope.cleanup(); lease?.release(); }
+    }
   });
+  // Bound incomplete HTTP bodies/headers; these are not SSH execution deadlines.
+  for (const server of [mcpHttp, adminHttp]) { server.requestTimeout = 30000; server.headersTimeout = 15000; }
   return { mcpHttp, adminHttp, mcpServer, reapCapabilities: capabilities.reap };
 }

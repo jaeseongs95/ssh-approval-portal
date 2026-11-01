@@ -2,7 +2,7 @@ name: Linux regression
 
 on:
   push:
-    branches: [fix/jev-binary-assessment, feat/windows-full-support-20261101, feat/admin-ui-1.6.8-20261101]
+    branches: [fix/jev-binary-assessment, feat/windows-full-support-20261101, feat/admin-ui-1.6.8-20261101, fix/request-admission-queue-20261102]
   workflow_dispatch:
 
 permissions:

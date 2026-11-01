@@ -7,6 +7,7 @@ import { COMMAND_MAX_BYTES, COMMAND_REQUEST_MAX_BYTES, utf8WithinLimit, CHUNK_BY
 import { CALLER_CONTEXT_LIMIT, commandRequest } from '../../domain/execution-context.mjs';
 import { OUTPUT_PAGE_BYTES } from '../../contracts/ports.mjs';
 import { outputSchemas, publicResult, jobResult, statusResult, immediateResult, sourceUnavailable, refused } from '../presentation/results.mjs';
+import { RequestAdmissionError } from '../../application/request-admission.mjs';
 
 const commandSchema = z.string().min(1).max(COMMAND_MAX_BYTES).refine(value => utf8WithinLimit(value, COMMAND_MAX_BYTES), 'Maximum 32768 UTF-8 bytes');
 const commandRequestSchema = z.string().min(1).max(COMMAND_REQUEST_MAX_BYTES).refine(value => utf8WithinLimit(value, value.startsWith('ssh-request-v1:') ? COMMAND_REQUEST_MAX_BYTES : COMMAND_MAX_BYTES), 'Maximum 32768 command bytes; 524288 envelope bytes');
@@ -22,7 +23,7 @@ function decodeChunk(data) {
 export function createMcpAdapter({ queue, commands, files, settings, capabilities, uiHtml, bindFileSource, shutdownSignal, targets, requestSafety, commandOutputs }) {
   const identity = target => targets && !targets.legacy ? { ...targets.select(target).identity, target: targets.select(target).target } : undefined;
   const URI = `ui://ssh-approval/card-${hash(uiHtml)}.html`;
-  return function mcpServer(requestSignal) {
+  return function mcpServer(requestSignal, admission) {
     // Largest valid input: eight run-python-source fields plus sixteen argv entries (24 elements).
     const server = new McpServer({ name: 'SSH Approval Portal', version: metadata.version }, { maxToolInputElements: 64 });
     server.registerResource('SSH approval card', URI, { mimeType: 'text/html;profile=mcp-app' }, async () => ({ contents: [{ uri: URI, mimeType: 'text/html;profile=mcp-app', text: uiHtml, _meta: { ui: { csp: { connectDomains: [], resourceDomains: [] }, prefersBorder: true } } }] }));
@@ -33,7 +34,12 @@ export function createMcpAdapter({ queue, commands, files, settings, capabilitie
       _meta: (ui || appOnly || meta) ? { ...meta, ...((ui || appOnly) ? { ui: { ...(ui ? { resourceUri: URI } : {}), visibility: appOnly ? ['app'] : ['model', 'app'] } } : {}) } : undefined,
     }, async (args, extra) => {
       try { return await handler(args, { ...extra, signal: AbortSignal.any([shutdownSignal, requestSignal, extra?.signal].filter(Boolean)) }); }
-      catch (error) { return refused(error); }
+      catch (error) {
+        if (error instanceof RequestAdmissionError) return { isError: true, content: [{ type: 'text', text: JSON.stringify({
+          error_code: error.code, stage: 'request_admission', executionAttempted: false, requestSubmitted: false, retryAfterMs: 1000,
+        }) }] };
+        return refused(error);
+      }
     });
     tool('list-targets', {}, outputSchemas.targets, () => publicResult(targets?.list() ?? { targets: [{ id: 'default', displayName: settings.targetDisplayName ?? 'SSH', enabled: true, isDefault: true }], defaultTarget: 'default' }, outputSchemas.targets), { readOnly: true, description: 'List administrator-registered SSH target IDs and display names. Unknown or disabled targets are refused; an omitted target uses only the configured fixed default.' });
     tool('read-command', { target, command: commandSchema }, outputSchemas.immediate, async ({ command, target }) => immediateResult(await commands.read(command, target), identity(target)), { readOnly: true, description: 'Execute proven read-only commands immediately (maximum 32768 UTF-8 command bytes; never truncated). Shell composition such as semicolons is outside the proven read-only path. Read JSON error codes from content text: READ_COMMAND_REQUIRES_APPROVAL, READ_COMMAND_BUSY and READ_COMMAND_NOT_STARTED mean the executor was not called. Only READ_COMMAND_REQUIRES_APPROVAL may lead to submitting the exact command through run-command after checking existing task authority and keeping normal server policy/approval gates; never split or rewrite commands to bypass admission. Never automatically resubmit BUSY or NOT_STARTED refusals. READ_COMMAND_EXECUTION_UNKNOWN means the executor was called but remote dispatch or completion is uncertain: never rerun or switch tools to resubmit. A generic refusal and a missing request ID do not prove non-execution. The redacted adapter result is stored as a file; only status and output reference are returned. Read needed ranges with read-command-output; never rerun to recover expired output.' });
@@ -56,6 +62,8 @@ export function createMcpAdapter({ queue, commands, files, settings, capabilitie
     }) });
     tool('wait-for-request', { id, until: z.enum(['approval', 'completion']).default('approval'), timeoutMs: z.number().int().min(1).max(60000).default(25000) }, callbackSchema,
       async ({ id, until, timeoutMs }, { signal }) => {
+        // Only this validated, bounded, non-executing wait can leave the ordinary lane.
+        admission?.detach();
         const { job, event } = await queue.waitForRequest(id, { until, timeoutMs, signal });
         return publicResult({ ...statusResult(job).structuredContent, callback: {
           contract: 'approval-callback-v1', until, event,

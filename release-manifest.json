@@ -1,6 +1,6 @@
 {
   "version": "1.7.0",
-  "status": "release",
+  "status": "candidate-pending-live-host-verification",
   "runtime": "Node.js 24",
   "files": [
     {
@@ -30,8 +30,8 @@
     },
     {
       "path": "app.mjs",
-      "size": 31747,
-      "sha256": "219f2cfd3fdf7e366112ac6172ab158a36fbb8589ea7d464d88d4c1628343b48"
+      "size": 31783,
+      "sha256": "6b8620f39e05d3b8da2c6e24d1d0a8974998c8e7554cdfd5c0dd9545c9cacb94"
     },
     {
       "path": "bridge.mjs",
@@ -207,6 +207,11 @@
       "path": "docs/oidc-https.ko.md",
       "size": 10532,
       "sha256": "dad77d5b3302560ab4ea151f33068822f117183cb34e076cf67b17ad17f119fb"
+    },
+    {
+      "path": "docs/request-queue.ko.md",
+      "size": 2751,
+      "sha256": "f39a0d71d9ea93ae9434af5bf83e637c7a4508aebc80d43e415f3beb82ac13ae"
     },
     {
       "path": "docs/roadmap.ko.md",
@@ -570,13 +575,13 @@
     },
     {
       "path": "src/adapters/http/protocol.mjs",
-      "size": 17241,
-      "sha256": "a00ff526f7440fa51502948b55303c0c2ced23835486845cf03d3d4639ca35d0"
+      "size": 19889,
+      "sha256": "3134a930d453ec5c562a9c7f9bced28fc4eed7a6654469af45fb36084f18bc32"
     },
     {
       "path": "src/adapters/mcp/server.mjs",
-      "size": 24976,
-      "sha256": "958f25c2d7ac35595a417c9ac53bbf8ba67e7bb3f9cc514e5606e47eeba9825a"
+      "size": 25476,
+      "sha256": "d5a5b125198cbafcf666094adc611fa4faca38c1b5e3d0166611471fd8306e3f"
     },
     {
       "path": "src/adapters/presentation/capabilities.mjs",
@@ -772,6 +777,11 @@
       "path": "src/application/model-catalog.mjs",
       "size": 1404,
       "sha256": "a9d188b1f18f9ffec58bfbe6f5c93d2a6f9ff295714bfb2eaf3501f2e9ed3064"
+    },
+    {
+      "path": "src/application/request-admission.mjs",
+      "size": 3920,
+      "sha256": "9503e46b36295b9641f9907764606fd40be7b7d39fe421bd239c6bcd2b587299"
     },
     {
       "path": "src/application/request-safety.mjs",
@@ -1497,6 +1507,11 @@
       "path": "test/release-version.test.mjs",
       "size": 2224,
       "sha256": "9a6f5b472fdd55b4033a0e9095c6215f23cd57f59cad4fd98a10da2863b5d789"
+    },
+    {
+      "path": "test/request-admission.test.mjs",
+      "size": 8217,
+      "sha256": "5602d5546f8fd3eed370891d6daa2f91acd974795a41da875d980e4aa49ed285"
     },
     {
       "path": "test/request-capacity.test.mjs",
