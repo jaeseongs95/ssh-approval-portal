@@ -322,10 +322,18 @@ Subsystem sftp $sftpPath
     } | ConvertTo-Json -Compress)
     Set-FixtureAcl $fixturePath ''
     $env:AGS_WINDOWS_SSH_FIXTURE = $fixturePath
-    & node --test (Join-Path $PSScriptRoot 'windows-ssh-integration.test.mjs') (Join-Path $PSScriptRoot 'windows-python-source.test.mjs') (Join-Path $PSScriptRoot 'windows-agent-cli-smoke.test.mjs')
-    Assert-Exit '실제 Windows SSH 통합 시험'
+    if ($env:AGS_WINDOWS_CLI_PACKAGE_SMOKE -eq '1') {
+        Write-Output '공식 CLI 설치 전용 시험: 일반 SSH/Python 회귀는 별도 기본 실행에서 확인합니다.'
+        & node --test (Join-Path $PSScriptRoot 'windows-agent-cli-smoke.test.mjs')
+        Assert-Exit '공식 CLI 설치 전용 시험'
+    } else {
+        Write-Output '기본 Windows SSH/Python 회귀 시험: 공식 CLI 설치 전용 시험은 선택하지 않았습니다.'
+        & node --test (Join-Path $PSScriptRoot 'windows-ssh-integration.test.mjs') (Join-Path $PSScriptRoot 'windows-python-source.test.mjs')
+        Assert-Exit '실제 Windows SSH/Python 회귀 시험'
+    }
     $testsPassed = $true
-    Write-Output '실제 Windows OpenSSH 통합 시험 통과'
+    if ($env:AGS_WINDOWS_CLI_PACKAGE_SMOKE -eq '1') { Write-Output '공식 CLI 설치 전용 시험 통과' }
+    else { Write-Output '실제 Windows OpenSSH/Python 회귀 시험 통과' }
 } finally {
     Remove-Item Env:AGS_WINDOWS_SSH_FIXTURE -ErrorAction SilentlyContinue
     Remove-Item Env:SOLID_PYTHON -ErrorAction SilentlyContinue

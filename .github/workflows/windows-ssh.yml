@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       package_smoke:
-        description: '격리 계정에 고정 공식 CLI 패키지를 실제 설치하는 연기 시험'
+        description: '일반 회귀와 분리해 고정 공식 CLI 패키지만 실제 설치하는 전용 시험'
         type: boolean
         default: false
   push:
@@ -19,6 +19,7 @@ concurrency:
 
 jobs:
   windows-ssh:
+    name: ${{ inputs.package_smoke && '공식 CLI 설치 전용' || 'Windows SSH와 Python 회귀' }}
     runs-on: windows-2025
     timeout-minutes: ${{ inputs.package_smoke && 40 || 20 }}
     env:
@@ -70,7 +71,7 @@ jobs:
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         shell: pwsh
         run: ./test/windows-file-helper.tests.ps1 -PowerShellExe pwsh.exe
-      - name: 실제 Windows OpenSSH와 파일 왕복 시험
+      - name: ${{ inputs.package_smoke && '격리 SSH 공식 CLI 설치 전용 시험' || '실제 Windows OpenSSH와 파일 왕복·Python 회귀' }}
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         shell: pwsh
         run: ./test/windows-ssh-ci.ps1

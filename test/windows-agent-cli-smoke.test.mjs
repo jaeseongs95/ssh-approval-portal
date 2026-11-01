@@ -35,7 +35,8 @@ test('고정 공식 npm 패키지를 격리 Windows SSH 계정에 설치하고 �
  const binding={targetId:'windows-cli-smoke',targetRevision:'9'.repeat(64),profile:'windows-write',platform:'windows'};
  const raw=async script=>{
   const connection=await runtime.registry.getOrCreate(binding.profile);
-  const result=await connection.exec(wrapWindowsCommand(script));
+  // 새 격리 계정의 최초 모듈 준비 진행 출력만 억제한다. 오류 스트림 검사는 유지한다.
+  const result=await connection.exec(wrapWindowsCommand("$global:ProgressPreference='SilentlyContinue';"+script));
   assert.equal(result.exitCode,0,result.stderr);assert.equal(result.stderr,'');
   return JSON.parse(result.stdout);
  };

@@ -2,6 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, writeFile, access, readdir, mkdir } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
 import { join, dirname, win32 } from 'node:path';
 import { createSshRuntime, createSshTransport } from '../src/adapters/ssh/vendor.mjs';
 import { Artifacts } from '../src/adapters/storage/artifacts.mjs';
@@ -19,9 +22,9 @@ const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 const absent = async path => assert.rejects(access(path), { code: 'ENOENT' });
 
 test('실제 Windows SSH 명령·승인·파일 전송 경계', {
-  // 제품·원시험 제한은 유지한다. 실패시 SSH/PS 판별(1.5초+15초)과
-  // 관리자60+10초를 더해도 180+16.5+70+정리20=286.5초 안에 자료를 회수한다.
-  skip: !fixturePath, timeout: 330_000,
+  // 제품·원시험 제한은 유지한다. 실패시 .NET/ReadFile 각16.5초와 관리자70초,
+  // 로그읽기최대30초를 더해 180+33+70+30+정리20=333초의 진단 예산을 분리한다.
+  skip: !fixturePath, timeout: 350_000,
 }, async t => {
   assert.equal(process.platform, 'win32');
   assert.equal(process.env.GITHUB_ACTIONS, 'true');
@@ -61,19 +64,29 @@ test('실제 Windows SSH 명령·승인·파일 전송 경계', {
   const connection = await runtime.registry.getOrCreate('windows-write');
   const call = script => connection.exec(wrapWindowsCommand(script));
   const serverLogWindow = async (fromLine = 0) => {
-    const lines = (await readFile(fixture.serverLog, 'utf8')).split(/\r?\n/);
-    const events = [];
-    for (let index = fromLine; index < lines.length; index++) {
-      const match = lines[index].match(/Connection from 127\.0\.0\.1 port \d+ on 127\.0\.0\.1 port \d+|User child is on pid \d+|Starting session: command for [a-z0-9]+ from 127\.0\.0\.1 port \d+ id \d+|channel \d+: (?:rcvd eof|send eof|input drain -> closed|output drain -> closed)/i);
-      if (match) events.push({ 줄: index + 1, 사건: match[0] });
-    }
-    return { 줄수: lines.length, 사건: events.slice(-256) };
+    // Node 파일 열기가 sshd의 공유 모드와 충돌하므로 전용 공유 읽기를 사용한다.
+    const { stdout } = await promisify(execFile)('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden',
+      '-ExecutionPolicy', 'Bypass', '-File', fileURLToPath(new URL('./windows-ssh-log-read.ps1', import.meta.url)),
+      '-LogPath', fixture.serverLog, '-FromLine', String(fromLine)], { windowsHide: true, timeout: 5000, maxBuffer: 262_144, encoding: 'utf8' }).catch(error => {
+        try {
+          const report = JSON.parse(error.stdout);
+          if (report.errorCode === 'LOG_READ_FAILED' && /^[a-z]+$/i.test(report.errorType) && Number.isInteger(report.hresult)) {
+            error.code = 'LOG_READ_FAILED:' + report.errorType + ':' + report.hresult;
+          }
+        } catch { /* 구조화하지 못한 경우 원래 프로세스 오류 코드를 보존한다. */ }
+        throw error;
+      });
+    const snapshot = JSON.parse(stdout.trim());
+    assert.ok(Number.isSafeInteger(snapshot.lineCount));
+    assert.ok(Array.isArray(snapshot.events));
+    return { 줄수: snapshot.lineCount, 사건: snapshot.events.map(row => ({ 줄: row.line, 사건: row.event })) };
   };
-  const eofBoundaryDiagnostic = async () => {
+  const eofBoundaryDiagnostic = async (native = false) => {
     // 756a277에서 통과한 직접PS/SSH-Python 대조는 반복하지 않는다.
     // 진단 전용 marker를 쓰고 제품의 길이·해시·UTF-8·EOF 검사는 그대로 둔다.
-    const marker = remote('command-eof-probe-marker.txt');
-    const phases = remote('command-eof-probe-phases.txt');
+    const prefix = native ? 'command-eof-win32' : 'command-eof-probe';
+    const marker = remote(prefix + '-marker.txt');
+    const phases = remote(prefix + '-phases.txt');
     await absent(marker);
     await absent(phases);
     const prepared = prepareWindowsCommand(`[IO.File]::WriteAllText('${marker}', 'once');[Console]::Write('EOF 완료')`);
@@ -90,11 +103,20 @@ test('실제 Windows SSH 명령·승인·파일 전송 경계', {
     instrument('$count+=$read', "$count+=$read;Write-CiPhase ('PROBE_COUNT|'+$count)");
     instrument('$stage=1;$code=', "Write-CiPhase 'PROBE_VERIFIED';$stage=1;$code=");
     instrument('& $code |', "Write-CiPhase 'PROBE_EXECUTE';& $code |");
-    const phasePath = Buffer.from(phases, 'utf16le').toString('base64');
-    script = `function Write-CiPhase([string]$value){$path=[Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('${phasePath}'));[IO.File]::AppendAllText($path,$value+[Environment]::NewLine,[Text.UTF8Encoding]::new($false));[Console]::Error.WriteLine($value);[Console]::Error.Flush()};Write-CiPhase ('PROBE_ENTRY|'+$PID+'|'+$env:SSH_CONNECTION);` + script;
+    if (native) {
+      const nativePath = remote('command-eof-native-reader.cs');
+      assert.doesNotMatch(nativePath, /[?*\[\]]/);
+      await absent(nativePath);
+      await writeFile(nativePath, 'using System;using System.Runtime.InteropServices;public static class CiNativeRead{[DllImport("kernel32.dll",SetLastError=true)]public static extern IntPtr GetStdHandle(int n);[DllImport("kernel32.dll",SetLastError=true)]public static extern uint GetFileType(IntPtr h);[DllImport("kernel32.dll",SetLastError=true)]public static extern bool ReadFile(IntPtr h,[Out] byte[] b,uint n,out uint r,IntPtr o);}', 'utf8');
+      const encodedPath = Buffer.from(nativePath, 'utf8').toString('base64');
+      instrument('$stream=[Console]::OpenStandardInput();', `$PSModuleAutoLoadingPreference='None';Microsoft.PowerShell.Core\\Import-Module ([IO.Path]::Combine($PSHOME,'Modules','Microsoft.PowerShell.Utility','Microsoft.PowerShell.Utility.psd1')) -ErrorAction Stop;Microsoft.PowerShell.Utility\\Add-Type -Path ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encodedPath}'))) -ErrorAction Stop;$handle=[CiNativeRead]::GetStdHandle(-10);$valid=$handle -ne [IntPtr]::Zero -and $handle -ne [IntPtr]::new(-1);$type=[CiNativeRead]::GetFileType($handle);Write-CiPhase ('PROBE_HANDLE|'+[int]$valid+'|'+$type);if(!$valid -or $type -ne 3){exit 125};`);
+      instrument('$read=$stream.Read($buffer,$count,$buffer.Length-$count);', "Write-CiPhase ('PROBE_NATIVE_BEFORE_READ|'+$count);$piece=[Array]::CreateInstance([byte],$buffer.Length-$count);[uint32]$taken=0;$ok=[CiNativeRead]::ReadFile($handle,$piece,[uint32]$piece.Length,[ref]$taken,[IntPtr]::Zero);$errorCode=[Runtime.InteropServices.Marshal]::GetLastWin32Error();Write-CiPhase ('PROBE_NATIVE_RESULT|'+[int]$ok+'|'+$taken+'|'+$(if($ok){0}else{$errorCode}));if(!$ok){if($errorCode -ne 109){exit 125};$read=0}else{if($taken -eq 0){[Threading.Thread]::Sleep(10);continue};$read=[int]$taken;[Buffer]::BlockCopy($piece,0,$buffer,$count,$read)};");
+    }
+    const phasePath = Buffer.from(phases, 'utf8').toString('base64');
+    script = `function Write-CiPhase([string]$value){$path=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${phasePath}'));[IO.File]::AppendAllText($path,$value+[Environment]::NewLine,[Text.UTF8Encoding]::new($false));[Console]::Error.WriteLine($value);[Console]::Error.Flush()};Write-CiPhase ('PROBE_ENTRY|'+$PID+'|'+$env:SSH_CONNECTION);` + script;
     args[encodedIndex] = Buffer.from(script, 'utf16le').toString('base64');
     const command = 'powershell.exe ' + args.join(' '), stdin = Buffer.from(prepared.stdin);
-    assert.ok(command.length < 8000);
+    assert.ok(command.length < 8000, '진단 런처가 Windows 명령 길이를 초과함: ' + command.length);
     let fromLine = 0;
     try { fromLine = Math.max(0, (await serverLogWindow()).줄수 - 1); }
     catch (error) { t.diagnostic('서버 진단 시작점 읽기 실패: ' + error.code); }
@@ -117,7 +139,7 @@ test('실제 Windows SSH 명령·승인·파일 전송 경계', {
         stderr += bytes.toString('utf8'); pending += bytes.toString('utf8');
         const lines = pending.split(/\r?\n/); pending = lines.pop();
         for (const line of lines) {
-          if (/^PROBE_(?:ENTRY\|\d+\|127\.0\.0\.1 \d+ 127\.0\.0\.1 \d+|BEFORE_OPEN|AFTER_OPEN|BEFORE_READ\|\d+|EOF\|\d+|COUNT\|\d+|VERIFIED|EXECUTE)$/.test(line)) event(line);
+          if (/^PROBE_(?:ENTRY\|\d+\|127\.0\.0\.1 \d+ 127\.0\.0\.1 \d+|BEFORE_OPEN|AFTER_OPEN|BEFORE_READ\|\d+|EOF\|\d+|COUNT\|\d+|VERIFIED|EXECUTE|HANDLE\|[01]\|\d+|NATIVE_BEFORE_READ\|\d+|NATIVE_RESULT\|[01]\|\d+\|\d+)$/.test(line)) event(line);
         }
       });
       const finished = new Promise((resolve, reject) => {
@@ -137,8 +159,8 @@ test('실제 Windows SSH 명령·승인·파일 전송 경계', {
     finally {
       clearTimeout(timer);
       const filePhases = await readFile(phases, 'utf8').then(text => text.split(/\r?\n/)
-        .filter(line => /^PROBE_(?:ENTRY\|\d+\|127\.0\.0\.1 \d+ 127\.0\.0\.1 \d+|BEFORE_OPEN|AFTER_OPEN|BEFORE_READ\|\d+|EOF\|\d+|COUNT\|\d+|VERIFIED|EXECUTE)$/.test(line)).slice(0, 64), error => ['단계 파일 읽기: ' + error.code]);
-      t.diagnostic(JSON.stringify({ 진단: 'SSH PowerShell 단계와 채널', 사건: events, 경과밀리초: Date.now() - started,
+        .filter(line => /^PROBE_(?:ENTRY\|\d+\|127\.0\.0\.1 \d+ 127\.0\.0\.1 \d+|BEFORE_OPEN|AFTER_OPEN|BEFORE_READ\|\d+|EOF\|\d+|COUNT\|\d+|VERIFIED|EXECUTE|HANDLE\|[01]\|\d+|NATIVE_BEFORE_READ\|\d+|NATIVE_RESULT\|[01]\|\d+\|\d+)$/.test(line)).slice(0, 64), error => ['단계 파일 읽기: ' + error.code]);
+      t.diagnostic(JSON.stringify({ 진단: native ? 'SSH PowerShell 직접 ReadFile' : 'SSH PowerShell 단계와 채널', 사건: events, 경과밀리초: Date.now() - started,
         localPort, incomingChannel, outgoingChannel, ...result, 오류: failure, stdout, stderr,
         파일단계: filePhases,
         EOF이전무효과: beforeEofAbsent, 효과확인: await readFile(marker, 'utf8').then(value => value === 'once', () => false),
@@ -339,6 +361,8 @@ test('실제 Windows SSH 명령·승인·파일 전송 경계', {
           catch (error) { t.diagnostic('시험 연결 정리: ' + error.message); }
           try { await eofBoundaryDiagnostic(); }
           catch (error) { t.diagnostic('입력 종료 판별 준비 실패: ' + error.message); }
+          try { await eofBoundaryDiagnostic(true); }
+          catch (error) { t.diagnostic('직접 ReadFile 판별 준비 실패: ' + error.message); }
         }
         channel.close();
       }
