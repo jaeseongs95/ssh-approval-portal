@@ -1,0 +1,64 @@
+name: Node runtime native regression
+
+on:
+  push:
+    branches: [test/node-runtime-native-20261101]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-runtime:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 83c1a445ad96cfa9d486d35a7478626e914c91a1
+          persist-credentials: false
+      - name: 고정 원본과 시험 해시 확인
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 83c1a445ad96cfa9d486d35a7478626e914c91a1
+          git rev-parse HEAD HEAD^{tree}
+          sha256sum test/test_node_runtime.py scripts/ensure-node-runtime.sh scripts/node-runtime.py
+      - name: 공식 Node 보관파일 검증
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/node-runtime-archive"
+          cd "$RUNNER_TEMP/node-runtime-archive"
+          curl --fail --show-error --silent --location --proto '=https' --proto-redir '=https' \
+            https://nodejs.org/dist/v24.21.0/node-v24.21.0-linux-x64.tar.xz -o node-v24.21.0-linux-x64.tar.xz
+          curl --fail --show-error --silent --location --proto '=https' --proto-redir '=https' \
+            https://nodejs.org/dist/v24.21.0/SHASUMS256.txt -o SHASUMS256.txt
+          grep '  node-v24.21.0-linux-x64.tar.xz$' SHASUMS256.txt | sha256sum -c -
+          echo 'fd8e59d5a511510f6a298afb548f18c7d2b1be404d8b4a27d94fbe49f56cb2d6  node-v24.21.0-linux-x64.tar.xz' | sha256sum -c -
+      - name: 격리 시험 이미지 준비
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/node-runtime-image"
+          cat > "$RUNNER_TEMP/node-runtime-image/Dockerfile" <<'DOCKERFILE'
+          FROM ubuntu:24.04
+          RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3 bash curl xz-utils util-linux ca-certificates && rm -rf /var/lib/apt/lists/*
+          DOCKERFILE
+          docker build --tag node-runtime-native:fixture "$RUNNER_TEMP/node-runtime-image"
+      - name: 기존 NativeRuntime 원시험 실행
+        shell: bash
+        run: |
+          set +e
+          set -uo pipefail
+          docker run --rm --network=none --user=0:0 \
+            --tmpfs /opt/ssh-approval:rw,nosuid,nodev,mode=0755 \
+            --mount "type=bind,src=$GITHUB_WORKSPACE,dst=/source,readonly" \
+            --mount "type=bind,src=$RUNNER_TEMP/node-runtime-archive,dst=/verified,readonly" \
+            -e NODE_RUNTIME_NATIVE_FIXTURE=1 \
+            -e NODE_RUNTIME_OFFICIAL_ARCHIVE=/verified/node-v24.21.0-linux-x64.tar.xz \
+            -w /source node-runtime-native:fixture \
+            python3 -B -m unittest -v test.test_node_runtime
+          result=$?
+          echo "NATIVE_RUNTIME_EXIT_CODE=$result"
+          exit "$result"
