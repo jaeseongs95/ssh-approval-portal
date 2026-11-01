@@ -1935,8 +1935,8 @@
     },
     {
       "path": "web/index.html",
-      "size": 39960,
-      "sha256": "817f7fde6e6a228e4d790859a9de978fd2532b157f607463f4bddaf016b206a5"
+      "size": 40007,
+      "sha256": "36bfea78949063b64e29c7dfd100b999419a79e358af2b2b8e5c3e0b8a73fa72"
     },
     {
       "path": "web/src/agent-cli.js",
