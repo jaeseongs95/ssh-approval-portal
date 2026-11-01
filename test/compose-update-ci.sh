@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # Disposable GitHub-hosted runner only. These paths must not exist before the test.
-[[ ! -e /var/lib/ssh-mcp && ! -e /etc/ssh-approval-portal ]] || { echo 'Fixture paths already exist' >&2; exit 1; }
 source_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 project="ssh-compose-ci-${GITHUB_RUN_ID:?}"
 candidate="ssh-compose-candidate:${GITHUB_RUN_ID}"
@@ -10,8 +9,18 @@ legacy="ssh-compose-legacy:${GITHUB_RUN_ID}"
 export BRIDGE_COMPOSE_PROJECT="$project"
 export BRIDGE_COMPOSE_ENV_FILE=/etc/ssh-approval-portal/compose.env
 compose=(docker compose -p "$project" --env-file "$BRIDGE_COMPOSE_ENV_FILE" -f "$source_dir/docker/compose.yaml")
-cleanup() { sudo "${compose[@]}" down --remove-orphans || true; }
+phase=setup
+cleanup() {
+  rc=$?
+  trap - EXIT
+  if [[ "$rc" != 0 ]]; then
+    sudo env GITHUB_ACTIONS=true python3 -B "$source_dir/test/compose-failure-observation.py" --project "$project" --phase "$phase" || true
+  fi
+  sudo "${compose[@]}" down --remove-orphans || true
+  exit "$rc"
+}
 trap cleanup EXIT
+[[ ! -e /var/lib/ssh-mcp && ! -e /etc/ssh-approval-portal ]] || { echo 'Fixture paths already exist' >&2; exit 1; }
 sudo install -d -m 0755 /var/lib/ssh-mcp /etc/ssh-approval-portal
 sudo install -d -m 0755 /opt/ssh-approval/node/bin
 sudo ln -s "$(command -v node)" /opt/ssh-approval/node/bin/node
@@ -24,7 +33,7 @@ sudo chown 10001:10001 /var/lib/ssh-mcp/.config/ssh-mcp/config.toml
 sudo chmod 0600 /var/lib/ssh-mcp/.config/ssh-mcp/config.toml
 printf 'BRIDGE_MCP_TOKEN=synthetic-mcp\nBRIDGE_ADMIN_TOKEN=synthetic-admin\nBRIDGE_ADMIN_ORIGIN=https://example.test\nBRIDGE_UI_TICKET_KEY=%064d\nBRIDGE_UI_ENABLED=true\nBRIDGE_COMMAND_AUTOMATION=true\n' 0 | sudo tee /etc/ssh-approval-portal/docker-secrets.env >/dev/null
 sudo chmod 0644 /etc/ssh-approval-portal/docker-secrets.env
-sudo python3 -c 'import json,os,sqlite3; p="/var/lib/ssh-mcp/transfers/command-automation.sqlite"; d=sqlite3.connect(p); d.executescript("CREATE TABLE policy (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, body TEXT NOT NULL); CREATE TABLE requests (id TEXT PRIMARY KEY, request_key TEXT UNIQUE, digest TEXT NOT NULL, body TEXT NOT NULL);"); d.execute("INSERT INTO policy VALUES (1,0,?)",(json.dumps({"targets":[]}),)); i="a"*48; j={"id":i,"state":"completed","kind":"command","targetId":"default","operation":{"kind":"command","command":"true"}}; d.execute("INSERT INTO requests VALUES (?,?,?,?)",(i,None,"b"*64,json.dumps(j))); d.commit(); d.close(); os.chown(p,10001,10001); os.chmod(p,0o600)'
+sudo python3 -c 'import json,os,sqlite3,time; p="/var/lib/ssh-mcp/transfers/command-automation.sqlite"; d=sqlite3.connect(p); d.executescript("CREATE TABLE policy (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, body TEXT NOT NULL); CREATE TABLE requests (id TEXT PRIMARY KEY, request_key TEXT UNIQUE, digest TEXT NOT NULL, body TEXT NOT NULL);"); d.execute("INSERT INTO policy VALUES (1,0,?)",(json.dumps({"targets":[]}),)); i="a"*48; now=int(time.time()*1000); j={"id":i,"state":"completed","kind":"command","targetId":"default","profile":"aws-local","createdAt":now,"expiresAt":now+3600000,"finishedAt":now,"operation":{"kind":"command","command":"true"}}; d.execute("INSERT INTO requests VALUES (?,?,?,?)",(i,None,"b"*64,json.dumps(j))); d.commit(); d.close(); os.chown(p,10001,10001); os.chmod(p,0o600)'
 printf 'BRIDGE_UID=10001\nBRIDGE_GID=10001\nBRIDGE_IMAGE=%s\n' "$legacy" | sudo tee "$BRIDGE_COMPOSE_ENV_FILE" >/dev/null
 python3 scripts/package.py
 version=$(node -p 'require("./package.json").version')
@@ -52,8 +61,10 @@ git archive 9644117aa904bcf6a6fd861b741942db3d42035c | tar -x -C "$legacy_dir"
 legacy_id=$(docker image inspect "$legacy" --format '{{.Id}}')
 printf '%s\n' "$legacy_id" | sudo tee "/etc/ssh-approval-portal/trusted-images/${legacy_id#sha256:}.sha256" >/dev/null
 sudo chmod 0600 "/etc/ssh-approval-portal/trusted-images/${legacy_id#sha256:}.sha256"
+phase=legacy-start
 "${compose[@]}" up -d --no-build --wait --wait-timeout 90
 old=$("${compose[@]}" ps -q bridge)
+phase=legacy-gates
 docker exec "$old" node test/delivery-runtime.mjs
 trust_file="/etc/ssh-approval-portal/trusted-images/${candidate_id#sha256:}.sha256"
 sudo chmod 0644 "$trust_file"
@@ -78,6 +89,12 @@ if sudo --preserve-env=BRIDGE_COMPOSE_PROJECT,BRIDGE_COMPOSE_ENV_FILE bash scrip
 fi
 [[ $("${compose[@]}" ps -q bridge) == "$old" ]]
 [[ $(docker inspect "$old" --format '{{.Image}}') == "$(docker image inspect "$legacy" --format '{{.Id}}')" ]]
+phase=explicit-offline-migration
+"${compose[@]}" stop bridge
+[[ $(docker inspect "$old" --format '{{.State.Running}}') == false ]]
+[[ $(docker inspect "$old" --format '{{.State.ExitCode}}') == 0 ]]
+sudo env GITHUB_ACTIONS=true PATH="$PATH" python3 -B "$source_dir/test/compose-offline-state-fixture.py"
+phase=baseline-start
 BRIDGE_IMAGE="$baseline" "${compose[@]}" up -d --no-build --wait --wait-timeout 90
 old=$("${compose[@]}" ps -q bridge)
 sudo chmod 0777 /var/lib/ssh-mcp
@@ -104,12 +121,14 @@ services:
     volumes:
       - $RUNNER_TEMP/compose-nested:/var/lib/ssh-mcp/transfers/nested
 YAML
+phase=nested-mount-start
 BRIDGE_IMAGE="$baseline" "${compose[@]}" -f "$RUNNER_TEMP/compose-nested.yaml" up -d --no-build --force-recreate --wait --wait-timeout 90
 nested=$("${compose[@]}" ps -q bridge)
 if sudo --preserve-env=BRIDGE_COMPOSE_PROJECT,BRIDGE_COMPOSE_ENV_FILE bash scripts/compose-update.sh "$candidate"; then
   echo 'An existing container with an extra nested mount was unexpectedly accepted' >&2; exit 1
 fi
 [[ $("${compose[@]}" ps -q bridge) == "$nested" ]]
+phase=nested-mount-removed
 BRIDGE_IMAGE="$baseline" "${compose[@]}" up -d --no-build --force-recreate --wait --wait-timeout 90
 old=$("${compose[@]}" ps -q bridge)
 cat > "$RUNNER_TEMP/compose-writable.yaml" <<YAML
@@ -117,12 +136,14 @@ services:
   bridge:
     read_only: false
 YAML
+phase=writable-root-start
 BRIDGE_IMAGE="$baseline" "${compose[@]}" -f "$RUNNER_TEMP/compose-writable.yaml" up -d --no-build --force-recreate --wait --wait-timeout 90
 writable=$("${compose[@]}" ps -q bridge)
 if sudo --preserve-env=BRIDGE_COMPOSE_PROJECT,BRIDGE_COMPOSE_ENV_FILE bash scripts/compose-update.sh "$candidate"; then
   echo 'An existing container with a writable root filesystem was unexpectedly accepted' >&2; exit 1
 fi
 [[ $("${compose[@]}" ps -q bridge) == "$writable" ]]
+phase=writable-root-removed
 BRIDGE_IMAGE="$baseline" "${compose[@]}" up -d --no-build --force-recreate --wait --wait-timeout 90
 old=$("${compose[@]}" ps -q bridge)
 if sudo env BRIDGE_COMPOSE_PROJECT="$project" BRIDGE_COMPOSE_ENV_FILE="$BRIDGE_COMPOSE_ENV_FILE" BRIDGE_COMPOSE_OVERRIDE=/dev/null bash scripts/compose-update.sh "$candidate"; then
@@ -135,6 +156,7 @@ if sudo --preserve-env=BRIDGE_COMPOSE_PROJECT,BRIDGE_COMPOSE_ENV_FILE bash scrip
 fi
 [[ $("${compose[@]}" ps -q bridge) == "$old" ]]
 sudo sed -i 's/^BRIDGE_UID=10002$/BRIDGE_UID=10001/' "$BRIDGE_COMPOSE_ENV_FILE"
+phase=durable-update
 sudo --preserve-env=BRIDGE_COMPOSE_PROJECT,BRIDGE_COMPOSE_ENV_FILE bash scripts/compose-update.sh "$candidate" | tee "$RUNNER_TEMP/compose-update-result.txt"
 grep -F '"commandRequestsChecked":1' "$RUNNER_TEMP/compose-update-result.txt"
 new=$(sudo "${compose[@]}" ps -q bridge)
@@ -172,6 +194,7 @@ health() {
   docker exec "$1" node --input-type=module -e 'import assert from "node:assert/strict"; const r=await fetch("http://127.0.0.1:39124/health"); assert.equal((await r.json()).maintenance,process.argv[1]==="true")' "$2"
 }
 for failure in capture start-before start-after release-before release release-restart compare-restart; do
+  phase="recovery-$failure"
   sudo /usr/bin/python3 -I scripts/compose-env.py image "$BRIDGE_COMPOSE_ENV_FILE" "$baseline"
   if [[ "$failure" == start-after ]]; then sudo cp -a -- "$BRIDGE_COMPOSE_ENV_FILE" "$RUNNER_TEMP/compose-before-recovery.env"; fi
   sudo env BRIDGE_IMAGE="$baseline" "${compose[@]}" up -d --no-build --force-recreate --wait --wait-timeout 90
@@ -259,6 +282,7 @@ for failure in capture start-before start-after release-before release release-r
   sudo rmdir -- "$(dirname "$owner")"
 done
 echo 'Check detected concurrent Compose configuration change and retained reservation'
+phase=concurrent-environment
 sudo /usr/bin/python3 -I scripts/compose-env.py image "$BRIDGE_COMPOSE_ENV_FILE" "$baseline"
 sudo env BRIDGE_IMAGE="$baseline" "${compose[@]}" up -d --no-build --force-recreate --wait --wait-timeout 90
 if sudo env PATH="$RUNNER_TEMP/docker-wrapper:$PATH" BRIDGE_COMPOSE_PROJECT="$project" BRIDGE_COMPOSE_ENV_FILE="$BRIDGE_COMPOSE_ENV_FILE" FIXTURE_FAILURE=env-change RESPONSE_LOSS_FILE="$source_dir/test/compose-response-loss.mjs" bash scripts/compose-update.sh "$candidate" > "$RUNNER_TEMP/compose-conflict-out.txt" 2> "$RUNNER_TEMP/compose-conflict-err.txt"; then

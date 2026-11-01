@@ -1189,9 +1189,19 @@
       "sha256": "88efbfc0947b0e6505ca59a430d888ad59ae91f2d851396e6dfab24b7a3ff679"
     },
     {
+      "path": "test/compose-failure-observation.py",
+      "size": 5193,
+      "sha256": "1b697d4cba705bc9741224ec99476d8e9ed66daa496a2f412a6026b7c748c51f"
+    },
+    {
       "path": "test/compose-maintenance-gate.test.mjs",
       "size": 1561,
       "sha256": "ab3755ef256c3dd66f4d264eb79f912490cef1c9ff3b57d4071831cada6fb8aa"
+    },
+    {
+      "path": "test/compose-offline-state-fixture.py",
+      "size": 3695,
+      "sha256": "0697128f3372eac07b869bdec2b3d69eab3c441adec1e4ef4b62c7f2df357f33"
     },
     {
       "path": "test/compose-recovery-debug.mjs",
@@ -1220,8 +1230,8 @@
     },
     {
       "path": "test/compose-update-ci.sh",
-      "size": 18681,
-      "sha256": "6bc1266867eaf103af1901a273fc9ac13260b1de20dc13cd7520c88e9cfd8fa0"
+      "size": 19559,
+      "sha256": "57f623646e2e232b190084df3f4341efb408d5863e41be35e4286107edd67d5f"
     },
     {
       "path": "test/config-contracts.test.mjs",
