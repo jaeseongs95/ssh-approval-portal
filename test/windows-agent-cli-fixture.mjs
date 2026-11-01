@@ -54,11 +54,21 @@ try {
 const fs=require('fs'),path=require('path');
 const prefix=process.argv[process.argv.indexOf('--prefix')+1];
 const fixture=JSON.parse(fs.readFileSync(process.argv.at(-1),'utf8'));
-const packageDir=path.join(prefix,'node_modules','@openai','codex');
+fs.appendFileSync(path.join(__dirname,'npm-executions.log'),JSON.stringify({provider:fixture.provider,version:fixture.version})+'\\n');
+const packageDir=path.join(prefix,'node_modules',fixture.provider==='claude'?'@anthropic-ai':'@openai',fixture.provider==='claude'?'claude-code':'codex');
 fs.mkdirSync(path.join(packageDir,'bin'),{recursive:true});
-fs.writeFileSync(path.join(packageDir,'package.json'),JSON.stringify({bin:{codex:'bin/codex.js'}}));
-fs.writeFileSync(path.join(packageDir,'bin','codex.js'),'console.log("codex-cli '+fixture.version+'")');
+const relative=fixture.provider==='claude'?'bin/claude.exe':'bin/codex.js';
+fs.writeFileSync(path.join(packageDir,'package.json'),JSON.stringify({bin:{[fixture.provider]:relative}}));
+if(fixture.provider==='claude'){
+ fs.copyFileSync(fixture.executable,path.join(packageDir,relative));
+ fs.writeFileSync(path.join(packageDir,'bin','version.txt'),fixture.version);
+}else{fs.writeFileSync(path.join(packageDir,relative),'console.log("codex-cli '+fixture.version+'")');}
 '@,$utf8)
+ function ExecutionCount {
+     $log=Join-Path $testRoot 'npm-executions.log'
+     if([IO.File]::Exists($log)){return [IO.File]::ReadAllLines($log).Length}
+     return 0
+ }
  function NodeRuntime { return @($testNode,$fakeNpm) }
  $testArchive='{"provider":"codex","version":"1.2.3"}'
  function Download($url,$destination,$deadline) { [IO.File]::WriteAllText($destination,$testArchive,$utf8) }
@@ -75,8 +85,22 @@ fs.writeFileSync(path.join(packageDir,'bin','codex.js'),'console.log("codex-cli 
  $receipt=Install $root 'install' 'codex' '1.2.3' (Integrity) $before.installationRevision $expiry $operation
  Assert ($receipt.state -eq 'completed') 'fixture-install'
  Assert ((Inspect $root 'codex').version -eq '1.2.3') 'fixture-active'
- Assert ((Status $root 'codex' $operation).state -eq 'completed') 'receipt-read'
+ $executions=ExecutionCount
+ Assert ($executions -eq 1) 'first-install-executed-once'
+ # Discard the response; recovery receives only the persisted operation ID.
+ $receipt=$null
+ $recovered=Status $root 'codex' $operation
+ Assert ($recovered.state -eq 'completed' -and $recovered.version -eq '1.2.3' -and $recovered.operationId -eq $operation) 'lost-response-receipt-read'
+ Assert ((ExecutionCount) -eq $executions) 'lost-response-read-does-not-install'
  Assert ((Install $root 'install' 'codex' '1.2.3' (Integrity) $before.installationRevision $expiry $operation).state -eq 'completed') 'receipt-no-replay'
+ Assert ((ExecutionCount) -eq $executions) 'same-intent-does-not-execute'
+ $fixtureStage='different-intent'
+ $rejected=$false
+ try { $null=Install $root 'install' 'codex' '1.2.9' (Integrity) $before.installationRevision $expiry $operation }
+ catch { $rejected=$_.Exception.ToString() -match 'REQUEST_CONFLICT' }
+ Assert $rejected 'same-operation-different-intent-refused'
+ Assert ((ExecutionCount) -eq $executions) 'different-intent-execution-count-unchanged'
+ Assert ((Status $root 'codex' $operation).intentDigest -eq $recovered.intentDigest) 'different-intent-receipt-unchanged'
  $oldActive=(ReadJson (Join-Path $root 'current.json')).active
  $before=Inspect $root 'codex'
  $fixtureStage='update'
@@ -84,6 +108,19 @@ fs.writeFileSync(path.join(packageDir,'bin','codex.js'),'console.log("codex-cli 
  $receipt=Install $root 'update' 'codex' '1.2.4' (Integrity) $before.installationRevision $expiry ('b'*48)
  Assert ($receipt.state -eq 'completed' -and (Inspect $root 'codex').version -eq '1.2.4') 'fixture-update'
  Assert (Test-Path -LiteralPath (Join-Path $root $oldActive)) 'previous-version-retained'
+ $fixtureStage='exclusive-lock'
+ $executions=ExecutionCount
+ $lockedBefore=Inspect $root 'codex'
+ $exclusive=[IO.File]::Open((Join-Path $root '.lock'),'Open','ReadWrite','None')
+ try {
+     $rejected=$false
+     try { $null=Install $root 'update' 'codex' '1.2.4' (Integrity) $lockedBefore.installationRevision $expiry ('2'*48) }
+     catch { $rejected=$_.Exception.ToString() -match 'BUSY' }
+     Assert $rejected 'live-exclusive-lock-refused'
+     Assert ((ExecutionCount) -eq $executions) 'live-lock-execution-count-unchanged'
+     Assert (-not (Test-Path -LiteralPath (Join-Path $root ('operations/'+('2'*48))))) 'live-lock-no-operation-created'
+ } finally { $exclusive.Dispose() }
+ Assert ((Inspect $root 'codex').installationRevision -eq $lockedBefore.installationRevision) 'live-lock-active-unchanged'
  $rejected=$false
  try { $null=Install $root 'update' 'codex' '1.2.4' (Integrity) $before.installationRevision $expiry ('c'*48) } catch { $rejected=$true }
  Assert $rejected 'stale-revision'
@@ -106,6 +143,38 @@ fs.writeFileSync(path.join(packageDir,'bin','codex.js'),'console.log("codex-cli 
  $pending=Join-Path $root ('operations/'+('d'*48)); PrivateDirectory $pending
  AtomicJson (Join-Path $pending 'receipt.json') @{provider='codex';operationId=('d'*48);intentDigest=('e'*64);state='installing';version='1.2.4';login='not_checked'}
  Assert ((Status $root 'codex' ('d'*48)).state -eq 'unknown') 'interrupted-install-unknown'
+ $fixtureStage='claude-install'
+ $claudeExecutable=Join-Path $testRoot 'fixture-claude.exe'
+ Add-Type -OutputType ConsoleApplication -OutputAssembly $claudeExecutable -TypeDefinition @'
+using System;
+using System.IO;
+public static class FixtureClaudeCli {
+ public static void Main(string[] args) { Console.WriteLine(File.ReadAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"version.txt"))+" (Claude Code)"); }
+}
+'@
+ $claudeRoot=Join-Path $homeDirectory '.ssh-approval-cli/claude'
+ $testArchive=Json ([ordered]@{provider='claude';version='2.1.1';executable=$claudeExecutable})
+ $claudeBefore=Inspect $claudeRoot 'claude'
+ $executions=ExecutionCount
+ $claudeReceipt=Install $claudeRoot 'install' 'claude' '2.1.1' (Integrity) $claudeBefore.installationRevision $expiry ('3'*48)
+ Assert ($claudeReceipt.state -eq 'completed' -and $claudeReceipt.provider -eq 'claude') 'claude-install-receipt'
+ Assert ((ExecutionCount) -eq ($executions+1)) 'claude-install-executed-once'
+ $claudeInstalled=Inspect $claudeRoot 'claude'
+ Assert ($claudeInstalled.managed -and $claudeInstalled.installed -and $claudeInstalled.version -eq '2.1.1') 'claude-inspect-installed'
+ $claudePackage=Join-Path (Join-Path $claudeRoot $claudeInstalled.active) 'node_modules/@anthropic-ai/claude-code'
+ $claudeMetadata=$utf8.GetString([IO.File]::ReadAllBytes((Join-Path $claudePackage 'package.json'))) | ConvertFrom-Json
+ Assert ($claudeMetadata.bin.claude -eq 'bin/claude.exe') 'claude-package-native-bin-layout'
+ Assert ((PackageExecutable (Join-Path $claudeRoot $claudeInstalled.active) 'claude') -eq [IO.Path]::GetFullPath((Join-Path $claudePackage 'bin/claude.exe'))) 'claude-selected-executable'
+ Assert ((Status $claudeRoot 'claude' ('3'*48)).state -eq 'completed') 'claude-install-status'
+ $fixtureStage='claude-update'
+ $testArchive=Json ([ordered]@{provider='claude';version='2.1.2';executable=$claudeExecutable})
+ $claudeReceipt=Install $claudeRoot 'update' 'claude' '2.1.2' (Integrity) $claudeInstalled.installationRevision $expiry ('4'*48)
+ Assert ($claudeReceipt.state -eq 'completed' -and $claudeReceipt.version -eq '2.1.2') 'claude-update-receipt'
+ $claudeUpdated=Inspect $claudeRoot 'claude'
+ Assert ($claudeUpdated.managed -and $claudeUpdated.version -eq '2.1.2' -and $claudeUpdated.active -ne $claudeInstalled.active) 'claude-update-active'
+ $claudeStatus=Status $claudeRoot 'claude' ('4'*48)
+ Assert ($claudeStatus.state -eq 'completed' -and $claudeStatus.provider -eq 'claude' -and $claudeStatus.version -eq '2.1.2') 'claude-update-status'
+ Assert ((ExecutionCount) -eq ($executions+2)) 'claude-update-executed-once'
  [Console]::Out.WriteLine('ok')
 } catch { [Console]::Error.WriteLine('CLI_FIXTURE_STAGE='+$fixtureStage); throw
 } finally { if(Test-Path -LiteralPath $testRoot){Remove-Item -LiteralPath $testRoot -Recurse -Force} }

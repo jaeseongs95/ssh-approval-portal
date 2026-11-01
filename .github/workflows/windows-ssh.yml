@@ -2,6 +2,11 @@ name: Windows SSH integration
 
 on:
   workflow_dispatch:
+    inputs:
+      package_smoke:
+        description: '격리 계정에 고정 공식 CLI 패키지를 실제 설치하는 연기 시험'
+        type: boolean
+        default: false
   push:
     branches: [feat/windows-ssh-targets-20261101, feat/windows-full-support-20261101]
 
@@ -15,7 +20,9 @@ concurrency:
 jobs:
   windows-ssh:
     runs-on: windows-2025
-    timeout-minutes: 20
+    timeout-minutes: ${{ inputs.package_smoke && 40 || 20 }}
+    env:
+      AGS_WINDOWS_CLI_PACKAGE_SMOKE: ${{ inputs.package_smoke && '1' || '0' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:

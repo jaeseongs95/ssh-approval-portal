@@ -1,5 +1,6 @@
 # 이 스크립트는 일회용 GitHub Windows 실행기 전용이다. 개발 PC에서 실행하지 않는다.
-# 예상 자원: 실행기 1개, 최대 20분, 1 MiB 이하 전송, 외부 SSH 접속 없음.
+# 예상 자원: 실행기 1개, 기본 최대 20분/전송 1 MiB 이하, 외부 SSH 접속 없음.
+# 명시 선택한 실제 CLI 패키지 시험만 최대 40분이며 공식 고정 패키지를 내려받는다.
 [CmdletBinding()]
 param()
 
@@ -274,7 +275,8 @@ Subsystem sftp $sftpPath
     # SSH 서버는 SYSTEM 권한이 필요하다. 기존 sshd 서비스나 기본 셸은 바꾸지 않는다.
     $action = New-ScheduledTaskAction -Execute $sshd -Argument "-D -f `"$serverConfig`" -E `"$serverLog`""
     $taskPrincipal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
-    $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
+    $serverMinutes = if ($env:AGS_WINDOWS_CLI_PACKAGE_SMOKE -eq '1') { 35 } else { 10 }
+    $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes $serverMinutes)
     Register-ScheduledTask -TaskName $taskName -Action $action -Principal $taskPrincipal -Settings $settings | Out-Null
     $registeredTask = $true
     Start-ScheduledTask -TaskName $taskName
@@ -312,13 +314,14 @@ Subsystem sftp $sftpPath
         artifactRoot = $artifactRoot; outsideFile = $outsideFile
         modulesRoot = $modulesRoot; moduleMarkers = $moduleMarkers
         pythonExecutable = $pythonExecutable
+        cliSmokeIsolation = @{ ephemeral = $true; accountName = $accountName; accountSid = $accountSid; nodeExecutable = @(Get-Command node.exe -CommandType Application -ErrorAction Stop)[0].Source }
         sshClient = $sshClient; nativeClientConfig = $nativeClientConfig
         adminConfigPath = $adminConfigPath; adminHelper = $adminInstalled.helper
         adminFileRoot = $adminInstalled.fileRoot; adminStageRoot = $adminInstalled.stageRoot
     } | ConvertTo-Json -Compress)
     Set-FixtureAcl $fixturePath ''
     $env:AGS_WINDOWS_SSH_FIXTURE = $fixturePath
-    & node --test (Join-Path $PSScriptRoot 'windows-ssh-integration.test.mjs') (Join-Path $PSScriptRoot 'windows-python-source.test.mjs')
+    & node --test (Join-Path $PSScriptRoot 'windows-ssh-integration.test.mjs') (Join-Path $PSScriptRoot 'windows-python-source.test.mjs') (Join-Path $PSScriptRoot 'windows-agent-cli-smoke.test.mjs')
     Assert-Exit '실제 Windows SSH 통합 시험'
     $testsPassed = $true
     Write-Output '실제 Windows OpenSSH 통합 시험 통과'
@@ -338,7 +341,7 @@ Subsystem sftp $sftpPath
             try {
                 $owner = Invoke-CimMethod -InputObject $process -MethodName GetOwner -ErrorAction Stop
             } catch [Microsoft.Management.Infrastructure.CimException] {
-                if ($_.Exception.StatusCode -eq [Microsoft.Management.Infrastructure.CimStatusCode]::NotFound) {
+                if ($_.Exception.NativeErrorCode -eq [Microsoft.Management.Infrastructure.NativeErrorCode]::NotFound) {
                     Write-Output '격리 계정 정리: 이미 종료된 프로세스 스냅샷을 건너뜁니다.'
                     continue
                 }

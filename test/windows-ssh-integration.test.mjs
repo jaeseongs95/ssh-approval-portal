@@ -20,8 +20,8 @@ const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 const absent = async path => assert.rejects(access(path), { code: 'ENOENT' });
 
 test('실제 Windows SSH 명령·승인·파일 전송 경계', {
-  // 제품 요청과 원시험 제한은 유지한다. 실패시 native EOF 60초와 관리자 60+10초
-  // 판별 자료가 중간에 취소되지 않게 180초+60초+70초와 정리 20초를 배정한다.
+  // 제품·원시험 제한은 유지한다. 실패시 3개 EOF 판별(각1.5초+15초)과
+  // 관리자60+10초를 더해도 180+49.5+70+정리20=319.5초 안에 자료를 회수한다.
   skip: !fixturePath, timeout: 330_000,
 }, async t => {
   assert.equal(process.platform, 'win32');
@@ -61,14 +61,22 @@ test('실제 Windows SSH 명령·승인·파일 전송 경계', {
   const remote = name => win32.join(fixture.fileRoot, name).replaceAll('\\', '/');
   const connection = await runtime.registry.getOrCreate('windows-write');
   const call = script => connection.exec(wrapWindowsCommand(script));
-  // 제품의 고정 stdin→즉시 end 경로와 별개인 지연 EOF 실패 때만 클라이언트를 바꿔 판별한다.
-  const nativeEofDiagnostic = async (prepared, marker) => {
+  // 제품의 고정 stdin→즉시 end 경로와 별개인 지연 EOF 실패 때만 실행 경계를 나눈다.
+  const delayedInputDiagnostic = async (label, executable, args, stdin, marker) => {
     const events = [], started = Date.now();
-    let stdout = '', stderr = '', timer, beforeEofAbsent = false;
-    const child = spawn(fixture.sshClient, ['-F', fixture.nativeClientConfig, '-T', 'ags-fixture', prepared.command], { windowsHide: true });
+    let stdout = '', stderr = '', timer, beforeEofAbsent;
+    const child = spawn(executable, args, { windowsHide: true });
     child.stdout.on('data', bytes => { stdout += bytes.toString('utf8'); });
-    child.stderr.on('data', bytes => { stderr += bytes.toString('utf8'); });
-    child.stdin.on('finish', () => events.push('로컬 EOF 전송 완료'));
+    const stages = new Set();
+    child.stderr.on('data', bytes => {
+      stderr += bytes.toString('utf8');
+      for (const stage of ['PROBE_STARTED', 'PROBE_READ_FINISHED']) {
+        if (stderr.includes(stage) && !stages.has(stage)) {
+          stages.add(stage); events.push({ 단계: stage, 경과밀리초: Date.now() - started });
+        }
+      }
+    });
+    child.stdin.on('finish', () => events.push({ 단계: '로컬 EOF 전송 완료', 경과밀리초: Date.now() - started }));
     child.stdin.on('error', error => events.push('로컬 입력 오류: ' + error.code));
     const finished = new Promise((resolve, reject) => {
       child.on('error', reject);
@@ -77,27 +85,52 @@ test('실제 Windows SSH 명령·승인·파일 전송 경계', {
     });
     finished.catch(() => {});
     try {
-      child.stdin.write(Buffer.from(prepared.stdin));
+      child.stdin.write(stdin);
       await new Promise(resolve => setTimeout(resolve, 1500));
-      beforeEofAbsent = await access(marker).then(() => false, error => {
-        if (error.code === 'ENOENT') return true;
-        throw error;
-      });
+      if (marker) {
+        beforeEofAbsent = await access(marker).then(() => false, error => {
+          if (error.code === 'ENOENT') return true;
+          throw error;
+        });
+      }
       child.stdin.end();
       const result = await Promise.race([finished, new Promise((_, reject) => {
-        timer = setTimeout(() => reject(Error('기본 SSH 지연 EOF 진단 시간초과')), 60_000);
+        timer = setTimeout(() => reject(Error('지연 EOF 경계 진단 시간초과')), 15_000);
       })]);
-      t.diagnostic(JSON.stringify({ 진단: '기본 SSH 지연 EOF 비교', 경과밀리초: Date.now() - started,
+      t.diagnostic(JSON.stringify({ 진단: label, 경과밀리초: Date.now() - started,
         사건: events, ...result, stdout, stderr, EOF이전무효과: beforeEofAbsent,
-        효과확인: await readFile(marker, 'utf8').then(value => value === 'once', () => false) }));
+        ...(marker ? { 효과확인: await readFile(marker, 'utf8').then(value => value === 'once', () => false) } : {}),
+        입력바이트: stdin.length, 입력해시: digest(stdin) }));
     } catch (error) {
-      t.diagnostic(JSON.stringify({ 진단: '기본 SSH 지연 EOF 비교', 경과밀리초: Date.now() - started,
-        사건: events, 오류: error.message, stdout, stderr, EOF이전무효과: beforeEofAbsent }));
+      t.diagnostic(JSON.stringify({ 진단: label, 경과밀리초: Date.now() - started,
+        사건: events, 오류: error.message, stdout, stderr, EOF이전무효과: beforeEofAbsent,
+        입력바이트: stdin.length, 입력해시: digest(stdin) }));
     } finally {
       clearTimeout(timer);
       child.stdin.destroy();
       if (child.exitCode === null) child.kill();
     }
+  };
+  const eofBoundaryDiagnostic = async (prepared, marker) => {
+    // 두 클라이언트 모두 멈춘 17efa63 이후에는 같은 native 명령을 반복하지 않는다.
+    // 시험용 단계 표식만 삽입하며 승인 원문·입력 길이/해시/EOF 검사는 바꾸지 않는다.
+    const args = prepared.command.split(' ').slice(1);
+    const encodedIndex = args.indexOf('-EncodedCommand') + 1;
+    assert.ok(encodedIndex > 0);
+    let script = Buffer.from(args[encodedIndex], 'base64').toString('utf16le');
+    assert.ok(script.includes('$stream=[Console]::OpenStandardInput();'));
+    assert.ok(script.includes('};if($count -ne '));
+    script = script.replace('$stream=[Console]::OpenStandardInput();', "[Console]::Error.WriteLine('PROBE_STARTED');$stream=[Console]::OpenStandardInput();")
+      .replace('};if($count -ne ', "};[Console]::Error.WriteLine('PROBE_READ_FINISHED');if($count -ne ");
+    args[encodedIndex] = Buffer.from(script, 'utf16le').toString('base64');
+    const stdin = Buffer.from(prepared.stdin);
+    await delayedInputDiagnostic('SSH 없는 PowerShell 지연 EOF: Text 옵션 있음', 'powershell.exe', args, stdin, marker);
+    const withoutFormat = args.filter((value, index) => !['-InputFormat', '-OutputFormat'].includes(value)
+      && !['-InputFormat', '-OutputFormat'].includes(args[index - 1]));
+    await delayedInputDiagnostic('SSH 없는 PowerShell 지연 EOF: Text 옵션 없음', 'powershell.exe', withoutFormat, stdin, marker);
+    const python = `"${fixture.pythonExecutable}" -I -c "import sys,hashlib;sys.stderr.write('PROBE_STARTED\\n');sys.stderr.flush();data=sys.stdin.buffer.read();sys.stderr.write('PROBE_READ_FINISHED\\n');sys.stderr.flush();sys.stdout.write(str(len(data))+':'+hashlib.sha256(data).hexdigest())"`;
+    await delayedInputDiagnostic('기본 SSH와 Python stdin EOF', fixture.sshClient,
+      ['-F', fixture.nativeClientConfig, '-T', 'ags-fixture', python], stdin);
   };
   // 실패 때만 동일 합성 명령의 원시 결과와 준비 후 재실행을 관측한다. 원시험 제한은 유지한다.
   const directDiagnostic = async (label, command, profile = 'windows-write') => {
@@ -270,12 +303,14 @@ test('실제 Windows SSH 명령·승인·파일 전송 경계', {
           효과확인: await readFile(marker, 'utf8').then(value => value === 'once', () => false) }));
         clearTimeout(deadline); channel.end();
         if (!complete) {
-          try { channel.signal('KILL'); }
+          // EOF 뒤 signal은 라이브러리에서 무시될 수 있다. 호출 성공을 원격 종료 증거로 삼지 않는다.
+          try { channel.signal('KILL'); t.diagnostic('시험 채널 KILL 요청: 원격 전달·종료는 확인되지 않음'); }
           catch (error) { t.diagnostic('시험 채널 중단: ' + error.message); }
           // 이 시험 프로세스에서만 쓰는 연결이다. 실패 채널이 Node 종료를 붙들지 않게 정리한다.
           try { connection.getClient().destroy(); }
           catch (error) { t.diagnostic('시험 연결 정리: ' + error.message); }
-          await nativeEofDiagnostic(prepared, marker);
+          try { await eofBoundaryDiagnostic(prepared, marker); }
+          catch (error) { t.diagnostic('입력 종료 판별 준비 실패: ' + error.message); }
         }
         channel.close();
       }

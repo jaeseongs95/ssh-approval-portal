@@ -1740,13 +1740,18 @@
     },
     {
       "path": "test/windows-agent-cli-fixture.mjs",
-      "size": 8039,
-      "sha256": "6597e53546d88708f4489e5609bd865dc70ddf58a2628b5c4c7fe413157e641b"
+      "size": 13072,
+      "sha256": "a572d3975d708b0f954dbcb1f4173d5b9a2d8d207bcce6ea0d159786540fb63d"
     },
     {
       "path": "test/windows-agent-cli-helper.test.mjs",
       "size": 955,
       "sha256": "0a496d21b8fc57b6ccd98c25a420e2cb2da357e72bf699ab90cdfcabf78bc7a0"
+    },
+    {
+      "path": "test/windows-agent-cli-smoke.test.mjs",
+      "size": 7854,
+      "sha256": "2d6927b0279aaf16e7c1b714688617713c7cad4108aa58852c8fc22b5a80c3c8"
     },
     {
       "path": "test/windows-agent-cli.test.mjs",
@@ -1785,13 +1790,13 @@
     },
     {
       "path": "test/windows-ssh-ci.ps1",
-      "size": 20392,
-      "sha256": "cd8a2dc4627abeee7a93211b6ea5ee1878ce30d0f6649381f49c9718ffbbb279"
+      "size": 20879,
+      "sha256": "4c0dbd2ed8ba163fd930a097188d60b20b64ae4bdf050573e29fbfa27e8f6f85"
     },
     {
       "path": "test/windows-ssh-integration.test.mjs",
-      "size": 28893,
-      "sha256": "520a29aff5687d01bc8be0be3b39f6c6321b6a0b36dcfd60727d0b081ba9e22b"
+      "size": 31538,
+      "sha256": "cadbeaa901a5228991f6dcfebc19234856e30b0db8855c71b09016779c208702"
     },
     {
       "path": "test/windows-target.test.mjs",
