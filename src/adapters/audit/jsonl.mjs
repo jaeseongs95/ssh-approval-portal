@@ -1,5 +1,6 @@
 import { openSync, fsyncSync, closeSync, writeSync } from 'node:fs';
 import { hash } from '../../domain/validation.mjs';
+import { safeExecutionFailure } from '../../domain/execution-failure.mjs';
 
 /** Complete partial writes; a zero/invalid write must never count as durable approval. */
 export function writeAll(fd, bytes, writer) {
@@ -24,6 +25,8 @@ export function createAudit({ path, redact, now = () => new Date() }) {
     if (event.decision) record.decision = event.decision;
     if (event.policyRevision !== undefined) record.policyRevision = event.policyRevision;
     if (event.approvalMode) record.approvalMode = event.approvalMode;
+    const failure = safeExecutionFailure(event.failure);
+    if (failure) record.failure = failure;
     if (command) { record.commandHash = hash(command); record.command = redact(command, { entropyScan: true }); }
     if (operation && operation.kind !== 'command') Object.assign(record, { remotePath: operation.remotePath, sha256: operation.sha256, size: operation.size, overwrite: operation.overwrite, elevate: operation.elevate });
     const fd = openSync(path, 'a', 0o600);

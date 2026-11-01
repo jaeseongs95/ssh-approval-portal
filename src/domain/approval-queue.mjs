@@ -3,6 +3,7 @@ import { APPROVAL_EXPIRES_MS } from '../contracts/ports.mjs';
 import { hash, validateCommand } from './validation.mjs';
 import { callerContext } from './execution-context.mjs';
 import { dispatchStep, dispatchRefusal, dispatchFailureDetails } from './dispatch-failure.mjs';
+import { executionFailureDetails } from './execution-failure.mjs';
 
 const COMMAND_AUTHORITY = Symbol('server-command-policy');
 const UPLOAD_AUTHORITY = Symbol('server-upload-policy');
@@ -157,12 +158,13 @@ export class ApprovalQueue {
       try {
         job.result = await this.executeOperation(job.operation, job.id);
         job.state = job.result.failed ? 'failed' : 'completed';
-      } catch {
-        job.result = { failed: true, texts: ['Operation failed; check the protected server diagnostics.'] };
+      } catch (error) {
+        const failure = executionFailureDetails(error);
+        job.result = { failed: true, texts: [`Operation failed (${failure.code}, ${failure.stage}); do not replay automatically.`], failure };
         job.state = job.operation.sourceContract ? 'unknown' : 'failed';
       } finally {
         job.finishedAt = this.now();
-        try { this.audit({ action: job.state, id }); job.persist?.(this.public(job)); } catch { job.auditError = 'Final audit write failed; operation must not be retried automatically'; }
+        try { this.audit({ action: job.state, id, failure: job.result?.failure }); job.persist?.(this.public(job)); } catch { job.auditError = 'Final audit write failed; operation must not be retried automatically'; }
         this.active = null; try { this.onTerminal(job); } finally { try { release(); } finally { this.notifyRequest(job); } }
       }
       return this.public(job);

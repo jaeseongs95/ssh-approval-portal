@@ -7,6 +7,8 @@ import { redactText } from 'ssh-mcp/build/guard/redactor.js';
 import { preparePythonSource, preparePythonHelper } from './python-source.mjs';
 import { validateAgentCliPlan, projectAgentCliResult } from './agent-cli.mjs';
 import { windowsRemotePath } from '../../domain/validation.mjs';
+import { executionFailure } from '../../domain/execution-failure.mjs';
+import { acquireSshConnection, withConnectionLifecycle, rawSshClient } from './connection-lifecycle.mjs';
 
 /** Per-operation view: dispatch authorization follows every connect/retry wait. */
 export function withDispatchGuard(connection, beforeDispatch = async () => {}, verifyConnection = () => {}, { connectedOnly = false, clientView = client => client } = {}) {
@@ -31,7 +33,7 @@ export function withDispatchGuard(connection, beforeDispatch = async () => {}, v
 
 async function connectionBinding(registry, profile) {
   const configured = registry.getProfile && JSON.stringify(registry.getProfile(profile));
-  const connection = await registry.getOrCreate(profile);
+  const connection = await acquireSshConnection(registry, profile);
   const snapshot = configured ?? JSON.stringify(connection.profile);
   const verify = () => {
     if (JSON.stringify(connection.profile) !== snapshot || registry.getProfile && JSON.stringify(registry.getProfile(profile)) !== snapshot) throw Error('SSH dispatch profile changed');
@@ -67,7 +69,7 @@ async function executeSourcePlan(registry, plan, verify, options = {}, prepare =
     if (!binding || binding.targetId !== m.targetId || binding.targetRevision !== m.targetRevision || binding.profile !== m.profile) throw Error('Source target binding changed');
   };
   check();
-  const connection = await registry.getOrCreate(m.profile);
+  const connection = await acquireSshConnection(registry, m.profile);
   check();
   if (connection.profile.tty === true || connection.profile.readOnly !== false) throw Error('Source execution requires a writable non-TTY profile');
   if (connection.profile.workdir) throw Error('Source execution requires an explicit cwd without profile workdir');
@@ -76,19 +78,23 @@ async function executeSourcePlan(registry, plan, verify, options = {}, prepare =
   // The pinned exec() awaits/reconnects/retries before each getClient(). Use a
   // per-call view, never patch the shared connection or duplicate its lifecycle.
   // Its getClient() and client.exec() have no await between them in 2.18.0.
-  const guarded = new Proxy(withDispatchGuard(connection, beforeDispatch), { get(target, key) {
-    if (key === 'getClient') return () => {
-      check();
-      if (JSON.stringify(target.profile) !== profileSnapshot || JSON.stringify(registry.getProfile(m.profile)) !== profileSnapshot) throw Error('Source SSH profile changed');
-      return target.getClient();
-    };
-    const value = Reflect.get(target, key, target);
-    return typeof value === 'function' ? value.bind(target) : value;
-  } });
-  let result;
-  try { result = await connection.exec.call(guarded, exact.command, { stdin: exact.transportStdin ?? exact.stdin, ...options }); }
-  catch { throw Error('Source execution result unknown; do not retry automatically'); }
-  return result;
+  const execute = observed => {
+    const guarded = new Proxy(withDispatchGuard(observed, beforeDispatch), { get(target, key) {
+      if (key === 'getClient') return () => {
+        check();
+        if (JSON.stringify(target.profile) !== profileSnapshot || JSON.stringify(registry.getProfile(m.profile)) !== profileSnapshot) throw Error('Source SSH profile changed');
+        return target.getClient();
+      };
+      const value = Reflect.get(target, key, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    } });
+    return connection.exec.call(guarded, exact.command, { stdin: exact.transportStdin ?? exact.stdin, ...options });
+  };
+  try { return await withConnectionLifecycle(connection, execute); }
+  catch (error) {
+    const failure = executionFailure(error, { stage: 'ssh_execution', code: 'SSH_EXECUTION_FAILED' });
+    failure.message = 'Source execution result unknown; do not retry automatically'; throw failure;
+  }
 }
 
 export async function executePythonSource(registry, plan, verify, beforeDispatch = async () => {}) {
@@ -102,7 +108,10 @@ export async function executeAgentCli(registry, plan, verify, beforeDispatch = a
   let result;
   const prepare = exact.manifest.contract === 'agent-cli-powershell-v1' ? () => validateAgentCliPlan(exact) : preparePythonHelper;
   try { result = await executeSourcePlan(registry, exact, verify, { timeoutMs }, prepare, beforeDispatch); }
-  catch { throw Error('CLI result unknown; inspect saved status, never retry automatically'); }
+  catch (error) {
+    const failure = executionFailure(error, { stage: 'ssh_execution', code: 'SSH_EXECUTION_FAILED' });
+    failure.message = 'CLI result unknown; inspect saved status, never retry automatically'; throw failure;
+  }
   return projectAgentCliResult(result, exact);
 }
 
@@ -118,7 +127,7 @@ export async function createSshRuntime(settings) {
     async executeCommand(profile, command, beforeDispatch = async () => {}, options = {}) {
       if (Object.keys(options).some(key => key !== 'stdin') || options.stdin !== undefined && typeof options.stdin !== 'string') throw Error('Invalid command transport options');
       const binding = await connectionBinding(registry, profile);
-      const result = await withDispatchGuard(binding.connection, beforeDispatch, binding.verify).exec(command, options);
+      const result = await withConnectionLifecycle(binding.connection, observed => withDispatchGuard(observed, beforeDispatch, binding.verify).exec(command, options));
       return commandOutcome(result, auditRedact);
     },
     executePythonSource: (plan, verify, beforeDispatch) => executePythonSource(registry, plan, verify, beforeDispatch),
@@ -143,28 +152,33 @@ export function createSshTransport(registry) {
         cleanupInput = JSON.stringify({ action: 'cleanup', id: cleanup.id });
       }
       const binding = await connectionBinding(registry, profile);
-      let originalClient, attempted = false;
-      const connection = withDispatchGuard(binding.connection, beforeDispatch, binding.verify, { clientView: client => new Proxy(client, { get(target, key) {
+      let originalClient, originalConnection, originalVerify, attempted = false;
+      const clientView = (client, current) => new Proxy(client, { get(target, key) {
         if (key === 'exec' || key === 'sftp') return (...args) => {
           const callback = args.pop();
           attempted = true;
           return target[key](...args, (error, channel) => {
-            if (!error) originalClient ??= target;
+            if (!error && !originalClient) {
+              originalClient = rawSshClient(target); originalConnection = current.connection; originalVerify = current.verify;
+            }
             callback(error, channel);
           });
         };
         const value = Reflect.get(target, key, target);
         return typeof value === 'function' ? value.bind(target) : value;
-      } }) });
-      const idleTimeoutMs = connection.profile.transferTimeoutMs;
+      } });
+      const perform = async action => {
+        const current = await connectionBinding(registry, profile);
+        return withConnectionLifecycle(current.connection, observed => action(withDispatchGuard(observed, beforeDispatch, current.verify, { clientView: client => clientView(client, current) })));
+      };
+      const idleTimeoutMs = binding.connection.profile.transferTimeoutMs;
       const verifyCleanup = () => {
         beforeDispatch?.cleanup?.();
-        binding.verify();
-        if (!originalClient || !binding.connection.isConnected() || binding.connection.getClient() !== originalClient) throw Error('Original cleanup connection changed');
+        originalVerify?.();
+        if (!originalClient || !originalConnection.isConnected() || originalConnection.getClient() !== originalClient) throw Error('Original cleanup connection changed');
       };
       const cleanupGuard = async () => verifyCleanup();
       cleanupGuard.verify = verifyCleanup;
-      const cleanupConnection = withDispatchGuard(binding.connection, cleanupGuard, binding.verify, { connectedOnly: true });
       return {
         ...(cleanupCommand === undefined ? {} : { cleanup() {
           if (!originalClient) {
@@ -172,14 +186,15 @@ export function createSshTransport(registry) {
             if (attempted) throw Error('Remote staging outcome unconfirmed');
             return Promise.resolve({ exitCode: 0, stdout: '{"cleaned":true}' });
           }
-          return cleanupConnection.exec(cleanupCommand, { stdin: cleanupInput, timeoutMs: idleTimeoutMs });
+          verifyCleanup();
+          return withConnectionLifecycle(originalConnection, observed => withDispatchGuard(observed, cleanupGuard, originalVerify, { connectedOnly: true }).exec(cleanupCommand, { stdin: cleanupInput, timeoutMs: idleTimeoutMs }));
         } }),
-        call(command, payload) { return connection.exec(command, { stdin: JSON.stringify(payload), timeoutMs: idleTimeoutMs }); },
+        call(command, payload) { return perform(connection => connection.exec(command, { stdin: JSON.stringify(payload), timeoutMs: idleTimeoutMs })); },
         upload(source, remotePath, { maxBytes }) {
-          return new SftpClient(connection).uploadFile(source, remotePath, { maxBytes, idleTimeoutMs, overwrite: false, mode: 0o600 });
+          return perform(connection => new SftpClient(connection).uploadFile(source, remotePath, { maxBytes, idleTimeoutMs, overwrite: false, mode: 0o600 }));
         },
         download(remotePath, destination, { maxBytes }) {
-          return new SftpClient(connection).downloadFile(remotePath, destination, { maxBytes, idleTimeoutMs });
+          return perform(connection => new SftpClient(connection).downloadFile(remotePath, destination, { maxBytes, idleTimeoutMs }));
         },
       };
     },

@@ -1,5 +1,6 @@
 import { validateCommand } from '../domain/validation.mjs';
 import { callerContext } from '../domain/execution-context.mjs';
+import { executionFailure, executionFailureDetails } from '../domain/execution-failure.mjs';
 
 const readFailure = (code, message) => Object.assign(Error(message), { code });
 
@@ -29,14 +30,21 @@ export function createCommandService({ queue, classify, executeCommand, audit, t
     let outcome;
     try {
       outcome = await executeCommand(readProfile, command);
-    } catch {
-      outcome = { failed: true, texts: ['Operation failed; check the protected server diagnostics.'] };
+    } catch (error) {
+      outcome = { failed: true, texts: [], failure: executionFailureDetails(error) };
       // Entering the executor is not proof of remote dispatch or non-execution.
-      throw readFailure('READ_COMMAND_EXECUTION_UNKNOWN', 'Operation failed; check the protected server diagnostics.');
+      const refused = readFailure('READ_COMMAND_EXECUTION_UNKNOWN', 'Operation failed; check the protected server diagnostics.');
+      const known = executionFailureDetails(error, false);
+      if (known) {
+        const diagnostic = executionFailure(refused, known);
+        diagnostic.code = refused.code;
+        throw diagnostic;
+      }
+      throw refused;
     } finally {
       activeReads--;
       // AP-02: an executor rejection still records a terminal failure, without raw errors.
-      try { audit({ action: outcome?.failed ? 'read-failed' : 'read-completed', profile: readProfile, target }); }
+      try { audit({ action: outcome?.failed ? 'read-failed' : 'read-completed', profile: readProfile, target, failure: outcome?.failure }); }
       catch { throw readFailure('READ_COMMAND_EXECUTION_UNKNOWN', 'Read command completion could not be confirmed; check the protected server diagnostics.'); }
       finally { release(); if (!activeReads) for (const resolve of idleWaiters.splice(0)) resolve(); }
     }

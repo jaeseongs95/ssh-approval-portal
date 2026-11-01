@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { randomBytes, createHash } from 'node:crypto';
 
 import { OUTPUT_PAGE_BYTES } from '../../contracts/ports.mjs';
+import { executionFailure, executionFailureDetails, safeExecutionFailure } from '../../domain/execution-failure.mjs';
 export { OUTPUT_PAGE_BYTES } from '../../contracts/ports.mjs';
 const TTL = 3_600_000, MAX = 16 * 1024 * 1024, BUDGET = 128 * 1024 * 1024;
 const validId = value => typeof value === 'string' && /^[a-f0-9]{48}$/.test(value);
@@ -51,6 +52,7 @@ export class CommandOutputs {
         const item = this.get(row.id);
         if (item.state === 'pending') { item.state = 'unavailable'; this.persist(item, this.maxBytes); }
       }
+      this.reconcileAccounting = true;
       this.reap();
     } catch (error) { this.db.close(); throw error; }
   }
@@ -77,6 +79,37 @@ export class CommandOutputs {
     if (Buffer.byteLength(body) > 256 * 1024) throw Error('Output manifest too large');
     this.db.prepare('INSERT INTO outputs VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body,digest=excluded.digest,charge=excluded.charge').run(item.id, body, digest(body), charge);
   }
+  retainedCharge(id, previous = this.maxBytes) {
+    const conservative = Math.max(this.maxBytes, previous);
+    let bytes = 0, files = 0;
+    try {
+      this.checkRoot();
+      for (const suffix of ['.part', '.out']) {
+        const path = join(this.root, id + suffix);
+        let expected;
+        try { expected = lstatSync(path); } catch (error) { if (error.code === 'ENOENT') continue; throw error; }
+        if (!safe(expected)) throw Error('Unsafe retained output');
+        const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+        try {
+          const st = fstatSync(fd);
+          if (!safe(st) || st.ino !== expected.ino || st.dev !== expected.dev || st.size !== expected.size) throw Error('Retained output changed');
+          bytes += st.size; files++;
+          if (!Number.isSafeInteger(bytes) || bytes < 0) throw Error('Invalid retained output size');
+        } finally { closeSync(fd); }
+      }
+      // Missing/unsafe evidence never proves an empty reservation. Oversize evidence
+      // is retained and charged without releasing any prior reservation.
+      if (files) return bytes > this.maxBytes ? Math.max(bytes, conservative) : bytes;
+    } catch { /* Keep the reservation when retained bytes cannot be safely measured. */ }
+    return conservative;
+  }
+  persistUnavailable(item) {
+    const previous = this.db.prepare('SELECT charge FROM outputs WHERE id=?').get(item.id)?.charge ?? this.maxBytes;
+    let charge = Math.max(this.maxBytes, previous);
+    if (this.canReap() === true) charge = this.retainedCharge(item.id, previous);
+    else this.reconcileAccounting = true;
+    this.persist(item, charge);
+  }
   describe(item) {
     return { ...capture, id: item.id, executionId: item.binding.executionId,
       state: this.now() >= item.expiresAt ? 'expired' : item.state === 'ready' ? 'ready' : 'unavailable',
@@ -87,7 +120,11 @@ export class CommandOutputs {
     this.checkRoot(); this.reap();
     const usage = this.db.prepare('SELECT count(*) AS n,coalesce(sum(charge),0) AS bytes FROM outputs').get();
     const disk = statfsSync(this.root);
-    if (usage.n >= 1000 || usage.bytes + this.maxBytes > this.budget || disk.bavail * disk.bsize < this.maxBytes + 1024 * 1024) throw Error('Output storage capacity unavailable before dispatch');
+    if (usage.n >= 1000 || usage.bytes + this.maxBytes > this.budget || disk.bavail * disk.bsize < this.maxBytes + 1024 * 1024) {
+      const error = executionFailure(undefined, { stage: 'output_reservation', code: 'OUTPUT_CAPACITY', remoteOutcome: 'not_started' });
+      error.message = 'Output storage capacity unavailable before dispatch';
+      throw error;
+    }
     const id = randomBytes(24).toString('hex'), item = { ...capture, id, binding: { ...binding }, state: 'pending', expiresAt: this.now() + this.ttl };
     const path = join(this.root, id + '.part');
     const fd = openSync(path, 'wx', 0o600);
@@ -97,6 +134,7 @@ export class CommandOutputs {
   }
   finish(item, outcome) {
     // Never throw a capture error across an already executed SSH effect.
+    let failure = safeExecutionFailure(outcome.failure);
     try {
       const json = Buffer.from(JSON.stringify(outcome), 'utf8');
       const text = Buffer.from(outcome.texts.join('\n') + (outcome.data === undefined ? '' : '\n' + JSON.stringify(outcome.data, null, 2)), 'utf8');
@@ -120,15 +158,16 @@ export class CommandOutputs {
       renameSync(join(this.root, item.id + '.part'), join(this.root, item.id + '.out'));
       if (process.platform !== 'win32') { const directory = openSync(this.root, constants.O_RDONLY); try { fsyncSync(directory); } finally { closeSync(directory); } }
       Object.assign(item, { state: 'ready', formats, size: bytes, expiresAt: this.now() + this.ttl }); this.persist(item, bytes);
-    } catch {
+    } catch (error) {
+      failure = executionFailureDetails(executionFailure(error, { stage: 'output_capture', code: 'OUTPUT_CAPTURE_FAILED', remoteOutcome: 'completed' }));
       item.state = 'unavailable'; delete item.formats; delete item.size; item.expiresAt = this.now() + this.ttl;
-      try { this.persist(item, this.maxBytes); } catch { /* The durable pending row remains charged and unavailable after restart. */ }
+      try { this.persistUnavailable(item); } catch { /* The durable pending row remains charged and unavailable after restart. */ }
     }
-    return { failed: outcome.failed, texts: [], output: this.describe(item) };
+    return { failed: outcome.failed, texts: [], output: this.describe(item), ...(failure ? { failure } : {}) };
   }
   abandon(item) {
     item.state = 'unavailable'; item.expiresAt = this.now() + this.ttl;
-    try { this.persist(item, this.maxBytes); } catch { /* Interrupted admission stays charged. */ }
+    try { this.persistUnavailable(item); } catch { /* Interrupted admission stays charged. */ }
   }
   read({ outputId, offsetBytes = 0, maxBytes = 4096, format = 'text' }, authorize) {
     this.checkRoot();
@@ -167,6 +206,14 @@ export class CommandOutputs {
   reap() {
     // A reserved restart must preserve baseline rows and bytes even after their read TTL.
     if (this.canReap() !== true) return;
+    if (this.reconcileAccounting) {
+      for (const { id, charge } of this.db.prepare('SELECT id,charge FROM outputs').all()) {
+        if (this.get(id).state !== 'unavailable') continue;
+        const retained = this.retainedCharge(id, charge);
+        if (retained !== charge) this.db.prepare('UPDATE outputs SET charge=? WHERE id=?').run(retained, id);
+      }
+      this.reconcileAccounting = false;
+    }
     for (const { id } of this.db.prepare('SELECT id FROM outputs').all()) {
       const item = this.get(id); if (item.state === 'pending' || this.now() < item.expiresAt) continue;
       for (const suffix of ['.part', '.out']) {

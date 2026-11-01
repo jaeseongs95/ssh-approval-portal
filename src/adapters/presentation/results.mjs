@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { fileTargetBinding } from '../../domain/file-target-binding.mjs';
+import { executionFailureDetails, safeExecutionFailure } from '../../domain/execution-failure.mjs';
 
 const identifier = z.string().regex(/^[a-f0-9]{48}$/);
 const state = z.enum(['pending', 'evaluating', 'running', 'completed', 'failed', 'denied', 'expired', 'unknown']);
@@ -64,7 +65,8 @@ export function presentCommandOutcome(value) {
   const parsed = outputReference.safeParse(value.output);
   const output = parsed.success ? parsed.data : { state: 'unavailable' };
   if (typeof output.expiresAt === 'number' && Date.now() >= output.expiresAt) output.state = 'expired';
-  return { content: [], ...(value.failed ? { isError: true } : {}), structuredContent: { output } };
+  const failure = safeExecutionFailure(value.failure);
+  return { content: [], ...(value.failed ? { isError: true } : {}), structuredContent: { output, ...(failure ? { failure } : {}) } };
 }
 
 export function presentJob(job) {
@@ -93,7 +95,7 @@ export const jobResult = job => publicResult({ ...presentJob(job),
 export const statusResult = job => job ? jobResult(job) : publicResult({ error: 'Unknown request; server may have restarted' }, unknownSchema);
 export function immediateResult(value, identity) {
   const result = presentCommandOutcome(value);
-  return { ...publicResult({ state: value.failed ? 'failed' : 'completed', kind: 'command', ...identity, output: result.structuredContent.output }, immediateSchema), ...(value.failed ? { isError: true } : {}) };
+  return { ...publicResult({ state: value.failed ? 'failed' : 'completed', kind: 'command', ...identity, ...result.structuredContent }, immediateSchema), ...(value.failed ? { isError: true } : {}) };
 }
 export const sourceUnavailable = sourceHost => ({ ...publicResult({ error: 'upload-source-not-configured', sourceHost,
   message: 'File was not fetched or queued. An administrator must configure a verified exact hostname or *.domain pattern for this provider; the card file picker remains available.' }, sourceUnavailableSchema), isError: true });
@@ -119,10 +121,11 @@ export const refused = error => {
     content: [{ type: 'text', text: JSON.stringify({ error_code: error.code, inputField: source.inputField, ruleId: source.ruleId,
       stage: 'source_admission', requestSubmitted: false, message: `${source.text} 요청은 등록되지 않았습니다.` }) }] };
   const read = readRefusals.get(error?.code);
+  const failure = executionFailureDetails(error, false);
   if (read) return { isError: true,
     content: [{ type: 'text', text: JSON.stringify({ error_code: error.code,
       stage: read.executionAttempted ? 'read_execution' : 'read_admission', executionAttempted: read.executionAttempted,
-      requestSubmitted: false, message: read.message }) }] };
+      requestSubmitted: false, message: read.message, ...(failure ? { failure } : {}) }) }] };
   return { isError: true, content: [{ type: 'text', text: contextRefusals.has(error?.code)
     ? `${error.code}: ${contextRefusals.get(error.code)} No command was submitted.`
     : 'Request refused or failed. Check authentication, state, limits and permissions.' }] };
