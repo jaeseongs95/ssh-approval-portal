@@ -1780,8 +1780,8 @@
     },
     {
       "path": "test/windows-python-source.test.mjs",
-      "size": 15686,
-      "sha256": "16f95134b49e6f4e3cb15d3a75776e2e6afd19976ce6c79c2df9fc901b1d308d"
+      "size": 15909,
+      "sha256": "0d11aca8532d52683e8a09215fc22c094681369ae7f4368b4022f4dbbd79343b"
     },
     {
       "path": "test/windows-ssh-ci.ps1",
