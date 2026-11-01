@@ -1,5 +1,5 @@
-import { createHash } from 'node:crypto';
 import { AGENT_CLI_CONTRACT, agentCliProviders } from '../domain/agent-cli.mjs';
+import { hash } from '../domain/validation.mjs';
 import { COMMAND_MAX_BYTES } from '../contracts/ports.mjs';
 
 export const HISTORY_PAGE_SIZE = 20;
@@ -8,7 +8,7 @@ const terminal = ['completed', 'failed', 'denied', 'expired', 'unknown'];
 const states = [...terminal, 'pending', 'evaluating', 'running'];
 const validId = value => typeof value === 'string' && /^[a-f0-9]{48}$/.test(value);
 const validTarget = value => typeof value === 'string' && /^[a-z][a-z0-9_-]{0,31}$/.test(value);
-const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+const digest = value => hash(JSON.stringify(value));
 const order = (a, b) => b.createdAt - a.createdAt || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0);
 const fail = (code, status = 400) => { throw Object.assign(Error(code), { historyCode: code, status }); };
 const integer = value => {

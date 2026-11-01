@@ -760,8 +760,8 @@
     },
     {
       "path": "src/application/history.mjs",
-      "size": 9740,
-      "sha256": "5980430ad0635046c305baa9a2c604b92f58ff3d3afb2b8f438cff267f435b21"
+      "size": 9710,
+      "sha256": "be6ac85cdea34885395e5c92b9c95ae77e5db56aa5e34c88f9fa25af9df73e36"
     },
     {
       "path": "src/application/lifecycle.mjs",
@@ -990,8 +990,8 @@
     },
     {
       "path": "test/browser/admin-ui-1.6.8-plan.md",
-      "size": 3230,
-      "sha256": "b1bde353770683b88691168634810c4d131a2b0cd71434d250c6ab8495388bbb"
+      "size": 3965,
+      "sha256": "197f5eb590cf3d62c23252c103e60b2d3513c0e51afa408be851c909c0ea6f57"
     },
     {
       "path": "test/browser/admin-ui.mjs",
@@ -1050,8 +1050,8 @@
     },
     {
       "path": "test/browser/history-language.test.mjs",
-      "size": 26079,
-      "sha256": "ca97c97c4e6cf690ebb596d58440f0b0fe174740fa9e21b50548caa06bbfb499"
+      "size": 29103,
+      "sha256": "6c40cf63d7c431e234a15b1ce35a62dbbe945a06770979db31f9fdc3e019ba9d"
     },
     {
       "path": "test/browser/multi-admin.test.mjs",
@@ -1515,8 +1515,8 @@
     },
     {
       "path": "test/retained-history.test.mjs",
-      "size": 13511,
-      "sha256": "2008462ee905d2e3294501470053ca804666bbbf7db952adbc16163d8829acb2"
+      "size": 13521,
+      "sha256": "8878d389304506e529617b348721e24d3c9c8d8ccddf85eaafbdf32b3f945f89"
     },
     {
       "path": "test/rollback-stopped-fixture.sh",
@@ -1780,8 +1780,8 @@
     },
     {
       "path": "test/web-session.test.mjs",
-      "size": 19526,
-      "sha256": "abbc79380912721af05fc2c1d7715166ed7d7ee66f283fb63acc7eb34eac4909"
+      "size": 23296,
+      "sha256": "894cf0a135879b2b1078ab3ebba987aa9eb2fbfbd32c2318a00ad65f7581d6e9"
     },
     {
       "path": "test/windows-agent-cli-fixture.mjs",
@@ -1930,8 +1930,8 @@
     },
     {
       "path": "web/dist/app.js",
-      "size": 302512,
-      "sha256": "7e8384b3bb549fafa3f74e5adde50282cf4c29ebf8e753a2ca2e10b7f1e39e0d"
+      "size": 304382,
+      "sha256": "f60f14dd0111260b75a5202dbc91beab8933b15337b312c553cb967a7d8dfaea"
     },
     {
       "path": "web/index.html",
@@ -2015,8 +2015,8 @@
     },
     {
       "path": "web/src/view.js",
-      "size": 27027,
-      "sha256": "ee32613b8a2f77c130dde89f13a94a3917c4528262dd7295a8c2b21fd9aee936"
+      "size": 28538,
+      "sha256": "445e1703bcdb3c7723485725601e0f65dd3b6b9e074c81b03830b6cd18f4903c"
     }
   ]
 }

@@ -148,7 +148,7 @@ test('HIST-SQL 기존 명령·도구 장부 조회는 스키마·내용을 바�
   const root = await storageFixture(t), command = createCommandState(root), cli = createAgentCliState(root);
   try {
     command.insert(job(1), 'synthetic-history-1', 'b'.repeat(64));
-    cli.insert(cliJob(2), 'synthetic-history-2', 'c'.repeat(64));
+    cli.insert(cliJob(2), 'agent-cli:synthetic-history-2', 'c'.repeat(64));
     const beforeCommand = command.preservationRows(), beforeCli = cli.preservationRows();
     const value = history({ commandJournal: command, cliJournal: cli })(query());
     assert.deepEqual(value.items.map(value => value.id), [id(2), id(1)]);

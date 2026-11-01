@@ -158,3 +158,25 @@ test('invalid saved language safely uses browser detection without changing othe
   await page.goto(server.origin+'/preferences');assert.equal(await page.locator('html').getAttribute('lang'),'en');assert.equal(await page.getByLabel('Administrator display language',{exact:true}).inputValue(),'auto');
   assert.deepEqual(await page.evaluate(()=>({...localStorage})),{'ssh-approval-language':'unsupported','unrelated-preference':'keep'});assert.equal(server.state.requests.some(r=>r.method==='POST'),false);
 },{locale:'en-US',initialize:()=>{localStorage.setItem('ssh-approval-language','unsupported');localStorage.setItem('unrelated-preference','keep');}}));
+
+for (const locale of ['ko-KR','en-US']) test('UI168 불완전 이력은 정상 0건과 구별하고 다음 완전 조회에서 경고를 해제한다 '+locale,async()=>fixture(async(page,server)=>{
+  const korean=locale==='ko-KR';let incomplete=false,items=[];
+  await page.route(/\/api\/history(?:\?|$)/,route=>route.fulfill({json:{items,nextCursor:null,asOf:Date.now(),observedAt:Date.now(),coverage:{commandJournal:true,cliJournal:true,fileHistory:'memory-only',snapshot:false,registeredTargetsOnly:true,cliCurrentBindingOnly:true,metadataIncomplete:incomplete}}}));
+  await page.goto(server.origin+'/history');await historyReady(page);
+  const coverage=page.locator('#history-coverage'),status=page.locator('#history-query-status'),search=page.getByRole('searchbox',{name:korean?'이력 검색':'Search history'});
+  assert.equal(await coverage.getAttribute('data-incomplete'),'false');assert.equal(await page.locator('#history-count').textContent(),'0');
+  assert.doesNotMatch(await status.textContent(),/불완전|incomplete/i);
+  incomplete=true;await search.fill('excluded-empty');await historyReady(page);
+  assert.equal(await coverage.getAttribute('data-incomplete'),'true');assert.equal(await page.locator('#history article[data-request-id]').count(),0);
+  assert.match(await coverage.textContent(),korean?/일부 기록 제외.*모든 기록을 보장하지 않습니다/:/Some records excluded.*does not represent complete history/);
+  assert.match(await status.textContent(),korean?/0건이어도 기록이 없다고 판단할 수 없습니다/:/zero results do not establish that no history exists/);
+  await page.getByText(korean?'일부 기록이 제외되어 조회가 불완전합니다':'History results are incomplete',{exact:true}).waitFor();
+  if(process.env.UI_SCREENSHOTS)await page.screenshot({path:process.env.UI_SCREENSHOTS+'/history-incomplete-empty-'+locale+'.png',fullPage:true});
+  items=[{...job('verifiable-retained'),history:{stateSource:'journal',storage:'command',targetStatus:'active'}}];
+  await search.fill('excluded-with-row');await historyReady(page);
+  assert.equal(await page.locator('#history article[data-request-id="verifiable-retained"]').count(),1);assert.equal(await coverage.getAttribute('data-incomplete'),'true');assert.match(await status.textContent(),korean?/확인 가능한 기록 1건.*불완전 조회/:/Showing 1 verifiable requests.*incomplete/);
+  incomplete=false;items=[];await search.fill('complete-empty');await historyReady(page);
+  assert.equal(await coverage.getAttribute('data-incomplete'),'false');assert.equal(await page.locator('#history-count').textContent(),'0');
+  assert.doesNotMatch(await coverage.textContent(),/일부 기록 제외|Some records excluded/);assert.doesNotMatch(await status.textContent(),/불완전|incomplete/i);
+  assert.match(await coverage.textContent(),korean?/파일 이력은 현재 메모리/:/File history is memory-only/);assert.equal(server.state.requests.some(request=>request.method==='POST'),false);
+},{locale}));

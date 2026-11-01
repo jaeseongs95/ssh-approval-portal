@@ -77,6 +77,7 @@ export function createWebView({ document, i18n }) {
     running: empty(t('실행 중인 요청이 없습니다'), t('승인 후 실행 중인 명령과 파일 전송이 표시됩니다.')),
     loadingHistory: empty(korean?'승인 이력을 조회하고 있습니다':'Loading approval history',korean?'조회 조건과 보관 기록을 확인하고 있습니다.':'Checking filters and retained records.'),
     failedHistory: empty(korean?'승인 이력을 조회하지 못했습니다':'Approval history unavailable',korean?'오류를 확인하고 요청 조회를 다시 누르세요. 실행 요청은 반복하지 않습니다.':'Check the error and refresh requests. Execution is not repeated.'),
+    incompleteHistory: empty(korean?'일부 기록이 제외되어 조회가 불완전합니다':'History results are incomplete',korean?'표시할 수 있는 기록이 없습니다. 기록 정보나 현재 연결을 확인하지 못한 일부 기록이 제외되어, 조회 대상의 기록이 없다고 판단할 수 없습니다.':'No displayable records were found. Some records were excluded because their metadata or current connection could not be verified; this does not establish that no history exists.'),
   };
   function createRecord(job) {
     const node = document.createElement('article'); node.className = 'request request-row'; node.dataset.requestId = job.id;
@@ -162,7 +163,7 @@ export function createWebView({ document, i18n }) {
     }
     reconcile(el('jobs'), pending.length ? pending : [placeholders.pending]);
     const filtered=historySearch?.value.trim()||historyFilter?.value||historyFrom?.value||historyTo?.value||historyRange.invalid||selected;
-    reconcile(el('history'), history.length ? history : [historyBusy?placeholders.loadingHistory:historyFailure?placeholders.failedHistory:filtered?placeholders.filteredHistory:placeholders.history]);
+    reconcile(el('history'), history.length ? history : [historyBusy?placeholders.loadingHistory:historyFailure?placeholders.failedHistory:historyResult?.coverage?.metadataIncomplete?placeholders.incompleteHistory:filtered?placeholders.filteredHistory:placeholders.history]);
     if (el('running')) reconcile(el('running'), running.length ? running : [placeholders.running]);
     el('pending-count').textContent = pending.length; el('history-count').textContent = historyJobs.length;
     if (el('running-count')) el('running-count').textContent = running.length;
@@ -243,8 +244,13 @@ export function createWebView({ document, i18n }) {
     historyLoading: value => { historyBusy=value;el('history')?.setAttribute('aria-busy', String(value));if(value&&historyStatus)historyStatus.textContent=korean?'이력을 조회하는 중입니다.':'Loading history.'; },
     history: data => {
       historyResult=data;historyBusy=false;historyFailure=false;el('history')?.setAttribute('aria-busy','false');
-      if(historyStatus)historyStatus.textContent=korean?`${data.items.length}건을 표시합니다. 전체 건수는 제공하지 않습니다.`:`Showing ${data.items.length} requests. An all-time total is not available.`;
-      if(historyCoverage)historyCoverage.textContent=data.coverage ? (korean?`조회 가능한 보관 기록 · 명령 저장기록 ${data.coverage.commandJournal?'포함':'없음'} · CLI 저장기록 ${data.coverage.cliJournal?'포함':'없음'} · 파일 이력은 현재 메모리에만 보관됩니다. 삭제·미등록 서버는 제외하며 CLI는 현재 연결 설정의 기록만 표시합니다. 조회 중 새 기록이 반영될 수 있습니다.`:`Retained history · Command journal ${data.coverage.commandJournal?'included':'unavailable'} · CLI journal ${data.coverage.cliJournal?'included':'unavailable'} · File history is memory-only. Unregistered targets are excluded; CLI history covers current bindings only. Records may change during browsing.`) : '';
+      const incomplete=!!data.coverage?.metadataIncomplete;
+      if(historyStatus)historyStatus.textContent=incomplete ? (korean?`확인 가능한 기록 ${data.items.length}건을 표시합니다. 일부 기록이 제외된 불완전 조회이며, 0건이어도 기록이 없다고 판단할 수 없습니다.`:`Showing ${data.items.length} verifiable requests. Results are incomplete because some records were excluded; zero results do not establish that no history exists.`) : (korean?`${data.items.length}건을 표시합니다. 전체 건수는 제공하지 않습니다.`:`Showing ${data.items.length} requests. An all-time total is not available.`);
+      if(historyCoverage){
+        historyCoverage.dataset.incomplete=String(incomplete);
+        const warning=incomplete ? (korean?'일부 기록 제외: 기록 정보나 현재 연결을 확인하지 못한 기록은 표시하지 않습니다. 아래 목록은 조회 범위의 모든 기록을 보장하지 않습니다. ':'Some records excluded: metadata or the current connection could not be verified. The list does not represent complete history for the selected scope. ') : '';
+        historyCoverage.textContent=data.coverage ? warning+(korean?`조회 가능한 보관 기록 · 명령 저장기록 ${data.coverage.commandJournal?'포함':'없음'} · CLI 저장기록 ${data.coverage.cliJournal?'포함':'없음'} · 파일 이력은 현재 메모리에만 보관됩니다. 삭제·미등록 서버는 제외하며 CLI는 현재 연결 설정의 기록만 표시합니다. 조회 중 새 기록이 반영될 수 있습니다.`:`Retained history · Command journal ${data.coverage.commandJournal?'included':'unavailable'} · CLI journal ${data.coverage.cliJournal?'included':'unavailable'} · File history is memory-only. Unregistered targets are excluded; CLI history covers current bindings only. Records may change during browsing.`) : '';
+      }
       render(latestJobs,latestDeciding);
     },
     historyError: message => { historyResult={items:[],nextCursor:null};historyBusy=false;historyFailure=true;el('history')?.setAttribute('aria-busy','false');if(historyStatus)historyStatus.textContent=message;render(latestJobs,latestDeciding); },
