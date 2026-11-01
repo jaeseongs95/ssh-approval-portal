@@ -1000,8 +1000,8 @@
     },
     {
       "path": "test/browser/admin-workflow.test.mjs",
-      "size": 13963,
-      "sha256": "efad4873a21eafadf8b073605de03d7792b29605c2eeab298404b80f48aaa260"
+      "size": 14586,
+      "sha256": "dd5d9f4859c4a753ca09ea39478cef1a54ab7132588a0bd68598a0f21dad39db"
     },
     {
       "path": "test/browser/agent-cli.test.mjs",
@@ -1935,8 +1935,8 @@
     },
     {
       "path": "web/index.html",
-      "size": 39958,
-      "sha256": "40a1af334cbf28237789c20df007188c2f8a45d67cc6e327255fe2adeb4eba20"
+      "size": 39960,
+      "sha256": "817f7fde6e6a228e4d790859a9de978fd2532b157f607463f4bddaf016b206a5"
     },
     {
       "path": "web/src/agent-cli.js",

@@ -63,10 +63,12 @@ for(const width of [320,390,760,820,1120,1440]) test('UI168 동일 이름 대상
     assert.match(await page.locator('#request-announcement').textContent(),/same-name-alpha/);
     const read=page.locator('#request-detail-body').getByRole('button',{name:'출력 보기',exact:true});await read.focus();await page.keyboard.press('Enter');
     const output=page.getByRole('region',{name:'실행 출력',exact:true});await output.waitFor();assert.equal(await output.textContent(),text);assert.equal(await output.evaluate(node=>node===document.activeElement),true);
-    await page.keyboard.press('End');await page.waitForFunction(()=>{const node=document.querySelector('#request-output');return node.scrollTop>0&&node.scrollTop+node.clientHeight>=node.scrollHeight-2;});const scroll=await output.evaluate(node=>node.scrollTop);
+    // https://drafts.csswg.org/cssom-view/#extension-to-the-element-interface: scrollTop은 실수, 높이는 정수다.
+    // 관측된 1 CSS px 표현 차이만 허용하며 끝 위치의 연속 프레임 안정·노드/원문/읽기 횟수 보존은 따로 검사한다.
+    await page.keyboard.press('End');await page.waitForFunction(async()=>{const node=document.querySelector('#request-output'),end=node.scrollHeight-node.clientHeight,position=node.scrollTop;if(end<=0||Math.abs(position-end)>1)return false;for(let frame=0;frame<4;frame++){await new Promise(requestAnimationFrame);if(node.scrollTop!==position||node.scrollHeight-node.clientHeight!==end)return false;}return true;});const scroll=await output.evaluate(node=>node.scrollTop);
     assert.equal(await page.evaluate(()=>window.outputInjected),undefined);await screenshot(page,width,'completed-output');
     await navigate(page,'/settings');assert.equal(await page.locator('#server-target').inputValue(),'');assert.equal(await page.locator('#policy-effective-state').getAttribute('data-test-mode'),'unselected');await page.locator('#request-return').click();await page.waitForURL(url=>url.pathname==='/');
-    assert.equal(await output.textContent(),text);assert.equal(await output.evaluate(node=>node===window.savedOutput&&node.scrollTop),scroll);assert.equal(outputReads,1);
+    assert.equal(await output.textContent(),text);assert.equal(await output.evaluate(node=>node===window.savedOutput),true);assert.ok(Math.abs(await output.evaluate(node=>node.scrollTop)-scroll)<=1,'같은 출력의 복귀 위치는 표현 차이 1 CSS px 이내여야 한다');assert.equal(outputReads,1);
     await navigate(page,'/settings');await page.locator('#server-target option[value=alpha]').waitFor({state:'attached'});await page.locator('#server-target').selectOption('alpha');await permissionsTab(page);
     const testMode=page.getByRole('checkbox',{name:/^테스트 서버/});assert.equal(await testMode.isChecked(),false);await testMode.check();
     assert.equal(await page.locator('#policy-effective-state').getAttribute('data-test-mode'),'off');assert.match(await page.locator('#policy-effective-state').textContent(),/아직 적용되지/);
