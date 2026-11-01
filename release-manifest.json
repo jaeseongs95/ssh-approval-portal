@@ -1580,8 +1580,8 @@
     },
     {
       "path": "test/solid-architecture.test.mjs",
-      "size": 5420,
-      "sha256": "775939e94748f11ff5c92a8b2015c29121212c1dda6f7f3156f07a7a8f6c205f"
+      "size": 7351,
+      "sha256": "49c26ecaa790e3ca8bb45e55f269deafd7db28e21d41250ce552cbafafe87981"
     },
     {
       "path": "test/solid-regression.fixture.mjs",

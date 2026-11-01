@@ -10,8 +10,13 @@ permissions:
 
 jobs:
   browser-regression:
+    name: browser-${{ matrix.browser }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -34,16 +39,16 @@ jobs:
                 "$scheme://$host/ubuntu/dists/$VERSION_CODENAME/InRelease" || true
             done
           done
-      - run: npx playwright install --with-deps chromium firefox webkit
+      - run: npx playwright install --with-deps ${{ matrix.browser }}
       - name: 관리자 화면 회귀 시험
-        run: node test/browser/run.mjs all
+        run: node test/browser/run.mjs ${{ matrix.browser }}
         env:
           UI_TEST_RESULTS: ${{ runner.temp }}/admin-ui-results
       - name: 관리자 화면 시험 결과와 화면갈무리 보관
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: admin-ui-results
+          name: admin-ui-results-${{ matrix.browser }}
           path: ${{ runner.temp }}/admin-ui-results
           if-no-files-found: warn
           retention-days: 7
