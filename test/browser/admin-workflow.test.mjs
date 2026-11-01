@@ -99,7 +99,7 @@ test('UI168 실제 기존 장부의 24시간 초과 기록을 날짜로 조회�
     page.on('request',request=>{const url=new URL(request.url());if(/\/(approve|deny)$/.test(url.pathname))decisions.push(request);if(url.pathname==='/api/history')history.push(url);});
     await page.goto(origin+'/history');await page.locator('#token').fill('fixture-owner');await page.locator('#load').click();await historyReady(page);
     await page.getByLabel('시작일',{exact:true}).fill('2020-01-02');await page.getByLabel('종료일',{exact:true}).fill('2020-01-02');await page.getByRole('searchbox',{name:'이력 검색'}).fill('OLD_ARCHIVE_CANARY');await historyReady(page);
-    await openRequest(page,id);assert.match(await page.locator('#request-detail-state').textContent(),/저장 기록/);assert.match(await page.locator('#request-detail-body').textContent(),/OLD_ARCHIVE_CANARY/);
+    await openRequest(page,id);assert.match(await page.locator('#request-detail-state').textContent(),/저장 기록/);const storedContext=await page.locator('#request-detail-target').textContent();assert.doesNotMatch(storedContext,/\bundefined\b/);assert.match(storedContext,/설정 revision 기록 없음/);assert.match(storedContext,/호스트 키 기록 없음/);assert.match(await page.locator('#request-detail-body').textContent(),/OLD_ARCHIVE_CANARY/);
     assert.doesNotMatch(await page.locator('body').textContent(),/PRIVATE_ARCHIVE_OUTPUT/);assert.equal(await page.locator('#request-detail-body').getByRole('button',{name:'승인·실행',exact:true,includeHidden:true}).isVisible(),false);
     const query=history.at(-1).searchParams;assert.equal(query.get('from'),'1577923200000');assert.equal(query.get('to'),'1578009600000');assert.equal(query.get('q'),'OLD_ARCHIVE_CANARY');assert.equal(decisions.length,0);assert.equal(executions,0);
     await screenshot(page,1440,'old-journal');

@@ -1000,8 +1000,8 @@
     },
     {
       "path": "test/browser/admin-workflow.test.mjs",
-      "size": 13715,
-      "sha256": "3686327ec2f597f7a29aab93bec7b5dbb4e191aa737381428d60cf44aacbd37d"
+      "size": 13963,
+      "sha256": "efad4873a21eafadf8b073605de03d7792b29605c2eeab298404b80f48aaa260"
     },
     {
       "path": "test/browser/agent-cli.test.mjs",
@@ -1050,8 +1050,8 @@
     },
     {
       "path": "test/browser/history-language.test.mjs",
-      "size": 29181,
-      "sha256": "58da0b26e4b148abab48b9c3d7b702d1e8e0ee11cfcc92bc35182179c58ae1cf"
+      "size": 29953,
+      "sha256": "01e00665b6409564155d4124a78ec08a5d02478513e17a1e271e51466e1a76e2"
     },
     {
       "path": "test/browser/multi-admin.test.mjs",
@@ -1066,7 +1066,7 @@
     {
       "path": "test/browser/run.mjs",
       "size": 3047,
-      "sha256": "eaf4ce3e38d97b63f2bc391b9ddc15544ed21eb1f00751cccb21b03e58a836cd"
+      "sha256": "3dae86e22aff65fae643bd6aee16d8ed20d030e57ccd4acc2db414266a38a074"
     },
     {
       "path": "test/browser/source-automation.test.mjs",
@@ -1930,8 +1930,8 @@
     },
     {
       "path": "web/dist/app.js",
-      "size": 304891,
-      "sha256": "1836d59e0d5cacaad37696bf407d9f21978a788133314e7fbb46119a86e70a5e"
+      "size": 304964,
+      "sha256": "d2102b5e08fff2145d0e8de332bf9652ea5bcc5f589c11913d330867f1650c3a"
     },
     {
       "path": "web/index.html",
@@ -1995,8 +1995,8 @@
     },
     {
       "path": "web/src/request-detail.js",
-      "size": 18317,
-      "sha256": "4c99058945fd9de72a8fae2ad49752e4aa8f8850b240c28999d60f971e2ac235"
+      "size": 18409,
+      "sha256": "90ed093fcc849aac41f8e120f75b4c4146f581c4e486d82cba3f30e0182cc0b2"
     },
     {
       "path": "web/src/settings-tabs.js",

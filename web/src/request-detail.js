@@ -72,8 +72,9 @@ export function createRequestDetail({ document, i18n, bridgeName, targetName, ta
     title.textContent = `${kinds[job.kind] ?? job.kind} · ${job.id}`;
     state.textContent = `${states[job.state] ?? job.state}${job.history?.stateSource === 'journal' ? (korean ? ' · 저장 기록에서 확인' : ' · Recorded history') : ''}`;
     state.dataset.state = job.state;
-    context.textContent = `${t('중계기')} · ${bridgeName} / ${t('대상 서버')} · ${job.targetDisplayName ?? targetName}${job.targetId ? ` [${job.targetId}]` : ''} (${job.target}) · ${t('요청')} ${job.id}`;
-    if (job.targetId) context.textContent += ` · ${t('설정 revision')} ${job.targetRevision} / ${t('호스트 키')} ${job.hostKey}`;
+    const absent = korean ? '기록 없음' : 'Not recorded';
+    context.textContent = `${t('중계기')} · ${bridgeName} / ${t('대상 서버')} · ${job.targetDisplayName ?? targetName}${job.targetId ? ` [${job.targetId}]` : ''} (${job.target ?? absent}) · ${t('요청')} ${job.id}`;
+    if (job.targetId) context.textContent += ` · ${t('설정 revision')} ${job.targetRevision ?? absent} / ${t('호스트 키')} ${job.hostKey ?? absent}`;
     const currentBinding = !job.history || job.history.targetStatus === 'active';
     if (job.history?.targetStatus && !currentBinding) context.textContent += korean ? (job.history.targetStatus === 'disabled' ? ' · 현재 대상 사용 중지' : ' · 현재 대상 설정이 기록 당시와 다름') : (job.history.targetStatus === 'disabled' ? ' · Target currently disabled' : ' · Current target binding differs from this record');
     const content = job.kind === 'command' ? job.command : JSON.stringify(job.operation, null, 2);
