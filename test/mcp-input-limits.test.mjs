@@ -9,6 +9,16 @@ const id = 'a'.repeat(48), bodyLimit = 1024 * 1024;
 const rpc = (name, args = {}, identifier = 1) => ({ jsonrpc: '2.0', id: identifier, method: 'tools/call', params: { name, arguments: args } });
 const initialize = { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'input-limit-fixture', version: '1' } } };
 
+function assertBatchRefused(response) {
+  assert.equal(response.status, 400);
+  const reply = JSON.parse(response.text);
+  assert.equal(reply.jsonrpc, '2.0'); assert.equal(reply.id, null);
+  assert.equal(reply.error.code, -32600);
+  assert.deepEqual(reply.error.data, {
+    error_code: 'MCP_BATCH_NOT_SUPPORTED', executionAttempted: false, requestSubmitted: false,
+  });
+}
+
 async function fixture() {
   const seen = { commands: [], source: [], chunks: [], waits: [] };
   const pending = { id, kind: 'command', command: 'id', operation: { kind: 'command', command: 'id' }, profile: 'fixture', commandClass: 'read-only', target: 'fixture@localhost:22', state: 'pending', createdAt: 10, expiresAt: Date.now() + 600_000 };
@@ -51,7 +61,9 @@ test('MCP HTTP enforces one MiB before parsing for tool calls, initialization an
     for (const value of [rpc('list-targets'), initialize, [rpc('list-targets')]]) {
       const wire = JSON.stringify(value);
       const exact = wire + ' '.repeat(bodyLimit - Buffer.byteLength(wire));
-      assert.equal((await f.post(exact)).status, 200, 'exact one MiB remains accepted');
+      const exactResponse = await f.post(exact);
+      if (Array.isArray(value)) assertBatchRefused(exactResponse);
+      else assert.equal(exactResponse.status, 200, 'exact one MiB remains accepted for a single message');
       for (const chunked of [true, false]) {
         const response = await f.post(exact + ' ', { chunked });
         assert.equal(response.status, 413, `one MiB + 1 must be refused (chunked=${chunked})`);
@@ -61,6 +73,7 @@ test('MCP HTTP enforces one MiB before parsing for tool calls, initialization an
     assert.equal((await f.post('x'.repeat(bodyLimit + 1))).status, 413, 'limit applies before malformed JSON parsing');
     assert.equal((await f.post('x'.repeat(bodyLimit + 1), { authenticated: false })).status, 401, 'bearer authentication still precedes transport');
     assert.equal((await f.call('list-targets')).isError, undefined, 'refusal leaves server usable');
+    assert.deepEqual(f.seen, { commands: [], source: [], chunks: [], waits: [] }, 'oversize and batch refusals never dispatch');
   } finally { await f.close(); }
 });
 
@@ -84,10 +97,18 @@ test('MCP bounds aggregate input before every registered tool schema, including 
     // The SDK protocol schema discards __proto__ before tool validation.
     const prototypeKey = await f.call('run-command', JSON.parse('{"__proto__":' + JSON.stringify(Array(64).fill(0)) + '}'));
     assert.equal(prototypeKey.isError, true); assert.ok(JSON.stringify(prototypeKey).length < 512);
-    const batch = JSON.parse((await f.post([rpc('run-python-source', { argv: Array(64).fill(0) }, 1), rpc('list-targets', {}, 2)])).text);
-    assert.match(batch.find(reply => reply.id === 1).result.content[0].text, /maximum of 64 elements/);
-    assert.equal(batch.find(reply => reply.id === 2).result.isError, undefined);
-    assert.equal((await f.post(Array.from({ length: 101 }, (_, index) => rpc('list-targets', {}, index)))).status, 400, 'SDK batch ceiling preserved');
+    const members = [rpc('run-python-source', { argv: Array(64).fill(0) }, 1), rpc('list-targets', {}, 2)];
+    const oversizedMember = JSON.parse((await f.post(members[0])).text);
+    assert.equal(oversizedMember.id, 1); assert.equal(oversizedMember.result.isError, true);
+    assert.match(oversizedMember.result.content[0].text, /maximum of 64 elements/);
+    const validMember = JSON.parse((await f.post(members[1])).text);
+    assert.equal(validMember.id, 2); assert.equal(validMember.result.isError, undefined);
+    assertBatchRefused(await f.post(members));
+    assertBatchRefused(await f.post([
+      rpc('run-command', { command: 'fixture-batch-must-not-submit' }, 3),
+      rpc('wait-for-request', { id, timeoutMs: 1 }, 4),
+    ]));
+    assertBatchRefused(await f.post(Array.from({ length: 101 }, (_, index) => rpc('list-targets', {}, index))));
     assert.deepEqual(f.seen, { commands: [], source: [], chunks: [], waits: [] }, 'rejected tools never dispatch');
   } finally { await f.close(); }
 });

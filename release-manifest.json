@@ -575,8 +575,8 @@
     },
     {
       "path": "src/adapters/http/protocol.mjs",
-      "size": 21468,
-      "sha256": "2101c1390acb959e87a9fd91a9dafdc4fc69e180dc62f168eaa22d5aefd68174"
+      "size": 21677,
+      "sha256": "851786a7d13d05856f17064b2da6c15575635d3a3650f62b63d6e9216086ca9a"
     },
     {
       "path": "src/adapters/mcp/server.mjs",
@@ -1375,8 +1375,8 @@
     },
     {
       "path": "test/mcp-input-limits.test.mjs",
-      "size": 9296,
-      "sha256": "84bfeeb97e9a293a8a87c817daaf52fdbc7b7751994985ae89651b6f6583460b"
+      "size": 10312,
+      "sha256": "2913ff7835bc18f8200b16b48847755b1bf87ca7a12045bc33a1f9a82442f2ca"
     },
     {
       "path": "test/model-selection.test.mjs",

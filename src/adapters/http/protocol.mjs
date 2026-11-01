@@ -38,13 +38,18 @@ async function responseFinished(res) {
 }
 
 async function readMcpMessage(req, res) {
+  const tooLarge = () => {
+    req.pause(); res.setHeader('Connection', 'close');
+    json(res, 413, { jsonrpc: '2.0', id: null, error: { code: -32000, message: 'Request body exceeds 1048576 bytes' } });
+  };
+  // Refuse declared oversize without waiting for bytes a client need not send.
+  if (Number(req.headers['content-length']) > 1024 * 1024) { tooLarge(); return; }
   const chunks = []; let bytes = 0;
   // Keep the socket alive long enough to deliver a bounded refusal, then close it.
   for await (const chunk of req.iterator({ destroyOnReturn: false })) {
     bytes += chunk.length;
     if (bytes > 1024 * 1024) {
-      req.pause(); res.setHeader('Connection', 'close');
-      json(res, 413, { jsonrpc: '2.0', id: null, error: { code: -32000, message: 'Request body exceeds 1048576 bytes' } });
+      tooLarge();
       return;
     }
     chunks.push(chunk);
