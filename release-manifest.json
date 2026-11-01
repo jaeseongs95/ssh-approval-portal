@@ -1295,8 +1295,8 @@
     },
     {
       "path": "test/http-admission.test.mjs",
-      "size": 21600,
-      "sha256": "cfd4f5b31e1648cbda2b10e8ccb9bacd111158e459f230d9052f15a878277727"
+      "size": 22470,
+      "sha256": "e887df57acc40797586efc74f69a6dc24d0f2f98296e1d728bde32804fa809f3"
     },
     {
       "path": "test/http-races.test.mjs",

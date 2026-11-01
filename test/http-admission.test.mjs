@@ -216,7 +216,8 @@ test('validated long waits have a separate finite budget without blocking contro
   assert.equal((await f.call('wait-for-request', { id: 'invalid' })).isError, true);
   assert.equal((await f.call('show-ui-probe')).isError, undefined);
   assert.equal((await f.owner('/api/requests')).status, 200);
-  assert.equal((await f.owner('/api/maintenance/status', { method: 'POST' })).status, 200);
+  const control = await f.owner('/api/maintenance/capabilities', { method: 'POST' });
+  assert.equal(control.status, 200); assert.equal((await control.json()).ownership, 'durable-v1');
   assert.equal((await f.owner('/api/' + job.id + '/approve', { method: 'POST', headers: { Authorization: 'Bearer fixture-mcp' } })).status, 401);
   assert.equal((await f.owner('/api/' + job.id + '/approve', { method: 'POST', headers: { Origin: 'https://foreign.example.test' } })).status, 403);
   assert.equal((await f.call('ui-decide-request', { id: job.id, action: 'approve', ticket: 'blind-model-call' })).isError, true);
@@ -246,17 +247,25 @@ test('slow synchronous approval keeps control available; disconnect does not can
   await refusal(await f.owner('/api/' + other.id + '/approve', { method: 'POST' }), 'REQUEST_WAIT_LIMIT');
   assert.equal(f.queue.get(other.id).state, 'pending');
   const status = await f.owner('/api/' + job.id); assert.equal(status.status, 200); assert.equal((await status.json()).state, 'running');
-  assert.equal((await f.owner('/api/maintenance/status', { method: 'POST' })).status, 200);
+  const control = await f.owner('/api/maintenance/capabilities', { method: 'POST' });
+  assert.equal(control.status, 200); assert.equal((await control.json()).ownership, 'durable-v1');
   assert.equal((await f.owner('/api/' + other.id + '/approve', { method: 'POST', headers: { Prefer: 'respond-async' } })).status, 409);
-  assert.equal((await f.owner('/api/' + other.id + '/deny', { method: 'POST' })).status, 200);
   assert.equal((await f.call('show-ui-probe')).isError, undefined);
   const disconnected = assert.rejects(approval); controller.abort(); await disconnected;
-  await eventually(async () => (await f.snapshot()).admin.detached === 0);
+  assert.equal((await f.snapshot()).admin.detached, 1, 'the synchronous approval handler still owns its unfinished execution');
   assert.equal(f.queue.get(job.id).state, 'running'); assert.equal(f.calls.length, 1);
+  const afterDisconnect = await f.owner('/api/' + job.id);
+  assert.equal(afterDisconnect.status, 200); assert.equal((await afterDisconnect.json()).state, 'running');
+  assert.equal((await f.owner('/api/' + other.id + '/deny', { method: 'POST' })).status, 200);
+  assert.equal(f.queue.get(other.id).state, 'denied');
+  assert.equal((await f.call('show-ui-probe')).isError, undefined);
+  assert.equal((await f.snapshot()).admin.detached, 1, 'control responses do not release the execution-owned lease');
   finish(); await f.queue.wait(job.id);
   assert.equal(f.queue.get(job.id).state, 'completed'); assert.equal(f.calls.length, 1);
+  await eventually(async () => { const { admin } = await f.snapshot(); return admin.active === 0 && admin.queued === 0 && admin.detached === 0; });
   assert.equal((await f.owner('/api/' + job.id + '/approve', { method: 'POST' })).status, 409);
   assert.equal(f.calls.length, 1);
+  await eventually(async () => (await f.snapshot()).admin.detached === 0);
 });
 
 test('shutdown rejects queued bodies without promotion and releases long-wait subscriptions', { timeout: 20000 }, async t => {
