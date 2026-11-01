@@ -21,9 +21,11 @@ const readExactly = (fd, size, position) => {
  * The OS page cache supplies byte reuse; no execution, approval or authority cache exists here.
  */
 export class CommandOutputs {
-  constructor(root, { now = Date.now, maxBytes = MAX, budget = BUDGET, ttl = TTL } = {}) {
+  constructor(root, { now = Date.now, maxBytes = MAX, budget = BUDGET, ttl = TTL, canReap = () => true } = {}) {
     if (![maxBytes, budget, ttl].every(n => Number.isSafeInteger(n) && n > 0) || budget < maxBytes) throw Error('Invalid output limits');
+    if (typeof canReap !== 'function') throw Error('Invalid output cleanup guard');
     this.root = join(root, 'command-outputs'); this.now = now; this.maxBytes = maxBytes; this.budget = budget; this.ttl = ttl;
+    this.canReap = canReap;
     mkdirSync(this.root, { recursive: true, mode: 0o700 }); this.checkRoot();
     const path = join(this.root, 'manifest.sqlite');
     try { closeSync(openSync(path, 'wx', 0o600)); } catch (error) { if (error.code !== 'EEXIST') throw error; }
@@ -163,6 +165,8 @@ export class CommandOutputs {
       totalBytes: part.bytes, sha256: part.sha256, expiresAt: item.expiresAt };
   }
   reap() {
+    // A reserved restart must preserve baseline rows and bytes even after their read TTL.
+    if (this.canReap() !== true) return;
     for (const { id } of this.db.prepare('SELECT id FROM outputs').all()) {
       const item = this.get(id); if (item.state === 'pending' || this.now() < item.expiresAt) continue;
       for (const suffix of ['.part', '.out']) {

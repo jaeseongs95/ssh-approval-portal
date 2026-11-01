@@ -62,9 +62,11 @@ export async function createApplication({ registry, classify, executeCommand, ex
   const definitions = resolveTargets(settings, registry);
   const store = new Artifacts(transferRoot, { maxBytes: settings.maxBytes, budget: settings.budget });
   await store.init();
-  const outputs = new CommandOutputs(transferRoot);
-  let commandState, dormantCommandState, cliState, maintenanceState;
+  let outputs, commandState, dormantCommandState, cliState, maintenanceState;
   try {
+  // Open the durable fence before output construction can expire baseline data.
+  maintenanceState = createMaintenanceState(transferRoot);
+  outputs = new CommandOutputs(transferRoot, {canReap: () => !maintenanceState.occupied()});
   let resolver = secretResolver;
   if (!resolver) {
     const providers = settings.secretStoreDir ? { 'local-file': createLocalSecretStore(settings.secretStoreDir) } : {};
@@ -222,7 +224,6 @@ export async function createApplication({ registry, classify, executeCommand, ex
   });
   const targets = createTargetRouter(runtimes, { defaultTarget: settings.targets === null ? 'default' : settings.defaultTarget, legacy: settings.targets === null, store, audit });
   const { queue, commands, files } = targets;
-  maintenanceState = createMaintenanceState(transferRoot);
   for (const job of commandState?.list() ?? []) {
     const runtime = runtimes.find(runtime => runtime.id === (job.targetId ?? 'default'));
     if (runtime && job.kind === 'command' && job.result && !job.result.output) {
@@ -365,5 +366,5 @@ export async function createApplication({ registry, classify, executeCommand, ex
       })))).finally(() => { browserSessions?.close(); for (const runtime of runtimes) {runtime.commands.close();runtime.cli?.close();} commandState?.close();dormantCommandState?.close();cliState?.close(); maintenanceState?.close(); outputs.close(); });
     },
   };
-  } catch (error) { browserSessions?.close(); commandState?.close();dormantCommandState?.close();cliState?.close(); maintenanceState?.close(); outputs.close(); throw error; }
+  } catch (error) { browserSessions?.close(); commandState?.close();dormantCommandState?.close();cliState?.close(); maintenanceState?.close(); outputs?.close(); throw error; }
 }
