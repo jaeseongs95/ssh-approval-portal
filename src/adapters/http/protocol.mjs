@@ -44,7 +44,7 @@ async function readMcpMessage(req, res) {
     bytes += chunk.length;
     if (bytes > 1024 * 1024) {
       req.pause(); res.setHeader('Connection', 'close');
-      json(res, 413, { jsonrpc: '2.0', id: null, error: { code: -32000, message: 'Request body too large' } });
+      json(res, 413, { jsonrpc: '2.0', id: null, error: { code: -32000, message: 'Request body exceeds 1048576 bytes' } });
       return;
     }
     chunks.push(chunk);

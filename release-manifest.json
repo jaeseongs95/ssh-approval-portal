@@ -575,8 +575,8 @@
     },
     {
       "path": "src/adapters/http/protocol.mjs",
-      "size": 21456,
-      "sha256": "f89069306cd51214b6e9288343e49c72ab74b5352970da8186c4bd5dd378f719"
+      "size": 21468,
+      "sha256": "2101c1390acb959e87a9fd91a9dafdc4fc69e180dc62f168eaa22d5aefd68174"
     },
     {
       "path": "src/adapters/mcp/server.mjs",
@@ -1292,6 +1292,11 @@
       "path": "test/fixtures/safety-replay.json",
       "size": 433,
       "sha256": "12ed0c35fc29e4d867b24285321a0e590f22b77451c49cdda6902bd281c706bb"
+    },
+    {
+      "path": "test/http-admission.test.mjs",
+      "size": 21600,
+      "sha256": "cfd4f5b31e1648cbda2b10e8ccb9bacd111158e459f230d9052f15a878277727"
     },
     {
       "path": "test/http-races.test.mjs",
