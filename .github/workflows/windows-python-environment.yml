@@ -1,0 +1,124 @@
+name: Windows Python 배포 형태 판별
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [test/windows-python-diagnostic-20261101]
+    paths: [.github/workflows/windows-python-environment.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  python-environment:
+    name: Python 3.12.10 ${{ matrix.distribution }}
+    runs-on: windows-2025
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        distribution: [hosted, embedded-zip, embedded-files]
+    env:
+      DISTRIBUTION: ${{ matrix.distribution }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        env:
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: core.autocrlf
+          GIT_CONFIG_VALUE_0: 'false'
+        with:
+          ref: 83c1a445ad96cfa9d486d35a7478626e914c91a1
+          path: subject
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.21.0'
+      - run: npm ci --ignore-scripts
+        working-directory: subject
+      - name: 버전 고정 배포 준비와 원시험 실행
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
+          [Console]::OutputEncoding = $OutputEncoding = [Text.UTF8Encoding]::new($false)
+          $utf8 = [Text.UTF8Encoding]::new($false)
+          $out = Join-Path $env:GITHUB_WORKSPACE 'environment-evidence'
+          [void][IO.Directory]::CreateDirectory($out)
+          $subject = Join-Path $env:GITHUB_WORKSPACE 'subject'
+          $mode = $env:DISTRIBUTION
+          $archive = Join-Path $env:RUNNER_TEMP 'python-3.12.10-embed-amd64.zip'
+          $runtime = Join-Path $env:RUNNER_TEMP 'python-3.12.10-environment'
+          if ([IO.File]::Exists($archive) -or [IO.Directory]::Exists($runtime)) { throw '새 배포 경로가 이미 있습니다.' }
+          Invoke-WebRequest 'https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd64.zip' -OutFile $archive
+          $archiveHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if (([IO.FileInfo]::new($archive)).Length -ne 11133606 -or $archiveHash -ne '4acbed6dd1c744b0376e3b1cf57ce906f9dc9e95e68824584c8099a63025a3c3') { throw '공식 배포 크기·해시 불일치' }
+          [IO.Compression.ZipFile]::ExtractToDirectory($archive, $runtime)
+          $stdlibZip = Join-Path $runtime 'python312.zip'
+          if ((Get-FileHash -LiteralPath $stdlibZip -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'fb131c0ef7e35cc5250a74c8cd18744bf4115fb8163710711f3758d7df3d1f88') { throw '표준 라이브러리 ZIP 불일치' }
+          $policy = Join-Path $runtime 'python312._pth'
+          $originalPolicy = [IO.File]::ReadAllText($policy)
+          if ($mode -eq 'embedded-files') {
+            [IO.Compression.ZipFile]::ExtractToDirectory($stdlibZip, (Join-Path $runtime 'stdlib'))
+            [IO.File]::Move($stdlibZip, (Join-Path $runtime 'python312.zip.original'))
+            [IO.File]::WriteAllText($policy, $originalPolicy.Replace('python312.zip', 'stdlib'), $utf8)
+          }
+          $python = if ($mode -eq 'hosted') { 'C:\hostedtoolcache\windows\Python\3.12.10\x64\python.exe' } else { Join-Path $runtime 'python.exe' }
+          if (-not [IO.File]::Exists($python)) { throw '지정한 3.12.10 실행파일 없음: 환경 비교 미실행' }
+          $version = [Diagnostics.FileVersionInfo]::GetVersionInfo($python).ProductVersion
+          if ($version -notmatch '^3\.12\.10(?:\D|$)') { throw '실행파일의 3.12.10 버전 고정 실패' }
+          $fileHashes = @{}
+          foreach ($name in @('test/windows-python-source.test.mjs', 'src/adapters/ssh/windows-python-source.mjs', 'src/adapters/ssh/windows-stdin.mjs')) {
+            $fileHashes[$name] = (Get-FileHash -LiteralPath (Join-Path $subject $name) -Algorithm SHA256).Hash.ToLowerInvariant()
+          }
+          if ($fileHashes['src/adapters/ssh/windows-python-source.mjs'] -ne '63f08b81f9ba9866887d147db2d8f8537ab48b9aa7ecf00942a6a59ef1428c73') { throw '원제품 파일 해시 불일치' }
+          $record = @{ sourceCommit = '83c1a445ad96cfa9d486d35a7478626e914c91a1'; distribution = $mode; interpreter = $python
+            productVersion = $version; interpreterSha256 = (Get-FileHash -LiteralPath $python -Algorithm SHA256).Hash.ToLowerInvariant()
+            archiveSha256 = $archiveHash; archiveBytes = 11133606; originalPathPolicy = $originalPolicy
+            selectedPathPolicy = if ($mode -eq 'hosted') { '기존 hosted 설치 정책' } else { [IO.File]::ReadAllText($policy) }
+            fileHashes = $fileHashes; nodeVersion = (& node --version); imageVersion = $env:ImageVersion; imageOS = $env:ImageOS
+            environmentKeys = @(Get-ChildItem Env: | ForEach-Object Name | Sort-Object); currentDirectory = $subject
+            history = '이 job에서 Python 실행·import 예열 없음. 배포 내려받기·추출·해시·버전 리소스 읽기는 수행함. OS 파일 캐시 상태 미확인'
+            scope = '새 독립 job의 배포 비교이며 기존 전체 SSH/병렬 회귀나 CI 실패의 대체 통과가 아님'
+            processDeadlineMs = 20000; originalTestFileUnchanged = $true; originalReceiverInstrumentation = '83의 고정 관측 복사본을 그대로 사용'
+          }
+          [IO.File]::WriteAllText((Join-Path $out 'environment.json'), ($record | ConvertTo-Json -Depth 8), $utf8)
+          $env:SOLID_PYTHON = $python
+          $stdout = Join-Path $out 'test.stdout.log'
+          $stderr = Join-Path $out 'test.stderr.log'
+          $started = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+          $watch = [Diagnostics.Stopwatch]::StartNew()
+          $node = (Get-Command node.exe -CommandType Application | Select-Object -First 1).Source
+          $child = Start-Process -FilePath $node -ArgumentList @('--test', '--test-name-pattern=Windows.PowerShell.5.1.forwards|Windows.source.rejects.truncated', 'test/windows-python-source.test.mjs') -WorkingDirectory $subject -WindowStyle Hidden -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          $outerTimeout = -not $child.WaitForExit(200000)
+          if ($outerTimeout) {
+            $killer = Start-Process -FilePath taskkill.exe -ArgumentList @('/PID', $child.Id, '/T', '/F') -WindowStyle Hidden -PassThru
+            if (-not $killer.WaitForExit(5000)) { $killer.Kill(); $child.Kill() }
+          }
+          $child.Refresh()
+          $summary = @{ outerTimeout = $outerTimeout; exitCode = $child.ExitCode; processId = $child.Id; startedEpochMs = $started
+            elapsedMs = $watch.ElapsedMilliseconds; outerDeadlineMs = 200000; originalProcessDeadlineMs = 20000 }
+          [IO.File]::WriteAllText((Join-Path $out 'execution.json'), ($summary | ConvertTo-Json), $utf8)
+          $text = [IO.File]::ReadAllText($stdout)
+          [Console]::Write($text)
+          [Console]::Error.Write([IO.File]::ReadAllText($stderr))
+          $rows = @($text -split '\r?\n' | Where-Object { $_.StartsWith('# {') } | ForEach-Object { $_.Substring(2) | ConvertFrom-Json })
+          $first = @($rows | Where-Object { $_.단계 -eq '직접 실행: 한글·따옴표 인자' -and $_.사건 -eq '시작' })
+          $sourceRows = @($rows | Where-Object { $_.진단 -eq '최초 원문 PowerShell 단계 계측' -and $_.sourceSha256 })
+          if ($first.Count -ne 1 -or $first[0].frameBytes -ne 608 -or $first[0].sourceBytes -ne 217) { throw '원시험 217/608 고정 확인 실패' }
+          if ($sourceRows.Count -ne 1 -or $sourceRows[0].sourceSha256 -ne '7b30f09927c34411c26cebe01f281361002ac0412bb311747acf8d37e988ade9') { throw '원시험 source SHA256 확인 실패' }
+          if ($outerTimeout -or $child.ExitCode -ne 0) { throw '원시험 실패: 원래 20초 판정과 로그를 보존합니다. 예열·재실행 없음.' }
+          # provenance는 원시험 통과 뒤에만 별도 실행한다. 최초 사례의 import를 예열하지 않는다.
+          $code = "import sys,json,enum,functools,struct;assert sys.version_info[:3]==(3,12,10);print(json.dumps(dict(version=sys.version,executable=sys.executable,architecture=struct.calcsize('P')*8,path=sys.path,json=json.__file__,enum=enum.__file__,functools=functools.__file__,isolated=sys.flags.isolated,noSite=sys.flags.no_site,utf8=sys.flags.utf8_mode),ensure_ascii=True))"
+          $payload = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($code))
+          $expression = "exec(__import__('base64').b64decode('$payload'))"
+          $provenance = Start-Process -FilePath $python -ArgumentList @('-I', '-B', '-S', '-X', 'utf8', '-c', ('"' + $expression + '"')) -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $out 'provenance.json') -RedirectStandardError (Join-Path $out 'provenance.stderr.log')
+          if (-not $provenance.WaitForExit(20000)) { $provenance.Kill(); throw '후속 출처 관측 시간초과. 원시험과 별개로 실패.' }
+          if ($provenance.ExitCode -ne 0) { throw '후속 출처 관측 실패' }
+          Get-Content -LiteralPath (Join-Path $out 'provenance.json') -Encoding utf8
+      - name: 원자료 보존
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: python-environment-${{ matrix.distribution }}
+          path: environment-evidence
+          if-no-files-found: error
