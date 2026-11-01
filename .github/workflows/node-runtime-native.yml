@@ -44,6 +44,9 @@ jobs:
           cat > "$RUNNER_TEMP/node-runtime-image/Dockerfile" <<'DOCKERFILE'
           FROM ubuntu:24.04
           RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3 bash curl xz-utils util-linux ca-certificates && rm -rf /var/lib/apt/lists/*
+          # Ubuntu의 test 패키지와 원본의 namespace 디렉터리가 충돌하지 않게 연결한다.
+          RUN mkdir -p /fixture/test && printf "__path__ = ['/source/test']\n" > /fixture/test/__init__.py
+          ENV PYTHONPATH=/fixture
           DOCKERFILE
           docker build --tag node-runtime-native:fixture "$RUNNER_TEMP/node-runtime-image"
       - name: 기존 NativeRuntime 원시험 실행
