@@ -55,7 +55,7 @@ jobs:
           set +e
           set -uo pipefail
           docker run --rm --network=none --user=0:0 \
-            --tmpfs /opt/ssh-approval:rw,nosuid,nodev,mode=0755 \
+            --tmpfs /opt/ssh-approval:rw,exec,nosuid,nodev,mode=0755 \
             --mount "type=bind,src=$GITHUB_WORKSPACE,dst=/source,readonly" \
             --mount "type=bind,src=$RUNNER_TEMP/node-runtime-archive,dst=/verified,readonly" \
             -e NODE_RUNTIME_NATIVE_FIXTURE=1 \
