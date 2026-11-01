@@ -78,6 +78,15 @@ if(fixture.provider==='claude'){
  function Download($url,$destination,$deadline) { [IO.File]::WriteAllText($destination,$testArchive,$utf8) }
  function Integrity { return 'sha512-'+[Convert]::ToBase64String([Security.Cryptography.SHA512]::Create().ComputeHash($utf8.GetBytes($testArchive))) }
  $env:PATH=[IO.Path]::GetDirectoryName($testNode)
+ $fixtureStage='login-environment'
+ $environmentProbe=Join-Path $testRoot 'environment-probe.cjs'
+ [IO.File]::WriteAllText($environmentProbe,'console.log(JSON.stringify({home:process.env.USERPROFILE,temp:process.env.TEMP,tmp:process.env.TMP,codex:process.env.CODEX_HOME}))',$utf8)
+ $loginEnvironment=RunCli $environmentProbe @() $testRoot $true
+ Assert ($loginEnvironment[0] -eq 0 -and -not $loginEnvironment[2]) 'login-environment-probe'
+ $loginValues=$loginEnvironment[1] | ConvertFrom-Json
+ Assert ($loginValues.home -ceq $homeDirectory) 'login-real-home-preserved'
+ Assert ($loginValues.temp -ceq (Join-Path $testRoot 'tmp') -and $loginValues.tmp -ceq $loginValues.temp) 'login-private-temporary-directory'
+ Assert ($null -eq $loginValues.codex -and -not (Join-Path $loginValues.home '.codex').StartsWith($loginValues.temp,[StringComparison]::OrdinalIgnoreCase)) 'login-home-outside-temporary-directory'
  $root=Join-Path $homeDirectory '.ssh-approval-cli/codex'
  PrivateDirectory (Join-Path $homeDirectory '.codex')
  $credentialFixture=Join-Path $homeDirectory '.codex/auth-fixture.txt'

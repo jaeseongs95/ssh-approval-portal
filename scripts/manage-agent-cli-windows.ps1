@@ -218,12 +218,13 @@ public static class AgentCliProcess {
  }
 }
 '@ | Out-Null
-function EnvironmentFor([string]$homePath, [string]$nodeDirectory = '', [bool]$login = $false) {
+function EnvironmentFor([string]$homePath, [string]$nodeDirectory = '', [bool]$login = $false, [string]$temporaryDirectory = '') {
     $system = [Environment]::GetFolderPath('System')
+    if (-not $temporaryDirectory) { $temporaryDirectory = $homePath }
     $values = @(('SystemRoot=' + [IO.Directory]::GetParent($system).FullName), ('WINDIR=' + [IO.Directory]::GetParent($system).FullName),
         ('COMSPEC=' + (Join-Path $system 'cmd.exe')), ('PATH=' + $nodeDirectory + ';' + $system),
         ('USERPROFILE=' + $homePath), ('HOME=' + $homePath), ('APPDATA=' + (Join-Path $homePath 'AppData\Roaming')),
-        ('LOCALAPPDATA=' + (Join-Path $homePath 'AppData\Local')), ('TEMP=' + $homePath), ('TMP=' + $homePath),
+        ('LOCALAPPDATA=' + (Join-Path $homePath 'AppData\Local')), ('TEMP=' + $temporaryDirectory), ('TMP=' + $temporaryDirectory),
         'DISABLE_UPDATES=1', 'DISABLE_AUTOUPDATER=1', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1')
     if (-not $login) { $values += @(('CODEX_HOME=' + (Join-Path $homePath 'codex')), ('CLAUDE_CONFIG_DIR=' + (Join-Path $homePath 'claude'))) }
     return $values
@@ -258,7 +259,10 @@ function PackageExecutable([string]$prefix, [string]$provider) {
 function RunCli([string]$binary, [string[]]$arguments, [string]$cwd, [bool]$login = $false) {
     $nodeDirectory = ''
     if ([IO.Path]::GetExtension($binary) -ne '.exe') { $runtime = NodeRuntime; $nodeDirectory = [IO.Path]::GetDirectoryName($runtime[0]); $arguments = @($binary) + $arguments; $binary = $runtime[0] }
-    return [AgentCliProcess]::Run($binary, $arguments, $cwd, (EnvironmentFor $(if ($login) { $homeDirectory } else { $cwd }) $nodeDirectory $login), 15000, 8192)
+    # A CLI may reject its persistent home below TEMP. Keep temporary files in
+    # the private invocation directory without changing the real login home.
+    $temporaryDirectory = Join-Path $cwd 'tmp'; PrivateDirectory $temporaryDirectory
+    return [AgentCliProcess]::Run($binary, $arguments, $cwd, (EnvironmentFor $(if ($login) { $homeDirectory } else { $cwd }) $nodeDirectory $login $temporaryDirectory), 15000, 8192)
 }
 function VersionOf([string]$binary, [string]$provider) {
     $directory = Join-Path ([IO.Path]::GetTempPath()) ('ssh-cli-version-' + [Guid]::NewGuid().ToString('N'))
@@ -399,7 +403,7 @@ function Install([string]$root, [string]$action, [string]$provider, [string]$ver
             $prefix=Join-Path $work 'prefix'; PrivateDirectory $prefix
             foreach ($name in @('user.npmrc','global.npmrc')) { [IO.File]::WriteAllText((Join-Path $work $name),'',$utf8) }
             $receipt.state='installing'; AtomicJson $receiptPath $receipt
-            $timeout=[Math]::Min(900000, $expires-[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()); Require ($timeout -gt 0) 'PLAN_EXPIRED'
+            $timeout=[Math]::Min([long]900000, $expires-[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()); Require ($timeout -gt 0) 'PLAN_EXPIRED'
             $npmArgs=@($runtime[1],'install','--global','--prefix',$prefix,'--registry','https://registry.npmjs.org','--cache',(Join-Path $work 'cache'),'--userconfig',(Join-Path $work 'user.npmrc'),'--globalconfig',(Join-Path $work 'global.npmrc'),'--no-audit','--no-fund','--silent',$package)
             $npmResult=[AgentCliProcess]::Run($runtime[0],$npmArgs,$work,(EnvironmentFor (Join-Path $work 'home') $nodeDirectory),[int]$timeout,65536)
             Require ($npmResult[0] -eq 0) 'NPM_FAILED'

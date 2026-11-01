@@ -177,6 +177,7 @@ $intent=[ordered]@{action=${literal(action)};expected=${literal(expected)};expir
     const inspected=await runtime.executeAgentCli(prepareAgentCliPlan({action:'inspect',provider:entry.provider,binding}),()=>binding);
     assert.equal(inspected.failed,false);assert.equal(inspected.data.agentCli.managed,true);assert.equal(inspected.data.agentCli.version,entry.version);
     const login=await runtime.executeAgentCli(prepareAgentCliPlan({action:'login-status',provider:entry.provider,binding}),()=>binding);
+    if(login.data.agentCli.state==='unavailable')t.diagnostic(JSON.stringify({provider:entry.provider,loginState:login.data.agentCli.state,loginReason:login.data.agentCli.reason}));
     assert.equal(login.failed,false);assert.equal(login.data.agentCli.state,'signed_out');
     t.diagnostic(JSON.stringify({provider:entry.provider,version:entry.version,installed:true,managed:true,login:'signed_out'}));
    });
