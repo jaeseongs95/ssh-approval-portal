@@ -1775,8 +1775,8 @@
     },
     {
       "path": "test/windows-dispatch-binding.test.mjs",
-      "size": 14423,
-      "sha256": "896812fbe2b9b55f37f5cd2e98b0465f5120b5e77a083379fa34628c454b8f9d"
+      "size": 14450,
+      "sha256": "d7a72b17d0eb4a628a3277883bdf9bd82aab48d732f059f96d74b0feeb1024ac"
     },
     {
       "path": "test/windows-file-contracts.test.mjs",

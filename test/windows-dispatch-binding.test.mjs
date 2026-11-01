@@ -32,7 +32,7 @@ readOnly=${mode === 'read'}
 tty=false
 announceAgent=false
 transferTimeoutMs=3000
-`).join(''), 'utf8');
+`).join(''), { encoding: 'utf8', mode: 0o600 });
   const runtime = await createSshRuntime({ BRIDGE_CONFIG_PATH: config, BRIDGE_HOST_KEY_MODE: 'strict' });
   const profiles = new Map(['win-read', 'win-write'].map(name => [name, { ...runtime.registry.getProfile(name) }]));
   const effects = { command: 0, sftp: 0, publish: 0, snapshot: 0, cleanup: 0 };
