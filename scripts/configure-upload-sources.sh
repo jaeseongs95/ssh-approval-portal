@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 [[ $EUID == 0 ]] || { echo 'Run from the administrator terminal with sudo.' >&2; exit 1; }
-active=/var/lib/ssh-mcp/app/approval-bridge
+source_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
+exec 9>/var/lib/ssh-mcp/.portal-install.lock
+flock -n 9
+active=$(python3 -I -B "$source_dir/scripts/deployment_entry.py" active-release)
+[[ -z ${SSH_APPROVAL_EXPECTED_RELEASE:-} || "$active" == "$SSH_APPROVAL_EXPECTED_RELEASE" ]] || { echo 'Active deployment changed before configuration; start again.' >&2; exit 1; }
 node=/opt/ssh-approval/node/bin/node
 . "$active/scripts/maintenance-owner.sh"
 env_file=/etc/ssh-mcp-approval-bridge.env
 [[ -f "$env_file" && ! -L "$env_file" ]] || { echo 'Expected the native managed secret file.' >&2; exit 1; }
 "$node" "$active/scripts/verify.mjs" "$active"
-exec 9>/var/lib/ssh-mcp/.portal-install.lock
-flock -n 9
 before=$(sha256sum "$env_file" | cut -d' ' -f1)
 work=$(mktemp -d /run/ssh-upload-sources.XXXXXXXX)
 reserved=0

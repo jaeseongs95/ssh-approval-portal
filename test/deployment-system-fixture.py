@@ -31,7 +31,7 @@ NODE = '/opt/ssh-approval/node/bin/node'
 LEGACY_ARCHIVE = '780fbc485bce4eea6358026ac57847e02ab80eef0b2a5b35fcc832c0e18e6471'
 LEGACY_MANIFEST = 'ec752d6873473a5500a447cbefc2ed577ac39b2dfd8b2c88ee562739e5d3ae59'
 STAGES = ('prepare', 'reserve', 'stop', 'migrate', 'baseline', 'launcher', 'helper',
-          'bootstrap', 'reload', 'promote', 'start', 'compare', 'release', 'final')
+          'bootstrap', 'reload', 'promote', 'enable', 'start', 'compare', 'release', 'final')
 
 
 class CheckFailure(Exception):
@@ -117,9 +117,14 @@ class Fixture:
         return dict(line.split('=', 1) for line in result.stdout.decode().splitlines() if '=' in line)
 
     def health(self, version):
+        result = self.command('read-validated-mcp-port', ['/usr/bin/python3', '-I', '-B',
+                              self.source / 'scripts/settings_contract.py', 'port', ENV, 'mcp'])
+        require(re.fullmatch(rb'[0-9]+\s*', result.stdout) is not None, 'HEALTH_PORT_INVALID')
+        port = int(result.stdout)
+        require(1 <= port <= 65535, 'HEALTH_PORT_INVALID')
         for _ in range(60):
             try:
-                with urllib.request.urlopen('http://127.0.0.1:8787/health', timeout=2) as response:
+                with urllib.request.urlopen('http://127.0.0.1:' + str(port) + '/health', timeout=2) as response:
                     value = json.load(response)
                 if value.get('healthy') is True and value.get('version') == version and value.get('maintenance') is False:
                     return value

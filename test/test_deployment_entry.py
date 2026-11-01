@@ -24,16 +24,20 @@ class DeploymentEntryTests(unittest.TestCase):
         self.launcher = self.root / 'libexec/launcher'
         self.launcher.parent.mkdir()
         self.jobs = self.root / 'jobs'
-        for name, value in [('EXECUTORS', self.executors), ('LAUNCHER', self.launcher), ('JOBS', self.jobs)]:
+        self.active = self.root / 'state/active.json'
+        self.releases = self.root / 'releases'
+        for name, value in [('EXECUTORS', self.executors), ('LAUNCHER', self.launcher), ('JOBS', self.jobs),
+                            ('ACTIVE', self.active), ('RELEASES', self.releases)]:
             change = patch.object(entry, name, value)
             change.start()
             self.addCleanup(change.stop)
         self.source = self.root / 'source'
         self.manifest, self.pin = self.package(self.source, 'old')
 
-    def package(self, path, token):
+    def package(self, path, token, marker=None):
+        prefix = ("from pathlib import Path\nPath(%r).touch()\n" % str(marker)).encode() if marker else b''
         files = {
-            'scripts/deployment.py': ("TOKEN = %r\ndef validate_plan(plan):\n"
+            'scripts/deployment.py': prefix + ("TOKEN = %r\ndef validate_plan(plan):\n"
                                       "    if plan.get('proof') != TOKEN:\n"
                                       "        raise ValueError('FIXTURE_PLAN_INVALID')\n" % token).encode(),
             'scripts/deployment_migration.py': b'MARKER = "migration"\n',
@@ -66,7 +70,9 @@ class DeploymentEntryTests(unittest.TestCase):
 
     def save_job(self, pin, token, **changes):
         job = 'deploy-' + 'a' * 32
-        plan = {'manifestSha256': pin, 'executor': str(self.executors / pin / 'deployment.py'), 'proof': token}
+        plan = {'manifestSha256': pin, 'executor': str(self.executors / pin / 'deployment.py'), 'proof': token,
+                'executorFingerprint': {name: hashlib.sha256((self.executors / pin / name).read_bytes()).hexdigest()
+                                        for name in ('deployment.py', 'deployment_migration.py')}}
         plan.update(changes)
         put(self.jobs / job / 'plan.json', json.dumps(plan).encode(), 0o600)
         return job
@@ -100,6 +106,37 @@ class DeploymentEntryTests(unittest.TestCase):
         job = self.save_job(self.pin, 'different-plan')
         with self.assertRaisesRegex(ValueError, 'FIXTURE_PLAN_INVALID'):
             entry.executor_for_job(job)
+
+    def test_executor_fingerprint_covers_both_modules_before_any_import(self):
+        marker = self.root / 'executor-imported'
+        source = self.root / 'marked-source'
+        _, pin = self.package(source, 'marked', marker=marker)
+        entry.install_executor(source, pin)
+        self.assertTrue(marker.exists(), '관측 표식은 실제 가져오기에서 생성되어야 한다')
+        marker.unlink()
+        job = self.save_job(pin, 'marked')
+        for name in ('deployment.py', 'deployment_migration.py'):
+            with self.subTest(module=name):
+                path = self.executors / pin / name
+                original = path.read_bytes()
+                put(path, original + b'# modified after plan\n')
+                with self.assertRaisesRegex(ValueError, 'EXECUTOR_CHANGED'):
+                    entry.executor_for_job(job)
+                self.assertFalse(marker.exists(), '두 모듈 검증이 끝나기 전 가져오면 안 된다')
+                put(path, original)
+
+    def test_missing_partial_extra_or_wrong_fingerprint_is_rejected(self):
+        entry.install_executor(self.source, self.pin)
+        for fingerprints, code in [(None, 'EXECUTOR_FINGERPRINT_INVALID'), ({}, 'EXECUTOR_FINGERPRINT_INVALID'),
+                                   ({'deployment.py': 'a' * 64}, 'EXECUTOR_FINGERPRINT_INVALID'),
+                                   ({'deployment.py': 'a' * 64, 'deployment_migration.py': 'b' * 64,
+                                     'extra.py': 'c' * 64}, 'EXECUTOR_FINGERPRINT_INVALID'),
+                                   ({'deployment.py': 'a' * 64, 'deployment_migration.py': 'b' * 64},
+                                    'EXECUTOR_CHANGED')]:
+            with self.subTest(fingerprints=fingerprints):
+                job = self.save_job(self.pin, 'old', executorFingerprint=fingerprints)
+                with self.assertRaisesRegex(ValueError, code):
+                    entry.executor_for_job(job)
 
     def test_changed_or_extra_installed_module_is_not_reused(self):
         entry.install_executor(self.source, self.pin)
@@ -214,6 +251,75 @@ class DeploymentEntryTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'DEPLOYMENT_PACKAGE_INCOMPLETE'):
                     entry.install_executor(self.source, pin)
                 self.assertFalse(self.executors.exists())
+
+    def active_fixture(self):
+        release = self.releases / 'pinned-release'
+        manifest, pin = self.package(release, 'active')
+        value = {'schemaVersion': 1, 'release': str(release), 'manifestSha256': pin}
+        put(self.active, json.dumps(value).encode(), 0o600)
+        return release, manifest, value
+
+    def test_active_release_returns_only_the_fully_verified_direct_release(self):
+        release, _, _ = self.active_fixture()
+        self.assertEqual(entry.active_release(), release)
+        self.assertFalse(self.executors.exists())
+        self.assertFalse(self.launcher.exists())
+        put(release / 'helper/file-helper.py', b'# unpinned helper\n')
+        with self.assertRaisesRegex(ValueError, 'SOURCE_CHANGED'):
+            entry.active_release()
+
+    def test_active_release_rejects_bad_record_and_outside_release_paths(self):
+        release, _, active = self.active_fixture()
+        invalid = [[], {}, {**active, 'schemaVersion': 0},
+                   {**active, 'release': str(self.source)},
+                   {**active, 'release': str(release / 'nested')},
+                   {**active, 'release': str(self.releases) + '/pinned-release/../other'},
+                   {**active, 'release': 'relative'}, {**active, 'release': None},
+                   {**active, 'manifestSha256': '0' * 64},
+                   {**active, 'manifestSha256': None}]
+        for value in invalid:
+            with self.subTest(active=value):
+                put(self.active, json.dumps(value).encode(), 0o600)
+                with self.assertRaises((ValueError, TypeError)):
+                    entry.active_release()
+        put(self.active, b'{not-json', 0o600)
+        with self.assertRaises(ValueError):
+            entry.active_release()
+
+    def test_active_release_rejects_incomplete_or_unpinned_manifest(self):
+        release, manifest, active = self.active_fixture()
+        put(release / 'release-manifest.json', b'{not-json')
+        with self.assertRaisesRegex(ValueError, 'MANIFEST_PIN_MISMATCH'):
+            entry.active_release()
+        manifest['files'] = [item for item in manifest['files'] if item['path'] != 'helper/file-helper.py']
+        active['manifestSha256'] = self.save_manifest(release, manifest)
+        put(self.active, json.dumps(active).encode(), 0o600)
+        with self.assertRaisesRegex(ValueError, 'DEPLOYMENT_PACKAGE_INCOMPLETE'):
+            entry.active_release()
+
+    def test_active_release_rejects_untrusted_record_or_release_ancestors(self):
+        release, _, _ = self.active_fixture()
+        for target, action in [(self.active, 'owner'), (self.active, 'mode'),
+                               (self.active.parent, 'owner'), (self.active.parent, 'mode'),
+                               (self.releases, 'owner'), (self.releases, 'mode'),
+                               (release, 'symlink')]:
+            with self.subTest(target=target, action=action):
+                if action == 'owner':
+                    os.chown(target, 10001, -1)
+                elif action == 'mode':
+                    target.chmod(0o777)
+                else:
+                    saved = release.with_name('real-release')
+                    release.rename(saved)
+                    release.symlink_to(saved, target_is_directory=True)
+                with self.assertRaises((ValueError, OSError)):
+                    entry.active_release()
+                if action == 'symlink':
+                    release.unlink()
+                    saved.rename(release)
+                else:
+                    os.chown(target, 0, -1)
+                    target.chmod(0o600 if target == self.active else 0o755)
 
 
 if __name__ == '__main__':

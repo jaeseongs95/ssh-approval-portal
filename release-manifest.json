@@ -285,8 +285,8 @@
     },
     {
       "path": "scripts/cloudflare_environment.py",
-      "size": 9103,
-      "sha256": "19c33e921f1aac000d38ce0b7850c0725bd0e94f9cc537598bb65643efdd148f"
+      "size": 10719,
+      "sha256": "51f13818c3c741a5ebf3de62acd5cb6b06e570d36cd5ff778cec08a01a778b2a"
     },
     {
       "path": "scripts/cloudflare_provision.py",
@@ -315,8 +315,8 @@
     },
     {
       "path": "scripts/configure-admin-access.sh",
-      "size": 5682,
-      "sha256": "e42c45769b82d8ecf5f50c08196c629fa572a32af53fd6d1c85088e122cf4ed4"
+      "size": 5969,
+      "sha256": "776dd21fd09173613150296047b9d354e76a7ef893667c95b9b87fbb151b4acc"
     },
     {
       "path": "scripts/configure-env-editor.sh",
@@ -330,8 +330,8 @@
     },
     {
       "path": "scripts/configure-upload-sources.sh",
-      "size": 3397,
-      "sha256": "4da1e47813f33edef9dbd6bce97799ff3d47e3036b599af68d5948ce31e9d61d"
+      "size": 3684,
+      "sha256": "b180982a5ff1f1dac621b83b63324ae7e898c987040cecfda611f8b304c53db0"
     },
     {
       "path": "scripts/deployment-bootstrap.py",
@@ -1255,8 +1255,8 @@
     },
     {
       "path": "test/deployment-system-fixture.py",
-      "size": 22098,
-      "sha256": "697871e695f4ac9b20547ac607162c36e6deec8fabbd3a1ef37e8b1e9fba7b51"
+      "size": 22496,
+      "sha256": "c45bace2baf9a924e3425d6a61a2c072a54f00f2118e10d021490bcbfb628feb"
     },
     {
       "path": "test/deployment_entry_fixture.py",
@@ -1720,8 +1720,8 @@
     },
     {
       "path": "test/test_cloudflare_environment.py",
-      "size": 23992,
-      "sha256": "0bf7573a9a2611f8b994760ae1770078471a620f9db901c95990fd7026148aef"
+      "size": 27882,
+      "sha256": "0f32f7424810ed071c1556b1c9262c646920902f23f13acc41bd04ef393b117c"
     },
     {
       "path": "test/test_cloudflare_provision.py",
@@ -1750,8 +1750,8 @@
     },
     {
       "path": "test/test_deployment_entry.py",
-      "size": 11563,
-      "sha256": "49b04f9602b10d5366b6ca1394150c627053224512b4564815ea5ca0d48bfe95"
+      "size": 17697,
+      "sha256": "dae016b58160db4e7c6c20335e93348447b62a1eafc70214e5d8276971d724f1"
     },
     {
       "path": "test/test_deployment_launcher.py",
@@ -1785,8 +1785,8 @@
     },
     {
       "path": "test/test_oidc_environment.py",
-      "size": 3375,
-      "sha256": "522f419b7bbbd907603e66917bfd26fe6aea88193048827b56fb369cec3f231b"
+      "size": 3365,
+      "sha256": "da33f0ddd62e8bd6178a53923af6fa421302d11ddec77bced5d7f4eecea038ea"
     },
     {
       "path": "test/test_oidc_proxy_install.py",
@@ -1917,6 +1917,11 @@
       "path": "test/windows-jev-contract.test.mjs",
       "size": 11179,
       "sha256": "ed77668ac6c9cae5298a13a712a8cd41aab1cb995e868bb5a189062160fa5c75"
+    },
+    {
+      "path": "test/windows-python-diagnosis.ps1",
+      "size": 16530,
+      "sha256": "9cead7c4b3b4946d37552f63c638f2a70ed885227f818089585744a570e74a6b"
     },
     {
       "path": "test/windows-python-source.test.mjs",

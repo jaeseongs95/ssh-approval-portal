@@ -1,5 +1,6 @@
 import contextlib
 import copy
+import hashlib
 import io
 import json
 import os
@@ -11,6 +12,7 @@ import sys
 import tempfile
 import threading
 import time
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -28,6 +30,48 @@ from settings_contract import parse_env
 
 
 class Portable(unittest.TestCase):
+    def test_active_selection_staging_and_child_lock_handoff(self):
+        selected = Path('/var/lib/ssh-mcp/app/releases/deployment-new-generation')
+        locked = False
+        @contextlib.contextmanager
+        def lock():
+            nonlocal locked
+            self.assertFalse(locked)
+            locked = True
+            try:
+                yield
+            finally:
+                locked = False
+        def choose():
+            self.assertTrue(locked, 'select the active generation after taking the installation lock')
+            return selected
+        helper_info = SimpleNamespace(st_mode=0o100644, st_uid=0, st_nlink=1)
+        for stage in [None, Path('/root/owned-stage.env')]:
+            with self.subTest(staging=stage is not None), patch.object(ce, 'installation_lock', side_effect=lock), \
+                    patch.object(ce, 'active_release', side_effect=choose), \
+                    patch.object(cc, 'trusted_path', side_effect=lambda path, **kwargs: path), \
+                    patch.object(cc, 'binary_file'), patch.object(cc, 'checked'), \
+                    patch.object(Path, 'lstat', return_value=helper_info), \
+                    patch.object(ce.subprocess, 'run') as run:
+                def execute(args, **kwargs):
+                    self.assertEqual(locked, stage is not None,
+                                     'staging keeps the lock; the child must reacquire it itself')
+                    self.assertEqual(kwargs['env']['SSH_APPROVAL_EXPECTED_RELEASE'], str(selected))
+                    self.assertIn(str(selected/'scripts/admin-access-config.mjs' if stage is not None
+                                      else selected/'scripts/configure-admin-access.sh'), args)
+                    return SimpleNamespace(returncode=0)
+                run.side_effect = execute
+                ce.run_access({'expected': 'unchanged'}, stage=stage)
+                run.assert_called_once()
+
+    def test_invalid_active_selection_never_runs_an_environment_action(self):
+        with patch.object(ce, 'installation_lock', return_value=contextlib.nullcontext()), \
+                patch.object(ce, 'active_release', side_effect=cp.ProvisionFailure('ACTIVE_DEPLOYMENT_REQUIRED')), \
+                patch.object(ce.subprocess, 'run') as run:
+            with self.assertRaisesRegex(cp.ProvisionFailure, 'ACTIVE_DEPLOYMENT_REQUIRED'):
+                ce.run_access({'expected': 'unchanged'})
+        run.assert_not_called()
+
     def test_explicit_flags_dry_run_and_nonroot_never_open_state_or_prompt(self):
         for flag in ['--link-environment', '--restore-environment']:
             with patch.object(cf, 'main', return_value=0) as child:
@@ -229,12 +273,21 @@ class NativeHelper(unittest.TestCase):
         for path in [cls.release, *cls.release.rglob('*')]:
             assert not path.is_symlink()
             path.chmod(0o750 if path.is_dir() else 0o640)
-        ce.ACTIVE.symlink_to(cls.release)
+        cls.selection = Path('/var/lib/ssh-mcp/deployments/active.json')
+        cls.selection.parent.mkdir(mode=0o755)
+        cls.selection.write_text(json.dumps({'schemaVersion': 1,
+            'generation': 'deploy-'+'e'*32, 'release': str(cls.release),
+            'dataRoot': '/var/lib/ssh-mcp/data/generations/deploy-'+'e'*32+'/transfers',
+            'environmentFile': str(cc.ENV),
+            'manifestSha256': hashlib.sha256((cls.release/'release-manifest.json').read_bytes()).hexdigest()})+'\n')
+        cls.selection.chmod(0o640)
+        assert not (cls.base/'approval-bridge').exists(), 'fixture must not depend on the removed legacy link'
 
     @classmethod
     def tearDownClass(cls):
-        assert ce.ACTIVE.is_symlink() and ce.ACTIVE.resolve() == cls.release
-        ce.ACTIVE.unlink()
+        assert not cls.selection.is_symlink() and json.loads(cls.selection.read_text())['release'] == str(cls.release)
+        cls.selection.unlink()
+        cls.selection.parent.rmdir()
         assert cls.base.resolve() == Path('/var/lib/ssh-mcp/app') and not cls.base.is_symlink()
         shutil.rmtree(cls.base)
 
@@ -351,6 +404,16 @@ class NativeHelper(unittest.TestCase):
         self.assertEqual(self.events, [('reserve', 409)])
         self.assertEqual(set(Path('/etc').glob('ssh-mcp-approval-bridge.env.before-access.*')), self.backups_before)
 
+    def test_changed_generation_between_selection_and_child_lock_refuses_before_env_mutation(self):
+        self.stage()
+        with self.assertRaisesRegex(cp.ProvisionFailure, 'ACTION_FAILED'):
+            ce.invoke_access(['/usr/bin/bash', str(self.release/'scripts/configure-admin-access.sh'),
+                              '--link-owned-access'], self.payload, self.release.parent/'another-generation')
+        self.assertEqual(cc.ENV.read_bytes(), self.original)
+        self.assertEqual(self.restart_calls(), 0)
+        self.assertEqual(self.events, [])
+        self.assertEqual(set(Path('/etc').glob('ssh-mcp-approval-bridge.env.before-access.*')), self.backups_before)
+
     def test_restart_failure_restores_backup_and_releases_reservation(self):
         self.stage()
         (self.flags/'fail-next-restart').touch()
@@ -391,7 +454,7 @@ class NativeHelper(unittest.TestCase):
     def test_term_during_restart_recovers_original_and_releases_reservation(self):
         self.stage()
         (self.flags/'block-next-restart').touch()
-        child = subprocess.Popen(['/usr/bin/bash', str(ce.ACTIVE/'scripts/configure-admin-access.sh'), '--link-owned-access'],
+        child = subprocess.Popen(['/usr/bin/bash', str(self.release/'scripts/configure-admin-access.sh'), '--link-owned-access'],
                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                  env={'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}, start_new_session=True)
         try:

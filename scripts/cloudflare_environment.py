@@ -1,4 +1,6 @@
 """Link the owned administrator Access app through the existing native ENV transaction."""
+from contextlib import contextmanager
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -6,11 +8,13 @@ import re
 import socket
 import stat
 import subprocess
+import sys
 
 import cloudflare_connector as cc
 from cloudflare_provision import ProvisionFailure, verify_resource
 
-ACTIVE = Path('/var/lib/ssh-mcp/app/approval-bridge')
+SOURCE = Path(__file__).resolve().parents[1]
+INSTALL_LOCK = Path('/var/lib/ssh-mcp/.portal-install.lock')
 NODE = '/opt/ssh-approval/node/bin/node'
 ORIGINAL = 'environment-before.env'
 APPLIED = 'environment-applied.env'
@@ -51,28 +55,67 @@ def read_snapshot(journal, state, name, identity_key):
     return data
 
 
-def run_access(values, restore=False, stage=None):
-    active = cc.trusted_path(ACTIVE.resolve(strict=True), directory=True)
-    cc.binary_file(NODE)
-    helper = active/'scripts/configure-admin-access.sh'
-    cc.trusted_path(helper)
-    info = helper.lstat()
-    if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_nlink != 1 or info.st_mode & 0o022:
-        raise ProvisionFailure('TRUSTED_ENVIRONMENT_HELPER_REQUIRED')
-    args = ['/usr/bin/bash', str(helper), '--restore-owned-access' if restore else '--link-owned-access']
-    if stage is not None:
-        cc.checked([NODE, str(active/'scripts/verify.mjs'), str(active)])
-        args = [NODE, str(active/'scripts/admin-access-config.mjs'), str(cc.ENV), str(stage), '--link-owned-access']
-    # The helper owns package verification, global lock, maintenance, backup, atomic replacement and recovery.
+def active_release():
+    path = SOURCE/'scripts/deployment_entry.py'
+    spec = importlib.util.spec_from_file_location('cloudflare_deployment_entry', path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    try:
+        return module.active_release()
+    except (ValueError, OSError, KeyError, TypeError):
+        raise ProvisionFailure('ACTIVE_DEPLOYMENT_REQUIRED') from None
+
+
+@contextmanager
+def installation_lock():
+    import fcntl
+    cc.trusted_path(INSTALL_LOCK.parent, directory=True)
+    descriptor = os.open(INSTALL_LOCK, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_nlink != 1 or info.st_mode & 0o022:
+            raise ProvisionFailure('UNSAFE_INSTALLATION_LOCK')
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise ProvisionFailure('DEPLOYMENT_BUSY') from None
+        yield
+    finally:
+        os.close(descriptor)
+
+
+def invoke_access(args, values, active):
     try:
         result = subprocess.run(args,
                                 input=json.dumps(values).encode('utf-8'), stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL, env={'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'},
+                                stderr=subprocess.DEVNULL, env={'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8',
+                                                              'SSH_APPROVAL_EXPECTED_RELEASE': str(active)},
                                 timeout=180, check=False)
     except (OSError, subprocess.SubprocessError):
         raise ProvisionFailure('ENVIRONMENT_ACTION_UNCERTAIN') from None
     if result.returncode:
         raise ProvisionFailure('ENVIRONMENT_ACTION_FAILED_REVIEW_REQUIRED')
+
+
+def run_access(values, restore=False, stage=None):
+    with installation_lock():
+        active = cc.trusted_path(active_release(), directory=True)
+        cc.binary_file(NODE)
+        helper = active/'scripts/configure-admin-access.sh'
+        cc.trusted_path(helper)
+        info = helper.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_nlink != 1 or info.st_mode & 0o022:
+            raise ProvisionFailure('TRUSTED_ENVIRONMENT_HELPER_REQUIRED')
+        args = ['/usr/bin/bash', str(helper), '--restore-owned-access' if restore else '--link-owned-access']
+        if stage is not None:
+            cc.checked([NODE, str(active/'scripts/verify.mjs'), str(active)])
+            args = [NODE, str(active/'scripts/admin-access-config.mjs'), str(cc.ENV), str(stage), '--link-owned-access']
+            invoke_access(args, values, active)
+            return
+    # Release before the child acquires this same lock. The expected immutable
+    # release fences a changed selection before any maintenance or ENV mutation.
+    invoke_access(args, values, active)
 
 
 def active_connector(journal):

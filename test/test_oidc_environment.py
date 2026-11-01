@@ -20,9 +20,9 @@ class OidcNative(fixture.NativeHelper):
 
         def run(values, restore=False, stage=None):
             mode = '--restore-owned-oidc' if restore else '--link-owned-oidc'
-            args = ([fixture.ce.NODE, str(fixture.ce.ACTIVE/'scripts/admin-access-config.mjs'),
+            args = ([fixture.ce.NODE, str(self.release/'scripts/admin-access-config.mjs'),
                      str(fixture.cc.ENV), str(stage), mode] if stage is not None else
-                    ['/usr/bin/bash', str(fixture.ce.ACTIVE/'scripts/configure-admin-access.sh'), mode])
+                    ['/usr/bin/bash', str(self.release/'scripts/configure-admin-access.sh'), mode])
             result = subprocess.run(args, input=json.dumps(values).encode(), stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE, env={'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8'}, timeout=60)
             if result.returncode:
