@@ -19,6 +19,8 @@
 
 결과에는 `localReadiness: "requires-local-check"`, 실제 관리자 origin을 사용한 `doctor` 실행 인자, 로컬 준비 조건과 기존 승인 경계가 포함됩니다. 원격 서버는 PC의 설치·실행파일·인증 캐시·파일 권한을 검사하지 않습니다. `serverUi.enabled`와 기존 `uiEnabled`도 서버 설정일 뿐, 클라이언트에서 카드가 실제로 렌더링되었다는 증거가 아닙니다. 카드를 지원하지 않거나 화면이 보이지 않으면 먼저 로컬 CLI 또는 stdio 사용 가능 여부를 확인합니다. `show-file-transfer`의 텍스트 결과에도 같은 안내와 `get-client-setup` 도구명이 나옵니다.
 
+로컬 프로세스나 stdio를 지원해도 에이전트 실행 호스트와 파일이 있는 호스트가 같다고 추정하지 않습니다. WSL·컨테이너·원격 개발 환경의 로컬 파일시스템은 사용자 PC와 다를 수 있습니다. 두 호스트의 일치 또는 소유자가 확인한 안전한 매핑을 확인하기 전에는 사용자 PC 경로를 실행·전송에 사용하지 않습니다. 경로를 임의로 변환해 접근 가능하다고 판단하지 않습니다.
+
 ## 클라이언트 능력에 따른 경로
 
 | 할 일 | 필요한 클라이언트 능력 | 사용할 경로 |
@@ -35,9 +37,11 @@
 
 ## 로컬 CLI
 
-신뢰한 배포 패키지를 PC에 준비하고 패키지가 요구하는 Node.js 24와 의존성을 설치합니다. `scripts/portal-client.mjs`가 있는 패키지 루트에서 실행합니다. CLI는 AI 공급자 SDK를 사용하지 않습니다. 현재 owner CLI 인증은 Cloudflare Access이며 `--cloudflared`로 지정한 실행파일이 기존 사용자 캐시를 읽거나 `--access-token-stdin`으로 비공개 토큰 입력을 받습니다. OIDC·정적 관리자 토큰 모드를 지원한다고 가정하지 마세요.
+PC에 준비된 신뢰한 배포 패키지의 위치와 패키지가 요구하는 Node.js 24·의존성을 확인합니다. `scripts/portal-client.mjs`가 있는 패키지 루트에서 실행합니다. CLI는 AI 공급자 SDK를 사용하지 않습니다. 현재 owner CLI 인증은 Cloudflare Access이며 `--cloudflared`로 지정한 실행파일이 기존 사용자 캐시를 읽거나 `--access-token-stdin`으로 비공개 토큰 입력을 받습니다. OIDC·정적 관리자 토큰 모드를 지원한다고 가정하지 마세요.
 
-먼저 `get-client-setup`이 반환한 `local.doctor.argv`로 로컬 준비 상태를 진단합니다. 아래 origin은 예시이며 반드시 결과에 포함된 실제 관리자 origin을 사용합니다. `doctor`는 명령·파일 전송·승인을 제출하지 않습니다. 진단 성공을 실제 전송이나 SSH 왕복 완료로 해석하지 않습니다.
+`local.doctor.cwd`의 `<trusted package root>`는 실제 설치 위치가 확인되기 전까지 미해결 자리표시자입니다. 기존 소유자 설정이나 이미 등록된 로컬 도구에서 위치를 확인하고, 해당 호스트에서 패키지 루트·`scripts/portal-client.mjs`·필요한 런타임·의존성을 검증한 다음에만 `local.doctor.argv`를 실행합니다. 위치를 확인하지 못하면 `CLI_LOCATION_UNKNOWN`에 해당하는 상태로 이 로컬 단계를 멈추고 소유자에게 기존 패키지 위치만 요청합니다. 이 안내는 새 doctor 오류 코드가 아니며, 미설치로 단정하거나 자동 설치하는 근거도 아닙니다.
+
+위치와 실행 조건을 확인한 뒤 `get-client-setup`이 반환한 `local.doctor.argv`로 로컬 준비 상태를 진단합니다. 아래 origin은 예시이며 반드시 결과에 포함된 실제 관리자 origin을 사용합니다. `doctor`는 명령·파일 전송·승인을 제출하지 않습니다. 진단 성공을 실제 전송이나 SSH 왕복 완료로 해석하지 않습니다.
 
 ```powershell
 node scripts/portal-client.mjs --origin 'https://your-admin.example' doctor

@@ -248,6 +248,12 @@ test('client setup chooses routes from reported abilities, never from product na
         assert.deepEqual(result.serverUi, { enabled, clientRenderingVerified: false });
         assert.deepEqual(result.local.doctor, { executable: 'node', argv: ['scripts/portal-client.mjs', '--origin', adminOrigin, 'doctor'],
           optionalArgs: ['--cloudflared', '<existing absolute executable>'], cwd: '<trusted package root>' });
+        const prerequisites = result.local.prerequisites.join(' ');
+        assert.match(prerequisites, /<trusted package root> is an unresolved placeholder, not a verified installation path/);
+        assert.match(prerequisites, /verify the actual trusted package root.*before executing the argv template/);
+        assert.match(prerequisites, /stop this local step as CLI_LOCATION_UNKNOWN/);
+        assert.match(prerequisites, /ask the owner only for the existing package location/);
+        assert.match(prerequisites, /do not infer that it is uninstalled or automatically install it/);
         assert.deepEqual(result.local.cloudflared.precedence, ['--cloudflared', 'PORTAL_CLOUDFLARED', 'PATH']);
         assert.match(result.local.cloudflared.guidance, /portable installation outside PATH needs an explicit/);
         assert.match(result.local.cloudflared.guidance, /PATH miss does not prove cloudflared is uninstalled/);
@@ -260,6 +266,12 @@ test('client setup chooses routes from reported abilities, never from product na
         assert.match(result.approvals.guidance, /no approval link or token/);
         assert.match(result.limitations.join(' '), /cannot inspect client package installation/);
         assert.match(result.limitations.join(' '), /Never place file bytes in shell commands/);
+        assert.match(result.limitations.join(' '), /Before executing against or transferring a user PC path, verify the agent execution host and file host match or the owner has confirmed a safe mapping/);
+        assert.match(result.limitations.join(' '), /WSL, containers and remote development/);
+        assert.match(result.limitations.join(' '), /do not invent path conversions or infer access/);
+        if (['local-cli', 'local-stdio'].includes(route)) {
+          assert.match(result.fileTransport.guidance, /execution host and file host match or the owner has confirmed a safe mapping/);
+        }
         assert.doesNotMatch(JSON.stringify(response), /contract-mcp|contract-admin|approvalTicket|bootstrapTicket|downloadUrl|PRIVATE/);
         assert.equal(response._meta, undefined);
       }

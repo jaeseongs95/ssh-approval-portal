@@ -31,8 +31,8 @@ export const clientSetupOutputSchema = z.object({
 }).strict();
 
 const routeGuidance = {
-  'local-cli': 'The caller reports local process access. After checking authorized local file access, package installation and owner authentication, use scripts/portal-client.mjs upload, request-download, status and save. Local process access alone does not prove local readiness.',
-  'local-stdio': 'The caller reports local stdio MCP support. The owner must configure scripts/portal-file-mcp.mjs with a manifest of authorized file IDs and a dedicated journal. Use file_capabilities, file_upload, file_download_request, file_status and file_save; remote command tools remain on the remote MCP server.',
+  'local-cli': 'The caller reports local process access. Before using scripts/portal-client.mjs upload, request-download, status or save, verify the execution host and file host match or the owner has confirmed a safe mapping, resolve the trusted package root, and check authorized file access, package installation and owner authentication. Local process access alone does not prove access to user PC paths or local readiness.',
+  'local-stdio': 'The caller reports local stdio MCP support. Verify the execution host and file host match or the owner has confirmed a safe mapping before treating user PC paths as accessible. The owner must configure scripts/portal-file-mcp.mjs with a manifest of authorized file IDs and a dedicated journal. Use file_capabilities, file_upload, file_download_request, file_status and file_save; remote command tools remain on the remote MCP server.',
   'host-file-input': 'The caller reports the openai/fileParams host file-input contract. Use request-upload only with a real authorized host-provided download_url and file_id and an administrator-configured source hostname. This contract does not imply local PC file access or a download-save transport.',
   'owner-ui': 'The caller reports a user interface. The owner can use the existing administrator page for file transfer and required approval; an MCP Apps card additionally requires server UI enablement and actual client rendering support. Do not treat serverUi.enabled as proof that a card rendered.',
   unavailable: 'No file transport was reported. First check whether this client has authorized local process access or can register a local stdio MCP server. Do not infer those abilities from the AI product name or a missing card. If neither is available, ask the owner to use the existing administrator page; do not claim that this client can transfer PC files.',
@@ -52,7 +52,7 @@ export function clientSetup(input, settings) {
       doctor: { executable: 'node', argv: ['scripts/portal-client.mjs', '--origin', settings.adminOrigin, 'doctor'],
         optionalArgs: ['--cloudflared', '<existing absolute executable>'], cwd: '<trusted package root>' },
       prerequisites: [
-        'A trusted package root containing scripts/portal-client.mjs, the package-required Node.js version and its dependencies must exist on the client machine.',
+        '<trusted package root> is an unresolved placeholder, not a verified installation path. Resolve the location from existing owner-provided setup or a registered local tool, then verify the actual trusted package root, scripts/portal-client.mjs, required Node.js version and dependencies before executing the argv template. If the location is unknown, stop this local step as CLI_LOCATION_UNKNOWN and ask the owner only for the existing package location; do not infer that it is uninstalled or automatically install it.',
         'The agent needs authorized local process and file access for CLI transfer, or an owner-configured local stdio manifest for file-ID tools.',
         'Current local owner authentication uses Cloudflare Access. Existing owner authentication must be checked locally; interactive login belongs to the owner. Do not copy credentials or authentication tokens into model context.',
         'Run doctor locally before transfer to check readiness. It does not submit SSH execution, transfer files, approve requests or prove an untested end-to-end operation.',
@@ -67,6 +67,7 @@ export function clientSetup(input, settings) {
       'Client flags are caller-reported abilities, not verified availability. Missing flags default to false and do not prove that a capability is impossible.',
       'The remote MCP server cannot inspect client package installation, local executable discovery, authentication cache, local file permissions or UI rendering.',
       'Never invent file URLs or treat opaque file IDs and server-side paths as PC file bytes. Never place file bytes in shell commands or copy credentials to bypass a missing file transport.',
+      'Before executing against or transferring a user PC path, verify the agent execution host and file host match or the owner has confirmed a safe mapping. WSL, containers and remote development can execute on a different host or filesystem. Local process or stdio support alone does not establish this condition; do not invent path conversions or infer access.',
     ],
     documentation: 'docs/agent-clients.ko.md',
   });
