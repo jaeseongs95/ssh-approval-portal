@@ -69,7 +69,7 @@ test('WIN-ENCODE UTF-16LE 래퍼가 원문과 셸 특수문자를 보존하고 �
   assert.equal(wrapped.includes(raw), false);
   assert.match(script, /\[Console\]::OutputEncoding=/);
   assert.match(script, /exit \$LASTEXITCODE/);
-  for (const raw of ['', ' ', 'x\0y', 'x\ny', 'x\ry', 'x\ty', 'x\x1by', 'x\x7fy', 'x\x85y', '\ud800']) {
+  for (const raw of ['', ' ', 'x\0y', 'x\ry', 'x\x1by', 'x\x7fy', 'x\x85y', '\ud800']) {
     assert.throws(() => wrapWindowsCommand(raw), /Invalid Windows command/);
   }
 });
@@ -178,7 +178,7 @@ test('WIN-APP safe 명령은 소유자 승인을 거치고 원문·출력 수명
   assert.equal(f.executions[1].profile, entry.readProfile);
   assert.equal(f.executions[1].stdin, 'Microsoft.PowerShell.Utility\\Get-Date');
   const admitted = f.app.queue.listAll().length;
-  for (const raw of ['x'.repeat(32769), 'x\ny', 'x\u202ey']) await assert.rejects(f.run(raw));
+  for (const raw of ['x'.repeat(32769), 'x\u202ey']) await assert.rejects(f.run(raw));
   assert.equal(f.app.queue.listAll().length, admitted);
   assert.equal(f.executions.length, 2);
 });

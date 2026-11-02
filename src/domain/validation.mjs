@@ -5,10 +5,19 @@ const HIDDEN = /[\u0000-\u001f\u007f-\u009f\u061c\u200b\u200e\u200f\u2028-\u202e
 export const hash = value => createHash('sha256').update(value).digest('hex');
 export const idValid = id => typeof id === 'string' && /^[a-f0-9]{48}$/.test(id);
 
+/** Shell formatting is visible input, not a reason to change its transport bytes.
+ * Only TAB, LF and paired CRLF are allowed; paths retain the strict HIDDEN rule.
+ */
+export const commandTextValid = command => utf8WithinLimit(command, COMMAND_MAX_BYTES)
+  && Boolean(command.trim()) && !HIDDEN.test(command.replace(/\r\n|\n|\t/g, ''));
+
 /** Validate command syntax before consulting the injected SSH policy classifier. */
 export function validateCommand(command, classify, safeOnly = false) {
-  if (!utf8WithinLimit(command, COMMAND_MAX_BYTES) || !command.trim() || HIDDEN.test(command)) throw Error('Invalid command');
-  const result = classify(command);
+  if (!commandTextValid(command)) throw Error('Invalid command');
+  const classified = classify(command);
+  // A classifier that trims its input cannot prove the whole multiline program
+  // read-only. Keep it on the normal request/policy path, including trailing LF.
+  const result = /[\r\n]/.test(command) && classified.class === 'read-only' ? { ...classified, class: 'safe' } : classified;
   if (safeOnly && result.class !== 'safe') throw Error('Only safe-class commands are supported');
   return result;
 }

@@ -33,7 +33,7 @@ test('LIMIT-UTF8 counts Korean/emoji bytes and refuses invalid Unicode or hidden
   assert.equal(parseCommandImport(command).complete,true);
   assert.throws(()=>validateCommand(command+'x',classify));assert.equal(parseCommandImport(command+'x').reason,'length');
  }
- for(const command of ['printf \ud800','printf \udc00','ls\nrm /tmp/synthetic','ls\0id','ls\u202eid']) assert.throws(()=>validateCommand(command,classify));
+ for(const command of ['printf \ud800','printf \udc00','ls\0id','ls\u202eid']) assert.throws(()=>validateCommand(command,classify));
  assert.equal(commandLineNames('printf \ud800').complete,false);
 });
 test('LIMIT-ENVELOPE keeps exact inner bytes and contexts with independent wire and command caps',()=>{

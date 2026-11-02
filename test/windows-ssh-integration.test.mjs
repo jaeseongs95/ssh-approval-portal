@@ -235,6 +235,21 @@ test('실제 Windows SSH 명령·승인·파일 전송 경계', {
       }
     });
 
+    await t.test('ML-WIN 실제 SSH가 LF·CRLF here-string과 탭을 실행한다', async () => {
+      const cases = [
+        ["$value = @'\n한글 $env:PATH 'literal'\n'@\n\t[Console]::Write($value)\n[Console]::Write('|second')\n", "한글 $env:PATH 'literal'|second"],
+        ["$word = 'expanded'\r\n$value = @\"\r\n$word 한글\r\n\"@\r\n\t[Console]::Write($value)\r\n[Console]::Write('|second')\r\n", 'expanded 한글|second'],
+      ];
+      for (const [raw, expected] of cases) {
+        const prepared = prepareWindowsCommand(raw);
+        assert.equal(prepared.stdin, raw);
+        assert.equal(digest(Buffer.from(prepared.stdin, 'utf8')), digest(Buffer.from(raw, 'utf8')));
+        const result = await runtime.executeCommand('windows-write', prepared.command, async () => {}, { stdin: prepared.stdin });
+        assert.equal(result.failed, false);
+        assert.deepEqual(result.texts, [expected]);
+      }
+    });
+
     await t.test('정확한 기본 읽기 명령은 외부 모듈 검색 경로에 있는 동명 합성 모듈을 불러오지 않는다', async () => {
       for (const command of ['Microsoft.PowerShell.Utility\\Get-Date', 'Microsoft.PowerShell.Management\\Get-Location']) {
         const inner = wrapWindowsCommand(command);

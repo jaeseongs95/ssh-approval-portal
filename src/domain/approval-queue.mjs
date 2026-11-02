@@ -157,7 +157,7 @@ export class ApprovalQueue {
     if (this.maintenance) dispatchRefusal('maintenance', 'maintenance', 'Maintenance in progress');
     if (!['pending', 'queued'].includes(job.state) || this.now() >= job.expiresAt) dispatchRefusal('request_state', 'request_state', 'Request is not executable');
     // Source requests use the exact private-plan guard; the fixed quoted receiver
-    // contains newlines that the legacy string-command boundary rightly rejects.
+    // contains a fixed launcher and private stdin, not a caller shell command.
     if (job.operation.kind === 'command' && !job.operation.sourceContract) dispatchStep('command_validation', () => validateCommand(job.operation.command, this.classify), 'invalid_command');
     if (job.operation.sourceContract && !this.beforeCommandStart) dispatchRefusal('private_plan', 'source_plan', 'Source plan verification required');
     if (job.operation.kind === 'command') dispatchStep('command_guard', () => this.beforeCommandStart?.(this.public(job)));

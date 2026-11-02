@@ -1,4 +1,4 @@
-import { COMMAND_MAX_BYTES, utf8WithinLimit } from '../contracts/ports.mjs';
+import { commandTextValid } from './validation.mjs';
 import { commandLineNames } from './command-line.mjs';
 import { windowsCommandLineNames } from './windows-command-line.mjs';
 
@@ -14,7 +14,7 @@ export function targetCapabilities(target) {
 }
 
 export const validateWindowsCommand = command => {
-  if (!utf8WithinLimit(command, COMMAND_MAX_BYTES) || !command.trim() || /[\u0000-\u001f\u007f-\u009f\u061c\u200b\u200e\u200f\u2028-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/.test(command)) throw Error('Invalid Windows command');
+  if (!commandTextValid(command)) throw Error('Invalid Windows command');
 };
 
 export function classifyForTarget(target, classify) {
@@ -22,7 +22,7 @@ export function classifyForTarget(target, classify) {
   return command => {
     validateWindowsCommand(command);
     // Module qualification avoids aliases, profiles and PATH command substitution.
-    const readOnly = /^(?:Microsoft\.PowerShell\.Utility\\Get-Date|Microsoft\.PowerShell\.Management\\Get-Location)$/i.test(command.trim());
+    const readOnly = !/[\r\n]/.test(command) && /^(?:Microsoft\.PowerShell\.Utility\\Get-Date|Microsoft\.PowerShell\.Management\\Get-Location)$/i.test(command.trim());
     return { class: readOnly ? 'read-only' : 'safe' };
   };
 }

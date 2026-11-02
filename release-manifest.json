@@ -1,5 +1,5 @@
 {
-  "version": "1.7.2",
+  "version": "1.7.3",
   "status": "release",
   "runtime": "Node.js 24",
   "files": [
@@ -86,12 +86,12 @@
     {
       "path": "docker/Dockerfile",
       "size": 1594,
-      "sha256": "54700cc4d9780e393b894e75ee4ff76a72911a2e9fe18dfa4725355bc499a8bd"
+      "sha256": "7c093426d4518d28183249d76318eea5caba6c8596a0331ba67b293bc08159f1"
     },
     {
       "path": "docker/compose.yaml",
       "size": 1128,
-      "sha256": "274a4fbbd2fdbecb477218ced7a087ecd57e5553143e093b53dad76472bc6e85"
+      "sha256": "98ff599659ea0f839310467adda4a5cf16a5f4638ba3bdd789c1afc8812765d3"
     },
     {
       "path": "docs/admin-login.en.md",
@@ -155,13 +155,13 @@
     },
     {
       "path": "docs/command-automation.ko.md",
-      "size": 29198,
-      "sha256": "0e9d257e36383bd1d85f7c0a56811421b0ebfc8bfeeacc877727f99efbcf087f"
+      "size": 29596,
+      "sha256": "8eaa4044a0f2ce5bb3ac6460adab068286fc8c39213c02a7d2dd68c3d3224392"
     },
     {
       "path": "docs/command-line-import.ko.md",
-      "size": 3283,
-      "sha256": "1686aca9b7d979290ddfcc44bee0090c89026f2d324eba85981e619dcf6b009d"
+      "size": 3514,
+      "sha256": "b9c723fa0b135cc62626450137b7685ce12d33bdc493178204c65dd520a2e162"
     },
     {
       "path": "docs/command-output.ko.md",
@@ -251,12 +251,12 @@
     {
       "path": "package-lock.json",
       "size": 100104,
-      "sha256": "060c3f37b05667b20bb8a369d7014746e68444f781a79bc508aefb867a5c74af"
+      "sha256": "96837b00ba499656f2f0dec3db489101f659e8f0a6393e7c1fc603714eb37d1e"
     },
     {
       "path": "package.json",
       "size": 740,
-      "sha256": "30f1c51cddadcd6190a0c0442011ffb70a58f0913ebf20ff2e465313de6d89fd"
+      "sha256": "fc2a8b50b5f84e947947874dc76f5676174452936ae7b2b0aeb3f370f4d6cc5e"
     },
     {
       "path": "scripts/admin-access-config.mjs",
@@ -590,8 +590,8 @@
     },
     {
       "path": "src/adapters/mcp/server.mjs",
-      "size": 29753,
-      "sha256": "f180880006efdc18ab6179d9bb6f5a7469d08d775f5366f717e3a4c1ec185971"
+      "size": 30084,
+      "sha256": "849ae5a9f4dca4b57ca5fffa5528a9eb022f6bc8f398adf5224bf64ed25af4d1"
     },
     {
       "path": "src/adapters/presentation/capabilities.mjs",
@@ -835,8 +835,8 @@
     },
     {
       "path": "src/domain/approval-queue.mjs",
-      "size": 20692,
-      "sha256": "24c83acd91044fdf7098e63e1cc0e6833a9bd972679997a15dcf6b0a724b0882"
+      "size": 20690,
+      "sha256": "9ee68d928dde3c6e5355c17bb6a44afcc6e0b053da2bdd6cb3d8c434521d6085"
     },
     {
       "path": "src/domain/automation-risk-question.json",
@@ -885,13 +885,13 @@
     },
     {
       "path": "src/domain/target-platform.mjs",
-      "size": 2309,
-      "sha256": "d3c55531792d6e731dae8ac523aa2cfe61f2b99062c5297a882e6837dd108c52"
+      "size": 2158,
+      "sha256": "896af624e2d3d83fa101bd70b33253e6ba15f2aba2eb52fb154db6e58c94c427"
     },
     {
       "path": "src/domain/validation.mjs",
-      "size": 2293,
-      "sha256": "fe08c70af1db8166bb60fc507c56dc87b2bc11471374a48aece32e85ef3ec18b"
+      "size": 2862,
+      "sha256": "8db08ba26bf05b0e860a4a3c1f10b579be5505f637510ca7fa34f78c2176f713"
     },
     {
       "path": "src/domain/windows-command-line.mjs",
@@ -1145,8 +1145,8 @@
     },
     {
       "path": "test/command-limits.test.mjs",
-      "size": 7231,
-      "sha256": "25349f64c2ebd8ea75520bc6f1f949a1bbb8ecdc0c12a92b41a5992308726aee"
+      "size": 7207,
+      "sha256": "5887bc0db826bde82810cd83226ade809cb54b186c66ccfe0f7b6b3c5bb47721"
     },
     {
       "path": "test/command-line-import.test.mjs",
@@ -1452,6 +1452,11 @@
       "path": "test/multi-target.test.mjs",
       "size": 15383,
       "sha256": "ca7b9204b46912b3b3a57091f87b2fae26d8ff1dc9a45c08a1e0ca7cf2c87c20"
+    },
+    {
+      "path": "test/multiline-commands.test.mjs",
+      "size": 13839,
+      "sha256": "84c2af31ade5555602cfc220e31a3260f85accb757af5439c44936ed6327133b"
     },
     {
       "path": "test/non-cloudflare-container-test.sh",
@@ -1925,8 +1930,8 @@
     },
     {
       "path": "test/windows-ssh-integration.test.mjs",
-      "size": 39225,
-      "sha256": "bfbda179f4c739efe956d1896a29426d93b84724f02fe448e8016decffe70b0e"
+      "size": 40156,
+      "sha256": "a405568e6b17803d682cc30ce0c99fcc6b0c0fb18cc01dfb3219dd90610be71f"
     },
     {
       "path": "test/windows-ssh-log-read.ps1",
@@ -1935,8 +1940,8 @@
     },
     {
       "path": "test/windows-target.test.mjs",
-      "size": 15155,
-      "sha256": "a4bc11bce47c1f1efcea9acfb704ca27f127c69d71288ef47e3b49f56f3b2ca3"
+      "size": 15131,
+      "sha256": "3d66256e41b86294b7dd65bf46d5ff7ec77a13dba46ec4157d488b5c63f81e42"
     },
     {
       "path": "ui/build.mjs",
