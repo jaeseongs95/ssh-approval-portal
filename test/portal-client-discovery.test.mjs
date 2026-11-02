@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { delimiter, isAbsolute, join, relative } from 'node:path';
 import { resolveCloudflared, cachedAccessToken } from '../src/adapters/cli/cloudflared.mjs';
 import { diagnoseClient } from '../src/adapters/cli/doctor.mjs';
+import { createPortalClient } from '../src/adapters/cli/portal-client.mjs';
 import { main } from '../scripts/portal-client.mjs';
 
 // engineering-test-plan: node:test, component boundaries plus CLI/fetch integration.
@@ -13,6 +14,9 @@ import { main } from '../scripts/portal-client.mjs';
 // injected process invocation, stable failure codes, no private output. Doctor:
 // ready/blocked stages and exact allowed client/HTTP calls prove no SSH/file or
 // approval submission. Excludes real login, SSH, uploads and model behavior.
+// Session acquisition: a validated response cookie creates a cleanup obligation,
+// while readiness requires a valid body; failed connects cannot be replayed.
+// The real HTTP client with injected fetch checks logout and authority separation.
 // engineering-test-proof/result: NOT_RUN by author; run only in the authorized
 // test server/Actions environment (package Node 24.2 <= version < 25).
 
@@ -295,4 +299,109 @@ test('CLI doctor uses injected environment discovery and returns public ready or
   assert.equal(blocked.code, 1); assert.equal(blocked.value.state, 'blocked');
   assert.equal(blocked.value.checks.at(-1).error, 'CLOUDFLARED_NOT_FOUND');
   assert.deepEqual(requests, []);
+});
+
+function sessionResponseFixture({ body = 'malformed', cookies, logoutFailure = false } = {}) {
+  const cookie = '__Host-ssh_admin_session=' + 'e'.repeat(64);
+  const setCookie = cookie + '; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=60';
+  const requests = [];
+  const send = async (url, options) => {
+    const parsed = new URL(url), path = parsed.pathname;
+    assert.equal(parsed.origin, origin);
+    assert.equal(options.redirect, 'error');
+    assert.equal(options.headers['cf-access-token'], credential);
+    requests.push({ path, method: options.method });
+    if (path !== '/api/session/logout') assert.equal(options.headers.Cookie, undefined);
+    if (path === '/api/session') return Response.json({ mode: 'access' });
+    if (path === '/api/session/start') {
+      const headers = new Headers({ 'content-type': 'application/json' });
+      for (const value of cookies ?? [setCookie]) headers.append('Set-Cookie', value);
+      if (body === 'stream-error') return new Response(new ReadableStream({
+        start(controller) { controller.error(errorWithCode('PRIVATE_STREAM_FAILURE')); },
+      }), { headers });
+      return new Response(body === 'malformed' ? '{"PRIVATE_BODY":"' + credential : JSON.stringify(body), { headers });
+    }
+    if (path === '/api/session/logout') {
+      assert.equal(options.headers.Cookie, cookie, 'Only the validated issued session may be cleaned up');
+      if (logoutFailure) throw errorWithCode('PRIVATE_LOGOUT_FAILURE');
+      return Response.json({ connected: false });
+    }
+    // Returning a valid list makes an erroneous ready transition observable.
+    if (path === '/api/targets') return Response.json({ targets: [{ id: 'default', enabled: true }] });
+    assert.fail('Unexpected command, file or approval request: ' + path);
+  };
+  return { cookie, setCookie, requests, send,
+    openClient: options => createPortalClient({ ...options, fetch: send }) };
+}
+
+test('shared owner client logs out the issued cookie after malformed connect body without becoming ready or reconnecting', async () => {
+  const f = sessionResponseFixture();
+  const client = createPortalClient({ origin, accessToken: credential, fetch: f.send });
+  await assert.rejects(client.connect(), codeIs('INVALID_PORTAL_RESPONSE'));
+  assert.throws(() => client.targets(), { code: 'OWNER_SESSION_REQUIRED' });
+  await assert.rejects(client.status('a'.repeat(48)), { code: 'OWNER_SESSION_REQUIRED' });
+  await assert.rejects(client.decide('a'.repeat(48), 'approve', true), { code: 'OWNER_SESSION_REQUIRED' });
+  await assert.rejects(client.connect(), { code: 'OWNER_SESSION_ALREADY_USED' });
+  await client.close();
+  await client.close(); // Cleanup is not replayed after retirement.
+  assert.deepEqual(f.requests, [
+    { path: '/api/session', method: 'GET' }, { path: '/api/session/start', method: 'POST' },
+    { path: '/api/session/logout', method: 'POST' },
+  ]);
+});
+
+test('doctor with the real HTTP client cleans up valid cookies after invalid or unreadable session bodies', async () => {
+  for (const body of ['malformed', 'stream-error', { connected: false }]) {
+    const f = sessionResponseFixture({ body });
+    let credentials = 0;
+    const result = await diagnoseClient({ origin, cloudflared: process.execPath, env: {}, openClient: f.openClient,
+      runCredential: () => { credentials++; return credential; } });
+    assert.equal(result.state, 'blocked');
+    assert.equal(result.checks.at(-1).stage, 'owner-session');
+    assert.equal(result.checks.at(-1).state, 'blocked');
+    assert.equal(result.sessionCleanup, undefined);
+    assert.equal(credentials, 1);
+    assert.deepEqual(f.requests, [
+      { path: '/api/session', method: 'GET' }, { path: '/api/session/start', method: 'POST' },
+      { path: '/api/session/logout', method: 'POST' },
+    ]);
+    noSideEffects(result);
+    assert.doesNotMatch(JSON.stringify(result), /PRIVATE_BODY|PRIVATE_STREAM_FAILURE/);
+    assert.equal(JSON.stringify(result).includes(f.cookie), false);
+  }
+});
+
+test('doctor reports OWNER_SESSION_CLEANUP_UNKNOWN when logout fails after an issued cookie and invalid body', async () => {
+  const f = sessionResponseFixture({ logoutFailure: true });
+  const result = await diagnoseClient({ origin, cloudflared: process.execPath, env: {}, openClient: f.openClient,
+    runCredential: () => credential });
+  assert.equal(result.state, 'blocked');
+  assert.equal(result.sessionCleanup, 'unknown');
+  assert.ok(result.checks.some(check => check.stage === 'owner-session' && check.error === 'INVALID_PORTAL_RESPONSE'));
+  assert.deepEqual(result.checks.at(-1), { stage: 'session-cleanup', state: 'blocked', error: 'OWNER_SESSION_CLEANUP_UNKNOWN' });
+  assert.deepEqual(f.requests, [
+    { path: '/api/session', method: 'GET' }, { path: '/api/session/start', method: 'POST' },
+    { path: '/api/session/logout', method: 'POST' },
+  ]);
+  noSideEffects(result);
+  assert.doesNotMatch(JSON.stringify(result), /PRIVATE_BODY|PRIVATE_LOGOUT_FAILURE/);
+  assert.equal(JSON.stringify(result).includes(f.cookie), false);
+});
+
+test('invalid or ambiguous session cookies never authorize operations or select an arbitrary cookie for logout', async () => {
+  const valid = '__Host-ssh_admin_session=' + 'e'.repeat(64) + '; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=60';
+  for (const cookies of [
+    [], ['unrelated=' + credential], [valid.replace('Secure; ', '')],
+    [valid, valid.replace('e'.repeat(64), 'd'.repeat(64))],
+  ]) {
+    const f = sessionResponseFixture({ cookies, body: { connected: true } });
+    const result = await diagnoseClient({ origin, cloudflared: process.execPath, env: {}, openClient: f.openClient,
+      runCredential: () => credential });
+    assert.equal(result.state, 'blocked');
+    assert.deepEqual(result.checks.at(-1), { stage: 'owner-session', state: 'blocked', error: 'INVALID_OWNER_SESSION' });
+    assert.deepEqual(f.requests, [
+      { path: '/api/session', method: 'GET' }, { path: '/api/session/start', method: 'POST' },
+    ]);
+    noSideEffects(result);
+  }
 });

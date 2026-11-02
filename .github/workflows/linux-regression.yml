@@ -125,6 +125,20 @@ jobs:
           fi
           cat "$RUNNER_TEMP/client-setup-red.log"
           grep -q '^# fail 1$' "$RUNNER_TEMP/client-setup-red.log"
+      - name: Session cleanup regression rejects the previous client
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp src/adapters/cli/portal-client.mjs "$RUNNER_TEMP/portal-client.cleanup-current.mjs"
+          trap 'cp "$RUNNER_TEMP/portal-client.cleanup-current.mjs" src/adapters/cli/portal-client.mjs' EXIT
+          git show 7a56c77df42d67736b7eaf913a3bbe60b91a3e84:src/adapters/cli/portal-client.mjs > src/adapters/cli/portal-client.mjs
+          if node --test --test-reporter=tap --test-name-pattern='^doctor reports OWNER_SESSION_CLEANUP_UNKNOWN when logout fails after an issued cookie and invalid body$' test/portal-client-discovery.test.mjs > "$RUNNER_TEMP/session-cleanup-red.log" 2>&1; then
+            cat "$RUNNER_TEMP/session-cleanup-red.log"
+            echo 'Expected missed cleanup failure was not observed' >&2
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/session-cleanup-red.log"
+          grep -q '^# fail 1$' "$RUNNER_TEMP/session-cleanup-red.log"
       - name: Execution queue regression rejects pre-fix source
         shell: bash
         run: |

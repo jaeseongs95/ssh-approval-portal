@@ -55,7 +55,7 @@ export function createPortalClient({ origin, accessToken, signal, timeoutMs = 12
   if (typeof accessToken !== 'string' || accessToken.length > 16384 || !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(accessToken)) throw fail('INVALID_ACCESS_CREDENTIAL');
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 600_000) throw fail('INVALID_DEADLINE');
   const deadline = AbortSignal.any([AbortSignal.timeout(timeoutMs), signal].filter(Boolean));
-  let cookie, connected = false, retired = false;
+  let cookie, connected = false, connectAttempted = false, retired = false;
   async function response(path, body) {
     if (retired) throw fail('CLIENT_CLOSED');
     const url = new URL(path, origin);
@@ -97,17 +97,19 @@ export function createPortalClient({ origin, accessToken, signal, timeoutMs = 12
   }
   return {
     async connect() {
-      if (connected || retired) throw fail('OWNER_SESSION_ALREADY_USED');
+      if (connectAttempted || retired) throw fail('OWNER_SESSION_ALREADY_USED');
+      connectAttempted = true; // An incomplete response never authorizes a replacement session.
       if ((await json('/api/session')).mode !== 'access') throw fail('ACCESS_MODE_REQUIRED');
       const r = await response('/api/session/start', {});
       const candidates = r.headers.getSetCookie().filter(value => value.startsWith('__Host-ssh_admin_session='));
       if (candidates.length !== 1 || !/^__Host-ssh_admin_session=[a-f0-9]{64}; Path=\/; HttpOnly; Secure; SameSite=Strict; Max-Age=[1-9][0-9]*$/.test(candidates[0])) throw fail('INVALID_OWNER_SESSION');
+      cookie = candidates[0].split(';')[0]; // Retain only for cleanup until the body confirms readiness.
       if ((await readJson(r)).connected !== true) throw fail('INVALID_OWNER_SESSION');
-      cookie = candidates[0].split(';')[0]; connected = true;
+      connected = true;
       return { connected: true, mode: 'access' };
     },
     async close() {
-      try { if (connected && !retired) await json('/api/session/logout', {}); }
+      try { if (cookie && !retired) await json('/api/session/logout', {}); }
       finally { retired = true; connected = false; cookie = undefined; accessToken = undefined; }
     },
     targets() { ready(); return json('/api/targets'); },
