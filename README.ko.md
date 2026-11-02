@@ -1,8 +1,8 @@
-# SSH Approval Portal 1.7.1
+# SSH Approval Portal 1.7.2
 
-[English](README.md) · [관리자 작업 공간](docs/admin-workspace.ko.md) · [관리자 로그인](docs/admin-login.ko.md) · [에이전트 파일 업로드](docs/agent-upload.ko.md) · [구조와 호환성](docs/architecture.ko.md)
+[English](README.md) · [공통 에이전트 연결](docs/agent-clients.ko.md) · [관리자 작업 공간](docs/admin-workspace.ko.md) · [관리자 로그인](docs/admin-login.ko.md) · [에이전트 파일 업로드](docs/agent-upload.ko.md) · [구조와 호환성](docs/architecture.ko.md)
 
-SSH 명령과 파일 전송을 사용자가 확인하고 승인할 수 있는 MCP 서버입니다. ChatGPT·Claude의 MCP Apps 카드와 웹 관리자 화면을 함께 제공합니다. 중계기 하나에 SSH 대상을 최대 32개 등록할 수 있습니다. 통합 관리자 화면에서 전체 요청을 확인하고 서버별로 좁혀 개별 요청을 처리합니다. [대상 설정 안내](docs/multi-targets.ko.md)를 참고하세요.
+SSH 명령과 파일 전송을 사용자가 확인하고 승인할 수 있는 표준 MCP 서버입니다. 명령·조회·승인 대기·출력 읽기는 AI 공급자와 관계없이 호환 MCP 클라이언트에서 사용하며 MCP Apps 카드는 선택 사항입니다. `get-client-capabilities`로 파일 입력과 로컬 전송의 사전 조건을 확인하세요. 중계기 하나에 SSH 대상을 최대 32개 등록할 수 있습니다. 통합 관리자 화면에서 전체 요청을 확인하고 서버별로 좁혀 개별 요청을 처리합니다. [대상 설정 안내](docs/multi-targets.ko.md)를 참고하세요.
 
 Windows SSH 대상의 PowerShell 명령·이름 정책·파일 전송·Python 코드 제출·서버 CLI 등록 방법은 [Windows 대상 등록](docs/windows-targets.ko.md)을 확인하세요. Python과 Node.js/npm은 기능별 사전 준비가 필요합니다. 중계기 자체의 Windows 호스팅은 후속 릴리스 범위입니다.
 
@@ -18,7 +18,7 @@ Jev는 사전승인 목록 밖의 명령을 평가하는 보조 도구입니다.
 | Claude 데스크톱 앱 | 기존 카드의 실제 승인·거부와 PC 파일 업로드·다운로드 왕복을 확인했습니다. |
 | ChatGPT 데스크톱·Claude 웹 | 전체 기능을 실제 클라이언트에서 확인하지 않았습니다. |
 | ChatGPT `request-upload` | 실제 파일 입력이 `upload-source-not-configured` 응답과 공급자 hostname 반환까지 도달했습니다. 공급자 파일 가져오기·승인·SSH 왕복은 이 관측으로 확인되지 않았습니다. |
-| Claude 자동 파일 전달 | 실제 시험에서 `file_uuid`와 빈 `download_url`이 전달되어 입력 검증에 실패했습니다. 샌드박스의 대상 HTTPS 연결도 proxy CONNECT 403으로 차단됐습니다. 자동 전송은 지원하지 않습니다. |
+| 원격 Claude의 호스트 파일 입력 | 해당 시험의 `file_uuid`와 빈 `download_url`은 입력 검증에 실패했고 샌드박스 HTTPS는 proxy CONNECT 403으로 차단됐습니다. 이 경로는 지원하지 않습니다. PC 파일 접근 권한이 있는 Claude Code 등 로컬 에이전트의 CLI·stdio 전송은 별도 지원 경로입니다. |
 | 구조 변경 검증 | 비ARM 구현은 Node 94개·Linux Python 21개, 브라우저 회귀, amd64 설치·업데이트·복원·Compose와 실제 SSH 파일 왕복 근거를 대조하고 독립 최종 검토 2건을 통과했습니다. 1.0.0 버전 변경분의 검증 범위는 릴리스의 `VALIDATION.json`에 기록합니다. |
 
 파일 공급자 허용 목록의 기본값은 비어 있습니다. `BRIDGE_UPLOAD_SOURCE_HOSTS`에는 정확한 hostname과 앞에 `*.`가 붙은 domain 패턴을 쉼표로 구분해 함께 입력할 수 있습니다. 예를 들어 `files.example.test,*.downloads.example.test`는 가상 주소를 사용한 설정 예입니다. 패턴은 점 경계를 기준으로 한 단계 이상의 모든 깊이 하위 도메인에 일치하며, 기준 domain 자체는 포함하지 않습니다. 단독 `*`, 다른 위치의 wildcard, URL·IP 주소·포트는 거부합니다. wildcard를 선택하면 포함되는 모든 하위 호스트를 신뢰하게 되므로, 신뢰 범위를 확인하지 않은 공유 CDN을 넓게 허용하지 않습니다. 카드 승인은 `BRIDGE_UI_ENABLED=false`, 웹 관리자 인증은 `BRIDGE_ADMIN_AUTH_MODE=token`이 기본값입니다. 기존 클라이언트 시험의 성공을 새 에이전트 업로드나 다른 플랫폼의 성공으로 해석하지 않습니다.
@@ -58,7 +58,8 @@ Jev는 사전승인 목록 밖의 명령을 평가하는 보조 도구입니다.
 | `get-request-status`·`show-approval` | 요청 상태를 조회하고 승인·거부 카드를 표시합니다. |
 | `show-file-transfer` | PC 파일을 선택해 업로드하거나 서버 파일을 내려받는 카드를 표시합니다. |
 | `request-download` | 서버 정책에 따라 파일을 자동 준비하거나 사용자 승인을 요청합니다. PC 저장은 별도입니다. |
-| `request-upload` | ChatGPT/OpenAI의 `download_url`·`file_id` 파일 입력을 임시 저장한 뒤 업로드 승인 대기에 등록합니다. Claude의 `file_uuid`만으로는 호출할 수 없습니다. |
+| `get-client-capabilities` | 표준 MCP·선택적 카드·호스트 파일 입력·로컬 CLI/stdio 전송의 지원 조건을 조회합니다. |
+| `request-upload` | `openai/fileParams` 호스트 파일 입력을 임시 저장해 업로드 요청합니다. PC 파일은 공급자 공통 CLI 또는 로컬 stdio 도구를 사용합니다. |
 | `show-ui-probe` | 명령이나 파일을 실행하지 않고 카드와 비공개 메타데이터 전달을 확인합니다. |
 
 PC 파일은 카드에서 고르고 목적지 경로·덮어쓰기·sudo를 지정합니다. 중계기는 받은 바이트의 SHA-256과 설정을 고정해 승인 요청을 만듭니다. 새 `request-upload` 경로도 같은 승인을 거칩니다. 관리자가 실제 공급자를 확인하고 정확한 hostname 또는 앞에 `*.`가 붙은 domain 패턴을 허용하기 전에는 파일을 가져오지 않습니다. 설정과 클라이언트 제약은 [에이전트 업로드 안내](docs/agent-upload.ko.md)를 확인하세요. 로그인 쿠키, 임의 URL이나 채팅에 붙인 파일 바이트로 대신하지 않습니다.

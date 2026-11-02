@@ -8,7 +8,7 @@ on:
         type: boolean
         default: false
   push:
-    branches: [feat/windows-ssh-targets-20261101, feat/windows-full-support-20261101]
+    branches: [feat/windows-ssh-targets-20261101, feat/windows-full-support-20261101, fix/agent-portability-20261102]
 
 permissions:
   contents: read
@@ -33,6 +33,8 @@ jobs:
           node-version: '24.21.0'
       - run: npm ci --ignore-scripts
         id: dependencies
+      - name: Provider-neutral MCP and CLI path contracts
+        run: node --test test/cli-platform-paths.test.mjs test/mcp-contracts.test.mjs
       - name: Windows 조상 경로 권한 읽기 진단
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         shell: pwsh

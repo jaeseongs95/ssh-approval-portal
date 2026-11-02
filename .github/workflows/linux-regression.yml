@@ -2,7 +2,7 @@ name: Linux regression
 
 on:
   push:
-    branches: [fix/jev-binary-assessment, feat/windows-full-support-20261101, feat/admin-ui-1.6.8-20261101, fix/request-admission-queue-20261102]
+    branches: [fix/jev-binary-assessment, feat/windows-full-support-20261101, feat/admin-ui-1.6.8-20261101, fix/request-admission-queue-20261102, fix/agent-portability-20261102]
   workflow_dispatch:
 
 permissions:
@@ -72,12 +72,34 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24.21.0'
       - run: npm ci --ignore-scripts
       - name: Node regression
         run: node --test --test-skip-pattern='^CLI-LOOPBACK exact helper executes inspection/status over pinned SSH and preserves authentication bytes$' test/*.test.mjs
+      - name: Agent portability regression rejects pre-fix source
+        shell: bash
+        run: |
+          set -euo pipefail
+          restore() {
+            cp "$RUNNER_TEMP/portal-client.mjs.portability-current" scripts/portal-client.mjs
+            cp "$RUNNER_TEMP/server.mjs.portability-current" src/adapters/mcp/server.mjs
+          }
+          cp scripts/portal-client.mjs "$RUNNER_TEMP/portal-client.mjs.portability-current"
+          cp src/adapters/mcp/server.mjs "$RUNNER_TEMP/server.mjs.portability-current"
+          trap restore EXIT
+          for path in scripts/portal-client.mjs src/adapters/mcp/server.mjs; do
+            git show cc0c8c075a1b598f99a7327531c829cdb88114f3:"$path" > "$path"
+          done
+          if node --test --test-name-pattern='provider-neutral capabilities|CLI upload, resume and download accept' test/mcp-contracts.test.mjs test/cli-platform-paths.test.mjs > "$RUNNER_TEMP/agent-portability-red.log" 2>&1; then
+            cat "$RUNNER_TEMP/agent-portability-red.log"
+            echo 'Expected pre-fix regression failure was not observed' >&2
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/agent-portability-red.log"
+          grep -q '^# fail 2$' "$RUNNER_TEMP/agent-portability-red.log"
       - name: Pre-fix SSH recovery regressions must fail
         run: bash test/ssh-recovery-red.sh
       - name: Preserve pre-fix regression evidence

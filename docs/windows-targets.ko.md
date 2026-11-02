@@ -21,11 +21,19 @@
 
 ## SSH·키 준비
 
-Windows OpenSSH 서버가 이미 동작하고 중계기에서 공개키 인증·명령 실행·SFTP 모두 가능해야 합니다. 이 기능과 설치기는 `sshd_config`, 기본 셸, 방화벽, 계정, 인증키를 수정하지 않습니다. SFTP 전용 계정으로 명령 실행이 막혀 있다면 도우미를 호출할 수 없습니다. 서버의 셸·SFTP 설정은 [Microsoft OpenSSH 구성 안내](https://learn.microsoft.com/en-us/windows-server/administration/openssh/openssh-server-configuration)를 확인하세요.
+Windows OpenSSH 서버가 이미 동작하고 중계기에서 구성한 인증 방식으로 명령 실행·SFTP 모두 가능해야 합니다. 이 기능과 설치기는 `sshd_config`, 기본 셸, 방화벽, 계정, 인증키를 수정하지 않습니다. 아래 예시는 공개키 인증입니다. SFTP 전용 계정으로 명령 실행이 막혀 있다면 도우미를 호출할 수 없습니다. 서버의 셸·SFTP 설정은 [Microsoft OpenSSH 구성 안내](https://learn.microsoft.com/en-us/windows-server/administration/openssh/openssh-server-configuration)를 확인하세요.
 
 중계기 전용 키의 공개키만 Windows 서버에 등록하고 개인키는 중계기의 보호된 경로에 둡니다. 일반 계정과 관리자 그룹 계정은 인증키 파일 위치가 다를 수 있으며, 기본 관리자 그룹 설정은 `C:\ProgramData\ssh\administrators_authorized_keys`를 사용합니다. 기존 설정을 보존하면서 [Microsoft 공개키 관리 안내](https://learn.microsoft.com/en-us/windows-server/administration/openssh/openssh_keymanagement)에 따라 위치와 접근 권한을 관리하세요.
 
 서버 호스트 키 지문은 별도 신뢰 경로로 확인해 두 프로필의 `trustedHostKey`에 고정합니다. 키·비밀번호를 바꾸면 `credentialRevision`도 올리고 중계기를 재시작합니다. 개인키·비밀번호·토큰을 채팅이나 `BRIDGE_TARGETS`에 넣지 않습니다.
+
+### SSH 인증과 Windows 앱 로그인은 별개
+
+공개키 SSH로 명령이 실행된다는 사실은 같은 Windows 계정의 GUI 앱 로그인을 읽을 수 있다는 뜻이 아닙니다. 비밀번호 SSH는 [Windows 외부 인증에 사용자 자격을 제공](https://github.com/PowerShell/Win32-OpenSSH/wiki/SSH-remote-sessions-on-Windows)하지만, 모든 Windows 버전에서 Credential Manager 접근이 보장되지는 않습니다. [비밀번호 인증에서도 실패한 OpenSSH 9.5 보고](https://github.com/PowerShell/Win32-OpenSSH/issues/2273)가 있으므로 해당 계정·버전에서 직접 비교해야 합니다. 이 보고는 `agy` 자체 시험이 아닙니다.
+
+Antigravity CLI는 [공식 원격 로그인 절차](https://github.com/google-antigravity/antigravity-cli#authentication)를 제공합니다. 같은 계정의 대화형 SSH에서 `agy`를 시작하고 표시되는 URL을 로컬 브라우저에서 열어 로그인합니다. 로그인 URL·인증코드·토큰을 에이전트 채팅이나 명령 이력에 붙이지 않습니다. 비대화형 `agy models`가 로그인 필요를 반환하는 경우 원격 로그인이나 자격 저장소 접근부터 확인하고, SSH 연결 실패로 처리하거나 키 인증을 무조건 끄지 않습니다.
+
+인증 방법을 바꾸기 전 기존 연결을 유지한 채 같은 계정으로 별도 비밀번호 SSH에서 앱의 상태 조회를 비교합니다. 계정 비밀번호를 도구 인수·환경 덤프·공개 설정에 넣지 않습니다. 서버의 `passwordauthentication yes`만 확인했다면 인증 전환이나 앱 로그인 성공으로 보고하지 않습니다. 비밀번호 연결의 실제 성공과 앱 상태가 확인된 뒤에만 보호된 자격 참조 및 대상 revision을 변경합니다.
 
 ## 전용 파일 도우미 준비
 

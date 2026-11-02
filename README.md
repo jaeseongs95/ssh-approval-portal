@@ -1,8 +1,8 @@
-# SSH Approval Portal 1.7.1
+# SSH Approval Portal 1.7.2
 
-[한국어](README.ko.md) · [Administrator sign-in](docs/admin-login.en.md) · [Agent file uploads](docs/agent-upload.en.md) · [Architecture and compatibility](docs/architecture.en.md)
+[한국어](README.ko.md) · [Agent client setup (Korean)](docs/agent-clients.ko.md) · [Administrator sign-in](docs/admin-login.en.md) · [Agent file uploads](docs/agent-upload.en.md) · [Architecture and compatibility](docs/architecture.en.md)
 
-An MCP server for reviewing and approving SSH commands and file transfers. It provides MCP Apps cards for ChatGPT and Claude alongside a web administrator interface. One bridge supports up to 32 registered SSH targets. The unified administrator screen shows requests across targets and lets the owner filter and act on each request. See [target configuration](docs/multi-targets.ko.md).
+An MCP server for reviewing and approving SSH commands and file transfers. Core execution, status, approval waits and output reads work through standard MCP without requiring a particular AI vendor or MCP Apps cards. Use `get-client-capabilities` to discover prerequisites for host file inputs and local file transports. One bridge supports up to 32 registered SSH targets. The unified administrator screen shows requests across targets and lets the owner filter and act on each request. See [target configuration](docs/multi-targets.ko.md).
 
 Windows SSH 대상의 PowerShell 명령·이름 정책·파일 전송·Python 코드 제출·서버 CLI 등록 방법은 [Windows 대상 등록](docs/windows-targets.ko.md)을 확인하세요. Python과 Node.js/npm은 기능별 사전 준비가 필요합니다. 중계기 자체의 Windows 호스팅은 후속 릴리스 범위입니다.
 
@@ -18,7 +18,7 @@ Version **1.6.2** adds durable maintenance ownership and post-restart preservati
 | Claude desktop app | Actual card approval, denial, and PC file upload/download round trips have been confirmed. |
 | ChatGPT desktop and Claude web | Full functionality has not been verified in these clients. |
 | ChatGPT `request-upload` | An actual file input reached `upload-source-not-configured` and returned the provider hostname. This observation does not establish provider retrieval, approval, or an SSH round trip. |
-| Claude automatic file delivery | The actual test supplied `file_uuid` and an empty `download_url`, failing input validation. Its sandbox HTTPS connection to the destination was also blocked by a proxy CONNECT 403. Automatic transfer is unsupported. |
+| Remote Claude host file input | That test supplied `file_uuid` and an empty `download_url`, failing input validation; its sandbox HTTPS was also blocked by proxy CONNECT 403. This route is unsupported. The CLI and local stdio file tools are separate routes for Claude Code or any other agent with authorized local access. |
 | Restructuring validation | The non-ARM implementation passed two independent final reviews against Node 94/Linux Python 21 tests, browser regressions, amd64 installation, updates, rollback, Compose, and real SSH roundtrip evidence. The release `VALIDATION.json` records the scope of the 1.0.0 version-change checks. |
 
 The file-provider hostname allowlist starts empty. `BRIDGE_UPLOAD_SOURCE_HOSTS` accepts a comma-separated mix of exact hostnames and leading `*.domain` patterns, for example `files.example.test,*.downloads.example.test` (fictional). A pattern covers one or more subdomain labels at any depth, excludes the apex domain, and matches at a dot boundary. Bare `*`, other wildcard placements, URLs, IP addresses and ports are rejected. Choosing a wildcard means trusting every subdomain it covers; do not broadly allow a shared CDN without verifying that trust scope. Card approval defaults to `BRIDGE_UI_ENABLED=false`, and web administrator authentication defaults to `BRIDGE_ADMIN_AUTH_MODE=token`. Successful tests of an existing client flow do not establish that the new agent-upload path or another platform works.

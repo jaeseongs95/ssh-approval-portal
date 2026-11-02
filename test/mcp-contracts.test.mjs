@@ -95,10 +95,20 @@ test('MCP contract families preserve tool names, JSON text, private capabilities
   const f = await fixture();
   try {
     const { tools } = await f.client.listTools();
-    assert.deepEqual(tools.map(tool => tool.name), ['list-targets', 'read-command', 'run-command', 'run-python-source', 'request-safe-command', 'get-request-status', 'wait-for-request', 'assess-request-risk', 'request-upload', 'show-ui-probe', 'show-approval', 'show-file-transfer', 'request-download', 'ui-decide-request', 'ui-upload-begin', 'ui-upload-chunk', 'ui-upload-finish', 'ui-download-link', 'read-command-output', 'ui-read-command-output']);
+    assert.deepEqual(tools.map(tool => tool.name), ['get-client-capabilities', 'list-targets', 'read-command', 'run-command', 'run-python-source', 'request-safe-command', 'get-request-status', 'wait-for-request', 'assess-request-risk', 'request-upload', 'show-ui-probe', 'show-approval', 'show-file-transfer', 'request-download', 'ui-decide-request', 'ui-upload-begin', 'ui-upload-chunk', 'ui-upload-finish', 'ui-download-link', 'read-command-output', 'ui-read-command-output']);
     for (const tool of tools) assert.equal(tool.outputSchema.type, 'object', tool.name);
     const upload = tools.find(tool => tool.name === 'request-upload');
     assert.deepEqual(upload._meta['openai/fileParams'], ['file']); assert.match(upload.description, /only that host contract/);
+    assert.deepEqual(Object.keys(upload.inputSchema.properties).sort(), ['elevate', 'file', 'overwrite', 'remotePath', 'target']);
+    assert.deepEqual(upload.inputSchema.required, ['file', 'remotePath']);
+    assert.deepEqual(Object.keys(upload.inputSchema.properties.file.properties).sort(), ['download_url', 'file_id', 'file_name', 'mime_type']);
+    assert.deepEqual(upload.inputSchema.properties.file.required, ['download_url', 'file_id']);
+    assert.equal(upload.inputSchema.properties.file.additionalProperties, false);
+    for (const descriptor of [upload, tools.find(tool => tool.name === 'request-download')]) {
+      assert.match(descriptor.description, /scripts\/portal-client\.mjs/);
+      assert.match(descriptor.description, /(?:scripts\/portal-file-mcp\.mjs|stdio)/);
+      assert.match(descriptor.description, /get-client-capabilities/);
+    }
     assert.deepEqual(tools.find(tool => tool.name === 'ui-upload-chunk')._meta.ui.visibility, ['app']);
     assert.ok(tools.find(tool => tool.name === 'show-approval').outputSchema.required.includes('id'));
     const immediate = await f.call('read-command', { command: 'id' });
@@ -119,6 +129,52 @@ test('MCP contract families preserve tool names, JSON text, private capabilities
     const malformed = await f.call('run-command', { command: 'id' });
     assert.equal(malformed.isError, true); assert.match(malformed.content[0].text, /Request refused or failed/);
   } finally { await f.close(); }
+});
+
+test('provider-neutral capabilities are exact, public and read-only; core tools work with UI disabled', async () => {
+  for (const enabled of [true, false]) {
+    let outputReads = 0, commandRuns = 0;
+    const page = { outputId: identifier, bytes: 7, nextOffset: 7, eof: true, text: 'fixture' };
+    const f = await fixture({ settings: { ...settings, uiEnabled: enabled }, commandOutputs: { read: () => { outputReads++; return page; } } });
+    f.commands.run = async () => { commandRuns++; return { type: 'job', job: f.pending }; };
+    try {
+      const tools = (await f.client.listTools()).tools;
+      const descriptor = tools.find(tool => tool.name === 'get-client-capabilities');
+      assert.equal(descriptor.annotations.readOnlyHint, true);
+      assert.equal(descriptor.annotations.destructiveHint, false);
+      assert.equal(descriptor._meta, undefined);
+      assert.deepEqual(descriptor.inputSchema.properties, {});
+      const expected = {
+        contract: 'agent-client-capabilities-v1',
+        core: { transport: 'streamable-http', input: 'json-schema', output: ['text', 'structuredContent'], uiRequired: false },
+        localFiles: { cli: 'scripts/portal-client.mjs', stdio: 'scripts/portal-file-mcp.mjs', requiresLocalAccess: true },
+        hostFileInput: { tool: 'request-upload', contract: 'openai/fileParams' },
+        approvals: { ownerRequiredByPolicy: true, agentSelfApproval: false },
+        ui: { enabled, optional: true },
+        documentation: 'docs/agent-clients.ko.md',
+      };
+      const result = await f.call('get-client-capabilities');
+      assert.deepEqual(result, { content: [{ type: 'text', text: JSON.stringify(expected) }], structuredContent: expected });
+      assert.deepEqual(JSON.parse(result.content[0].text), result.structuredContent);
+      assert.doesNotMatch(JSON.stringify(result), /contract-mcp|contract-admin|approvalTicket|downloadUrl|PRIVATE/);
+      assert.equal(commandRuns, 0); assert.equal(outputReads, 0); assert.equal(f.calls.imports.length, 0);
+      const instructions = f.client.getInstructions();
+      assert.match(instructions, /independent of model vendor/);
+      assert.match(instructions, /get-client-capabilities/);
+      assert.match(instructions, /never self-approve/);
+      assert.match(instructions, /scripts\/portal-client\.mjs/);
+      assert.match(instructions, /scripts\/portal-file-mcp\.mjs/);
+      assert.match(instructions, /openai\/fileParams/);
+      assert.equal((await f.call('list-targets')).structuredContent.defaultTarget, 'default');
+      assert.equal((await f.call('read-command', { command: 'id' })).structuredContent.state, 'completed');
+      assert.equal((await f.call('run-command', { command: 'sudo id' })).structuredContent.id, identifier);
+      assert.equal((await f.call('get-request-status', { id: identifier })).structuredContent.state, 'pending');
+      const output = await f.call('read-command-output', { outputId: identifier });
+      assert.deepEqual(output.content, [{ type: 'text', text: page.text }]);
+      assert.deepEqual(output.structuredContent, page);
+      assert.equal(commandRuns, 1); assert.equal(outputReads, 1);
+    } finally { await f.close(); }
+  }
 });
 
 test('app-only chunks decode canonical base64 before the application sees bytes', async () => {

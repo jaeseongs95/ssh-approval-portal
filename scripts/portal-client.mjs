@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { createPortalClient, validateOutputOptions, validateUploadExpectation } from '../src/adapters/cli/portal-client.mjs';
 import { validateOrigin } from '../src/adapters/config/settings.mjs';
 import { validateLocalPath } from '../src/adapters/cli/local-files.mjs';
-import { idValid, remotePath as validateRemotePath } from '../src/domain/validation.mjs';
+import { idValid, anyRemotePath as validateRemotePath } from '../src/domain/validation.mjs';
 
 export async function main(argv = process.argv.slice(2), input = process.stdin, output = process.stdout, errorOutput = process.stderr, runCredential = execFileSync) {
   let client;
