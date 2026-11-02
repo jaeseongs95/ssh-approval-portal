@@ -62,7 +62,7 @@ const recordSchema = z.discriminatedUnion('kind', [
   z.strictObject({ ...recordBase, kind: z.literal('request'), requestId: id }),
   z.strictObject({ ...recordBase, kind: z.literal('saved'), requestId: id, size: z.number().int().nonnegative(), sha256: digest }),
 ]);
-const states = new Set(['pending', 'evaluating', 'running', 'completed', 'failed', 'denied', 'expired', 'unknown']);
+const states = new Set(['pending', 'evaluating', 'queued', 'running', 'completed', 'failed', 'denied', 'expired', 'unknown']);
 const safeErrors = new Set(['OWNER_REAUTH_REQUIRED', 'ACCESS_CREDENTIAL_UNAVAILABLE', 'PORTAL_REQUEST_REFUSED',
   'INVALID_TRANSFER_ACK', 'RESUME_SOURCE_MISMATCH', 'RESUME_INTENT_MISMATCH', 'UPLOAD_NOT_RESUMABLE',
   'UPLOAD_SOURCE_MISMATCH', 'DOWNLOAD_EXPECTATION_MISMATCH', 'DOWNLOAD_NOT_READY', 'DOWNLOAD_INTEGRITY_MISMATCH', 'CAPABILITY_TARGET_UNAVAILABLE', 'CAPABILITY_EXPIRED']);

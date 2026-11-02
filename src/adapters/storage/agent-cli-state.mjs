@@ -20,7 +20,7 @@ export function createAgentCliState(root){
   db.exec('PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL; PRAGMA locking_mode=EXCLUSIVE; BEGIN EXCLUSIVE; COMMIT; CREATE TABLE IF NOT EXISTS requests (id TEXT PRIMARY KEY, request_key TEXT UNIQUE NOT NULL, digest TEXT NOT NULL, body TEXT NOT NULL, remote_status TEXT);');
   for(const row of db.prepare('SELECT id,body FROM requests').all()){
    const job=JSON.parse(row.body);
-   if(['pending','evaluating','running'].includes(job.state)){
+   if(['pending','evaluating','queued','running'].includes(job.state)){
     job.state=job.state==='pending'?'expired':'unknown';job.finishedAt=Date.now();db.prepare('UPDATE requests SET body=? WHERE id=?').run(encode(job),row.id);
    }
   }
@@ -37,7 +37,7 @@ export function createAgentCliState(root){
    const created="json_extract(body,'$.createdAt')",args=[AGENT_CLI_CONTRACT,targetId,targetRevision,profile,provider,profile];
    let older='';if(cursor){older=` AND (${created}<? OR (${created}=? AND id<?))`;args.push(cursor.before,cursor.before,cursor.beforeId);}
    const rows=db.prepare(`SELECT id,json_extract(body,'$.state') AS state,${created} AS createdAt FROM requests WHERE json_extract(body,'$.operation.agentCliContract')=? AND json_extract(body,'$.operation.agentCliTargetId')=? AND json_extract(body,'$.operation.agentCliTargetRevision')=? AND json_extract(body,'$.operation.agentCliProfile')=? AND json_extract(body,'$.operation.agentCliProvider')=? AND json_extract(body,'$.profile')=?${older} ORDER BY ${created} DESC,id DESC LIMIT 21`).all(...args);
-   if(rows.some(row=>!idValid(row.id)||!['pending','running','completed','failed','unknown','expired','denied','evaluating'].includes(row.state)||!Number.isSafeInteger(row.createdAt)||row.createdAt<=0))throw Error('Invalid CLI history metadata');
+   if(rows.some(row=>!idValid(row.id)||!['pending','queued','running','completed','failed','unknown','expired','denied','evaluating'].includes(row.state)||!Number.isSafeInteger(row.createdAt)||row.createdAt<=0))throw Error('Invalid CLI history metadata');
    const requests=rows.slice(0,20).map(row=>({id:row.id,state:row.state,createdAt:row.createdAt})),last=requests.at(-1);
    return {requests,next:rows.length>20?{before:last.createdAt,beforeId:last.id}:null};
   },

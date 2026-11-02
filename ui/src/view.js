@@ -66,6 +66,10 @@ export function createCardView({ document, i18n }) {
     }
     if (job.result?.isError && job.kind !== 'command') text(el('details'), 'pre', job.result.content?.map(x => x.text ?? '').join('\n') ?? t('파일 전송에 실패했습니다.'));
     if (job.auditError) text(el('details'), 'p', job.auditError);
+    if (job.state === 'queued') {
+      text(el('details'), 'p', korean ? '승인이 완료되어 실행 순서를 기다리고 있습니다. 다시 승인하거나 요청하지 마세요.' : 'Approval is complete and this request is waiting for its execution turn. Do not approve or submit it again.');
+      button(korean ? '실행 취소' : 'Cancel execution', () => actions.decide('deny'), !meta.uiEnabled || !meta.approvalTicket);
+    }
     if (job.state === 'pending') for (const action of ['approve', 'deny']) button(t(action === 'approve' ? '승인·실행' : '거부'), () => actions.decide(action), !meta.uiEnabled || !meta.approvalTicket);
     if (job.kind === 'download' && job.state === 'completed') {
       status(korean ? '서버 파일 준비 완료' : 'Server file ready', job.state);

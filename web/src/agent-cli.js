@@ -33,7 +33,7 @@ export function createAgentCliPanel({document,api,isSignedOut,canLoad,storage,ge
  const validHint=h=>h&&Object.keys(h).every(k=>['requestKey','requestId','targetId','provider'].includes(k))&&typeof h.requestKey==='string'&&/^[A-Za-z0-9_.:-]{16,128}$/.test(h.requestKey)&&validTarget(h.targetId)&&['codex','claude'].includes(h.provider)&&(!Object.hasOwn(h,'requestId')||validId(h.requestId));
  let hints=[];try{const raw=storage?.getItem(storageKey);if(raw&&raw.length<=24576){const v=JSON.parse(raw);if(Array.isArray(v)&&v.length<=64&&v.every(validHint))hints=v;}}catch{/* disabled or invalid storage never grants execution */}
  let capabilities,capabilityRead,preview,job,remoteStatus,historyCursor,busy=false,uncertain=false,generation=0,timer,closed=false,currentScope='',currentBinding;
- const drafts=new Map(),blocked=()=>busy||uncertain||['running','evaluating','unknown'].includes(job?.state);
+ const drafts=new Map(),blocked=()=>busy||uncertain||['queued','running','evaluating','unknown'].includes(job?.state);
  const selectedTarget=()=>currentScope.split('\n')[0];
  const active=()=>!closed&&!isSignedOut()&&document.body.dataset.page==='settings';
  const binding=()=>capabilities?.bindings?.find(b=>b.targetId===target.value&&b.enabled===true);
@@ -41,11 +41,11 @@ export function createAgentCliPanel({document,api,isSignedOut,canLoad,storage,ge
  const hint=()=>hints.find(h=>h.targetId===target.value&&h.provider===provider.value);
  const persist=h=>{hints=hints.filter(v=>v.targetId!==h.targetId||v.provider!==h.provider);hints.push(h);hints=hints.slice(-64);try{storage?.setItem(storageKey,JSON.stringify(hints));}catch{/* local restoration may be unavailable */}};
  const clearTimer=()=>{cancel(timer);timer=undefined;};
- const stateName=state=>({pending:t('승인 대기','Awaiting approval'),running:t('설치 실행 중','Installing'),completed:t('완료','Completed'),failed:t('실패','Failed'),unknown:t('결과 불명','Outcome unknown'),expired:t('만료','Expired'),denied:t('거부','Denied'),evaluating:t('평가 중','Assessing'),not_found:t('기록 없음','Not found'),preparing:t('준비 중','Preparing'),installing:t('설치 중','Installing'),reused:t('기존 버전 사용','Reused')})[state]??t('확인 필요','Check required');
+ const stateName=state=>({pending:t('승인 대기','Awaiting approval'),queued:t('실행 대기','Queued for execution'),running:t('설치 실행 중','Installing'),completed:t('완료','Completed'),failed:t('실패','Failed'),unknown:t('결과 불명','Outcome unknown'),expired:t('만료','Expired'),denied:t('거부','Denied'),evaluating:t('평가 중','Assessing'),not_found:t('기록 없음','Not found'),preparing:t('준비 중','Preparing'),installing:t('설치 중','Installing'),reused:t('기존 버전 사용','Reused')})[state]??t('확인 필요','Check required');
  function lock(){
   const ready=supported()&&capabilities?.available&&active()&&(!getTarget||getTarget()===target.value);
   checkLogin.disabled=busy||!ready;
-  inspect.disabled=busy||!ready||uncertain||Boolean(job&&['pending','running','evaluating','unknown'].includes(job.state));
+  inspect.disabled=busy||!ready||uncertain||Boolean(job&&['pending','queued','running','evaluating','unknown'].includes(job.state));
   recover.disabled=busy||!ready;historySelect.disabled=busy||!ready;historyNext.disabled=busy||!ready;submit.hidden=!preview||Boolean(job);submit.disabled=busy||!ready||uncertain||!ack.checked||!preview||Date.now()>=preview.expiresAt;
   start.hidden=job?.state!=='pending';start.disabled=busy||!ready||uncertain||!ack.checked;
   reconcile.hidden=!job||!['unknown','failed'].includes(job.state);reconcile.disabled=busy||!ready;
@@ -75,17 +75,17 @@ if ($executable.EndsWith('.exe')) { & $executable ${p==='codex'?'login':'auth lo
   if(b&&draft&&draft.binding?.targetId===b.targetId&&draft.binding.targetRevision===b.targetRevision&&draft.binding.profile===b.profile){({preview,job,remoteStatus,uncertain}=draft);summary.textContent=draft.summary;summary.hidden=!preview&&!job;message.textContent=draft.message;loginState.textContent=draft.loginState;}
   lock();poll();
  }
- function validateJob(value){const b=binding(),op=value?.operation;if(!validId(value?.id)||!b||op?.agentCliContract!=='agent-cli-install-v1'||op.agentCliProvider!==provider.value||op.agentCliTargetId!==b.targetId||op.agentCliTargetRevision!==b.targetRevision||op.agentCliProfile!==b.profile||!['pending','running','completed','failed','unknown','expired','denied','evaluating'].includes(value.state))throw Error(t('요청의 대상 정보가 현재 선택과 다릅니다.','The request does not match the current target binding.'));return value;}
+ function validateJob(value){const b=binding(),op=value?.operation;if(!validId(value?.id)||!b||op?.agentCliContract!=='agent-cli-install-v1'||op.agentCliProvider!==provider.value||op.agentCliTargetId!==b.targetId||op.agentCliTargetRevision!==b.targetRevision||op.agentCliProfile!==b.profile||!['pending','queued','running','completed','failed','unknown','expired','denied','evaluating'].includes(value.state))throw Error(t('요청의 대상 정보가 현재 선택과 다릅니다.','The request does not match the current target binding.'));return value;}
  function displayJob(value,status){job=validateJob(value);remoteStatus=status;preview=undefined;ack.checked=false;uncertain=false;
   summary.hidden=false;summary.textContent=[identity.textContent,provider.value,'ID: '+job.id,stateName(job.state),...(remoteStatus?[t('서버 기록: ','Server receipt: ')+stateName(remoteStatus.state)]:[])].join('\n');
   message.textContent=job.state==='unknown'?t('결과를 확정하지 못했습니다. 설치를 반복하지 말고 서버 기록을 확인하세요.','Outcome is unknown. Check the server receipt before attempting another installation.'):stateName(job.state);lock();poll();
  }
  async function run(fn){if(busy||!active())return;const token=generation;busy=true;failure.textContent='';lock();try{await fn(()=>token===generation&&active());}catch(error){if(token===generation&&active())failure.textContent=String(error.message);}finally{busy=false;lock();}}
- function poll(){clearTimer();if(!active()||document.hidden||!['pending','running','evaluating'].includes(job?.state))return;timer=schedule(()=>{if(busy){poll();return;}run(async current=>{try{const value=await api('/api/agent-cli/requests/'+job.id);if(current())displayJob(value.job,value.remoteStatus);}finally{if(current())poll();}});},2000);}
+ function poll(){clearTimer();if(!active()||document.hidden||!['pending','queued','running','evaluating'].includes(job?.state))return;timer=schedule(()=>{if(busy){poll();return;}run(async current=>{try{const value=await api('/api/agent-cli/requests/'+job.id);if(current())displayJob(value.job,value.remoteStatus);}finally{if(current())poll();}});},2000);}
  async function loadHistory(current,cursor=null){
   const b=binding(),p=provider.value;clearTimer();clearHistory();preview=job=remoteStatus=undefined;ack.checked=false;summary.hidden=true;summary.textContent='';output.hidden=true;output.textContent='';lock();
   const value=await api('/api/agent-cli/history?'+new URLSearchParams({targetId:b.targetId,provider:p,...(cursor??{})}));if(!current())return;
-  const states=['pending','running','completed','failed','unknown','expired','denied','evaluating'],rows=value?.requests;
+  const states=['pending','queued','running','completed','failed','unknown','expired','denied','evaluating'],rows=value?.requests;
   if(value?.binding?.targetId!==b.targetId||value.binding.targetRevision!==b.targetRevision||value.binding.profile!==b.profile||value.provider!==p||!Array.isArray(rows)||rows.length>20||rows.some(row=>!validId(row?.id)||!states.includes(row.state)||!Number.isSafeInteger(row.createdAt)||row.createdAt<=0)||new Set(rows.map(row=>row.id)).size!==rows.length)throw Error('Invalid CLI history response');
   if(rows.some((row,i)=>i>0&&(row.createdAt>rows[i-1].createdAt||(row.createdAt===rows[i-1].createdAt&&row.id>=rows[i-1].id)))||cursor&&rows.some(row=>row.createdAt>cursor.before||(row.createdAt===cursor.before&&row.id>=cursor.beforeId)))throw Error('Invalid CLI history order');
   const last=rows.at(-1),next=value.next;
@@ -147,5 +147,5 @@ if ($executable.EndsWith('.exe')) { & $executable ${p==='codex'?'login':'auth lo
  document.addEventListener('visibilitychange',()=>{clearTimer();if(!document.hidden)poll();});
  document.querySelector('#load')?.addEventListener('click',load);
  document.querySelector('#logout')?.addEventListener('click',()=>{closed=true;hints=[];drafts.clear();currentScope='';try{storage?.removeItem(storageKey);}catch{}scope();});
- scope();queueMicrotask(load);return {root,targetControl:target,ensureLoaded:load,selectTarget,scopeState:()=>({targetId:selectedTarget(),name:capabilities?.bindings?.find(b=>b.targetId===selectedTarget())?.displayName,ready:!!capabilities,blocked:blocked(),readingCapabilities:!!capabilityRead&&busy&&!uncertain&&!['running','evaluating','unknown'].includes(job?.state),uncertain}),reloadState:()=>({blocked:busy||uncertain,dirty:preview?[t('CLI 설치 계획','CLI installation plan')]:[]})};
+ scope();queueMicrotask(load);return {root,targetControl:target,ensureLoaded:load,selectTarget,scopeState:()=>({targetId:selectedTarget(),name:capabilities?.bindings?.find(b=>b.targetId===selectedTarget())?.displayName,ready:!!capabilities,blocked:blocked(),readingCapabilities:!!capabilityRead&&busy&&!uncertain&&!['queued','running','evaluating','unknown'].includes(job?.state),uncertain}),reloadState:()=>({blocked:busy||uncertain,dirty:preview?[t('CLI 설치 계획','CLI installation plan')]:[]})};
 }

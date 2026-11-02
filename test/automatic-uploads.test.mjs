@@ -58,9 +58,9 @@ test('revocation while importing and stale target fencing prevent automatic publ
  await f.set(true);f.profiles.get('alpha-write').host='changed.test';const stale=await f.upload();assert.equal(stale.state,'pending');f.app.queue.deny(stale.id);assert.equal(f.effects.length,0);
 }));
 
-test('busy execution stays pending and never retries automatically when a slot becomes free',async()=>fixture(async f=>{
+test('busy automatic upload queues and starts exactly once when a slot becomes free',async()=>fixture(async f=>{
  await f.set(true);let release;const held=new Promise(r=>release=r),runtime=f.app.targets.select('alpha'),execute=runtime.transfers.upload;runtime.transfers.upload=async op=>{await held;return execute(op);};
- const first=await f.upload(),second=await f.upload();assert.equal(second.state,'pending');release();await f.finish(first);assert.equal(f.app.queue.get(second.id).state,'pending');assert.equal(f.effects.length,1);f.app.queue.deny(second.id);
+ try{const first=await f.upload(),second=await f.upload();assert.equal(second.state,'queued');assert.equal(second.approvalMode,'automatic');assert.equal(f.effects.length,0);release();await f.finish(first);await f.finish(second);assert.equal(f.app.queue.get(second.id).state,'completed');assert.equal(f.effects.length,2);}finally{release();}
 }));
 
 test('execution audit failure grants no upload and is not silently retried',async()=>fixture(async f=>{
@@ -84,8 +84,9 @@ test('test server bypass covers elevated overwrite uploads only on the reviewed 
 }));
 
 
-test('test server upload slot rejection is terminal rather than owner pending',async()=>fixture(async f=>{
- await f.set(false,'alpha',{testServer:true});const q=f.app.targets.select('alpha').queue,busy=q.externalBusy;q.externalBusy=()=>true;
- const job=await f.upload('alpha',{overwrite:true,elevate:true});assert.equal(job.state,'failed');assert.equal(job.decision.dispatchFailure,'not_dispatched');assert.equal(job.decision.dispatchFailureReason,'busy');assert.equal(job.decision.dispatchFailureStage,'busy_check');
- q.externalBusy=busy;assert.throws(()=>q.start(job.id),/not pending/);assert.equal(f.effects.length,0);
+test('test server upload waits behind an active transfer without falling back to owner approval',async()=>fixture(async f=>{
+ await f.set(false,'alpha',{testServer:true});const runtime=f.app.targets.select('alpha'),execute=runtime.transfers.upload;
+ const held=Promise.withResolvers();runtime.transfers.upload=async op=>{await held.promise;return execute(op);};
+ try{const first=await f.upload('alpha',{overwrite:true,elevate:true}),job=await f.upload('alpha',{overwrite:true,elevate:true});assert.equal(job.state,'queued');assert.equal(job.approvalMode,'automatic');assert.equal(job.decision.reasonCode,'test_server_bypass');assert.equal(job.decision.dispatchFailure,undefined);assert.equal(f.effects.length,0);
+ held.resolve();await f.finish(first);await f.finish(job);assert.equal(f.app.queue.get(job.id).state,'completed');assert.equal(f.effects.length,2);}finally{held.resolve();}
 }));

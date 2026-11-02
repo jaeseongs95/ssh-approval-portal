@@ -12,7 +12,7 @@ export function createCommandAutomation({ queue, state, definition, classify, ev
   const sources = new Map();
   const sourcePlan = id => {
     const job = queue.get(id), plan = sources.get(id);
-    if (!job || !['pending', 'evaluating', 'running'].includes(job.state) || !plan || job.operation.sourcePlanDigest !== plan.planDigest) dispatchRefusal('private_plan', 'source_plan', 'Source unavailable; never reconstruct or replay');
+    if (!job || !['pending', 'evaluating', 'queued', 'running'].includes(job.state) || !plan || job.operation.sourcePlanDigest !== plan.planDigest) dispatchRefusal('private_plan', 'source_plan', 'Source unavailable; never reconstruct or replay');
     return plan;
   };
   const sourceDenied = (plan, rule) => deniedCommand(plan.command + '\n' + plan.stdin + '\n' + plan.manifest.argvJson, rule);

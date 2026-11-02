@@ -16,7 +16,7 @@ export function createCapabilities({ queue, store, signer, settings, targets, ad
     const meta = { bridgeDisplayName: settings.bridgeDisplayName, targetDisplayName: job.targetDisplayName ?? settings.targetDisplayName, ...(job.targetId ? { targetId: job.targetId, targetRevision: job.targetRevision } : {}), uiEnabled: settings.uiEnabled, namespace: settings.prefix, maxBytes: settings.maxBytes, chunkBytes: CHUNK_BYTES, webUrl: settings.adminOrigin, downloadRequiresLogin: ['access', 'oidc'].includes(adminAuthMode) };
     if (settings.uiEnabled) {
       meta.viewTicket = signer.issue('view', queue.subject(job.id), now() + 600_000);
-      if (job.state === 'pending') meta.approvalTicket = signer.issue('decision', queue.subject(job.id), job.expiresAt);
+      if (['pending', 'queued'].includes(job.state)) meta.approvalTicket = signer.issue('decision', queue.subject(job.id), job.expiresAt);
     }
     return meta;
   };

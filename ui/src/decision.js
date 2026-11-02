@@ -93,9 +93,9 @@ export function decisionText(decision, korean) {
   return `${reason}${label ? (korean ? ' · AI 분류: ' : ' · AI classification: ') + label : ''}`;
 }
 
-/** Admission records an approval route only after a request enters execution. */
+/** Admission records the approval route before waiting for an execution turn. */
 export function recordedApprovalMode(job) {
-  return ['running', 'completed', 'failed', 'unknown'].includes(job.state) && ['owner', 'automatic'].includes(job.approvalMode) ? job.approvalMode : undefined;
+  return ['queued', 'running', 'completed', 'failed', 'unknown'].includes(job.state) && ['owner', 'automatic'].includes(job.approvalMode) ? job.approvalMode : undefined;
 }
 
 /** Explain recorded facts, never an invented model rationale. Shared card/web view. */
@@ -103,10 +103,10 @@ export function renderDecision(document, parent, decision, korean, job = {}) {
   const add = (parent, tag, value) => { const node = document.createElement(tag); node.textContent = value; parent.append(node); return node; };
   const box = add(parent, 'div', ''); box.className = 'assessment-summary';
   const approval = recordedApprovalMode(job);
-  const historical = ['running', 'completed', 'failed', 'unknown'].includes(job.state);
+  const historical = ['queued', 'running', 'completed', 'failed', 'unknown'].includes(job.state);
   const assessment = decision.assessment;
   const titles = {
-    pending: ['승인 대기', 'Awaiting approval'], evaluating: ['승인 조건 확인 중', 'Checking approval conditions'],
+    pending: ['승인 대기', 'Awaiting approval'], queued: ['실행 대기', 'Queued for execution'], evaluating: ['승인 조건 확인 중', 'Checking approval conditions'],
     denied: ['거절됨', 'Denied'], expired: ['승인 기한 만료', 'Approval expired'],
   };
   const title = approval === 'owner' ? ['사용자가 승인한 요청입니다', 'Approved by the owner']

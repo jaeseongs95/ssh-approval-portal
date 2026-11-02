@@ -63,7 +63,7 @@ export function createRequestDetail({ document, i18n, bridgeName, targetName, ta
   root.setAttribute('aria-labelledby', title.id);
   const fail = message => { failure.textContent = message; failure.hidden = !message; };
   function decide(action) {
-    if (!selected || !available || busy || selected.state !== 'pending') return;
+    if (!selected || !available || busy || !(selected.state === 'pending' || selected.state === 'queued' && action === 'deny')) return;
     return actions.decide(selected.id, action);
   }
   function refresh() {
@@ -72,6 +72,7 @@ export function createRequestDetail({ document, i18n, bridgeName, targetName, ta
     title.textContent = `${kinds[job.kind] ?? job.kind} · ${job.id}`;
     state.textContent = `${states[job.state] ?? job.state}${job.history?.stateSource === 'journal' ? (korean ? ' · 저장 기록에서 확인' : ' · Recorded history') : ''}`;
     state.dataset.state = job.state;
+    if (job.state === 'queued') state.textContent += korean ? ' · 승인이 완료되어 실행 순서를 기다리고 있습니다.' : ' · Approved and waiting for an execution turn.';
     const absent = korean ? '기록 없음' : 'Not recorded';
     context.textContent = `${t('중계기')} · ${bridgeName} / ${t('대상 서버')} · ${job.targetDisplayName ?? targetName}${job.targetId ? ` [${job.targetId}]` : ''} (${job.target ?? absent}) · ${t('요청')} ${job.id}`;
     if (job.targetId) context.textContent += ` · ${t('설정 revision')} ${job.targetRevision ?? absent} / ${t('호스트 키')} ${job.hostKey ?? absent}`;
@@ -86,15 +87,18 @@ export function createRequestDetail({ document, i18n, bridgeName, targetName, ta
       const op = job.operation;
       sourceMeta.textContent = `Python · ${op.sourceContract} · ${op.sourceBytes} bytes · SHA-256 ${op.sourceSha256}\n${JSON.stringify({ cwd: op.sourceCwd, argv: JSON.parse(op.sourceArgvJson), elevate: op.sourceElevate })}`;
       if (targets().find(target => target.id === job.targetId)?.platform === 'windows') sourceMeta.textContent += korean ? '\nWindows의 관리자 등록 Python 경로와 격리 시작 옵션을 사용합니다. 권한 상승에는 기존 관리자 연결 토큰이 필요합니다.' : '\nUses the registered Windows Python path with isolated startup flags. Elevation requires the existing administrator connection token.';
-      if (!waiting) sourceMeta.textContent += korean ? '\n처리된 코드 원문은 보관하지 않습니다. 실행 계획 정보만 표시합니다.' : '\nFinished source is not retained. Only execution plan metadata is shown.';
+      if (job.state === 'queued') sourceMeta.textContent += korean ? '\n승인된 코드 원문은 이 화면에서 표시하지 않습니다. 실행 계획 정보만 표시합니다.' : '\nApproved source is not displayed here. Only execution plan metadata is shown.';
+      else if (!waiting) sourceMeta.textContent += korean ? '\n처리된 코드 원문은 보관하지 않습니다. 실행 계획 정보만 표시합니다.' : '\nFinished source is not retained. Only execution plan metadata is shown.';
     } else sourceMeta.textContent = '';
-    const nextDecision = JSON.stringify(job.decision);
+    const nextDecision = JSON.stringify([job.decision, job.state, job.approvalMode]);
     if (nextDecision !== decisionKey) { decision.replaceChildren(); if (job.decision) renderDecision(document, decision, job.decision, korean, job); decisionKey = nextDecision; }
     const focusedAction = [approve, deny].includes(document.activeElement);
-    approve.hidden = deny.hidden = !waiting;
+    approve.hidden = !waiting;
+    deny.hidden = !waiting && job.state !== 'queued';
+    deny.textContent = job.state === 'queued' ? (korean ? '실행 취소' : 'Cancel execution') : t('거부');
     approve.disabled = deny.disabled = busy || !available;
     openPolicy.hidden = !automated; openPolicy.disabled = !available;
-    register.hidden = !automated || job.kind !== 'command' || !!job.operation?.sourceContract || ['pending', 'running', 'evaluating'].includes(job.state) || targets().find(target => target.id === (job.targetId ?? 'default'))?.capabilities?.commandNameApproval === false;
+    register.hidden = !automated || job.kind !== 'command' || !!job.operation?.sourceContract || ['pending', 'queued', 'running', 'evaluating'].includes(job.state) || targets().find(target => target.id === (job.targetId ?? 'default'))?.capabilities?.commandNameApproval === false;
     register.disabled = !available || !currentBinding || ![job.targetId, job.targetRevision, job.profile, job.command].every(value => typeof value === 'string' && value.length);
     sourceButton.hidden = !waiting || !job.operation?.sourceContract; sourceButton.disabled = sourceBusy || !available;
     if (!waiting) { source.hidden = true; source.textContent = ''; }
@@ -165,7 +169,7 @@ export function createRequestDetail({ document, i18n, bridgeName, targetName, ta
       if (!selected) return;
       const latest = jobs.find(job => job.id === selected.id), priorState = selected.state;
       // 페이지 밖의 종료된 저장 기록은 읽던 상세를 유지하되, 읽기 권한은 API가 다시 확인한다.
-      available = latest ? binding(latest) === binding(selected) : !!selected.history && !['pending', 'running', 'evaluating'].includes(selected.state);
+      available = latest ? binding(latest) === binding(selected) : !!selected.history && !['pending', 'queued', 'running', 'evaluating'].includes(selected.state);
       if (latest && available) selected = latest;
       stale.hidden = available;
       stale.textContent = korean ? '현재 조회에서 같은 대상의 요청을 확인하지 못했습니다. 기존 상세는 읽을 수 있지만 실행·결과 읽기는 중단합니다. 목록을 새로 조회하세요.' : 'This request binding is absent from the current snapshot. The existing detail remains readable; actions are blocked. Refresh requests.';

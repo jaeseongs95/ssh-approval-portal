@@ -79,6 +79,20 @@ jobs:
       - run: npm ci --ignore-scripts
       - name: Node regression
         run: node --test --test-skip-pattern='^CLI-LOOPBACK exact helper executes inspection/status over pinned SSH and preserves authentication bytes$' test/*.test.mjs
+      - name: Execution queue regression rejects pre-fix source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp src/domain/approval-queue.mjs "$RUNNER_TEMP/approval-queue.current.mjs"
+          trap 'cp "$RUNNER_TEMP/approval-queue.current.mjs" src/domain/approval-queue.mjs' EXIT
+          git show e7a13aea16a57b2657292562195ffe012f566cee:src/domain/approval-queue.mjs > src/domain/approval-queue.mjs
+          if node --test --test-reporter=tap --test-name-pattern='^execution queue preserves per-target FIFO' test/execution-queue.test.mjs > "$RUNNER_TEMP/execution-queue-red.log" 2>&1; then
+            cat "$RUNNER_TEMP/execution-queue-red.log"
+            echo 'Expected pre-fix busy failure was not observed' >&2
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/execution-queue-red.log"
+          grep -q '^# fail 1$' "$RUNNER_TEMP/execution-queue-red.log"
       - name: Agent portability regression rejects pre-fix source
         shell: bash
         run: |

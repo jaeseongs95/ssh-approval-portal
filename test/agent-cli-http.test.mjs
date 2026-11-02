@@ -244,15 +244,19 @@ test('test server owner policy automatically executes a new CLI request and repl
 });
 
 
-test('test server CLI slot rejection is terminal and replay cannot start the installation',async t=>{
- const f=await fixture(t,{env:{BRIDGE_COMMAND_AUTOMATION:'true'}});
+test('test server CLI waits behind an active command and replay never repeats installation',async t=>{
+ const held=defer(),entered=defer();
+ const f=await fixture(t,{env:{BRIDGE_COMMAND_AUTOMATION:'true'},executeCommand:async()=>{entered.resolve();await held.promise;return{failed:false,texts:['first']};}});f.beforeClose(()=>held.resolve());
  const current=(await f.api('/api/command-policy')).body,b=current.bindings[0];
  const proposal={expectedRevision:current.revision,policy:{targets:[{targetId:b.targetId,targetRevision:b.targetRevision,profile:b.profile,commands:[],deniedCommands:[],externalDisclosure:false,modelExecution:false,testServer:true,fallback:null,thresholds:{}}]}};
  const review=await f.api('/api/command-policy/review',{method:'POST',body:proposal});assert.equal(review.status,200);
  assert.equal((await f.api('/api/command-policy',{method:'POST',body:{...proposal,reviewToken:review.body.reviewToken,acknowledged:true}})).status,200);
- const p=await f.preview(),q=f.app.targets.select('default').queue,busy=q.externalBusy;q.externalBusy=()=>true;
- const job=await f.submit(p);assert.equal(job.state,'failed');assert.equal(job.decision.dispatchFailure,'not_dispatched');assert.equal(job.decision.dispatchFailureReason,'busy');assert.equal(job.decision.dispatchFailureStage,'busy_check');
- q.externalBusy=busy;const before=f.calls.length;assert.equal((await f.submit(p)).id,job.id);assert.equal(f.calls.length,before);assert.throws(()=>q.start(job.id),/not pending/);
+ const p=await f.preview();
+ const first=await f.app.targets.commands.run('sudo first');await entered.promise;
+ const job=await f.submit(p);assert.equal(job.state,'queued');assert.equal(job.approvalMode,'automatic');assert.equal(job.decision.reasonCode,'test_server_bypass');assert.equal(job.decision.dispatchFailure,undefined);
+ const before=f.calls.length;assert.equal((await f.submit(p)).id,job.id);assert.equal(f.calls.length,before);
+ held.resolve();await f.app.queue.wait(first.job.id);await f.app.queue.wait(job.id);assert.equal(f.app.queue.get(job.id).state,'completed');
+ assert.equal(f.calls.filter(plan=>plan.agentCli.action==='install').length,1);assert.equal((await f.submit(p)).id,job.id);assert.equal(f.calls.filter(plan=>plan.agentCli.action==='install').length,1);
 });
 
 

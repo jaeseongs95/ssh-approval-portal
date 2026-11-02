@@ -61,7 +61,7 @@ export function createWebView({ document, i18n }) {
   const matchesHistory=job=>{
     const query=historySearch?.value.trim().toLowerCase()??'',filter=historyFilter?.value??'';
     const {from,to,invalid}=historyRange,hasRange=from!==undefined||to!==undefined;
-    return !invalid&&(!hasRange||(Number.isFinite(job.createdAt)&&(from===undefined||job.createdAt>=from)&&(to===undefined||job.createdAt<to)))&&!['pending','running','evaluating'].includes(job.state)&&(!filter||job.state===filter)&&(!query||[job.id,job.command,job.kind==='command'?'':JSON.stringify(job.operation),job.targetDisplayName,job.targetId].join(' ').toLowerCase().includes(query));
+    return !invalid&&(!hasRange||(Number.isFinite(job.createdAt)&&(from===undefined||job.createdAt>=from)&&(to===undefined||job.createdAt<to)))&&!['pending','queued','running','evaluating'].includes(job.state)&&(!filter||job.state===filter)&&(!query||[job.id,job.command,job.kind==='command'?'':JSON.stringify(job.operation),job.targetDisplayName,job.targetId].join(' ').toLowerCase().includes(query));
   };
   function text(parent, tag, value, className = '') {
     const node = document.createElement(tag); node.textContent = value; node.className = className; parent.append(node); return node;
@@ -111,7 +111,7 @@ export function createWebView({ document, i18n }) {
     if (!root) return;
     const counts = id => {
       const scoped = id === undefined ? jobs : jobs.filter(job => (job.targetId ?? 'default') === id);
-      return [scoped.length, ...['pending', 'evaluating', 'running', 'completed', 'failed', 'denied', 'expired', 'unknown'].map(state => scoped.filter(job => job.state === state).length)];
+      return [scoped.length, ...['pending', 'evaluating', 'queued', 'running', 'completed', 'failed', 'denied', 'expired', 'unknown'].map(state => scoped.filter(job => job.state === state).length)];
     };
     const selected = el('target-filter')?.value || '';
     const entries = [{ id: '', displayName: t('전체 대상'), enabled: true }, ...targetList];
@@ -127,7 +127,7 @@ export function createWebView({ document, i18n }) {
       if (record.fingerprint !== fingerprint) {
         record.node.setAttribute('aria-pressed', String(target.id === selected)); record.name.textContent = target.displayName;
         record.identity.textContent = target.id ? `${target.id}${target.platform ? ' · ' + (target.platform === 'windows' ? 'Windows' : 'Linux') : ''} · ${t(target.enabled ? '등록됨' : '사용 중지')}` : '';
-        const labels=['보관 중', '승인 대기', '평가 중', '실행 중', '완료', '실패', '거부', '만료', '결과 불명'];
+        const labels=['보관 중', '승인 대기', '평가 중', '실행 대기', '실행 중', '완료', '실패', '거부', '만료', '결과 불명'];
         record.counts.textContent = labels.map((label,index)=>`${t(label)} ${values[index]}`).join(' · ');
         record.node.disabled = !changeTarget; record.fingerprint = fingerprint;
       }
@@ -152,14 +152,14 @@ export function createWebView({ document, i18n }) {
     const live = new Set(combined.map(job => job.id)), pending = [], running = [], history = [];
     for (const [id, record] of records) if (!live.has(id)) { record.node.remove(); records.delete(id); }
     // Aggregate queues arrive grouped by target, so insertion order is not chronology.
-    const listJobs = [...new Map([...ordered.filter(job => ['pending','running','evaluating'].includes(job.state)), ...historySlice].map(job => [job.id, job])).values()];
+    const listJobs = [...new Map([...ordered.filter(job => ['pending','queued','running','evaluating'].includes(job.state)), ...historySlice].map(job => [job.id, job])).values()];
     for (const job of listJobs) {
-      if(!['pending','running','evaluating'].includes(job.state)&&!pageIds.has(job.id))continue;
+      if(!['pending','queued','running','evaluating'].includes(job.state)&&!pageIds.has(job.id))continue;
       let record = records.get(job.id);
       if (record?.fingerprint !== JSON.stringify(job)) {
         if (record) record.update(job); else { record = createRecord(job); records.set(job.id, record); }
       }
-      (job.state === 'pending' ? pending : ['running', 'evaluating'].includes(job.state) ? running : history).push(record.node);
+      (job.state === 'pending' ? pending : ['queued', 'running', 'evaluating'].includes(job.state) ? running : history).push(record.node);
     }
     reconcile(el('jobs'), pending.length ? pending : [placeholders.pending]);
     const filtered=historySearch?.value.trim()||historyFilter?.value||historyFrom?.value||historyTo?.value||historyRange.invalid||selected;

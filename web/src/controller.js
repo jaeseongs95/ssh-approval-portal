@@ -30,7 +30,7 @@ export function createWebController({ state, view, api, document, location, time
       const jobs = await api('/api/requests', 'GET', undefined, { signal: read.signal });
       if (state.signedOut || token !== generation || !current(context)) return;
       const matches = uncertainDecision ? jobs.filter(job => job.id === uncertainDecision) : [];
-      if (matches.length === 1 && ['running', 'completed', 'failed', 'denied', 'expired', 'unknown'].includes(matches[0].state)) uncertainDecision = undefined;
+      if (matches.length === 1 && ['queued', 'running', 'completed', 'failed', 'denied', 'expired', 'unknown'].includes(matches[0].state)) uncertainDecision = undefined;
       latestJobs = jobs; view.render(jobs, state.deciding || !!uncertainDecision); view.connected(); view.error(uncertainDecision ? uncertainMessage() : '');
       if (document.body?.dataset.page === 'history') loadHistory();
     } catch (error) {

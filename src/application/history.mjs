@@ -5,7 +5,7 @@ import { COMMAND_MAX_BYTES } from '../contracts/ports.mjs';
 export const HISTORY_PAGE_SIZE = 20;
 export const HISTORY_RESPONSE_BYTES = 256 * 1024;
 const terminal = ['completed', 'failed', 'denied', 'expired', 'unknown'];
-const states = [...terminal, 'pending', 'evaluating', 'running'];
+const states = [...terminal, 'pending', 'evaluating', 'queued', 'running'];
 const validId = value => typeof value === 'string' && /^[a-f0-9]{48}$/.test(value);
 const validTarget = value => typeof value === 'string' && /^[a-z][a-z0-9_-]{0,31}$/.test(value);
 const digest = value => hash(JSON.stringify(value));

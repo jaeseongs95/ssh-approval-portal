@@ -60,7 +60,6 @@ test('late completed downloads remain addressable for a full hour after completi
 test('DISPATCH-01 new failures retain only fixed cause/stage, never exception properties, and release claims once', async t => {
   const hostile = new Proxy({}, { get() { assert.fail('exception properties must not be read'); } });
   const cases = [
-    ['busy', 'busy_check', q => { q.externalBusy = () => true; }],
     ['unknown', 'busy_check', q => { q.externalBusy = () => { throw hostile; }; }],
     ['claim_failed', 'execution_claim', q => { q.claimExecution = () => { throw hostile; }; }],
     ['audit_failed', 'start_audit', q => { q.audit = () => { throw hostile; }; }],

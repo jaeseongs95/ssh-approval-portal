@@ -9,6 +9,8 @@ import { inspectCommand, validateCommandPolicy } from '../src/domain/command-pol
 import { createCommandState } from '../src/adapters/storage/command-state.mjs';
 import { createAikSshTool } from '../src/adapters/aik/ssh-tool.mjs';
 import { createJevAssessor } from '../src/adapters/safety/jev.mjs';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
 const low = { status: 'assessed', model: 'jev-1.14.0', label: 'low_risk', confidence: 1,
   probabilities: { low_risk: 1, high_risk: 0 } };
@@ -178,9 +180,32 @@ test('durable admission restores interrupted evaluation/execution as unknown and
   const root = await mkdtemp(join(tmpdir(), 'command-state-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   let state = createCommandState(root);
-  for (const status of ['evaluating', 'running', 'pending']) state.insert({ id: status, state: status }, status, 'digest');
+  for (const status of ['evaluating', 'running', 'queued', 'pending']) state.insert({ id: status, state: status }, status, 'digest');
   state.close(); state = createCommandState(root);
-  assert.deepEqual(state.list().map(job => job.state), ['unknown', 'unknown', 'expired']); state.close();
+  assert.deepEqual(state.list().map(job => job.state), ['unknown', 'unknown', 'unknown', 'expired']); state.close();
+});
+
+test('startup restores a persisted queued command as unknown and never automatically replays it', { timeout: 10000 }, async t => {
+  const f = await fixture(t); await f.policy({});
+  const key = 'fixture-queued-restart-0001', command = 'sudo id';
+  const completed = await f.run(command, key);
+  assert.equal(completed.state, 'completed'); assert.equal(f.executions.length, 1);
+  await f.app.close();
+  const state = createCommandState(f.root);
+  try {
+    const persisted = state.find(key);
+    assert.equal(persisted.job.id, completed.id);
+    const queued = { ...persisted.job, state: 'queued', approvalMode: 'automatic' };
+    delete queued.result; delete queued.finishedAt;
+    state.save(queued);
+  } finally { state.close(); }
+  await f.restart();
+  const restored = f.app.queue.get(completed.id);
+  assert.equal(restored.state, 'unknown'); assert.equal(restored.approvalMode, 'automatic');
+  assert.equal(f.executions.length, 1, 'startup adds no execution');
+  const replay = await f.run(command, key);
+  assert.equal(replay.id, completed.id); assert.equal(replay.state, 'unknown');
+  assert.equal(f.executions.length, 1, 'the same request key cannot replay a recovered queued command');
 });
 
 test('owner authentication, exact Origin, revision and target bindings protect policy mutations', async t => {
@@ -561,14 +586,40 @@ test('test server bypass overrides deny, sudo and missing evaluators only after 
 });
 
 
-test('test server busy rejection is terminal and never becomes owner approval or deferred execution', async t => {
- const f = await fixture(t); await f.policy({ commands: [], testServer: true, externalDisclosure: false });
- const queue=f.app.targets.select('default').queue, externalBusy=queue.externalBusy; queue.externalBusy=()=>true;
- const job=await f.run('sudo id','test-server-busy-key-0001','');
- assert.equal(job.state,'failed'); assert.equal(job.decision.dispatchFailure,'not_dispatched');assert.equal(job.decision.dispatchFailureReason,'busy');assert.equal(job.decision.dispatchFailureStage,'busy_check'); assert.equal(job.approvalMode,undefined);
- assert.equal(f.executions.length,0);queue.externalBusy=externalBusy;
- assert.equal((await f.run('sudo id','test-server-busy-key-0001','')).id,job.id);assert.equal(f.executions.length,0);
- assert.throws(()=>queue.start(job.id),/not pending/);
+test('test server automatic command waits for execution capacity and replay never dispatches twice', async t => {
+ const held=Promise.withResolvers(),entered=Promise.withResolvers(),executed=[];
+ const f=await fixture(t,{executeCommand:async(_profile,command)=>{executed.push(command);if(command==='sudo first'){entered.resolve();await held.promise;}return{failed:false,texts:['ok']};}});
+ await f.policy({commands:[],testServer:true,externalDisclosure:false});
+ await new Promise(resolve=>f.app.mcpHttp.listen(0,'127.0.0.1',resolve));
+ const client=new Client({name:'execution-queue-contract',version:'1'});
+ try {
+  await client.connect(new StreamableHTTPClientTransport(new URL('http://127.0.0.1:'+f.app.mcpHttp.address().port+'/mcp'),{requestInit:{headers:{Authorization:'Bearer fixture-mcp'}}}));
+  const first=await f.app.targets.commands.run('sudo first');await entered.promise;
+  const request=await client.callTool({name:'run-command',arguments:{command:'sudo id',requestKey:'test-server-busy-key-0001',context:''}});
+  assert.equal(request.isError,undefined);const job=request.structuredContent;assert.equal(job.state,'queued');assert.equal(job.approvalMode,'automatic');assert.equal(job.decision.reasonCode,'test_server_bypass');assert.equal(job.decision.dispatchFailure,undefined);
+  const approved=await client.callTool({name:'wait-for-request',arguments:{id:job.id,until:'approval',timeoutMs:5000}});
+  assert.equal(approved.structuredContent.state,'queued');assert.equal(approved.structuredContent.callback.approved,true);assert.equal(approved.structuredContent.callback.executionSucceeded,false);
+  const completion=client.callTool({name:'wait-for-request',arguments:{id:job.id,until:'completion',timeoutMs:5000}});
+  assert.deepEqual(executed,['sudo first']);
+  held.resolve();await f.app.queue.wait(first.job.id);await f.app.queue.wait(job.id);
+  const completed=await completion;assert.equal(completed.structuredContent.state,'completed');assert.equal(completed.structuredContent.callback.executionSucceeded,true);
+  assert.equal(f.app.queue.get(job.id).state,'completed');assert.deepEqual(executed,['sudo first','sudo id']);
+  const replay=await f.app.targets.commands.run('sudo id',undefined,'test-server-busy-key-0001','');assert.equal(replay.job.id,job.id);assert.equal(executed.length,2);
+ } finally {held.resolve();await client.close();}
+});
+
+test('application shutdown cancels queued automatic work and drains only the active command', {timeout:10000}, async t => {
+ const held=Promise.withResolvers(),entered=Promise.withResolvers(),executed=[];
+ const f=await fixture(t,{executeCommand:async(_profile,command)=>{executed.push(command);entered.resolve();await held.promise;return{failed:false,texts:['ok']};}});
+ await f.policy({commands:[],testServer:true,externalDisclosure:false});
+ try {
+  const first=await f.app.targets.commands.run('sudo first');await entered.promise;
+  const second=await f.app.targets.commands.run('sudo second');assert.equal(f.app.queue.get(second.job.id).state,'queued');
+  const queuedDone=f.app.queue.wait(second.job.id),closing=f.app.close();
+  const cancelled=await queuedDone;assert.equal(cancelled.state,'failed');assert.equal(cancelled.decision.dispatchFailure,'not_dispatched');assert.equal(cancelled.decision.dispatchFailureReason,'maintenance');
+  assert.equal(f.app.queue.get(first.job.id).state,'running');assert.deepEqual(executed,['sudo first']);
+  held.resolve();await closing;assert.equal(f.app.queue.get(first.job.id).state,'completed');assert.deepEqual(executed,['sudo first']);
+ } finally {held.resolve();}
 });
 
 

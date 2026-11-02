@@ -3,7 +3,7 @@ import { fileTargetBinding } from '../../domain/file-target-binding.mjs';
 import { executionFailureDetails, safeExecutionFailure } from '../../domain/execution-failure.mjs';
 
 const identifier = z.string().regex(/^[a-f0-9]{48}$/);
-const state = z.enum(['pending', 'evaluating', 'running', 'completed', 'failed', 'denied', 'expired', 'unknown']);
+const state = z.enum(['pending', 'evaluating', 'queued', 'running', 'completed', 'failed', 'denied', 'expired', 'unknown']);
 const content = z.array(z.object({ type: z.literal('text'), text: z.string() }));
 const outcome = z.object({ failed: z.boolean(), texts: z.array(z.string()), data: z.object({}).passthrough().optional() });
 const legacyOutcome = z.object({ content, isError: z.boolean().optional(), structuredContent: z.object({}).passthrough().optional() }).passthrough();
@@ -87,6 +87,7 @@ export function publicResult(value, schema) {
 }
 
 export const jobResult = job => publicResult({ ...presentJob(job),
+  ...(job.state === 'queued' ? { message: 'Approval is complete. This request is waiting for its execution turn. Call wait-for-request with the same ID and until: completion; never resubmit or approve it again.' } : {}),
   ...(['pending', 'evaluating'].includes(job.state) ? { approvalCallback: {
     tool: 'wait-for-request', arguments: { id: job.id, until: 'approval', timeoutMs: 25000 },
     instruction: 'After presenting owner approval, call wait-for-request to receive the decision without asking the user to confirm in chat. On timeout, wait on the same ID; never resubmit the operation.',

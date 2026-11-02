@@ -341,11 +341,16 @@ test('test server executes source without disclosure, model, source opt-in or su
 });
 
 
-test('test server source busy rejection releases the private plan without owner approval or replay',async t=>{
- const f=await fixture(t);await f.policy({testServer:true});
- const q=f.app.targets.select('default').queue, busy=q.externalBusy;q.externalBusy=()=>true;
- const args={requestKey:'test-source-busy-key-0001',context:''};const job=await f.run(args);
- assert.equal(job.state,'failed');assert.equal(job.decision.dispatchFailure,'not_dispatched');assert.equal(job.decision.dispatchFailureReason,'busy');assert.equal(job.decision.dispatchFailureStage,'busy_check');assert.equal(f.executions.length,0);
- assert.throws(()=>f.app.targets.commands.source(job.id));q.externalBusy=busy;
- assert.equal((await f.run(args)).id,job.id);assert.equal(f.executions.length,0);
+test('test server source retains its private plan while queued and executes exact bytes once',async t=>{
+ const held=Promise.withResolvers(),entered=Promise.withResolvers(),executed=[];
+ const firstSource='print("first")\n';
+ const f=await fixture(t,{executePythonSource:async(plan,verify)=>{verify();executed.push(plan.stdin);if(plan.stdin===firstSource){entered.resolve();await held.promise;}return{failed:false,texts:['ok']};}});await f.policy({testServer:true});
+ try {
+  const first=await f.app.targets.commands.runSource({source:firstSource,cwd:'/tmp',context:''});await entered.promise;
+  const args={source,cwd:'/tmp',requestKey:'test-source-busy-key-0001',context:''};const request=await f.app.targets.commands.runSource(args),job=f.app.queue.get(request.job.id);
+  assert.equal(job.state,'queued');assert.equal(job.approvalMode,'automatic');assert.equal(job.decision.dispatchFailure,undefined);assert.deepEqual(executed,[firstSource]);
+  held.resolve();await f.app.queue.wait(first.job.id);await f.app.queue.wait(job.id);
+  assert.equal(f.app.queue.get(job.id).state,'completed');assert.deepEqual(executed,[firstSource,source]);
+  assert.equal((await f.app.targets.commands.runSource(args)).job.id,job.id);assert.equal(executed.length,2);
+ } finally {held.resolve();}
 });

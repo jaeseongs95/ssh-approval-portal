@@ -25,7 +25,7 @@ export function createCardController({ state, view, host, document, hashFile, en
     if (state.mode === 'probe') return view.probe(state.probeMarker, state.meta);
     if (state.mode === 'transfer') return view.transfer(state.transfer, state.meta, (config, file) => submit(config, file, context), target => selectTarget(target, context));
     view.job(state.job, state.meta, { decide: action => decide(action, context), save: () => save(context), output: () => output(context) });
-    if (['pending', 'evaluating', 'running'].includes(state.job.state)) polling = timers.setInterval(() => {
+    if (['pending', 'evaluating', 'queued', 'running'].includes(state.job.state)) polling = timers.setInterval(() => {
       if (!document.hidden) refresh().catch(() => {
         if (state.current(context)) view.error(t('연결이 끊겼습니다. 명령은 재실행하지 않습니다.'));
       });
@@ -59,7 +59,7 @@ export function createCardController({ state, view, host, document, hashFile, en
     try {
       const result = await call(context, 'get-request-status', { id: context.job.id });
       if (result.structuredContent?.error) { stopPolling(); view.missing(); return; }
-      if (result.structuredContent?.state === 'pending' && context.meta.uiEnabled && !context.meta.approvalTicket) {
+      if (['pending', 'queued'].includes(result.structuredContent?.state) && context.meta.uiEnabled && !context.meta.approvalTicket) {
         receive(await call(context, 'show-approval', { id: context.job.id }));
       } else receive(result);
     } catch (error) { if (error !== stale && state.current(context)) throw error; }
@@ -75,7 +75,7 @@ export function createCardController({ state, view, host, document, hashFile, en
   }
   function decide(action, context) {
     return act(async context => {
-      if (!context.meta.uiEnabled || !context.meta.approvalTicket || context.job?.state !== 'pending') return;
+      if (!context.meta.uiEnabled || !context.meta.approvalTicket || !(context.job?.state === 'pending' || context.job?.state === 'queued' && action === 'deny')) return;
       receive(await call(context, 'ui-decide-request', { id: context.job.id, action, ticket: context.meta.approvalTicket }));
     }, context);
   }

@@ -32,7 +32,7 @@ export function createAgentCliService({queue,journal,resolveTarget,readInstallat
  const beforeStart=job=>{
   dispatchStep('cli_guard',open);
   const entry=executions.get(job?.id);
-  if(!isJob(job)||!entry||!['pending','running'].includes(job.state)||JSON.stringify(job.operation)!==entry.operationJson||job.profile!==entry.binding.profile)dispatchRefusal('private_plan','cli_guard','CLI private execution plan unavailable; never reconstruct or replay');
+  if(!isJob(job)||!entry||!['pending','queued','running'].includes(job.state)||JSON.stringify(job.operation)!==entry.operationJson||job.profile!==entry.binding.profile)dispatchRefusal('private_plan','cli_guard','CLI private execution plan unavailable; never reconstruct or replay');
   dispatchStep('target_guard',()=>verifyBinding(entry.binding),'target_changed');
   if(now()>=entry.intent.expiresAt)dispatchRefusal('plan_expired','cli_guard','CLI plan expired');
   dispatchStep('policy_guard',()=>checkPolicy(entry.plan,entry.binding));
@@ -91,7 +91,7 @@ export function createAgentCliService({queue,journal,resolveTarget,readInstallat
    reap();const preview=previews.get(body.planId);
    if(!preview||JSON.stringify(preview.binding)!==JSON.stringify(binding)||preview.installation.installationRevision!==request.expectedInstallationRevision)throw Error('CLI preview changed or expired');
    const intent=agentCliIntent(request,{binding,release:preview.release,expiresAt:preview.expiresAt,now:now()});
-   if(queue.listAll().some(job=>isJob(job)&&job.operation.agentCliProvider===intent.provider&&job.operation.agentCliTargetId===binding.targetId&&['pending','evaluating','running'].includes(job.state)))throw Error('CLI installation already pending or running');
+   if(queue.listAll().some(job=>isJob(job)&&job.operation.agentCliProvider===intent.provider&&job.operation.agentCliTargetId===binding.targetId&&['pending','evaluating','queued','running'].includes(job.state)))throw Error('CLI installation already pending or running');
    const operationId=nonce();if(!id(operationId))throw Error('CLI operation identity unavailable');
    const plan=preparePlan({action:intent.action,provider:intent.provider,binding,release:preview.release,expectedInstallationRevision:intent.expectedInstallationRevision,expiresAt:intent.expiresAt,operationId});
    checkPolicy(plan,binding);

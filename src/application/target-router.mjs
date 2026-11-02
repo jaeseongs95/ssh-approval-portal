@@ -1,16 +1,49 @@
 import { fileTargetFields } from '../domain/file-target-binding.mjs';
 import { platformOf, targetCapabilities } from '../domain/target-platform.mjs';
 
-/** Single-process synchronous claims; callers release in finally, with no hidden waiting queue. */
-export function createClaims(limit) {
-  let used = 0;
+/** Single-process synchronous claims; callers release in finally, with bounded waiting reservations and release notifications. */
+export function createClaims(limit, { maxWaiting = 32, onSubscriberError = () => {} } = {}) {
+  if (!Number.isSafeInteger(limit) || limit < 1 || !Number.isSafeInteger(maxWaiting) || maxWaiting < 0) {
+    throw new RangeError('Invalid execution claim limits');
+  }
+  if (typeof onSubscriberError !== 'function') throw new TypeError('Invalid execution claim error handler');
+  let used = 0, waiting = 0, scheduled = false;
+  const subscribers = new Set();
+  const notify = () => {
+    if (scheduled || !subscribers.size) return;
+    scheduled = true;
+    queueMicrotask(() => {
+      scheduled = false;
+      for (const listener of [...subscribers]) {
+        if (!subscribers.has(listener)) continue;
+        try { listener.callback(); }
+        catch (error) {
+          // The caller owns safe error reporting; observer failures cannot stop other queues.
+          try { onSubscriberError(error); } catch { /* No reporting failure may consume a wakeup. */ }
+        }
+      }
+    });
+  };
   const claim = () => {
     if (used >= limit) throw Error('Global concurrency limit reached');
     used++;
     let released = false;
-    return () => { if (!released) { released = true; used--; } };
+    return () => { if (!released) { released = true; used--; notify(); } };
   };
   claim.busy = () => used >= limit;
+  claim.reserveWait = () => {
+    if (waiting >= maxWaiting) throw Object.assign(Error('Execution queue is full'), { code: 'EXECUTION_QUEUE_FULL' });
+    waiting++;
+    let released = false;
+    return () => { if (!released) { released = true; waiting--; notify(); } };
+  };
+  claim.waiting = () => waiting;
+  claim.subscribe = callback => {
+    if (typeof callback !== 'function') throw new TypeError('Invalid execution claim subscriber');
+    const listener = { callback };
+    subscribers.add(listener);
+    return () => { subscribers.delete(listener); };
+  };
   return claim;
 }
 
@@ -67,7 +100,7 @@ export function createTargetRouter(runtimes, { defaultTarget, legacy, store, aud
     busy: () => runtimes.some(runtime => runtime.queue.busy()),
     reap() { let failure; for (const runtime of runtimes) { try { runtime.queue.reap(); } catch (error) { failure ??= error; } } if (failure) throw failure; },
     reserveMaintenance() {
-      if (maintenance || runtimes.some(runtime => runtime.commands.busy() || runtime.files.busy() || runtime.queue.busy() || runtime.queue.listAll().some(job => ['pending', 'evaluating'].includes(job.state))) || store.hasActiveWork()) throw Error('All targets must finish before maintenance');
+      if (maintenance || runtimes.some(runtime => runtime.commands.busy() || runtime.files.busy() || runtime.queue.busy() || runtime.queue.listAll().some(job => ['pending', 'evaluating', 'queued'].includes(job.state))) || store.hasActiveWork()) throw Error('All targets must finish before maintenance');
       audit({ action: 'maintenance-reserved' }); queue.maintenance = true;
     },
     releaseMaintenance() { audit({ action: 'maintenance-released' }); queue.maintenance = false; },
@@ -90,6 +123,6 @@ export function createTargetRouter(runtimes, { defaultTarget, legacy, store, aud
       reap: () => store.reap(),
       close: () => Promise.all(runtimes.map(runtime => runtime.files.close())),
     },
-    async drain() { await Promise.all(runtimes.flatMap(runtime => [runtime.queue.active?.completion, runtime.commands.drain(),runtime.cliDrain?.()])); },
+    async drain() { await Promise.all(runtimes.flatMap(runtime => [runtime.queue.active?.completion, ...runtime.queue.waiting.map(entry => entry.job.completion), runtime.commands.drain(),runtime.cliDrain?.()])); },
   };
 }

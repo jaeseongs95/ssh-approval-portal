@@ -103,7 +103,7 @@ export async function createApplication({ registry, classify, executeCommand, ex
     inspect() { const policy = source.inspect(url); return { allowed: policy.allowed, sourceHost: policy.sourceHost ?? policy.hostname }; },
     open: options => source.open(url, options),
   };
-  const execute = commandExecutor(executeCommand), claimExecution = createClaims(2), claimImport = createClaims(2);
+  const execute = commandExecutor(executeCommand), claimExecution = createClaims(2, { onSubscriberError: () => audit({ action: 'execution-wakeup-failed' }) }), claimImport = createClaims(2);
   const runtimes = definitions.map(definition => {
     const { target, readProfile, writeProfile, identity } = definition;
     const platform = platformOf(definition), targetClassify = classifyForTarget(definition, classify);

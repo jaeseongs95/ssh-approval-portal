@@ -17,7 +17,7 @@ export function createCommandState(root) {
     db.prepare('INSERT OR IGNORE INTO policy VALUES (1,0,?)').run(JSON.stringify({ targets: [] }));
     for (const row of db.prepare('SELECT id,body FROM requests').all()) {
       const job = JSON.parse(row.body);
-      if (['running', 'evaluating'].includes(job.state)) { job.state = 'unknown'; job.finishedAt = Date.now(); }
+      if (['queued', 'running', 'evaluating'].includes(job.state)) { job.state = 'unknown'; job.finishedAt = Date.now(); }
       else if (job.state === 'pending') { job.state = 'expired'; job.finishedAt = Date.now(); }
       db.prepare('UPDATE requests SET body=? WHERE id=?').run(JSON.stringify(job), row.id);
     }

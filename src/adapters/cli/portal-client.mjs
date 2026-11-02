@@ -6,7 +6,7 @@ import { anyRemotePath as validateRemotePath } from '../../domain/validation.mjs
 
 const fail = (code, details = {}) => Object.assign(new Error(code), { code, ...details });
 const identifier = value => { if (typeof value !== 'string' || !/^[a-f0-9]{48}$/.test(value)) throw fail('INVALID_REQUEST_ID'); return value; };
-const jobStates = new Set(['pending', 'evaluating', 'running', 'completed', 'failed', 'denied', 'expired', 'unknown']);
+const jobStates = new Set(['pending', 'evaluating', 'queued', 'running', 'completed', 'failed', 'denied', 'expired', 'unknown']);
 export function validateUploadExpectation(value) {
   if (value === undefined) return undefined;
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length !== 2 ||
@@ -143,7 +143,7 @@ export function createPortalClient({ origin, accessToken, signal, timeoutMs = 12
     async decide(id, action, confirm) {
       if (confirm !== true || !['approve', 'deny'].includes(action)) throw fail('EXPLICIT_OWNER_DECISION_REQUIRED');
       const job = await knownJob(id);
-      if (job.state !== 'pending') return job; // Observe terminal/unknown; never replay.
+      if (job.state !== 'pending' && !(job.state === 'queued' && action === 'deny')) return job; // Observe queued approvals and running/terminal/unknown; never replay.
       try { return await json('/api/' + id + '/' + action, {}); }
       catch (error) { throw fail(error.code ?? 'PORTAL_RESULT_UNKNOWN', { requestId: id, phase: action }); }
     },

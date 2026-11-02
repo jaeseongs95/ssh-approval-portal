@@ -25,6 +25,15 @@ export class ApprovalQueue {
     this.identity = identity && Object.freeze({ ...identity }); this.claimExecution = claimExecution;
     this.jobs = new Map(); this.active = null; this.maintenance = false;
     this.requestWaiters = new Set();
+    this.waiting = []; this.draining = false;
+    this.unsubscribeExecution = claimExecution.subscribe?.(() => this.drainExecution());
+  }
+  get maintenance() { return this._maintenance ?? false; }
+  set maintenance(value) {
+    this._maintenance = value;
+    if (value && this.waiting) for (const entry of [...this.waiting]) {
+      this.finishQueued(entry, 'failed', { dispatchFailureReason: 'maintenance', dispatchFailureStage: 'maintenance' });
+    }
   }
   submit(command, safeOnly = false, context = '', displayContext = '') {
     const { class: commandClass } = validateCommand(command, this.classify, safeOnly);
@@ -59,6 +68,10 @@ export class ApprovalQueue {
   }
   get(id) {
     const job = this.jobs.get(id);
+    if (job?.state === 'queued' && this.now() >= job.expiresAt) {
+      const entry = this.waiting.find(item => item.job === job);
+      if (entry) this.finishQueued(entry, 'expired');
+    }
     if (['pending', 'evaluating'].includes(job?.state) && this.now() >= job.expiresAt) {
       // Expiry is irrevocable even if the audit adapter fails. Callers handle that failure.
       job.state = 'expired'; job.finishedAt = this.now();
@@ -68,25 +81,32 @@ export class ApprovalQueue {
   }
   listAll() { return [...this.jobs.keys()].map(id => this.get(id)); }
   list() { return this.listAll().filter(job => job.state === 'pending'); }
-  busy() { return Boolean(this.active) || this.externalBusy(); }
+  executionBusy() { return Boolean(this.active) || this.externalBusy(); }
+  busy() { return Boolean(this.waiting.length) || this.executionBusy(); }
   reserveMaintenance() {
-    if (this.maintenance || this.busy() || this.listAll().some(job => ['pending', 'evaluating'].includes(job.state))) throw Error('Requests must finish before maintenance');
+    if (this.maintenance || this.busy() || this.listAll().some(job => ['pending', 'evaluating', 'queued'].includes(job.state))) throw Error('Requests must finish before maintenance');
     this.audit({ action: 'maintenance-reserved' }); this.maintenance = true;
   }
   releaseMaintenance() { this.audit({ action: 'maintenance-released' }); this.maintenance = false; }
   reap() {
     for (const [id, job] of this.jobs) {
       this.get(id);
-      if (!['pending', 'evaluating', 'running'].includes(job.state) && this.now() > (job.finishedAt ?? job.expiresAt) + 3_600_000) this.jobs.delete(id);
+      if (!['pending', 'evaluating', 'queued', 'running'].includes(job.state) && this.now() > (job.finishedAt ?? job.expiresAt) + 3_600_000) this.jobs.delete(id);
     }
   }
   deny(id) {
     const job = this.jobs.get(id);
+    if (job && this.get(id).state === 'queued') {
+      this.finishQueued(this.waiting.find(entry => entry.job === job), 'denied');
+      this.drainExecution(); return this.public(job);
+    }
     if (!job || this.get(id).state !== 'pending') throw Error('Request is not pending');
     this.audit({ action: 'denied', id });
     job.state = 'denied'; job.finishedAt = this.now(); try { job.persist?.(this.public(job)); } finally { try { this.onTerminal(job); } finally { this.notifyRequest(job); } } return this.public(job);
   }
-  restore(job, persist) { this.jobs.set(job.id, { ...job, operation: Object.freeze({ ...job.operation }), persist }); }
+  restore(job, persist) {
+    this.jobs.set(job.id, { ...job, ...(job.state === 'queued' ? { state: 'unknown', finishedAt: this.now() } : {}), operation: Object.freeze({ ...job.operation }), persist });
+  }
   track(id, persist) { this.jobs.get(id).persist = persist; }
   beginEvaluation(id) { this.jobs.get(id).state = 'evaluating'; }
   abortEvaluation(id) { const job = this.jobs.get(id); job.state = 'unknown'; job.finishedAt = this.now(); try { this.onTerminal(job); } finally { this.notifyRequest(job); } }
@@ -114,7 +134,8 @@ export class ApprovalQueue {
   }
   rejectAutomaticDispatch(id, error) {
     const job = this.jobs.get(id);
-    if (!job || this.get(id).state !== 'pending' || job.decision?.reasonCode !== 'test_server_bypass') return false;
+    if (!job || this.get(id).state !== 'pending' || (job.decision?.reasonCode !== 'test_server_bypass'
+        && !(job.decision?.decision === 'execute' && dispatchFailureDetails(error).dispatchFailureReason === 'queue_full'))) return false;
     job.state = 'failed'; job.finishedAt = this.now();
     const details = dispatchFailureDetails(error);
     job.decision = { ...job.decision, dispatchFailure: 'not_dispatched', ...details };
@@ -128,6 +149,13 @@ export class ApprovalQueue {
     const job = this.jobs.get(id);
     if (!job || this.get(id).state !== 'pending') dispatchRefusal('request_state', 'request_state', 'Request is not pending');
     if (automatic) dispatchRefusal('authority', 'authority', 'Server policy authority required');
+    this.checkStart(job, authority);
+    if (this.waiting.length || dispatchStep('busy_check', () => this.executionBusy())) return this.enqueueExecution(job, authority);
+    return this.dispatch(job, authority);
+  }
+  checkStart(job, authority) {
+    if (this.maintenance) dispatchRefusal('maintenance', 'maintenance', 'Maintenance in progress');
+    if (!['pending', 'queued'].includes(job.state) || this.now() >= job.expiresAt) dispatchRefusal('request_state', 'request_state', 'Request is not executable');
     // Source requests use the exact private-plan guard; the fixed quoted receiver
     // contains newlines that the legacy string-command boundary rightly rejects.
     if (job.operation.kind === 'command' && !job.operation.sourceContract) dispatchStep('command_validation', () => validateCommand(job.operation.command, this.classify), 'invalid_command');
@@ -136,14 +164,99 @@ export class ApprovalQueue {
     if (authority === UPLOAD_AUTHORITY || authority === DOWNLOAD_AUTHORITY) {
       const decision = dispatchStep('file_guard', () => (authority === UPLOAD_AUTHORITY ? this.beforeUploadStart : this.beforeDownloadStart)?.(this.public(job)));
       if (!decision || decision.decision !== 'execute') dispatchRefusal('authority', 'file_guard', 'File policy authority required');
-      dispatchStep('decision_persistence', () => this.setDecision(id, decision), 'persistence_failed');
+      dispatchStep('decision_persistence', () => this.setDecision(job.id, decision), 'persistence_failed');
     }
-    if (dispatchStep('busy_check', () => this.busy())) dispatchRefusal('busy', 'busy_check', 'A request is already executing');
+  }
+  enqueueExecution(job, authority) {
+    let releaseWait;
+    try {
+      if (this.claimExecution.reserveWait) releaseWait = this.claimExecution.reserveWait();
+      else {
+        if (this.waiting.length >= 32) throw Error('Execution queue full');
+        releaseWait = () => {};
+      }
+    } catch { dispatchRefusal('queue_full', 'execution_queue', 'Execution queue is full'); }
+    const entry = { job, authority, releaseWait, resolve: undefined, timer: undefined };
+    const policyAuthority = [COMMAND_AUTHORITY, UPLOAD_AUTHORITY, DOWNLOAD_AUTHORITY].includes(authority);
+    job.approvalMode = policyAuthority ? 'automatic' : 'owner'; job.state = 'queued';
+    try {
+      dispatchStep('start_audit', () => this.audit({ action: 'execution-queued', ...this.public(job) }), 'audit_failed');
+      dispatchStep('start_persistence', () => job.persist?.(this.public(job)), 'persistence_failed');
+    } catch (error) {
+      job.state = 'pending'; delete job.approvalMode; releaseWait(); throw error;
+    }
+    job.completion = new Promise(resolve => { entry.resolve = resolve; });
+    this.waiting.push(entry);
+    const expire = () => {
+      if (entry.job.state !== 'queued') return;
+      if (this.now() < job.expiresAt) { entry.timer = setTimeout(expire, Math.max(1, job.expiresAt - this.now())); entry.timer.unref?.(); return; }
+      this.finishQueued(entry, 'expired'); this.drainExecution();
+    };
+    entry.timer = setTimeout(expire, Math.max(1, job.expiresAt - this.now()));
+    entry.timer.unref?.();
+    this.notifyRequest(job); this.drainExecution();
+    return this.public(job);
+  }
+  removeQueued(entry) {
+    const index = this.waiting.indexOf(entry);
+    if (index < 0) return false;
+    this.waiting.splice(index, 1); clearTimeout(entry.timer); entry.releaseWait(); return true;
+  }
+  finishQueued(entry, state, details) {
+    if (!entry || !this.removeQueued(entry)) return;
+    const job = entry.job;
+    job.state = state; job.finishedAt = this.now();
+    if (details) {
+      job.decision = { ...job.decision, dispatchFailure: 'not_dispatched', ...details };
+      job.result = { failed: true, texts: ['Execution queue admission ended before dispatch; operation was not executed.'] };
+    }
+    try { job.persist?.(this.public(job)); this.audit({ action: 'execution-queue-' + state, id: job.id, ...details }); }
+    catch { job.auditError = 'Queue terminal audit write failed; operation must not be retried automatically'; }
+    finally {
+      try { this.onTerminal(job); }
+      catch { job.auditError = 'Queue terminal cleanup failed; operation must not be retried automatically'; }
+      finally { this.notifyRequest(job); entry.resolve(this.public(job)); }
+    }
+  }
+  drainExecution() {
+    if (this.draining || this.maintenance) return;
+    this.draining = true;
+    try {
+      while (this.waiting.length) {
+        const entry = this.waiting[0], job = entry.job;
+        if (this.now() >= job.expiresAt) { this.finishQueued(entry, 'expired'); continue; }
+        try {
+          this.checkStart(job, entry.authority);
+          if (this.executionBusy()) return;
+          this.removeQueued(entry);
+          this.dispatch(job, entry.authority);
+          job.completion.then(entry.resolve, () => entry.resolve(this.public(job)));
+          return;
+        } catch (error) {
+          // A failed guard never reaches the executor and must not block later entries.
+          if (this.waiting.includes(entry)) this.finishQueued(entry, 'failed', dispatchFailureDetails(error));
+          // Guards may observe expiry through get(), which already finalizes the entry.
+          else if (!['pending', 'queued'].includes(job.state)) entry.resolve(this.public(job));
+          else {
+            job.state = 'failed'; job.finishedAt = this.now();
+            job.decision = { ...job.decision, dispatchFailure: 'not_dispatched', ...dispatchFailureDetails(error) };
+            job.result = { failed: true, texts: ['Execution was refused before dispatch.'] };
+            try { job.persist?.(this.public(job)); } catch { job.auditError = 'Queue dispatch failure could not be persisted'; }
+            try { this.onTerminal(job); }
+            catch { job.auditError = 'Queue terminal cleanup failed; operation must not be retried automatically'; }
+            finally { this.notifyRequest(job); entry.resolve(this.public(job)); }
+          }
+        }
+      }
+    } finally { this.draining = false; }
+  }
+  dispatch(job, authority) {
+    const id = job.id;
     const release = dispatchStep('execution_claim', () => this.claimExecution(), 'claim_failed');
     const policyAuthority = authority === COMMAND_AUTHORITY || authority === UPLOAD_AUTHORITY || authority === DOWNLOAD_AUTHORITY;
-    const approvalMode = policyAuthority || automatic ? 'automatic' : 'owner';
+    const approvalMode = policyAuthority ? 'automatic' : 'owner';
     try {
-      dispatchStep('start_audit', () => this.audit({ action: policyAuthority ? 'policy-execution-started' : automatic ? 'read-started' : 'approved', ...this.public(job), approvalMode }), 'audit_failed');
+      dispatchStep('start_audit', () => this.audit({ action: policyAuthority ? 'policy-execution-started' : 'approved', ...this.public(job), approvalMode }), 'audit_failed');
       job.approvalMode = approvalMode; job.state = 'running'; dispatchStep('start_persistence', () => job.persist?.(this.public(job)), 'persistence_failed');
     } catch (error) {
       delete job.approvalMode;
@@ -165,7 +278,7 @@ export class ApprovalQueue {
       } finally {
         job.finishedAt = this.now();
         try { this.audit({ action: job.state, id, failure: job.result?.failure }); job.persist?.(this.public(job)); } catch { job.auditError = 'Final audit write failed; operation must not be retried automatically'; }
-        this.active = null; try { this.onTerminal(job); } finally { try { release(); } finally { this.notifyRequest(job); } }
+        this.active = null; try { this.onTerminal(job); } finally { try { release(); } finally { this.notifyRequest(job); this.drainExecution(); } }
       }
       return this.public(job);
     });
@@ -177,7 +290,7 @@ export class ApprovalQueue {
     signal?.throwIfAborted();
     const current = this.get(id);
     const eventFor = job => !job ? 'missing' : ['pending', 'evaluating'].includes(job.state) ? null
-      : job.state === 'running' ? until === 'approval' && ['owner', 'automatic'].includes(job.approvalMode) ? 'approved' : null : job.state;
+      : ['queued', 'running'].includes(job.state) ? until === 'approval' && ['owner', 'automatic'].includes(job.approvalMode) ? 'approved' : null : job.state;
     const event = eventFor(current);
     if (event) return Promise.resolve({ job: current, event, until });
     // ponytail: bounded per-target subscriptions; a shared broker is unnecessary for one bridge process.
@@ -200,7 +313,7 @@ export class ApprovalQueue {
           finish(job, eventFor(job) ?? 'timeout');
         } catch (error) { finish(null, null, error); }
       };
-      const approvalRemaining = ['pending', 'evaluating'].includes(current.state) ? Math.max(1, current.expiresAt - this.now()) : timeoutMs;
+      const approvalRemaining = ['pending', 'evaluating', 'queued'].includes(current.state) ? Math.max(1, current.expiresAt - this.now()) : timeoutMs;
       timer = setTimeout(expireWait, Math.min(timeoutMs, approvalRemaining));
     });
   }
