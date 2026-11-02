@@ -111,6 +111,21 @@ jobs:
           fi
           cat "$RUNNER_TEMP/approval-expiry-red.log"
           grep -q '^# fail 1$' "$RUNNER_TEMP/approval-expiry-red.log"
+      - name: Cross-dialect setup regression rejects the previous source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp src/adapters/mcp/client-setup.mjs "$RUNNER_TEMP/client-setup.dialect-current.mjs"
+          trap 'cp "$RUNNER_TEMP/client-setup.dialect-current.mjs" src/adapters/mcp/client-setup.mjs' EXIT
+          git show 59095c63ea9ac4961553a5c8acc768305b55d99a:src/adapters/mcp/client-setup.mjs > src/adapters/mcp/client-setup.mjs
+          if node --test --test-reporter=tap --test-name-pattern='^SDK-published MCP schemas compile' test/mcp-contracts.test.mjs > "$RUNNER_TEMP/client-setup-dialect-red.log" 2>&1; then
+            cat "$RUNNER_TEMP/client-setup-dialect-red.log"
+            echo 'Expected pre-fix tuple schema incompatibility was not observed' >&2
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/client-setup-dialect-red.log"
+          grep -q '^# fail 1$' "$RUNNER_TEMP/client-setup-dialect-red.log"
+          grep -q 'get-client-setup.outputSchema 2020-12' "$RUNNER_TEMP/client-setup-dialect-red.log"
       - name: Client setup regression rejects the previous source
         shell: bash
         run: |

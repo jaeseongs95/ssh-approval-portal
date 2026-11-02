@@ -10,6 +10,10 @@ const clientSchema = z.object({
 export const clientSetupInputSchema = z.object({ client: clientSchema.default({ localProcess: false, localStdio: false, hostFileInput: false, ui: false }) }).strict();
 const guidance = z.string().min(1).max(2048);
 const coreTool = z.enum(['list-targets', 'run-command', 'run-python-source', 'get-request-status', 'wait-for-request', 'read-command-output']);
+// Whole-array enum preserves tuple order in both draft-07 and 2020-12 schemas.
+const fixedStringArray = values => z.array(z.enum(values)).length(values.length)
+  .refine(items => items.every((item, index) => item === values[index]), 'Expected the exact ordered values')
+  .meta({ enum: [values] });
 export const clientSetupOutputSchema = z.object({
   contract: z.literal('agent-client-setup-v1'),
   client: clientSchema,
@@ -19,10 +23,10 @@ export const clientSetupOutputSchema = z.object({
   core: z.object({ uiRequired: z.literal(false), tools: z.array(coreTool).min(1).max(6), guidance }).strict(),
   local: z.object({
     doctor: z.object({ executable: z.literal('node'), argv: z.array(z.string().min(1).max(4096)).length(4),
-      optionalArgs: z.tuple([z.literal('--cloudflared'), z.literal('<existing absolute executable>')]),
+      optionalArgs: fixedStringArray(['--cloudflared', '<existing absolute executable>']),
       cwd: z.literal('<trusted package root>') }).strict(),
     prerequisites: z.array(guidance).min(1).max(5),
-    cloudflared: z.object({ precedence: z.tuple([z.literal('--cloudflared'), z.literal('PORTAL_CLOUDFLARED'), z.literal('PATH')]), guidance }).strict(),
+    cloudflared: z.object({ precedence: fixedStringArray(['--cloudflared', 'PORTAL_CLOUDFLARED', 'PATH']), guidance }).strict(),
   }).strict(),
   fileTransport: z.object({ guidance }).strict(),
   approvals: z.object({ adminUrl: z.string().url().max(4096), ownerRequiredByPolicy: z.literal(true), agentSelfApproval: z.literal(false), guidance }).strict(),

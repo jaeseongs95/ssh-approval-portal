@@ -7,6 +7,9 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import Ajv from 'ajv';
+import Ajv2020 from 'ajv/dist/2020.js';
+import addFormats from 'ajv-formats';
 import { createProtocolAdapters } from '../src/adapters/http/protocol.mjs';
 import { Tickets } from '../src/adapters/security/tickets.mjs';
 import { authorizeAdminRequest } from '../src/adapters/security/admin-policy.mjs';
@@ -196,6 +199,54 @@ test('provider-neutral capabilities are exact, public and read-only; core tools 
       }
     } finally { await f.close(); }
   }
+});
+
+test('SDK-published MCP schemas compile as draft-07 and remain structurally compatible with 2020-12 (setup tuple regression)', async () => {
+  const f = await fixture();
+  try {
+    const { tools } = await f.client.listTools();
+    assert.equal(tools.length, 22);
+    const validators = [new Ajv({ strict: false, allErrors: true }), new Ajv2020({ strict: false, allErrors: true })];
+    const setupValidators = [];
+    for (const [index, ajv] of validators.entries()) {
+      addFormats(ajv);
+      let compiled = 0;
+      for (const tool of tools) {
+        for (const key of ['inputSchema', 'outputSchema']) {
+          const published = tool[key];
+          assert.ok(published, `${tool.name}.${key}`);
+          assert.equal(published.$schema, 'http://json-schema.org/draft-07/schema#');
+          // Only relabel the dialect for this compatibility check; the published body stays intact.
+          const schema = index === 0 ? published : { ...published, $schema: 'https://json-schema.org/draft/2020-12/schema' };
+          let validate;
+          assert.doesNotThrow(() => { validate = ajv.compile(schema); }, `${tool.name}.${key} ${index === 0 ? 'draft-07' : '2020-12'}`);
+          compiled++;
+          if (tool.name === 'get-client-setup' && key === 'outputSchema') setupValidators.push(validate);
+        }
+      }
+      assert.equal(compiled, 44);
+    }
+    assert.equal(setupValidators.length, 2);
+    const result = (await f.call('get-client-setup')).structuredContent;
+    assert.deepEqual(clientSetupOutputSchema.parse(result), result);
+    for (const validate of setupValidators) assert.equal(validate(result), true, JSON.stringify(validate.errors));
+    for (const [section, field, expected] of [
+      ['doctor', 'optionalArgs', ['--cloudflared', '<existing absolute executable>']],
+      ['cloudflared', 'precedence', ['--cloudflared', 'PORTAL_CLOUDFLARED', 'PATH']],
+    ]) {
+      assert.deepEqual(result.local[section][field], expected);
+      for (const invalid of [
+        [...expected].reverse(), expected.slice(0, -1), [...expected, expected[0]],
+        expected.map(() => expected[0]), [...expected.slice(0, -1), 'unexpected-value'],
+      ]) {
+        const changed = structuredClone(result);
+        changed.local[section][field] = invalid;
+        const label = `${section}.${field}: ${JSON.stringify(invalid)}`;
+        assert.equal(clientSetupOutputSchema.safeParse(changed).success, false, label);
+        for (const validate of setupValidators) assert.equal(validate(changed), false, label);
+      }
+    }
+  } finally { await f.close(); }
 });
 
 test('client setup chooses routes from reported abilities, never from product names or server UI, without execution', async () => {
