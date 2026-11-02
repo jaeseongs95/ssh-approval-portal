@@ -6,7 +6,7 @@
     {
       "path": ".dockerignore",
       "size": 303,
-      "sha256": "0d19a07c4c313e89a6bf220cbfc69263d8b3734e75e3c8567c1992ab97fa363f"
+      "sha256": "836f906ee8ecc37a4c9ba17fb1d0ec96974c91257e41c66d4642e29cae3c167a"
     },
     {
       "path": "LICENSE",
@@ -16,12 +16,12 @@
     {
       "path": "README.ko.md",
       "size": 22901,
-      "sha256": "5d9c177899a3586b746018b08583fe49bf20ab3357d4b7feed934fa2bc7b34ce"
+      "sha256": "087d9a4eb07ef8b442d61e45002ecfc57f3250b9741065e89d61ebb3c9b0e736"
     },
     {
       "path": "README.md",
       "size": 20895,
-      "sha256": "571d3807dd872fbe48479d3ffca23168fb00ac967593d8b9a8b8e809bb75f87d"
+      "sha256": "3c00b04d877006e2a69731f96e1e33464691c3b0acd929753cc49abc30804c4d"
     },
     {
       "path": "THIRD_PARTY_NOTICES.json",
@@ -51,7 +51,7 @@
     {
       "path": "config/docker.example.env",
       "size": 73,
-      "sha256": "7f4f4e071af40882f933dc3c4ce2409b46a27ca18b71c931b36e057c91ecfb7f"
+      "sha256": "28446b307a3066b9b62aa26655ea1cef6d080fa262a96fc48f5ac1da4dc9ded3"
     },
     {
       "path": "config/settings-contract.json",
@@ -1455,8 +1455,8 @@
     },
     {
       "path": "test/multiline-commands.test.mjs",
-      "size": 13839,
-      "sha256": "84c2af31ade5555602cfc220e31a3260f85accb757af5439c44936ed6327133b"
+      "size": 14100,
+      "sha256": "94fda236232b8a417a886afe4cc4314590c99126b7d0a92f27bb397524088821"
     },
     {
       "path": "test/non-cloudflare-container-test.sh",

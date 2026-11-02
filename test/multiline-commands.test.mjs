@@ -147,7 +147,8 @@ async function fixture(t, platform, automation = true) {
 
 for (const platform of ['linux', 'windows']) {
   test(`ML-AUTH ${platform} multiline requires full review and preserves owner/model/TEST routes`, async t => {
-    const f = await fixture(t, platform), raw = platform === 'linux' ? linuxCommands[2] : windowsCommands[0];
+    const f = await fixture(t, platform), raw = platform === 'linux' ? linuxCommands[2]
+      : windowsCommands[0] + "\nMicrosoft.PowerShell.Utility\\Write-Output 'synthetic tail'";
     await f.policy({});
     const pending = await f.run(raw, 'multiline-owner-key');
     assert.equal(pending.state, 'pending'); assert.equal(pending.command, raw); assert.equal(pending.operation.command, raw);
@@ -164,7 +165,9 @@ for (const platform of ['linux', 'windows']) {
     const model = await f.run(raw);
     assert.equal(model.state, 'completed'); assert.equal(model.decision.reasonCode, 'model_passed');
     assert.equal(f.inputs.length, 1); assert.equal(f.inputs[0].command, raw); assert.equal(f.inputs[0].userApproval.explicit, false);
-    const deniedCommands = platform === 'linux' ? ['cat'] : ['Console'];
+    // Windows policies require a module-qualified cmdlet or executable name;
+    // the .NET type name Console is not a registrable command-policy name.
+    const deniedCommands = platform === 'linux' ? ['cat'] : ['Microsoft.PowerShell.Utility\\Write-Output'];
     await f.policy({ externalDisclosure: false, modelExecution: false, deniedCommands });
     const denied = await f.run(raw);
     assert.equal(denied.state, 'denied'); assert.equal(denied.decision.reasonCode, 'policy_denied');
