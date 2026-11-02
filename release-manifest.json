@@ -215,8 +215,8 @@
     },
     {
       "path": "docs/request-queue.ko.md",
-      "size": 5243,
-      "sha256": "b33fb999bc145d5641ff8f0efc9c4a00dcc782b795c8af6804d2987c62c24c0d"
+      "size": 5615,
+      "sha256": "7b19e34396c7fdd2396640c90d2b28bcd2f96665f8502201d8b668d329c2dbd0"
     },
     {
       "path": "docs/roadmap.ko.md",
@@ -1140,8 +1140,8 @@
     },
     {
       "path": "test/command-lifecycle.test.mjs",
-      "size": 10851,
-      "sha256": "2775546f5c42acd01565e938eca41aff750e6c753c8f4afaf4428315c39cb025"
+      "size": 11232,
+      "sha256": "8f1cdcd6919c1e46f1124fc55eeea908e8dcd2b4afa30c2bba5e8c4e07397c2c"
     },
     {
       "path": "test/command-limits.test.mjs",
@@ -1345,13 +1345,13 @@
     },
     {
       "path": "test/http-admission.test.mjs",
-      "size": 22470,
-      "sha256": "e887df57acc40797586efc74f69a6dc24d0f2f98296e1d728bde32804fa809f3"
+      "size": 23546,
+      "sha256": "c761acbea88b86e4bb24b23191e964ee66804e317385b8e86196361a31173fdc"
     },
     {
       "path": "test/http-races.test.mjs",
-      "size": 6587,
-      "sha256": "4ba1db29a3efeadb5c29407a211bcdace59503de197dc85970a6b4e8a735d3cc"
+      "size": 7336,
+      "sha256": "da657868e4284aa56032b3a2549b182e14ecd35b51537a5170c902b97cf6953e"
     },
     {
       "path": "test/http.test.mjs",
@@ -1450,8 +1450,8 @@
     },
     {
       "path": "test/multi-target.test.mjs",
-      "size": 14416,
-      "sha256": "5253d741b5ac14e5c8d38a7a7f2297f23610fd536f2eb5d0742a43d2da48006b"
+      "size": 15383,
+      "sha256": "ca7b9204b46912b3b3a57091f87b2fae26d8ff1dc9a45c08a1e0ca7cf2c87c20"
     },
     {
       "path": "test/non-cloudflare-container-test.sh",
@@ -1570,8 +1570,8 @@
     },
     {
       "path": "test/request-capacity.test.mjs",
-      "size": 5986,
-      "sha256": "8d077c76fb779c18867466990968afa685d13deecd55b967dab7ce0707745c58"
+      "size": 6418,
+      "sha256": "593f0c9654602fcee33fc0d707be358e870f672f3188065f888600d1dfb74f6b"
     },
     {
       "path": "test/request-safety-http.test.mjs",

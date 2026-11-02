@@ -74,15 +74,18 @@ test('custom capacity stays bounded, retains terminal output for one hour and ne
 });
 
 test('larger capacity preserves per-target serialization and external execution claims', async () => {
-  let finish, claims = 0, releases = 0, externalBusy = false;
+  let claims = 0, releases = 0, externalBusy = false;
+  const effects = [], first = Promise.withResolvers(), second = Promise.withResolvers();
   const queue = new ApprovalQueue({ ...ports, requestCapacity: 101, externalBusy: () => externalBusy,
-    claimExecution: () => { claims++; return () => { releases++; }; },
-    executeOperation: () => new Promise(resolve => { finish = resolve; }) });
-  const a = queue.submit('sudo id'), b = queue.submit('sudo id');
-  externalBusy = true; assert.throws(() => queue.start(a.id), /already executing/); assert.equal(claims, 0);
-  externalBusy = false; queue.start(a.id); await Promise.resolve();
-  assert.throws(() => queue.start(b.id), /already executing/); assert.equal(claims, 1);
-  finish({ failed: false, texts: [] }); await queue.wait(a.id); assert.equal(releases, 1);
-  queue.start(b.id); await Promise.resolve(); finish({ failed: false, texts: [] }); await queue.wait(b.id);
+    claimExecution: () => { assert.equal(claims - releases, 0, 'only one execution claim may be active'); claims++; return () => { releases++; }; },
+    executeOperation: operation => { effects.push(operation.command); return effects.length === 1 ? first.promise : second.promise; } });
+  const a = queue.submit('sudo first'), b = queue.submit('sudo second');
+  externalBusy = true; assert.equal(queue.start(a.id).state, 'queued'); assert.equal(claims, 0); assert.deepEqual(effects, []);
+  externalBusy = false; queue.drainExecution(); await Promise.resolve();
+  assert.equal(queue.start(b.id).state, 'queued'); assert.equal(claims, 1); assert.deepEqual(effects, ['sudo first']);
+  first.resolve({ failed: false, texts: [] }); await queue.wait(a.id); await Promise.resolve();
+  assert.equal(releases, 1); assert.deepEqual(effects, ['sudo first', 'sudo second']);
+  second.resolve({ failed: false, texts: [] }); await queue.wait(b.id);
   assert.equal(claims, 2); assert.equal(releases, 2);
+  assert.deepEqual(effects, ['sudo first', 'sudo second']); assert.equal(queue.busy(), false);
 });

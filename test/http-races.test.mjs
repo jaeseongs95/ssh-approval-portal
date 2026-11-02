@@ -53,9 +53,9 @@ test('one download URL is claimed before verification await; simultaneous replay
 
 
 for(const failed of [false,true])test(`asynchronous owner approval acknowledges acceptance before execution ${failed?'fails':'completes'}`,async t=>{
- const root=await mkdtemp(join(tmpdir(),'ssh-async-approval-'));let release,executions=0;
+ const root=await mkdtemp(join(tmpdir(),'ssh-async-approval-'));let release,executions=0;const executed=[];
  const gate=new Promise(resolve=>{release=resolve;});
- const app=await createApplication({registry:{getProfile:name=>({host:'127.0.0.1',port:22,user:'fixture',readOnly:name==='aws-readonly'}),closeAll:async()=>{}},classify:()=>({class:'privileged'}),executeCommand:async()=>{executions++;await gate;return {failed,texts:['synthetic terminal result']};},audit:()=>{},transferRoot:root,env:{BRIDGE_MCP_TOKEN:'fixture-mcp',BRIDGE_ADMIN_TOKEN:'fixture-admin',BRIDGE_ADMIN_ORIGIN:'https://example.test',BRIDGE_UI_TICKET_KEY:'d'.repeat(64)},uiHtml:'<html></html>'});
+ const app=await createApplication({registry:{getProfile:name=>({host:'127.0.0.1',port:22,user:'fixture',readOnly:name==='aws-readonly'}),closeAll:async()=>{}},classify:()=>({class:'privileged'}),executeCommand:async(_profile,command)=>{executions++;executed.push(command);await gate;return {failed,texts:['synthetic terminal result']};},audit:()=>{},transferRoot:root,env:{BRIDGE_MCP_TOKEN:'fixture-mcp',BRIDGE_ADMIN_TOKEN:'fixture-admin',BRIDGE_ADMIN_ORIGIN:'https://example.test',BRIDGE_UI_TICKET_KEY:'d'.repeat(64)},uiHtml:'<html></html>'});
  t.after(async()=>{release();await app.close();await rm(root,{recursive:true,force:true});});
  await new Promise(resolve=>app.adminHttp.listen(0,'127.0.0.1',resolve));const base=`http://127.0.0.1:${app.adminHttp.address().port}`;
  const job=app.queue.submit('sudo id'),other=app.queue.submit('sudo hostname');
@@ -67,8 +67,13 @@ for(const failed of [false,true])test(`asynchronous owner approval acknowledges 
  const response=attempts.find(r=>r.status===202);assert.equal(response.headers.get('preference-applied'),'respond-async');
  const accepted=await response.json();assert.equal(accepted.id,job.id);assert.equal(accepted.state,'running');assert.equal(accepted.approvalMode,'owner');assert.equal(accepted.result,undefined);assert.equal(executions,1);
  const status=await fetch(`${base}/api/${job.id}`,{headers:{Authorization:headers.Authorization}});assert.equal((await status.json()).state,'running');
+ const queuedResponse=await approve(other.id);assert.equal(queuedResponse.status,202);assert.equal(queuedResponse.headers.get('preference-applied'),'respond-async');
+ const queued=await queuedResponse.json();assert.equal(queued.id,other.id);assert.equal(queued.state,'queued');assert.equal(queued.approvalMode,'owner');assert.equal(queued.result,undefined);
+ assert.equal(app.queue.get(other.id).state,'queued');assert.equal(executions,1);assert.deepEqual(executed,['sudo id']);
  assert.equal((await approve(other.id)).status,409);assert.equal(executions,1);
  // The approval response and its HTTP connection are already complete; the job remains server-owned.
- release();await app.queue.wait(job.id);assert.equal(app.queue.get(job.id).state,failed?'failed':'completed');assert.equal(executions,1);
- assert.equal((await approve(job.id)).status,409);assert.equal(executions,1);
+ release();await app.queue.wait(job.id);await app.queue.wait(other.id);
+ assert.equal(app.queue.get(job.id).state,failed?'failed':'completed');assert.equal(app.queue.get(other.id).state,failed?'failed':'completed');
+ assert.equal(executions,2);assert.deepEqual(executed,['sudo id','sudo hostname']);
+ assert.equal((await approve(job.id)).status,409);assert.equal((await approve(other.id)).status,409);assert.equal(executions,2);
 });

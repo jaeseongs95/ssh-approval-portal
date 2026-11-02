@@ -7,34 +7,38 @@ import { ApprovalQueue } from '../src/domain/approval-queue.mjs';
 import { createCommandService } from '../src/application/commands.mjs';
 import { createLifecycleService } from '../src/application/lifecycle.mjs';
 import { createAudit } from '../src/adapters/audit/jsonl.mjs';
+import { createClaims } from '../src/application/target-router.mjs';
 
 const outcome = { failed: false, texts: ['ok'] };
 const classify = command => ({ class: command.startsWith('cat ') ? 'read-only' : 'privileged' });
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
-function commandFixture({ executeCommand = async () => outcome, audit = () => {}, now } = {}) {
+function commandFixture({ executeCommand = async () => outcome, executeOperation = async () => outcome, audit = () => {}, now } = {}) {
   let commands;
+  const claimExecution = createClaims(1);
   const queue = new ApprovalQueue({ profile: 'writer', target: 'host', classify, audit, now,
-    executeOperation: async () => outcome, externalBusy: () => commands?.busy() ?? false });
-  commands = createCommandService({ queue, classify, executeCommand, audit, target: 'host', readProfile: 'reader' });
+    executeOperation, claimExecution, externalBusy: () => (commands?.busy() ?? false) || claimExecution.busy() });
+  commands = createCommandService({ queue, classify, executeCommand, audit, target: 'host', readProfile: 'reader', claimExecution });
   return { queue, commands };
 }
 
 test('AP-02 read rejection records failure, hides transport text, and releases the shared execution claim', async () => {
-  const events = [], gate = deferred();
+  const events = [], gate = deferred(), effects = [];
   const { queue, commands } = commandFixture({ audit: event => events.push(event), executeCommand: async profile => {
     assert.equal(profile, 'reader'); await gate.promise; throw Error('SECRET-TRANSPORT-CONTENT');
-  } });
+  }, executeOperation: async operation => { effects.push(operation.command); return outcome; } });
   const read = commands.read('cat /tmp/a');
   assert.equal(commands.busy(), true); assert.equal(queue.busy(), true);
-  const job = queue.submit('sudo id'); assert.throws(() => queue.start(job.id), /already executing/);
+  const job = queue.submit('sudo id'); assert.equal(queue.start(job.id).state, 'queued');
+  assert.deepEqual(effects, []);
   await assert.rejects(commands.read('cat /tmp/b'), /another operation/);
   gate.resolve();
   await assert.rejects(read, error => {
     assert.match(error.message, /Operation failed/); assert.equal(error.message.includes('SECRET'), false); return true;
   });
-  assert.deepEqual(events.map(event => event.action), ['read-started', 'submitted', 'read-failed']);
+  assert.equal((await queue.wait(job.id)).state, 'completed');
+  assert.deepEqual(events.map(event => event.action), ['read-started', 'submitted', 'execution-queued', 'read-failed', 'approved', 'completed']);
   assert.equal(commands.busy(), false); assert.equal(queue.busy(), false);
-  queue.start(job.id); assert.equal((await queue.wait(job.id)).state, 'completed');
+  assert.deepEqual(effects, ['sudo id']);
 });
 
 test('read audit failures preserve fail-closed admission and release the claim after terminal audit errors', async () => {

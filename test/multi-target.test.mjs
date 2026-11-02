@@ -79,15 +79,21 @@ test('file bootstrap, staged bytes, approval tickets and cleanup remain target-o
 });
 
 test('global execution slots, per-target serialization, audit failures, configuration fencing and shutdown drain',async()=>{
- const gate=deferred();const f=await fixture({requestCapacity:'101',execute:async()=>{await gate.promise;return {failed:false,texts:['done']};}});try {
+ const alpha=deferred(),beta=deferred(),write=deferred();let active=0,peak=0,downloads=0;
+ const f=await fixture({requestCapacity:'101',execute:async profile=>{active++;peak=Math.max(peak,active);try{await (profile==='alpha-read'?alpha:profile==='beta-read'?beta:write).promise;return {failed:false,texts:['done']};}finally{active--;}}});try {
   const a=f.app.targets.commands.read('id','alpha'),b=f.app.targets.commands.read('id','beta');await until(()=>f.calls.length===2);
   await assert.rejects(f.app.targets.commands.read('id','alpha'));await assert.rejects(f.app.targets.commands.read('id','gamma'));assert.equal(f.calls.length,2);
-  const download=f.app.targets.files.requestDownload({target:'gamma',remotePath:'/tmp/read.bin',elevate:false});assert.equal(download.state,'pending');assert.ok(f.app.queue.list().some(j=>j.id===download.id),'A deferred download is visible for owner review');assert.throws(()=>f.app.queue.start(download.id));f.app.queue.deny(download.id);
-  const job=f.app.queue.submit('sudo id',false,'gamma');assert.throws(()=>f.app.queue.start(job.id));assert.equal(f.app.queue.get(job.id).state,'pending');f.app.queue.deny(job.id);
+  f.app.targets.select('gamma').transfers.download=async()=>{downloads++;active++;peak=Math.max(peak,active);try{return {failed:false,texts:['downloaded']};}finally{active--;}};
+  const download=f.app.targets.files.requestDownload({target:'gamma',remotePath:'/tmp/read.bin',elevate:false});assert.equal(download.state,'pending');assert.ok(f.app.queue.list().some(j=>j.id===download.id),'A deferred download is visible for owner review');assert.equal(f.app.queue.start(download.id).state,'queued');
+  const job=f.app.queue.submit('sudo id',false,'gamma');assert.equal(f.app.queue.start(job.id).state,'queued');assert.equal(f.app.queue.get(job.id).approvalMode,'owner');
+  assert.equal(downloads,0);assert.equal(f.calls.filter(call=>call.profile==='gamma-write').length,0);assert.equal(peak,2);
   assert.equal((await f.http('/api/maintenance/reserve','POST')).status,409);
+  alpha.resolve();await a;assert.equal((await f.app.queue.wait(download.id)).state,'completed');await until(()=>f.calls.some(call=>call.profile==='gamma-write'));
+  assert.equal(downloads,1);assert.equal(f.calls.filter(call=>call.profile==='gamma-write').length,1);assert.equal(peak,2);assert.equal(active,2);
   const closing=f.app.close();await settle();assert.equal(f.closed,false);assert.equal(f.app.queue.maintenance,true);
-  gate.resolve();await Promise.all([a,b,closing]);assert.equal(f.closed,true);
- }finally{gate.resolve();await f.close();}
+  beta.resolve();write.resolve();await Promise.all([b,closing]);assert.equal(f.closed,true);assert.equal(peak,2);assert.equal(active,0);
+  assert.equal(downloads,1);assert.equal(f.calls.filter(call=>call.profile==='gamma-write').length,1);
+ }finally{alpha.resolve();beta.resolve();write.resolve();await f.close();}
  const g=await fixture({auditFails:event=>event.action==='approved'&&event.targetId==='alpha'});try {
   const a=g.app.queue.submit('sudo id',false,'alpha');assert.throws(()=>g.app.queue.start(a.id));assert.equal(g.calls.length,0);
   const stored=await g.app.targets.commands.read('id','beta');assert.equal(stored.output.state,'ready');assert.deepEqual(stored.texts,[]);
