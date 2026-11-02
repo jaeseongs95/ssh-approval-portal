@@ -29,6 +29,7 @@ const targetId = z.string().regex(/^[a-z][a-z0-9_-]{0,31}$/);
 const transferSchema = z.object({
   transfer: z.object({ target: targetId.optional(), direction: z.enum(['upload', 'download']), remotePath: z.string(), elevate: z.boolean(), overwrite: z.boolean() }),
   uiEnabled: z.boolean(), maxBytes: z.number().int().positive(),
+  setup: z.object({ tool: z.literal('get-client-setup'), guidance: z.string().min(1).max(2048) }).strict(),
 });
 
 // SDK 1.32.1 only normalizes object output schemas. Presenters validate exact variants;
@@ -99,7 +100,7 @@ export function immediateResult(value, identity) {
   return { ...publicResult({ state: value.failed ? 'failed' : 'completed', kind: 'command', ...identity, ...result.structuredContent }, immediateSchema), ...(value.failed ? { isError: true } : {}) };
 }
 export const sourceUnavailable = sourceHost => ({ ...publicResult({ error: 'upload-source-not-configured', sourceHost,
-  message: 'File was not fetched or queued. An administrator must configure a verified exact hostname or *.domain pattern for this provider. Check get-client-capabilities for local CLI or stdio file transports; the card file picker is an alternative only when supported and enabled.' }, sourceUnavailableSchema), isError: true });
+  message: 'File was not fetched or queued. An administrator must configure a verified exact hostname or *.domain pattern for this provider. Check get-client-capabilities and get-client-setup for local CLI or stdio file transports; the card file picker is an alternative only when supported and enabled. Missing cards do not prove those local transports are unavailable.' }, sourceUnavailableSchema), isError: true });
 const contextRefusals = new Map([
   ['INVALID_COMMAND_CONTEXT', 'Command context must be text without NUL characters.'],
   ['COMMAND_CONTEXT_TOO_LARGE', 'Command context exceeds the 8192-character limit.'],

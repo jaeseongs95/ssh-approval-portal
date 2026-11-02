@@ -1,0 +1,73 @@
+import { z } from 'zod';
+
+const clientSchema = z.object({
+  localProcess: z.boolean().default(false),
+  localStdio: z.boolean().default(false),
+  hostFileInput: z.boolean().default(false),
+  ui: z.boolean().default(false),
+}).strict();
+
+export const clientSetupInputSchema = z.object({ client: clientSchema.default({ localProcess: false, localStdio: false, hostFileInput: false, ui: false }) }).strict();
+const guidance = z.string().min(1).max(2048);
+const coreTool = z.enum(['list-targets', 'run-command', 'run-python-source', 'get-request-status', 'wait-for-request', 'read-command-output']);
+export const clientSetupOutputSchema = z.object({
+  contract: z.literal('agent-client-setup-v1'),
+  client: clientSchema,
+  recommendedRoute: z.enum(['local-cli', 'local-stdio', 'host-file-input', 'owner-ui', 'unavailable']),
+  localReadiness: z.literal('requires-local-check'),
+  serverUi: z.object({ enabled: z.boolean(), clientRenderingVerified: z.literal(false) }).strict(),
+  core: z.object({ uiRequired: z.literal(false), tools: z.array(coreTool).min(1).max(6), guidance }).strict(),
+  local: z.object({
+    doctor: z.object({ executable: z.literal('node'), argv: z.array(z.string().min(1).max(4096)).length(4),
+      optionalArgs: z.tuple([z.literal('--cloudflared'), z.literal('<existing absolute executable>')]),
+      cwd: z.literal('<trusted package root>') }).strict(),
+    prerequisites: z.array(guidance).min(1).max(5),
+    cloudflared: z.object({ precedence: z.tuple([z.literal('--cloudflared'), z.literal('PORTAL_CLOUDFLARED'), z.literal('PATH')]), guidance }).strict(),
+  }).strict(),
+  fileTransport: z.object({ guidance }).strict(),
+  approvals: z.object({ adminUrl: z.string().url().max(4096), ownerRequiredByPolicy: z.literal(true), agentSelfApproval: z.literal(false), guidance }).strict(),
+  limitations: z.array(guidance).min(1).max(5),
+  documentation: z.literal('docs/agent-clients.ko.md'),
+}).strict();
+
+const routeGuidance = {
+  'local-cli': 'The caller reports local process access. After checking authorized local file access, package installation and owner authentication, use scripts/portal-client.mjs upload, request-download, status and save. Local process access alone does not prove local readiness.',
+  'local-stdio': 'The caller reports local stdio MCP support. The owner must configure scripts/portal-file-mcp.mjs with a manifest of authorized file IDs and a dedicated journal. Use file_capabilities, file_upload, file_download_request, file_status and file_save; remote command tools remain on the remote MCP server.',
+  'host-file-input': 'The caller reports the openai/fileParams host file-input contract. Use request-upload only with a real authorized host-provided download_url and file_id and an administrator-configured source hostname. This contract does not imply local PC file access or a download-save transport.',
+  'owner-ui': 'The caller reports a user interface. The owner can use the existing administrator page for file transfer and required approval; an MCP Apps card additionally requires server UI enablement and actual client rendering support. Do not treat serverUi.enabled as proof that a card rendered.',
+  unavailable: 'No file transport was reported. First check whether this client has authorized local process access or can register a local stdio MCP server. Do not infer those abilities from the AI product name or a missing card. If neither is available, ask the owner to use the existing administrator page; do not claim that this client can transfer PC files.',
+};
+
+// Pure guidance only: the remote server cannot inspect the caller's PC or authenticate it.
+export function clientSetup(input, settings) {
+  const { client } = clientSetupInputSchema.parse(input);
+  const recommendedRoute = client.localProcess ? 'local-cli' : client.localStdio ? 'local-stdio'
+    : client.hostFileInput ? 'host-file-input' : client.ui ? 'owner-ui' : 'unavailable';
+  return clientSetupOutputSchema.parse({
+    contract: 'agent-client-setup-v1', client, recommendedRoute, localReadiness: 'requires-local-check',
+    serverUi: { enabled: settings.uiEnabled, clientRenderingVerified: false },
+    core: { uiRequired: false, tools: ['list-targets', 'run-command', 'run-python-source', 'get-request-status', 'wait-for-request', 'read-command-output'],
+      guidance: 'Core requests, status, approval waiting and output reads use standard MCP JSON inputs and text results without cards. Check list-targets, submit the authorized exact request under server policy, retain its ID, present pending approval on the existing administrator page, wait-for-request with the SAME ID, and read-command-output by returned offsets. Read content text if structuredContent is unavailable. Timeout, missing, unknown, failed or expired results never authorize automatic replay or resubmission.' },
+    local: {
+      doctor: { executable: 'node', argv: ['scripts/portal-client.mjs', '--origin', settings.adminOrigin, 'doctor'],
+        optionalArgs: ['--cloudflared', '<existing absolute executable>'], cwd: '<trusted package root>' },
+      prerequisites: [
+        'A trusted package root containing scripts/portal-client.mjs, the package-required Node.js version and its dependencies must exist on the client machine.',
+        'The agent needs authorized local process and file access for CLI transfer, or an owner-configured local stdio manifest for file-ID tools.',
+        'Current local owner authentication uses Cloudflare Access. Existing owner authentication must be checked locally; interactive login belongs to the owner. Do not copy credentials or authentication tokens into model context.',
+        'Run doctor locally before transfer to check readiness. It does not submit SSH execution, transfer files, approve requests or prove an untested end-to-end operation.',
+      ],
+      cloudflared: { precedence: ['--cloudflared', 'PORTAL_CLOUDFLARED', 'PATH'],
+        guidance: 'Resolve the exact executable in this order: explicit --cloudflared absolute path, PORTAL_CLOUDFLARED absolute path, then exact cloudflared executable names on PATH. A portable installation outside PATH needs an explicit flag or environment setting. A PATH miss does not prove cloudflared is uninstalled. Do not recursively search disks or execute a similarly named program. Append the optional --cloudflared argument pair to doctor only after locating an existing absolute executable; otherwise let environment/PATH discovery run.' },
+    },
+    fileTransport: { guidance: routeGuidance[recommendedRoute] },
+    approvals: { adminUrl: settings.adminOrigin, ownerRequiredByPolicy: true, agentSelfApproval: false,
+      guidance: 'Use only the existing administrator page and returned request ID for owner review when policy requires it. This setup tool issues no approval link or token. Never call owner approval commands or private ui-* tools to self-approve; never automatically approve or replay a request.' },
+    limitations: [
+      'Client flags are caller-reported abilities, not verified availability. Missing flags default to false and do not prove that a capability is impossible.',
+      'The remote MCP server cannot inspect client package installation, local executable discovery, authentication cache, local file permissions or UI rendering.',
+      'Never invent file URLs or treat opaque file IDs and server-side paths as PC file bytes. Never place file bytes in shell commands or copy credentials to bypass a missing file transport.',
+    ],
+    documentation: 'docs/agent-clients.ko.md',
+  });
+}

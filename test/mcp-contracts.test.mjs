@@ -11,6 +11,7 @@ import { createProtocolAdapters } from '../src/adapters/http/protocol.mjs';
 import { Tickets } from '../src/adapters/security/tickets.mjs';
 import { authorizeAdminRequest } from '../src/adapters/security/admin-policy.mjs';
 import { CommandOutputs } from '../src/adapters/storage/command-output.mjs';
+import { clientSetupOutputSchema } from '../src/adapters/mcp/client-setup.mjs';
 
 const identifier = 'a'.repeat(48);
 
@@ -100,7 +101,7 @@ test('MCP contract families preserve tool names, JSON text, private capabilities
   const f = await fixture();
   try {
     const { tools } = await f.client.listTools();
-    assert.deepEqual(tools.map(tool => tool.name), ['get-client-capabilities', 'list-targets', 'read-command', 'run-command', 'run-python-source', 'request-safe-command', 'get-request-status', 'wait-for-request', 'assess-request-risk', 'request-upload', 'show-ui-probe', 'show-approval', 'show-file-transfer', 'request-download', 'ui-decide-request', 'ui-upload-begin', 'ui-upload-chunk', 'ui-upload-finish', 'ui-download-link', 'read-command-output', 'ui-read-command-output']);
+    assert.deepEqual(tools.map(tool => tool.name), ['get-client-capabilities', 'get-client-setup', 'list-targets', 'read-command', 'run-command', 'run-python-source', 'request-safe-command', 'get-request-status', 'wait-for-request', 'assess-request-risk', 'request-upload', 'show-ui-probe', 'show-approval', 'show-file-transfer', 'request-download', 'ui-decide-request', 'ui-upload-begin', 'ui-upload-chunk', 'ui-upload-finish', 'ui-download-link', 'read-command-output', 'ui-read-command-output']);
     for (const tool of tools) assert.equal(tool.outputSchema.type, 'object', tool.name);
     const upload = tools.find(tool => tool.name === 'request-upload');
     assert.deepEqual(upload._meta['openai/fileParams'], ['file']); assert.match(upload.description, /only that host contract/);
@@ -157,6 +158,7 @@ test('provider-neutral capabilities are exact, public and read-only; core tools 
         hostFileInput: { tool: 'request-upload', contract: 'openai/fileParams' },
         approvals: { ownerRequiredByPolicy: true, agentSelfApproval: false, adminUrl: adminOrigin },
         ui: { enabled, optional: true },
+        setup: { tool: 'get-client-setup' },
         documentation: 'docs/agent-clients.ko.md',
       };
       const result = await f.call('get-client-capabilities');
@@ -192,6 +194,119 @@ test('provider-neutral capabilities are exact, public and read-only; core tools 
         assert.match(unavailable.structuredContent.message, /only when supported and enabled/);
         assert.doesNotMatch(JSON.stringify(unavailable), /PRIVATE-FILE-|download_url|signature=|file_id/);
       }
+    } finally { await f.close(); }
+  }
+});
+
+test('client setup chooses routes from reported abilities, never from product names or server UI, without execution', async () => {
+  const cases = [
+    [{}, 'unavailable'],
+    [{ client: {} }, 'unavailable'],
+    [{ client: { localProcess: false, localStdio: false, hostFileInput: false, ui: false } }, 'unavailable'],
+    [{ client: { localProcess: true } }, 'local-cli'],
+    [{ client: { localStdio: true } }, 'local-stdio'],
+    [{ client: { hostFileInput: true } }, 'host-file-input'],
+    [{ client: { ui: true } }, 'owner-ui'],
+    [{ client: { localProcess: true, localStdio: true, hostFileInput: true, ui: true } }, 'local-cli'],
+    [{ client: { localStdio: true, hostFileInput: true, ui: true } }, 'local-stdio'],
+    [{ client: { hostFileInput: true, ui: true } }, 'host-file-input'],
+  ];
+  for (const enabled of [false, true]) {
+    const adminOrigin = enabled ? 'https://enabled-admin.example.test' : 'https://no-cards.example.test';
+    const forbidden = () => assert.fail('setup must not execute commands, access files, approve or create tickets');
+    const f = await fixture({ settings: { ...settings, uiEnabled: enabled, adminOrigin },
+      queue: { get: forbidden, submit: forbidden, start: forbidden, deny: forbidden },
+      files: { requestUpload: forbidden, requestDownload: forbidden },
+      signer: { issue: forbidden }, commandOutputs: { read: forbidden }, bindFileSource: forbidden });
+    f.commands.read = f.commands.run = forbidden;
+    try {
+      const descriptor = (await f.client.listTools()).tools.find(tool => tool.name === 'get-client-setup');
+      assert.equal(descriptor.annotations.readOnlyHint, true);
+      assert.equal(descriptor.annotations.destructiveHint, false);
+      assert.equal(descriptor._meta, undefined);
+      assert.equal(descriptor.inputSchema.additionalProperties, false);
+      assert.equal(descriptor.inputSchema.properties.client.additionalProperties, false);
+      assert.deepEqual(Object.keys(descriptor.inputSchema.properties.client.properties).sort(), ['hostFileInput', 'localProcess', 'localStdio', 'ui']);
+      assert.equal(descriptor.outputSchema.type, 'object');
+      assert.equal(descriptor.outputSchema.additionalProperties, false);
+      assert.deepEqual(descriptor.outputSchema.properties.recommendedRoute.enum, ['local-cli', 'local-stdio', 'host-file-input', 'owner-ui', 'unavailable']);
+      assert.equal(descriptor.outputSchema.properties.local.properties.doctor.properties.argv.maxItems, 4);
+      assert.equal(descriptor.outputSchema.properties.local.properties.prerequisites.maxItems, 5);
+      for (const [input, route] of cases) {
+        const response = await f.call('get-client-setup', input);
+        assert.equal(response.isError, undefined, JSON.stringify(response));
+        const result = response.structuredContent;
+        assert.deepEqual(clientSetupOutputSchema.parse(result), result);
+        assert.deepEqual(Object.keys(result).sort(), Object.keys(descriptor.outputSchema.properties).sort());
+        assert.deepEqual([...descriptor.outputSchema.required].sort(), Object.keys(result).sort());
+        // A text-only host can discard structuredContent and still receive the complete setup.
+        assert.deepEqual(JSON.parse(response.content[0].text), result);
+        assert.equal(result.contract, 'agent-client-setup-v1');
+        assert.deepEqual(result.client, { localProcess: false, localStdio: false, hostFileInput: false, ui: false, ...input.client });
+        assert.equal(result.recommendedRoute, route);
+        assert.equal(result.localReadiness, 'requires-local-check');
+        assert.deepEqual(result.serverUi, { enabled, clientRenderingVerified: false });
+        assert.deepEqual(result.local.doctor, { executable: 'node', argv: ['scripts/portal-client.mjs', '--origin', adminOrigin, 'doctor'],
+          optionalArgs: ['--cloudflared', '<existing absolute executable>'], cwd: '<trusted package root>' });
+        assert.deepEqual(result.local.cloudflared.precedence, ['--cloudflared', 'PORTAL_CLOUDFLARED', 'PATH']);
+        assert.match(result.local.cloudflared.guidance, /portable installation outside PATH needs an explicit/);
+        assert.match(result.local.cloudflared.guidance, /PATH miss does not prove cloudflared is uninstalled/);
+        assert.equal(result.core.uiRequired, false);
+        assert.deepEqual(result.core.tools, ['list-targets', 'run-command', 'run-python-source', 'get-request-status', 'wait-for-request', 'read-command-output']);
+        assert.match(result.core.guidance, /SAME ID/);
+        assert.equal(result.approvals.adminUrl, adminOrigin);
+        assert.equal(result.approvals.ownerRequiredByPolicy, true);
+        assert.equal(result.approvals.agentSelfApproval, false);
+        assert.match(result.approvals.guidance, /no approval link or token/);
+        assert.match(result.limitations.join(' '), /cannot inspect client package installation/);
+        assert.match(result.limitations.join(' '), /Never place file bytes in shell commands/);
+        assert.doesNotMatch(JSON.stringify(response), /contract-mcp|contract-admin|approvalTicket|bootstrapTicket|downloadUrl|PRIVATE/);
+        assert.equal(response._meta, undefined);
+      }
+      assert.equal(f.calls.imports.length, 0);
+      assert.equal(f.calls.append.length, 0);
+    } finally { await f.close(); }
+  }
+});
+
+test('client setup rejects unknown keys, nonboolean abilities and malformed client objects', async () => {
+  const f = await fixture();
+  try {
+    for (const input of [
+      { client: { localProcess: true, vendor: 'assumed-capability' } },
+      { client: { localProcess: 'true' } },
+      { client: { localStdio: 1 } },
+      { client: { hostFileInput: null } },
+      { client: { ui: [] } },
+      { client: null }, { client: [] }, { client: 'local-cli' },
+      { client: {}, autoApprove: true },
+      { client: { extra: Array(65).fill('not-a-capability') } },
+    ]) {
+      const response = await f.call('get-client-setup', input);
+      assert.equal(response.isError, true, JSON.stringify(input));
+      assert.equal(response.structuredContent, undefined);
+    }
+    assert.equal((await f.call('get-client-setup')).structuredContent.recommendedRoute, 'unavailable');
+    assert.equal(f.calls.imports.length, 0);
+  } finally { await f.close(); }
+});
+
+test('file transfer text points card-less clients to setup and local capabilities with matching output schema', async () => {
+  for (const enabled of [false, true]) {
+    const f = await fixture({ settings: { ...settings, uiEnabled: enabled } });
+    try {
+      const descriptor = (await f.client.listTools()).tools.find(tool => tool.name === 'show-file-transfer');
+      assert.ok(descriptor.outputSchema.required.includes('setup'));
+      assert.equal(descriptor.outputSchema.properties.setup.properties.tool.const, 'get-client-setup');
+      const response = await f.call('show-file-transfer', { direction: 'upload', remotePath: '/tmp/input.bin' });
+      const textOnly = JSON.parse(response.content[0].text);
+      assert.deepEqual(textOnly, response.structuredContent);
+      assert.equal(textOnly.setup.tool, 'get-client-setup');
+      assert.match(textOnly.setup.guidance, /First check.*local process access.*local CLI.*local stdio MCP/);
+      assert.match(textOnly.setup.guidance, /not evidence of actual client rendering/);
+      assert.match(textOnly.setup.guidance, /Core requests, status, output and approval waiting need no card/);
+      assert.equal(textOnly.uiEnabled, enabled);
+      assert.doesNotMatch(response.content[0].text, /bootstrapTicket|contract-mcp|contract-admin/);
     } finally { await f.close(); }
   }
 });

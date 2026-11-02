@@ -81,7 +81,7 @@ test('MCP bounds aggregate input before every registered tool schema, including 
   const f = await fixture();
   try {
     const listing = JSON.parse((await f.post({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} })).text).result;
-    assert.equal(listing.tools.length, 21);
+    assert.equal(listing.tools.length, 22);
     for (const { name } of listing.tools) {
       const result = await f.call(name, { overflow: Array(64).fill(0) });
       assert.equal(result.isError, true, name); assert.match(result.content[0].text, /maximum of 64 elements/, name);

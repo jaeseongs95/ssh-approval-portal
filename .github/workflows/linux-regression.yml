@@ -2,7 +2,7 @@ name: Linux regression
 
 on:
   push:
-    branches: [fix/jev-binary-assessment, feat/windows-full-support-20261101, feat/admin-ui-1.6.8-20261101, fix/request-admission-queue-20261102, fix/agent-portability-20261102, fix/multiline-commands-20261102]
+    branches: [fix/jev-binary-assessment, feat/windows-full-support-20261101, feat/admin-ui-1.6.8-20261101, fix/request-admission-queue-20261102, fix/agent-portability-20261102, fix/multiline-commands-20261102, fix/agent-file-discovery-20261102]
   workflow_dispatch:
 
 permissions:
@@ -111,6 +111,20 @@ jobs:
           fi
           cat "$RUNNER_TEMP/approval-expiry-red.log"
           grep -q '^# fail 1$' "$RUNNER_TEMP/approval-expiry-red.log"
+      - name: Client setup regression rejects the previous source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp src/adapters/mcp/server.mjs "$RUNNER_TEMP/server.discovery-current.mjs"
+          trap 'cp "$RUNNER_TEMP/server.discovery-current.mjs" src/adapters/mcp/server.mjs' EXIT
+          git show 56f6f717257341d989832d29add0172cbb50dd22:src/adapters/mcp/server.mjs > src/adapters/mcp/server.mjs
+          if node --test --test-reporter=tap --test-name-pattern='^client setup chooses routes' test/mcp-contracts.test.mjs > "$RUNNER_TEMP/client-setup-red.log" 2>&1; then
+            cat "$RUNNER_TEMP/client-setup-red.log"
+            echo 'Expected missing client setup regression was not observed' >&2
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/client-setup-red.log"
+          grep -q '^# fail 1$' "$RUNNER_TEMP/client-setup-red.log"
       - name: Execution queue regression rejects pre-fix source
         shell: bash
         run: |

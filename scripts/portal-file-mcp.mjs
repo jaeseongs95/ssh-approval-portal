@@ -8,6 +8,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { createPortalClient } from '../src/adapters/cli/portal-client.mjs';
 import { loadFileManifest, createFileForwarder } from '../src/adapters/cli/file-forwarder.mjs';
 import { validateLocalPath } from '../src/adapters/cli/local-files.mjs';
+import { resolveCloudflared, cachedAccessToken } from '../src/adapters/cli/cloudflared.mjs';
 
 const fail = code => Object.assign(new Error(code), { code });
 const capabilityArgs = z.strictObject({ capabilityId: z.string().regex(/^[a-f0-9]{48}$/) });
@@ -35,20 +36,19 @@ export async function main(argv = process.argv.slice(2), errorOutput = process.s
       help: { type: 'boolean' }, manifest: { type: 'string' }, journal: { type: 'string' }, cloudflared: { type: 'string' },
     } });
     if (values.help && argv.length === 1) {
-      errorOutput.write('사용법: node scripts/portal-file-mcp.mjs --manifest 절대설정경로 --journal 기존전용기록폴더 --cloudflared 기존실행경로\n모델 도구 입력은 고정 파일 ID만 받습니다. 인증은 기존 로그인 캐시를 사용하며, 자동 로그인·승인·경로 변경은 하지 않습니다. 결과 불명 기록은 지우거나 새 작업으로 재실행하지 마세요.\n');
+      errorOutput.write('사용법: node scripts/portal-file-mcp.mjs --manifest 절대설정경로 --journal 기존전용기록폴더 [--cloudflared 기존실행경로]\n인증 실행기는 --cloudflared > PORTAL_CLOUDFLARED > PATH 순서로 확인합니다. PATH 조회 실패는 미설치 증거가 아닙니다. CLI doctor로 같은 PC와 origin의 준비 상태를 먼저 확인하세요.\n모델 도구 입력은 고정 파일 ID만 받습니다. 인증은 기존 로그인 캐시를 사용하며, 자동 로그인·승인·경로 변경은 하지 않습니다. 결과 불명 기록은 지우거나 새 작업으로 재실행하지 마세요.\n');
       return 0;
     }
-    if (values.help || positionals.length || !values.manifest || !values.journal || !values.cloudflared) throw fail('INVALID_ARGUMENTS');
-    validateLocalPath(values.cloudflared);
+    if (values.help || positionals.length || !values.manifest || !values.journal) throw fail('INVALID_ARGUMENTS');
+    if (values.cloudflared !== undefined) validateLocalPath(values.cloudflared);
+    const helper = await resolveCloudflared({ explicit: values.cloudflared });
     const manifest = await loadFileManifest(values.manifest);
     const forwarder = await createFileForwarder({ manifest, journalRoot: values.journal,
       openClient: async (origin, { timeoutMs, signal }) => {
         let token, client;
         try {
-          token = runCredential(values.cloudflared, ['access', 'token', '--app=' + origin],
-            { encoding: 'utf8', timeout: Math.min(30_000, timeoutMs), maxBuffer: 16386, killSignal: 'SIGKILL', windowsHide: true, shell: false, stdio: ['ignore', 'pipe', 'pipe'] });
-          if (typeof token !== 'string') throw Error();
-          client = createPortalClient({ origin, accessToken: token.replace(/\r?\n$/, ''), timeoutMs, signal });
+          token = cachedAccessToken(helper.path, origin, runCredential, timeoutMs);
+          client = createPortalClient({ origin, accessToken: token, timeoutMs, signal });
           token = undefined; await client.connect(); return client;
         } catch {
           token = undefined; await client?.close().catch(() => {});
