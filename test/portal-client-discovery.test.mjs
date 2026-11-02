@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, chmod, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { delimiter, join, relative } from 'node:path';
+import { delimiter, isAbsolute, join, relative } from 'node:path';
 import { resolveCloudflared, cachedAccessToken } from '../src/adapters/cli/cloudflared.mjs';
 import { diagnoseClient } from '../src/adapters/cli/doctor.mjs';
 import { main } from '../scripts/portal-client.mjs';
@@ -108,8 +108,10 @@ test('PATH discovery skips current and relative entries and accepts only the exa
   const f = await fixture(t);
   const directory = join(f.root, '한글 path');
   const expected = await f.helper(directory);
-  const relativeDirectory = relative(process.cwd(), directory);
-  assert.ok(relativeDirectory && !relativeDirectory.startsWith(delimiter));
+  // Windows checkout and tmpdir can be on different drives. Use the fixture's
+  // own parent so the negative input is truly relative on both platforms.
+  const relativeDirectory = relative(f.root, directory);
+  assert.ok(relativeDirectory && !isAbsolute(relativeDirectory));
   await assert.rejects(resolveCloudflared({ env: { PATH: ['', '.', relativeDirectory].join(delimiter) } }), codeIs('CLOUDFLARED_NOT_FOUND'));
   assert.deepEqual(await resolveCloudflared({ env: { Path: ['', '.', relativeDirectory, '"' + directory + '"'].join(delimiter) } }), {
     path: expected, source: 'path',
@@ -236,6 +238,21 @@ test('doctor rejects malformed or oversized target responses instead of claiming
     assert.deepEqual(peer.calls, ['open', 'connect', 'targets', 'close']);
     noSideEffects(result);
   }
+});
+
+test('doctor does not report readiness when temporary session cleanup is unknown', async () => {
+  const peer = injectedClient();
+  const result = await diagnoseClient({ origin, cloudflared: process.execPath, env: {}, runCredential: () => credential,
+    openClient: options => {
+      const client = peer.openClient(options);
+      client.close = async () => { peer.calls.push('close'); throw errorWithCode('PORTAL_RESULT_UNKNOWN'); };
+      return client;
+    } });
+  assert.equal(result.state, 'blocked');
+  assert.equal(result.sessionCleanup, 'unknown');
+  assert.deepEqual(result.checks.at(-1), { stage: 'session-cleanup', state: 'blocked', error: 'OWNER_SESSION_CLEANUP_UNKNOWN' });
+  assert.deepEqual(peer.calls, ['open', 'connect', 'targets', 'close']);
+  noSideEffects(result);
 });
 
 test('CLI doctor uses injected environment discovery and returns public ready or blocked JSON with correct exit codes', async t => {
