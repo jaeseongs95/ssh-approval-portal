@@ -86,9 +86,11 @@ jobs:
           restore() {
             cp "$RUNNER_TEMP/validation.multiline-current.mjs" src/domain/validation.mjs
             cp "$RUNNER_TEMP/target-platform.multiline-current.mjs" src/domain/target-platform.mjs
+            cp "$RUNNER_TEMP/approval-queue.multiline-current.mjs" src/domain/approval-queue.mjs
           }
           cp src/domain/validation.mjs "$RUNNER_TEMP/validation.multiline-current.mjs"
           cp src/domain/target-platform.mjs "$RUNNER_TEMP/target-platform.multiline-current.mjs"
+          cp src/domain/approval-queue.mjs "$RUNNER_TEMP/approval-queue.multiline-current.mjs"
           trap restore EXIT
           for path in src/domain/validation.mjs src/domain/target-platform.mjs; do
             git show 6b90681d135bee5c12338ea0449eae5861d0ae0f:"$path" > "$path"
@@ -100,6 +102,15 @@ jobs:
           fi
           cat "$RUNNER_TEMP/multiline-red.log"
           grep -q '^# fail 1$' "$RUNNER_TEMP/multiline-red.log"
+          restore
+          git show 6b90681d135bee5c12338ea0449eae5861d0ae0f:src/domain/approval-queue.mjs > src/domain/approval-queue.mjs
+          if node --test --test-reporter=tap --test-name-pattern='^expiry wake before' test/approval-callback.test.mjs > "$RUNNER_TEMP/approval-expiry-red.log" 2>&1; then
+            cat "$RUNNER_TEMP/approval-expiry-red.log"
+            echo 'Expected pre-fix early expiry timeout was not observed' >&2
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/approval-expiry-red.log"
+          grep -q '^# fail 1$' "$RUNNER_TEMP/approval-expiry-red.log"
       - name: Execution queue regression rejects pre-fix source
         shell: bash
         run: |

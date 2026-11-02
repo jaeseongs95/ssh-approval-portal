@@ -296,10 +296,10 @@ export class ApprovalQueue {
     // ponytail: bounded per-target subscriptions; a shared broker is unnecessary for one bridge process.
     if (this.requestWaiters.size >= 64) throw Error('Request wait limit reached');
     return new Promise((resolve, reject) => {
-      let timer;
+      let timer, expiryTimer;
       const finish = (job, event, error) => {
         if (!this.requestWaiters.delete(waiter)) return;
-        clearTimeout(timer); signal?.removeEventListener('abort', abort);
+        clearTimeout(timer); clearTimeout(expiryTimer); signal?.removeEventListener('abort', abort);
         if (error) reject(error); else resolve({ job, event, until });
       };
       const abort = () => finish(null, null, signal.reason ?? Error('Request wait aborted'));
@@ -313,8 +313,21 @@ export class ApprovalQueue {
           finish(job, eventFor(job) ?? 'timeout');
         } catch (error) { finish(null, null, error); }
       };
-      const approvalRemaining = ['pending', 'evaluating', 'queued'].includes(current.state) ? Math.max(1, current.expiresAt - this.now()) : timeoutMs;
-      timer = setTimeout(expireWait, Math.min(timeoutMs, approvalRemaining));
+      const checkExpiry = () => {
+        try {
+          const job = this.get(id), event = eventFor(job);
+          if (event) { finish(job, event); return; }
+          // An expiry wake may precede the wall-clock boundary. It is not the
+          // caller's timeout; recheck expiry while the independent wait runs.
+          if (['pending', 'evaluating', 'queued'].includes(job.state)) {
+            expiryTimer = setTimeout(checkExpiry, Math.max(1, job.expiresAt - this.now()));
+          }
+        } catch (error) { finish(null, null, error); }
+      };
+      timer = setTimeout(expireWait, timeoutMs);
+      if (['pending', 'evaluating', 'queued'].includes(current.state) && current.expiresAt - this.now() < timeoutMs) {
+        expiryTimer = setTimeout(checkExpiry, Math.max(1, current.expiresAt - this.now()));
+      }
     });
   }
   notifyRequest(job) {

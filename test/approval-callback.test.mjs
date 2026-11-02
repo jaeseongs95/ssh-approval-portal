@@ -93,6 +93,34 @@ test('expiry wakes without a queue reaper, while timeout leaves the original req
   assert.equal((await late.wait(unseen.id)).event, 'expired'); assert.equal(late.queue.requestWaiters.size, 0); assert.equal(late.effects, 0);
 });
 
+test('expiry wake before the wall-clock deadline rearms without consuming the caller timeout', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  // Track live handles around the existing fake clock; expiry and caller timeout
+  // must both disappear when the wait settles, without running a real timer.
+  const scheduled = new Set(), fakeSetTimeout = globalThis.setTimeout, fakeClearTimeout = globalThis.clearTimeout;
+  t.mock.method(globalThis, 'setTimeout', (callback, milliseconds, ...args) => {
+    const handle = fakeSetTimeout(() => { scheduled.delete(handle); callback(...args); }, milliseconds);
+    scheduled.add(handle); return handle;
+  });
+  t.mock.method(globalThis, 'clearTimeout', handle => { scheduled.delete(handle); return fakeClearTimeout(handle); });
+  let now = 1000, deliveries = 0, outcome;
+  const f = queueFixture(t, { now: () => now });
+  const job = f.queue.submitOperation({ kind: 'command', command: 'fixture-command' }, 'privileged', { expiresAt: 1015 });
+  const waiting = f.wait(job.id, { timeoutMs: 1000 }).then(value => { deliveries++; outcome = value; return value; });
+  assert.equal(f.queue.requestWaiters.size, 1);
+  now = 1014; t.mock.timers.tick(15); await Promise.resolve();
+  assert.equal(outcome, undefined, 'an early expiry wake is not the caller timeout');
+  assert.equal(deliveries, 0); assert.equal(f.queue.requestWaiters.size, 1); assert.equal(f.effects, 0);
+  now = 1015; t.mock.timers.tick(1);
+  const result = await waiting;
+  assert.equal(result.event, 'expired'); assert.equal(result.job.state, 'expired');
+  assert.equal(deliveries, 1); assert.equal(f.queue.requestWaiters.size, 0); assert.equal(f.effects, 0);
+  assert.equal(getEventListeners(f.controller.signal, 'abort').length, 0);
+  assert.equal(scheduled.size, 0, 'expiry completion must clear its independent caller timeout');
+  t.mock.timers.tick(1000); await Promise.resolve();
+  assert.equal(deliveries, 1); assert.equal(scheduled.size, 0);
+});
+
 test('abort, saturation and invalid deadlines release subscriptions without cancelling the operation', async t => {
   const f = queueFixture(t), job = f.queue.submit('fixture-command');
   for (const timeoutMs of [0, -1, 60001, 1.5, NaN, Infinity]) assert.throws(() => f.wait(job.id, { timeoutMs }));

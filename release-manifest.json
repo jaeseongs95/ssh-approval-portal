@@ -835,8 +835,8 @@
     },
     {
       "path": "src/domain/approval-queue.mjs",
-      "size": 20690,
-      "sha256": "9ee68d928dde3c6e5355c17bb6a44afcc6e0b053da2bdd6cb3d8c434521d6085"
+      "size": 21328,
+      "sha256": "0002eda96197ee0a075db10b102731d5a3594db5912ee8f9c5832f2c625b502c"
     },
     {
       "path": "src/domain/automation-risk-question.json",
@@ -970,8 +970,8 @@
     },
     {
       "path": "test/approval-callback.test.mjs",
-      "size": 19123,
-      "sha256": "3a78163057c954b853594f33d62e43bad6cf1a167b489e0642bc73a51d0831fe"
+      "size": 21098,
+      "sha256": "94e227e803994270fa6cc17a0eea1119e31c3f471cc23f5d8ecb62c1f440ae21"
     },
     {
       "path": "test/approval-expiry.test.mjs",
