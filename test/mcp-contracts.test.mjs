@@ -1,11 +1,16 @@
 import metadata from '../package.json' with { type: 'json' };
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { createProtocolAdapters } from '../src/adapters/http/protocol.mjs';
 import { Tickets } from '../src/adapters/security/tickets.mjs';
 import { authorizeAdminRequest } from '../src/adapters/security/admin-policy.mjs';
+import { CommandOutputs } from '../src/adapters/storage/command-output.mjs';
 
 const identifier = 'a'.repeat(48);
 
@@ -134,8 +139,9 @@ test('MCP contract families preserve tool names, JSON text, private capabilities
 test('provider-neutral capabilities are exact, public and read-only; core tools work with UI disabled', async () => {
   for (const enabled of [true, false]) {
     let outputReads = 0, commandRuns = 0;
+    const adminOrigin = enabled ? settings.adminOrigin : 'https://owner-without-apps.example.test';
     const page = { outputId: identifier, bytes: 7, nextOffset: 7, eof: true, text: 'fixture' };
-    const f = await fixture({ settings: { ...settings, uiEnabled: enabled }, commandOutputs: { read: () => { outputReads++; return page; } } });
+    const f = await fixture({ settings: { ...settings, adminOrigin, uiEnabled: enabled }, commandOutputs: { read: () => { outputReads++; return page; } } });
     f.commands.run = async () => { commandRuns++; return { type: 'job', job: f.pending }; };
     try {
       const tools = (await f.client.listTools()).tools;
@@ -149,7 +155,7 @@ test('provider-neutral capabilities are exact, public and read-only; core tools 
         core: { transport: 'streamable-http', input: 'json-schema', output: ['text', 'structuredContent'], uiRequired: false },
         localFiles: { cli: 'scripts/portal-client.mjs', stdio: 'scripts/portal-file-mcp.mjs', requiresLocalAccess: true },
         hostFileInput: { tool: 'request-upload', contract: 'openai/fileParams' },
-        approvals: { ownerRequiredByPolicy: true, agentSelfApproval: false },
+        approvals: { ownerRequiredByPolicy: true, agentSelfApproval: false, adminUrl: adminOrigin },
         ui: { enabled, optional: true },
         documentation: 'docs/agent-clients.ko.md',
       };
@@ -170,10 +176,72 @@ test('provider-neutral capabilities are exact, public and read-only; core tools 
       assert.equal((await f.call('run-command', { command: 'sudo id' })).structuredContent.id, identifier);
       assert.equal((await f.call('get-request-status', { id: identifier })).structuredContent.state, 'pending');
       const output = await f.call('read-command-output', { outputId: identifier });
-      assert.deepEqual(output.content, [{ type: 'text', text: page.text }]);
+      const { text: body, ...metadata } = page;
+      assert.deepEqual(output.content, [{ type: 'text', text: body }, { type: 'text', text: JSON.stringify({ type: 'output-page-metadata', ...metadata }) }]);
       assert.deepEqual(output.structuredContent, page);
       assert.equal(commandRuns, 1); assert.equal(outputReads, 1);
+      if (!enabled) {
+        const unavailable = await f.call('request-upload', {
+          file: { download_url: 'https://files.example.test/private?signature=PRIVATE-FILE-SIGNATURE', file_id: 'PRIVATE-FILE-ID' },
+          remotePath: '/tmp/input.bin',
+        });
+        assert.equal(unavailable.isError, true);
+        assert.equal(unavailable.structuredContent.error, 'upload-source-not-configured');
+        assert.match(unavailable.structuredContent.message, /get-client-capabilities/);
+        assert.match(unavailable.structuredContent.message, /local CLI or stdio/);
+        assert.match(unavailable.structuredContent.message, /only when supported and enabled/);
+        assert.doesNotMatch(JSON.stringify(unavailable), /PRIVATE-FILE-|download_url|signature=|file_id/);
+      }
     } finally { await f.close(); }
+  }
+});
+
+test('text-only MCP consumers recover UTF-8 pages, completion, hash and expiry without structuredContent', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'mcp-text-output-'));
+  let now = 1000, commandExecutions = 0, f;
+  const outputs = new CommandOutputs(root, { now: () => now });
+  try {
+    const text = 'a가나', executionId = 'b'.repeat(48);
+    const reserved = outputs.reserve({ executionId, targetId: null });
+    const reference = outputs.finish(reserved, { failed: false, texts: [text] }).output;
+    f = await fixture({ settings: { ...settings, uiEnabled: false }, commandOutputs: {
+      read: args => outputs.read(args, binding => assert.deepEqual(binding, { executionId, targetId: null })),
+    } });
+    f.commands.read = f.commands.run = async () => { commandExecutions++; throw Error('Output reads must not execute commands'); };
+    let offsetBytes = 0, reconstructed = '';
+    const pages = [];
+    do {
+      const response = await f.call('read-command-output', { outputId: reference.id, offsetBytes, maxBytes: 5 });
+      assert.equal(response.isError, undefined);
+      // Simulate a host that exposes only standard text content, discarding all other fields.
+      const content = response.content.filter(item => item.type === 'text').map(item => item.text);
+      assert.equal(content.length, 2);
+      const metadata = JSON.parse(content[1]);
+      assert.equal(metadata.type, 'output-page-metadata');
+      assert.equal(metadata.outputId, reference.id);
+      assert.equal(metadata.executionId, executionId);
+      assert.equal(metadata.format, 'text');
+      assert.equal(metadata.offsetBytes, offsetBytes);
+      assert.equal(metadata.bytes, Buffer.byteLength(content[0]));
+      assert.equal(metadata.nextOffset, offsetBytes + metadata.bytes);
+      assert.equal(metadata.totalBytes, Buffer.byteLength(text));
+      assert.equal(metadata.expiresAt, reference.expiresAt);
+      assert.equal(metadata.expiresAt > now, true);
+      assert.equal(metadata.eof, metadata.nextOffset === metadata.totalBytes);
+      assert.equal(Object.hasOwn(metadata, 'text'), false);
+      reconstructed += content[0]; pages.push(metadata); offsetBytes = metadata.nextOffset;
+      assert.ok(pages.length <= 2, 'text-only pagination must advance and terminate');
+    } while (!pages.at(-1).eof);
+    assert.equal(reconstructed, text);
+    assert.deepEqual(pages.map(page => [page.bytes, page.nextOffset, page.eof]), [[4, 4, false], [3, 7, true]]);
+    for (const page of pages) assert.equal(page.sha256, createHash('sha256').update(reconstructed).digest('hex'));
+    now = reference.expiresAt;
+    const expired = await f.call('read-command-output', { outputId: reference.id });
+    assert.equal(expired.isError, true);
+    assert.ok(expired.content.some(item => item.type === 'text'));
+    assert.equal(commandExecutions, 0);
+  } finally {
+    await f?.close(); outputs.close(); await rm(root, { recursive: true, force: true });
   }
 });
 
