@@ -93,7 +93,7 @@ jobs:
           for path in scripts/portal-client.mjs src/adapters/mcp/server.mjs; do
             git show cc0c8c075a1b598f99a7327531c829cdb88114f3:"$path" > "$path"
           done
-          if node --test --test-name-pattern='provider-neutral capabilities|CLI upload, resume and download accept' test/mcp-contracts.test.mjs test/cli-platform-paths.test.mjs > "$RUNNER_TEMP/agent-portability-red.log" 2>&1; then
+          if node --test --test-reporter=tap --test-name-pattern='provider-neutral capabilities|CLI upload, resume and download accept' test/mcp-contracts.test.mjs test/cli-platform-paths.test.mjs > "$RUNNER_TEMP/agent-portability-red.log" 2>&1; then
             cat "$RUNNER_TEMP/agent-portability-red.log"
             echo 'Expected pre-fix regression failure was not observed' >&2
             exit 1

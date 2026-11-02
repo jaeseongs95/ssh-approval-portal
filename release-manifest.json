@@ -5,8 +5,8 @@
   "files": [
     {
       "path": ".dockerignore",
-      "size": 277,
-      "sha256": "fdf0b0635ab53ec48ca6238027c8d3589cf93b41148d8d7b8057f8f781caf1f6"
+      "size": 303,
+      "sha256": "0d19a07c4c313e89a6bf220cbfc69263d8b3734e75e3c8567c1992ab97fa363f"
     },
     {
       "path": "LICENSE",
@@ -16,12 +16,12 @@
     {
       "path": "README.ko.md",
       "size": 22901,
-      "sha256": "38d35df34657e7cac7cb370b047ae8ee79feadcec9c3290f7d42fe947044389e"
+      "sha256": "5d9c177899a3586b746018b08583fe49bf20ab3357d4b7feed934fa2bc7b34ce"
     },
     {
       "path": "README.md",
       "size": 20895,
-      "sha256": "b8f0825bcf91414ab46bfcf7cfa668cb83431a873962cad40fcc8b08237413d8"
+      "sha256": "571d3807dd872fbe48479d3ffca23168fb00ac967593d8b9a8b8e809bb75f87d"
     },
     {
       "path": "THIRD_PARTY_NOTICES.json",
@@ -51,7 +51,7 @@
     {
       "path": "config/docker.example.env",
       "size": 73,
-      "sha256": "b5e0d3e6e02d81c80a85af82708cea2536c3706ec3867a618bb4c2a5f1661929"
+      "sha256": "7f4f4e071af40882f933dc3c4ce2409b46a27ca18b71c931b36e057c91ecfb7f"
     },
     {
       "path": "config/settings-contract.json",
@@ -86,12 +86,12 @@
     {
       "path": "docker/Dockerfile",
       "size": 1594,
-      "sha256": "59a7c16e357b67b8fd6e91086e0a96233d97aa8680f09ad06cf62e35f2cbcaca"
+      "sha256": "54700cc4d9780e393b894e75ee4ff76a72911a2e9fe18dfa4725355bc499a8bd"
     },
     {
       "path": "docker/compose.yaml",
       "size": 1128,
-      "sha256": "8e2005a34a10ac8c38c7392e26b9934d78ff5922b68d0e5da5895e781a8baffd"
+      "sha256": "274a4fbbd2fdbecb477218ced7a087ecd57e5553143e093b53dad76472bc6e85"
     },
     {
       "path": "docs/admin-login.en.md",
@@ -1411,7 +1411,7 @@
     {
       "path": "test/mcp-input-limits.test.mjs",
       "size": 10312,
-      "sha256": "2913ff7835bc18f8200b16b48847755b1bf87ca7a12045bc33a1f9a82442f2ca"
+      "sha256": "faf19e5e5e9082f2f1bbe8023fb937b5b6d7a617f5dbb563648aaf036c698b74"
     },
     {
       "path": "test/model-selection.test.mjs",
