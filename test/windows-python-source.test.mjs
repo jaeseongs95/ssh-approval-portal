@@ -186,6 +186,14 @@ test('Windows PowerShell 5.1 forwards source bytes and literal arguments without
   t.diagnostic(JSON.stringify({ testArtifact: 'unmodified-production-plan', planDigest: firstPlan.planDigest,
     launcherSha256: firstPlan.manifest.launcherSha256, receiverSha256: firstPlan.manifest.receiverSha256 }));
   const good = await run(t, '직접 실행: 한글·따옴표 인자', firstPlan);
+  if (good.error?.code === 'ETIMEDOUT') {
+    // Separate diagnostic input: never substitute its result for the failed
+    // unmodified source above. Keep the production receiver and 20 s limit.
+    const diagnosticSource = 'import faulthandler,sys\nfaulthandler.dump_traceback_later(5,repeat=False)\nsys.stderr.write("diagnostic source entered\\n");sys.stderr.flush()\n' + source;
+    const diagnostic = await run(t, '진단 전용: source 진입·Python 대기 위치', plan(diagnosticSource, { ...options, argv: literal }));
+    t.diagnostic(JSON.stringify({ diagnosticOnly: true, status: diagnostic.status, errorCode: diagnostic.error?.code,
+      stderr: diagnostic.stderr, stdout: diagnostic.stdout }));
+  }
   assert.ifError(good.error);
   assert.equal(good.status, 0, good.stderr);
   assert.deepEqual(JSON.parse(good.stdout), [literal, cwd, '__main__']);
