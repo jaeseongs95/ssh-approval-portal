@@ -26,17 +26,23 @@ const replaceOnce = (text, before, after) => {
   return text.replace(before, after);
 };
 // 최초 원시험의 source/argv/cwd/frame은 그대로 두고 수신기 복사본만 계측한다.
-// 추가 sys/time 가져오기·관측문·해시가 초기화와 시점을 바꿀 가능성은 남는다.
-const diagnosticBootstrapOf = p => {
-  const pyStage = name => `sys.stderr.write('AGS_PY_STAGE|'+str(time.time_ns()//1000000)+'|${name}\\n');sys.stderr.flush()\n`;
+// 추가 _io/sys/time 가져오기·파일 I/O·관측문·해시가 초기화와 시점을 바꿀 가능성은 남는다.
+const diagnosticBootstrapOf = (p, stagePath) => {
+  // 경로는 이 시험이 만든 임시 디렉터리의 고정 진단 파일뿐이다. 인수나 프레임에는 넣지 않는다.
+  // CRT 인용을 바꾸는 큰따옴표·역슬래시 없이 UTF-8 경로를 receiver 복사본에만 넣는다.
+  const fileStage = name => `with __import__('_io').FileIO(bytes.fromhex('${Buffer.from(stagePath, 'utf8').toString('hex')}').decode('utf-8'),'ab') as _ags_stage: _ags_stage.write(b'AGS_PY_FILE_STAGE|${name}\\n')\n`;
+  const pyStage = name => fileStage(name) + (name === 'receiver-entry'
+    ? `${fileStage('stderr-write-before')}sys.stderr.write('AGS_PY_STAGE|'+str(time.time_ns()//1000000)+'|${name}\\n')\n${fileStage('stderr-write-after')}${fileStage('stderr-flush-before')}sys.stderr.flush()\n${fileStage('stderr-flush-after')}`
+    : `sys.stderr.write('AGS_PY_STAGE|'+str(time.time_ns()//1000000)+'|${name}\\n');sys.stderr.flush()\n`);
   let receiver = replaceOnce(receiverOf(p), 'import hashlib,json,os,sys,types\n',
-    `import sys,time\n${pyStage('receiver-entry')}import hashlib,json,os,sys,types\n${pyStage('receiver-imports-complete')}`);
+    `${fileStage('minimal-import-start')}import sys,time\n${fileStage('minimal-import-complete')}${pyStage('receiver-entry')}${fileStage('receiver-imports-start')}import hashlib,json,os,sys,types\n${pyStage('receiver-imports-complete')}`);
   receiver = replaceOnce(receiver, 'b=sys.stdin.buffer.read(n+1)\n', `${pyStage('receiver-read-start')}b=sys.stdin.buffer.read(n+1)\n${pyStage('receiver-read-complete')}`);
   receiver = replaceOnce(receiver, "if v['elevate']:", `${pyStage('frame-verified')}if v['elevate']:`);
   receiver = replaceOnce(receiver, 'try:\n c=compile', `${pyStage('source-compile-start')}try:\n c=compile`);
   receiver = replaceOnce(receiver, "sys.argv=['<ssh-python-source-v1>',*v['argv']]", `${pyStage('source-compiled')}sys.argv=['<ssh-python-source-v1>',*v['argv']]`);
   receiver = replaceOnce(receiver, 'exec(c,m.__dict__)\n', `${pyStage('source-start')}exec(c,m.__dict__)\n${pyStage('source-complete')}`);
   assert.equal(receiver.split('\n').filter(line => line !== 'import sys,time'
+    && !line.startsWith("with __import__('_io').FileIO(") && line !== 'sys.stderr.flush()'
     && !line.startsWith("sys.stderr.write('AGS_PY_STAGE|")).join('\n'), receiverOf(p),
     '고정 관측문과 추가 가져오기를 제거하면 제품 receiver 원문과 같아야 합니다.');
   const psStage = name => `psstage '${name}';`;
@@ -46,7 +52,7 @@ const diagnosticBootstrapOf = p => {
   launcher = replaceOnce(launcher, 'Microsoft.PowerShell.Core\\Import-Module', psStage('module-start') + 'Microsoft.PowerShell.Core\\Import-Module');
   launcher = replaceOnce(launcher, 'Microsoft.PowerShell.Utility\\Add-Type', psStage('module-complete') + psStage('add-type-start') + 'Microsoft.PowerShell.Utility\\Add-Type');
   launcher = replaceOnce(launcher, '-ErrorAction Stop};$s=', '-ErrorAction Stop;' + psStage('add-type-complete') + '};$s=');
-  launcher = replaceOnce(launcher, '$p=[Diagnostics.Process]::Start($s);', psStage('child-start') + '$p=[Diagnostics.Process]::Start($s);' + psStage('child-started'));
+  launcher = replaceOnce(launcher, '$p=[Diagnostics.Process]::Start($s);', psStage('child-start') + '$p=[Diagnostics.Process]::Start($s);' + psStage('child-started') + "psstage ('child-pid:'+$p.Id);");
   launcher = replaceOnce(launcher, 'try{while(($n=', "$total=0;$hash=[Security.Cryptography.SHA256]::Create();try{" + psStage('native-read-start') + 'while(($n=');
   launcher = replaceOnce(launcher, '{$i.Write($b,0,$n)}}finally{$i.Close()};$p.WaitForExit();',
     "{[void]$hash.TransformBlock($b,0,$n,$b,0);$total+=$n;psstage ('native-read-bytes:'+$n+':'+$total);$i.Write($b,0,$n);psstage ('child-written:'+$total)}[void]$hash.TransformFinalBlock([byte[]]::new(0),0,0);psstage ('native-eof:'+$total+':'+[BitConverter]::ToString($hash.Hash).Replace('-','').ToLowerInvariant())}finally{" + psStage('child-input-close') + '$i.Close();$hash.Dispose()};' + psStage('child-wait-start') + '$p.WaitForExit();' + psStage('child-exited'));
@@ -222,23 +228,42 @@ test('Windows PowerShell 5.1 forwards source bytes and literal arguments without
   const literal = ['한글', "a'b", 'a"b', 'C:\\tail\\', '', '‘’“”', quotePayload(attackMarker)];
   const source = "import json,os,sys\r\nassert sys.stdin.buffer.read()==b''\r\nassert '__file__' not in globals()\r\nassert __package__ is None and __spec__ is None\r\nprint(json.dumps([sys.argv[1:],os.getcwd(),__name__],ensure_ascii=False))\r\n";
   const firstPlan = plan(source, { ...options, argv: literal });
-  const instrumented = diagnosticBootstrapOf(firstPlan);
+  const stagePath = join(cwd, 'receiver-stages.log');
+  const instrumented = diagnosticBootstrapOf(firstPlan, stagePath);
   t.diagnostic(JSON.stringify({ 진단: '최초 원문 PowerShell 단계 계측', 기준계획Digest: firstPlan.planDigest,
     계측LauncherSha256: instrumented.launcherSha256, 계측ReceiverSha256: instrumented.receiverSha256,
     원ReceiverSha256: firstPlan.manifest.receiverSha256,
     sourceSha256: firstPlan.manifest.sourceSha256, sourceBytes: firstPlan.manifest.sourceBytes,
     프레임변경: false, Python인수변경: '고정 receiver 복사본의 관측문만 추가', 시점영향가능: true }));
-  const good = await run(t, '직접 실행: 한글·따옴표 인자', firstPlan, firstPlan.transportStdin, 'direct', instrumented.bootstrap);
+  let good, fileStageError, fileStages = [];
+  try {
+    good = await run(t, '직접 실행: 한글·따옴표 인자', firstPlan, firstPlan.transportStdin, 'direct', instrumented.bootstrap);
+  } finally {
+    // stderr·정상 종료·timeout과 독립적으로 읽고, 원래 실패 assertion과 임시 디렉터리 정리 전에 남긴다.
+    // 첫 표식도 _io 가져오기와 파일 I/O 뒤다. 표식 부재만으로 Python 미진입을 확정하지 않는다.
+    let raw = '';
+    try { raw = await readFile(stagePath, 'utf8'); fileStages = raw.split(/\r?\n/).filter(Boolean); }
+    catch (error) { fileStageError = error; }
+    t.diagnostic(JSON.stringify({ 진단: '최초 원문 Python 독립 단계 파일', 관측단계: fileStages,
+      읽은시각: new Date().toISOString(), 읽기오류: fileStageError?.code, exitCode: good?.status,
+      실행오류: good?.error?.code, 파일바이트: Buffer.byteLength(raw), 파일Sha256: createHash('sha256').update(raw).digest('hex') }));
+  }
   const stages = good.stderr.split(/\r?\n/).filter(line => line.startsWith('AGS_PY_STAGE|'));
   t.diagnostic(JSON.stringify({ 진단: '최초 원문 PowerShell 단계 계측', 관측단계: stages }));
   assert.ifError(good.error);
   assert.equal(good.status, 0, good.stderr);
+  assert.ifError(fileStageError);
   assert.deepEqual(JSON.parse(good.stdout), [literal, cwd, '__main__']);
   assert.ok(stages.some(line => line.endsWith(`|native-eof:${firstPlan.manifest.transportBytes}:${firstPlan.manifest.transportSha256}`)));
   assert.ok(stages.some(line => line.endsWith('|launcher-exit')));
   for (const stage of ['receiver-entry', 'receiver-imports-complete', 'receiver-read-start', 'receiver-read-complete',
     'frame-verified', 'source-compile-start', 'source-compiled', 'source-start', 'source-complete']) {
     assert.ok(stages.some(line => line.endsWith('|' + stage)), `수신기 계측 누락: ${stage}`);
+    assert.ok(fileStages.includes('AGS_PY_FILE_STAGE|' + stage), `독립 파일 계측 누락: ${stage}`);
+  }
+  for (const stage of ['minimal-import-start', 'minimal-import-complete', 'receiver-imports-start',
+    'stderr-write-before', 'stderr-write-after', 'stderr-flush-before', 'stderr-flush-after']) {
+    assert.ok(fileStages.includes('AGS_PY_FILE_STAGE|' + stage), `독립 파일 계측 누락: ${stage}`);
   }
   await assert.rejects(access(attackMarker), { code: 'ENOENT' });
   for (const host of ['cmd', 'powershell-shell']) {
