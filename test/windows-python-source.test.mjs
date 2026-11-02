@@ -138,11 +138,12 @@ const run = (t, label, p, input = p.transportStdin, host = 'direct') => traceInp
     const now = Date.now();
     events.push({ 단계: stage, 세계시밀리초: now, 경과밀리초: now - started });
   };
-  let error, completed = false;
+  let error, completed = false, observationDeadline;
   const finish = (status = child.exitCode, signal = child.signalCode) => {
     if (completed) return;
     completed = true;
     clearTimeout(deadline);
+    clearTimeout(observationDeadline);
     const result = { status, signal, error, stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8') };
     if (error) t.diagnostic(JSON.stringify({ 진단: 'Python 직접 실행 수명', 프로세스번호: child.pid, 시작세계시밀리초: started, 종료세계시밀리초: Date.now(), 사건: events,
       stdoutBytes: Buffer.byteLength(result.stdout), stderrBytes: Buffer.byteLength(result.stderr), errorCode: error?.code,
@@ -153,9 +154,15 @@ const run = (t, label, p, input = p.transportStdin, host = 'direct') => traceInp
   const deadline = setTimeout(() => {
     event('20초 제한 도달');
     error = Object.assign(Error('Python direct process timed out'), { code: 'ETIMEDOUT' });
-    child.kill();
-    child.stdin.destroy(); child.stdout.destroy(); child.stderr.destroy();
-    finish();
+    // Preserve the 20 s failure while observing this same owned process for a
+    // bounded interval. Late output distinguishes finite startup latency from
+    // a persistent wait; it never turns this execution into a passing result.
+    observationDeadline = setTimeout(() => {
+      event('진단 관측 총 60초 제한 도달');
+      child.kill();
+      child.stdin.destroy(); child.stdout.destroy(); child.stderr.destroy();
+      finish();
+    }, 40_000);
   }, 20_000);
   child.once('spawn', () => event('프로세스 시작'));
   child.once('error', failure => { error = failure; event('프로세스 오류'); });
