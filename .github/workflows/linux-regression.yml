@@ -115,17 +115,36 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          schema_state() {
+            printf 'schema_dialect_%s_at=%s\n' "$1" "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)"
+            sha256sum src/adapters/mcp/client-setup.mjs test/mcp-contracts.test.mjs
+          }
           cp src/adapters/mcp/client-setup.mjs "$RUNNER_TEMP/client-setup.dialect-current.mjs"
           trap 'cp "$RUNNER_TEMP/client-setup.dialect-current.mjs" src/adapters/mcp/client-setup.mjs' EXIT
           git show 59095c63ea9ac4961553a5c8acc768305b55d99a:src/adapters/mcp/client-setup.mjs > src/adapters/mcp/client-setup.mjs
-          if node --test --test-reporter=tap --test-name-pattern='^SDK-published MCP schemas compile' test/mcp-contracts.test.mjs > "$RUNNER_TEMP/client-setup-dialect-red.log" 2>&1; then
-            cat "$RUNNER_TEMP/client-setup-dialect-red.log"
+          schema_state red_started
+          red_exit=0
+          node --test --test-reporter=tap --test-name-pattern='^SDK-published MCP schemas compile' test/mcp-contracts.test.mjs > "$RUNNER_TEMP/client-setup-dialect-red.log" 2>&1 || red_exit=$?
+          schema_state red_finished
+          cat "$RUNNER_TEMP/client-setup-dialect-red.log"
+          printf 'schema_dialect_red_exit=%s\n' "$red_exit"
+          if [[ "$red_exit" -eq 0 ]]; then
             echo 'Expected pre-fix tuple schema incompatibility was not observed' >&2
             exit 1
           fi
-          cat "$RUNNER_TEMP/client-setup-dialect-red.log"
           grep -q '^# fail 1$' "$RUNNER_TEMP/client-setup-dialect-red.log"
           grep -q 'get-client-setup.outputSchema 2020-12' "$RUNNER_TEMP/client-setup-dialect-red.log"
+          cp "$RUNNER_TEMP/client-setup.dialect-current.mjs" src/adapters/mcp/client-setup.mjs
+          schema_state green_started
+          green_exit=0
+          node --test --test-reporter=tap --test-name-pattern='^SDK-published MCP schemas compile' test/mcp-contracts.test.mjs > "$RUNNER_TEMP/client-setup-dialect-green.log" 2>&1 || green_exit=$?
+          schema_state green_finished
+          cat "$RUNNER_TEMP/client-setup-dialect-green.log"
+          printf 'schema_dialect_green_exit=%s\n' "$green_exit"
+          test "$green_exit" -eq 0
+          grep -q '^# tests 1$' "$RUNNER_TEMP/client-setup-dialect-green.log"
+          grep -q '^# pass 1$' "$RUNNER_TEMP/client-setup-dialect-green.log"
+          grep -q '^# fail 0$' "$RUNNER_TEMP/client-setup-dialect-green.log"
       - name: Client setup regression rejects the previous source
         shell: bash
         run: |
