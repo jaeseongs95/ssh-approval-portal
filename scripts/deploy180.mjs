@@ -89,7 +89,7 @@ export async function durableFingerprint(dataRoot) {
       if (st.isSymbolicLink()) fail('UNSAFE_DEPLOY_DATA');
       if (!prefix && ['command-outputs', 'orphans'].includes(name) && st.isDirectory()) { await scan(path, name + '/'); continue; }
       const accepted = prefix === 'orphans/' ? /^[a-f0-9]{48}\.(part|json)$/.test(name)
-        : prefix ? /^(manifest\.sqlite|[a-f0-9]{48}\.(out|part|stream))$/.test(name)
+        : prefix ? /^(manifest\.sqlite(?:-(?:journal|wal|shm))?|[a-f0-9]{48}\.(out|part|stream))$/.test(name)
         : /^(command-automation|agent-cli|maintenance|operations|capacity)\.sqlite(?:-(?:journal|wal|shm))?$/.test(name) || /^[a-f0-9]{48}\.(part|json)$/.test(name);
       if (!accepted || !st.isFile() || st.nlink !== 1n) fail('UNSUPPORTED_DURABLE_DATA');
       rows.push({ path: key, bytes: String(st.size), modified: String(st.mtimeNs), sha256: await fileDigest(path) });
