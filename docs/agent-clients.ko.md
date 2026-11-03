@@ -87,6 +87,14 @@ node @portal upload 'C:\work\input.json' 'C:/upload/input.json' --target windows
 
 에이전트는 `file_capabilities`에서 받은 ID로 `file_upload`, `file_download_request`, `file_status`, `file_upload_resume`, `file_save`를 호출합니다. 이 전달기는 로컬 파일 전용이며 원격 명령 도구를 대체하지 않습니다. 원격 SSH MCP와 함께 등록합니다. 임의 경로·새 권한을 모델이 인수로 추가할 수 없습니다.
 
+## 에이전트가 직접 파일을 고르는 모드
+
+소유자가 파일 선택을 허용한 PC에서는 `--manifest` 대신 `--agent-uploads --origin https://관리자호스트`로 같은 stdio MCP를 시작할 수 있습니다. `--journal`과 기존 인증 실행기는 그대로 사용합니다. 이 모드의 `file_upload_select`에 고유한 48자리 소문자 16진수 `capabilityId`, `localPath`, `remotePath`, `target`을 전달하면 크기·해시·대상 revision을 고정합니다. Linux 절대경로와 `C:/upload/file.bin` 또는 `C:\upload\file.bin` 같은 Windows 경로를 지원하며, 실제 대상 운영체제와 맞아야 합니다. 선택 결과의 `available`은 업로드 완료가 아닙니다. 반환된 ID로 `file_upload`를 한 번 호출하고 같은 ID의 `file_status`로 결과를 확인합니다.
+
+이 기능은 Codex·Claude 등 특정 제품의 파일 카드가 필요하지 않습니다. 파일이 있는 PC에서 stdio 프로세스가 실행되어야 하며, 원격 서버 배포만으로 PC의 기존 MCP 프로세스가 갱신되지는 않습니다. 새 패키지로 로컬 MCP를 갱신한 뒤 클라이언트에서 다시 연결합니다. 기존 journal은 보존합니다.
+
+`INVALID_REMOTE_PATH`는 대상 경로 형식 오류, `CAPABILITY_UNAVAILABLE`는 선택 기록이 없는 ID, `CAPABILITY_SELECTION_MISMATCH`는 같은 ID에 다른 파일·목적지를 지정한 경우입니다. 인증 오류는 `ACCESS_CREDENTIAL_UNAVAILABLE`로 구분합니다. 알 수 없는 내부 오류만 `CAPABILITY_REQUEST_REFUSED`로 반환하며 원문 경로·인증정보는 노출하지 않습니다. 상태가 불명확하거나 전송이 실패한 기록을 새 ID로 바꿔 자동 재실행하지 마세요.
+
 ## 승인과 검증 경계
 
 `ui-*` 도구와 비공개 티켓은 사용자 화면용입니다. 일반 에이전트가 호출해 소유자 승인을 대신하지 않습니다. 카드가 없으면 `get-client-capabilities` 또는 `get-client-setup`의 기존 `approvals.adminUrl`과 요청 ID로 관리자 페이지의 해당 요청을 안내하고 같은 요청 ID의 완료를 기다립니다. 새 승인 링크나 토큰을 만들지 않습니다. 이 주소에는 승인 티켓이나 인증정보가 없습니다. MCP 연결이 끝난 에이전트를 깨우는 푸시 기능으로 해석하지 않습니다.

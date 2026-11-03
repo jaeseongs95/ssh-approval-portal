@@ -3,7 +3,7 @@ import { basename, join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { validateOrigin } from '../config/settings.mjs';
-import { remotePath } from '../../domain/validation.mjs';
+import { anyRemotePath, remotePath, windowsRemotePath } from '../../domain/validation.mjs';
 import { validateLocalPath, withUploadSnapshot, saveDownload } from './local-files.mjs';
 import { createFileForwarder, readPrivateJson, validateFileManifest } from './file-forwarder.mjs';
 
@@ -40,7 +40,8 @@ export async function createAgentUploadForwarder({ origin, journalRoot, openClie
   }
   async function selectUpload(input) {
     const args = agentUploadSelectionArgs.parse(input);
-    validateLocalPath(args.localPath); remotePath(args.remotePath);
+    validateLocalPath(args.localPath);
+    try { anyRemotePath(args.remotePath); } catch { throw fail('INVALID_REMOTE_PATH'); }
     const existing = await load(args.capabilityId);
     if (existing) return sameIntent(existing, args);
     const signal = AbortSignal.timeout(120000);
@@ -49,6 +50,11 @@ export async function createAgentUploadForwarder({ origin, journalRoot, openClie
       client = await openClient(origin, { timeoutMs: 120000, signal });
       const listed = await client.targets(), matches = Array.isArray(listed?.targets) ? listed.targets.filter(item => item?.id === args.target) : [];
       if (matches.length !== 1 || matches[0].enabled !== true || !/^[a-f0-9]{64}$/.test(matches[0].revision)) throw fail('CAPABILITY_TARGET_UNAVAILABLE');
+      const platform = matches[0].platform;
+      if (platform !== undefined && !['linux', 'windows'].includes(platform)) throw fail('CAPABILITY_TARGET_UNAVAILABLE');
+      try {
+        (platform === 'windows' ? windowsRemotePath : platform === 'linux' ? remotePath : anyRemotePath)(args.remotePath);
+      } catch { throw fail('INVALID_REMOTE_PATH'); }
       return await withUploadSnapshot(args.localPath, async snapshot => {
         const publicName = [...basename(args.localPath).replace(/[^\p{L}\p{N}._ -]/gu, '-')].slice(0, 128).join('') || 'upload';
         const manifest = validateFileManifest({ version: 1, origin, capabilities: [{

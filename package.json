@@ -1,6 +1,6 @@
 {
   "name": "ssh-approval-portal",
-  "version": "1.7.5",
+  "version": "1.7.6",
   "license": "MIT",
   "private": true,
   "type": "module",

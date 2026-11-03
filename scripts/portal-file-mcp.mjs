@@ -24,7 +24,7 @@ export async function startFileMcp({ forwarder, transport = new StdioServerTrans
   const result = value => ({ content: [{ type: 'text', text: JSON.stringify(value) }], structuredContent: value, ...(value.error ? { isError: true } : {}) });
   const wrap = callback => async args => {
     try { return result(await callback(args)); }
-    catch { return result({ state: 'refused', error: 'CAPABILITY_REQUEST_REFUSED' }); }
+    catch (error) { return result({ state: 'refused', error: publicErrors.has(error?.code) ? error.code : 'CAPABILITY_REQUEST_REFUSED' }); }
   };
   server.registerTool('file_capabilities', { description: '고정된 파일 ID와 공개 이름을 확인합니다. PC 경로·원격 경로는 표시하지 않습니다.', inputSchema: z.strictObject({}), annotations: { readOnlyHint: true } }, wrap(args => forwarder.list(args)));
   if (forwarder.selectUpload) server.registerTool('file_upload_select', {
