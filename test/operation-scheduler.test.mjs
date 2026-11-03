@@ -51,6 +51,69 @@ test('unknown blocks one conflict key while independent work continues on the sa
   assert.equal(f.scheduler.enqueue(first.id).state, 'unknown'); assert.deepEqual(f.starts, ['installer', 'independent']);
 });
 
+test('33 retained legacy unknowns stay visible without consuming admission or dispatch capacity', { timeout: 5000 }, async t => {
+  const f = fixture(t), source = 'command-automation.sqlite';
+  const list = f.store.list;
+  f.store.list = filter => {
+    assert.ok(filter?.state || filter?.states, 'scheduler hot paths must not load all retained history bodies');
+    return list(filter);
+  };
+  const waiting = f.enqueue('queued-before-history', 'alpha', { conflictKey: 'legacy-resource' });
+  const imported = Array.from({ length: 33 }, (_, index) => f.store.importLegacy({
+    id: (index + 1).toString(16).padStart(48, '0'), state: 'running', kind: 'command',
+    targetId: 'alpha', targetRevision: 'rev1', conflictKey: 'legacy-resource',
+    operation: { kind: 'command', command: 'historical-only' },
+  }, { source }));
+  const events = imported.map(job => f.store.events(job.id));
+  assert.equal(f.scheduler.snapshot().unknown, 33, 'public history count still includes migrated unknowns');
+  assert.ok(imported.every(job => job.conflictKey === undefined && job.legacy.original.conflictKey === 'legacy-resource'));
+  const fresh = f.enqueue('new-after-history', 'alpha', { conflictKey: 'legacy-resource' });
+  await tick(); assert.deepEqual(f.starts, ['queued-before-history']);
+  f.release('queued-before-history'); await f.scheduler.observe(waiting.id); await tick();
+  assert.deepEqual(f.starts, ['queued-before-history', 'new-after-history']);
+  f.release('new-after-history'); assert.equal((await f.scheduler.observe(fresh.id)).state, 'completed');
+  assert.equal(f.scheduler.enqueue(imported[0].id).state, 'unknown', 'history never authorizes replay');
+  for (const [index, job] of imported.entries()) {
+    assert.deepEqual(f.store.get(job.id), job); assert.deepEqual(f.store.events(job.id), events[index]);
+  }
+  assert.equal(f.scheduler.snapshot().unknown, 33);
+  assert.deepEqual(f.starts, ['queued-before-history', 'new-after-history']);
+});
+
+test('live unknowns still exhaust the shared budget and stop queued dispatch beside retained history', { timeout: 5000 }, async t => {
+  const f = fixture(t, { unknownBudget: 2 });
+  for (let index = 0; index < 33; index++) f.store.importLegacy({
+    id: (index + 1).toString(16).padStart(48, '0'), state: 'running', kind: 'command',
+    operation: { kind: 'command', command: 'historical-only' },
+  }, { source: 'command-automation.sqlite' });
+  const one = f.enqueue('live-one'), two = f.enqueue('live-two'), waiting = f.enqueue('still-queued');
+  const unknown = { failed: true, execution: { ...exited.execution, remoteState: 'unknown', cleanupComplete: false, requiresReconciliation: true } };
+  await tick(); assert.deepEqual(f.starts, ['live-one']);
+  f.release('live-one', unknown); assert.equal((await f.scheduler.observe(one.id)).state, 'unknown'); await tick();
+  assert.deepEqual(f.starts, ['live-one', 'live-two']);
+  f.release('live-two', unknown); assert.equal((await f.scheduler.observe(two.id)).state, 'unknown'); await tick();
+  assert.equal(f.scheduler.snapshot().unknown, 35, 'history and live unknowns remain observable together');
+  assert.equal(f.store.get(waiting.id).state, 'queued', 'live risk budget still fences durable claims');
+  assert.throws(() => f.enqueue('over-live-budget'), { code: 'OPERATION_RECONCILIATION_CAPACITY', accepted: false });
+  assert.equal(f.store.find('over-live-budget'), null);
+  assert.deepEqual(f.starts, ['live-one', 'live-two']);
+});
+
+test('partial legacy markers do not exempt a live unknown from admission risk', { timeout: 5000 }, async t => {
+  const id = 'f'.repeat(48), source = 'command-automation.sqlite';
+  for (const extra of [
+    { recoveryReason: 'bridge_restart', legacy: { source, original: { id } } },
+    { recoveryReason: 'legacy_import', legacy: { source: null, original: { id } } },
+    { recoveryReason: 'legacy_import', legacy: { source, original: { id: 'different' } } },
+  ]) {
+    const f = fixture(t, { unknownBudget: 1 }), job = f.enqueue('live-marker', 'alpha', { id, ...extra });
+    await tick(); f.release('live-marker', { failed: true, execution: { ...exited.execution, remoteState: 'unknown', cleanupComplete: false, requiresReconciliation: true } });
+    assert.equal((await f.scheduler.observe(job.id)).state, 'unknown');
+    assert.throws(() => f.enqueue('blocked'), { code: 'OPERATION_RECONCILIATION_CAPACITY', accepted: false });
+    assert.equal(f.store.find('blocked'), null); assert.deepEqual(f.starts, ['live-marker']);
+  }
+});
+
 test('shrinking capacity preserves running and accepted work; overload is typed and unaccepted', { timeout: 5000 }, async t => {
   const f = fixture(t, { globalConcurrency: 2, targetConcurrency: 2, queueCapacity: 4, targetQueueCapacity: { alpha: 3, beta: 1 } });
   const one = f.enqueue('one'), two = f.enqueue('two'); await tick(); assert.deepEqual(f.starts, ['one', 'two']);

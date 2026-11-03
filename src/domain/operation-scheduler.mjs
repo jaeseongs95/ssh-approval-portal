@@ -30,9 +30,9 @@ export function createOperationScheduler({ store, execute, beforeDispatch = () =
   };
   const persist = (id, patch, options) => { const job = store.update(id, patch, options); changed(job); return job; };
   const snapshot = () => {
-    const jobs = store.list(), count = states => jobs.filter(job => states.includes(job.state)).length;
-    return { ...settings, paused, closed, lastError, active: count(activeStates), queued: count(['queued']),
-      accepted: count(['accepted']), unknown: count(['unknown']), observers: observers.size, targets: [...ring] };
+    const counts = store.countStates();
+    return { ...settings, paused, closed, lastError, active: activeStates.reduce((total, state) => total + counts[state], 0), queued: counts.queued,
+      accepted: counts.accepted, unknown: counts.unknown, observers: observers.size, targets: [...ring] };
   };
   function schedule() {
     if (scheduled || closed) return;
@@ -119,10 +119,11 @@ export function createOperationScheduler({ store, execute, beforeDispatch = () =
     if (existing && existing.state !== 'accepted') return typeof recordOrId === 'string' ? existing : store.accept(recordOrId);
     if (closed || paused) throw error('OPERATION_ADMISSION_CLOSED');
     if (typeof recordOrId === 'string' && !existing) throw error('OPERATION_NOT_FOUND');
-    const jobs = store.list(), queued = jobs.filter(job => job.state === 'queued');
+    const queued = store.list({ state: 'queued' });
     const targetId = existing?.targetId ?? recordOrId.targetId;
     if (queued.length >= settings.queueCapacity || queued.filter(job => job.targetId === targetId).length >= targetLimit(settings.targetQueueCapacity, targetId)) throw error('OPERATION_QUEUE_FULL');
-    if (jobs.filter(job => job.state === 'unknown').length >= settings.unknownBudget) throw error('OPERATION_RECONCILIATION_CAPACITY');
+    // Durable import credits identify non-replay history without reading legacy bodies.
+    if (store.countStates({ includeLegacy: false }).unknown >= settings.unknownBudget) throw error('OPERATION_RECONCILIATION_CAPACITY');
     const accepted = typeof recordOrId === 'string' ? existing : store.accept(recordOrId);
     if (!accepted) throw error('OPERATION_NOT_FOUND');
     const job = persist(accepted.id, { state: 'queued' }, { expectedState: 'accepted', expectedVersion: accepted.version });

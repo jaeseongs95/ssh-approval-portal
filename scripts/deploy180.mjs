@@ -291,15 +291,14 @@ export async function runDeployment(stage, input, { fetchImpl = fetch } = {}) {
 if (import.meta.main) {
   try {
     if (['--migration-child', '--migration-check'].includes(process.argv[2])) {
-      const { createOperationStore } = await import('../src/adapters/storage/operation-store.mjs');
+      const { createOperationStore, LEGACY_IMPORT_BATCH_SIZE } = await import('../src/adapters/storage/operation-store.mjs');
       const { migrateLegacyOperations } = await import('../src/adapters/storage/operation-migration.mjs');
       let text = ''; for await (const chunk of process.stdin) text += chunk;
       const options = JSON.parse(text), store = createOperationStore(options.legacyRoot);
       try {
         if (process.argv[2] === '--migration-check') {
-          for (const { source, rows } of options.inventory) for (const { job, digest, requestKey } of rows) {
-            if (!store.find(requestKey ?? `legacy:${source}:${job.id}`)) fail('LEGACY_MIGRATION_RECORD_MISSING');
-            store.importLegacy(job, { source, digest, requestKey });
+          for (const { source, rows } of options.inventory) for (let offset = 0; offset < rows.length; offset += LEGACY_IMPORT_BATCH_SIZE) {
+            store.importLegacyBatch(rows.slice(offset, offset + LEGACY_IMPORT_BATCH_SIZE), { source, requireExisting: true });
           }
           process.stdout.write(JSON.stringify({ type: 'portal.operation-migration-check.v1', status: 'completed' }));
         } else process.stdout.write(JSON.stringify(migrateLegacyOperations({ ...options, store })));

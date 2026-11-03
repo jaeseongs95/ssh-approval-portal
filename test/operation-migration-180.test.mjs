@@ -108,12 +108,21 @@ test('redeployment preserves the first import after real 1.8 journal recovery an
   const adopted = await prepareDeploymentMigration({ ...plan, generation: 'c'.repeat(64) }, release, { previousGeneration: generation });
   assert.equal(adopted.reused, true); assert.equal(adopted.originalGeneration, generation);
   const store = createOperationStore(dataRoot);
+  let corrupted;
   try {
     assert.equal(store.list().length, 4); assert.equal(store.list({ state: 'queued' }).length, 0);
     const original = store.get(commandJobs[0].id);
     assert.deepEqual(original.legacy.original, commandJobs[0]);
-    store.update(original.id, { legacy: { ...original.legacy, original: { ...original.legacy.original, state: 'failed' } } });
+    const legacy = { ...original.legacy, original: { ...original.legacy.original, state: 'failed' } };
+    assert.throws(() => store.update(original.id, { legacy }), { code: 'OPERATION_CONTRACT_IMMUTABLE' });
+    corrupted = { ...original, legacy };
   } finally { store.close(); }
+  // Corrupt only this synthetic target after releasing its exclusive connection.
+  // Public updates now protect imported evidence; the reuse check must still
+  // detect storage corruption rather than silently accepting conflicting history.
+  const corruptor = new DatabaseSync(join(dataRoot, 'operations.sqlite'));
+  try { corruptor.prepare('UPDATE operations SET body=? WHERE id=?').run(JSON.stringify(corrupted), corrupted.id); }
+  finally { corruptor.close(); }
   const conflicted = await readFile(join(dataRoot, 'operations.sqlite'));
   await assert.rejects(prepareDeploymentMigration({ ...plan, generation: 'd'.repeat(64) }, release), { code: 'OPERATION_KEY_CONFLICT' });
   assert.deepEqual(await readFile(join(dataRoot, 'operations.sqlite')), conflicted);

@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { copyFileSync, constants, existsSync, lstatSync, mkdirSync, readFileSync, chmodSync, openSync, closeSync, fsyncSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
+import { LEGACY_IMPORT_BATCH_SIZE } from './operation-store.mjs';
 
 const sources = ['command-automation.sqlite', 'agent-cli.sqlite'];
 const terminal = new Set(['completed', 'failed', 'cancelled', 'expired', 'denied', 'unknown']);
@@ -75,13 +76,14 @@ export function migrateLegacyOperations({ legacyRoot, archiveRoot, store, now = 
   }
   for (const { source, sha256, rows } of inventory) {
     let unknown = 0;
-    for (const { job, digest, requestKey } of rows) {
-      store.importLegacy(job, { source, digest, requestKey });
-      if (!terminal.has(job.state) || job.state === 'unknown') unknown++;
+    for (let offset = 0; offset < rows.length; offset += LEGACY_IMPORT_BATCH_SIZE) {
+      const batch = rows.slice(offset, offset + LEGACY_IMPORT_BATCH_SIZE);
+      store.importLegacyBatch(batch, { source });
+      for (const { job } of batch) if (!terminal.has(job.state) || job.state === 'unknown') unknown++;
     }
     if (hash(readFileSync(join(legacyRoot, source))) !== sha256) fail('LEGACY_CHANGED_DURING_IMPORT');
     receipt.sources.push({ source, sha256, imported: rows.length, unknown, archiveMode: '0400' });
     receipt.imported += rows.length; receipt.unknown += unknown;
   }
-  return receipt;
+  return { ...receipt, retainedHistoryBudget: store.legacyUsage() };
 }
