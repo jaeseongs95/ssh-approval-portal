@@ -155,6 +155,24 @@ test('text-only MCP clients reconstruct bounded UTF-8 output and digest with no 
   } finally { await f.close(); }
 });
 
+test('actual MCP observe projects signal delivery without converting a request into remote exit evidence', async () => {
+  const f = await fixture(); try {
+    f.pending.state = 'unknown';
+    for (const [signalDelivery, expected] of [['requested', 'requested'], ['unsupported', 'unsupported'], ['claimed-terminated', null], [undefined, null]]) {
+      f.pending.result = { failed: true, texts: [], execution: { phase: 'settled', reason: 'cancel', remoteState: 'unknown',
+        exitCode: null, cleanupComplete: false, requiresReconciliation: true, automaticReplay: false, signalDelivery } };
+      const result = await f.call('observe', { id: identifier });
+      assert.equal(result.structuredContent.ok, true);
+      const data = result.structuredContent.data;
+      assert.equal(data.execution.signalDelivery, expected); assert.equal(data.state, 'unknown');
+      assert.equal(data.execution.remoteState, 'unknown'); assert.equal(data.execution.cleanupComplete, false);
+      assert.equal(data.execution.requiresReconciliation, true); assert.equal(data.execution.automaticReplay, false);
+    }
+    const descriptor = (await f.client.listTools()).tools.find(tool => tool.name === 'observe');
+    assert.match(descriptor.description, /signalDelivery=requested.*not that remote termination was confirmed/);
+  } finally { await f.close(); }
+});
+
 test('native submit keeps exact UTF-8 limits and refuses command overflow without dispatch', async () => {
   const f = await fixture(); try {
     const submit = (await f.client.listTools()).tools.find(t => t.name === 'submit'); assert.equal(submit.inputSchema.properties.command.maxLength, 32768); assert.equal(submit.inputSchema.properties.source.maxLength, 16384);
