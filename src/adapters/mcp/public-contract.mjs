@@ -193,7 +193,7 @@ export function registerPublicTools(server, { operations, files, settings, targe
     return { ...Object.fromEntries(['id', 'received', 'sequence', 'size', 'sha256', 'expiresAt', 'targetId', 'targetRevision'].map(field => [field, item[field]])), maxChunkBytes: CHUNK_BYTES };
   }, 'Reserve an upload on this MCP connection using a stable operationKey, bound to exact target revision, destination, byte size and SHA-256. The caller must already possess authorized file bytes. No client path is read and no SSH work starts. Recover the same key and transfer ID; a conflicting key reuse is refused.');
   register('artifact-chunk', async ({ id, sequence, data }) => files.appendAgentUpload({ id, sequence, bytes: decodeArtifactChunk(data) }),
-    'Append 1..262144 authorized bytes as canonical base64. Sequence begins at zero. After uncertainty inspect artifact-status using the same ID; only an identical immediately preceding chunk may be acknowledged twice. Never put file bytes in shell commands.');
+    'Append 1..262144 authorized bytes as canonical base64. Sequence begins at zero. After uncertainty inspect artifact-status using the same ID. While staging remains writable, any previously acknowledged chunk with the same sequence, decoded size and SHA-256 returns the current ACK without another write. Prefer dedicated artifact tools for file bytes; shell-based transfer is not categorically prohibited. The caller remains responsible for exact encoding and escaping, required approval and preventing unauthorized exposure.');
   register('artifact-status', ({ id }) => {
     const value = files.agentUploadStatus(id);
     return value.state === 'submitted' ? { state: value.state, transfer: null, request: presentOperation(value.job) }
