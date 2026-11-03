@@ -36,7 +36,7 @@ sudo /opt/ssh-approval/node/bin/node scripts/deploy180.mjs verify --plan /srv/po
 
 `inspect`는 읽기만 수행하며 현재 릴리스, 파일 수, 여유 공간을 반환한다. `stage`는 manifest에 있는 파일만 새 디렉터리에 복사하고 해시 검증, `npm ci --omit=dev --ignore-scripts`, 기존 import 검사를 수행한 뒤 `releases/<generation>`으로 rename한다. 기존 릴리스와 manifest도 고정한다. 같은 generation에 계획을 바꾸면 `DEPLOY_PLAN_CHANGED`로 거부한다.
 
-`activate`는 현재 링크가 준비 당시와 같은지 확인하고 서비스를 중지한다. 상태 명령이 중지 상태를 확인한 뒤 원본 DB를 읽고 보관·이전한다. 새 영구 저장소 전체의 fingerprint를 저장하고 임시 링크를 활성 링크로 atomic rename한 뒤 서비스를 시작한다. 시작 시도 전 상태를 디스크에 기록하므로 응답 유실을 미실행으로 오인하지 않는다. 서비스 중지·시작으로 해당 설치에 짧은 중단이 발생한다.
+`activate`는 현재 링크가 준비 당시와 같은지 확인하고 서비스를 중지한다. 상태 명령이 중지 상태를 확인한 뒤 최초 이전이면 원본 DB를 보관·이전하고, 이미 완료한 이전이면 아래의 보관본·journal 검증으로 그 증거를 재사용한다. 새 영구 저장소 전체의 fingerprint를 저장하고 임시 링크를 활성 링크로 atomic rename한 뒤 서비스를 시작한다. 시작 시도 전 상태를 디스크에 기록하므로 응답 유실을 미실행으로 오인하지 않는다. 서비스 중지·시작으로 해당 설치에 짧은 중단이 발생한다.
 
 `verify`는 활성 링크와 manifest SHA-256, 서비스 실행 상태, `/health`의 `healthy`, `version`, `deploymentGeneration`을 함께 확인한다. `deploymentGeneration`은 현재 실행 소스의 manifest SHA-256이어야 한다. 단순한 HTTP 200을 배포 완료로 처리하지 않는다.
 
@@ -45,6 +45,10 @@ sudo /opt/ssh-approval/node/bin/node scripts/deploy180.mjs verify --plan /srv/po
 `src/adapters/storage/operation-migration.mjs`는 `command-automation.sqlite`, `agent-cli.sqlite`의 기존 `requests(id,body,digest)` 스키마를 읽기 전용 SQLite로 연다. 기존 adapter를 호출하지 않으므로 adapter 초기화의 상태 변경도 실행하지 않는다. 원본 DB의 `policy`와 요청 JSON, 요청 digest를 변경하지 않는다. 알 수 없는 스키마, 잔류 WAL/journal, 변경 중인 원본, 용량 초과는 명시적으로 실패한다.
 
 먼저 두 원본을 `appRoot/legacy-archives/<generation>/`에 복사하고 해시를 대조한다. 보관 파일은 `0400`이다. root 배포에서는 이전 성공 뒤 보관 파일과 디렉터리를 root 소유로 고정한다. 원본 DB는 그대로 둔다. `completed`, `failed`, `cancelled`, `expired`, `denied`, `unknown` 이력을 같은 상태로 새 operation store에 명시적으로 import한다. 나머지 예전 작업은 `unknown` 증거로만 import하며 대기열에 넣거나 재실행하지 않는다. 원문은 `legacy.original`, 기존 digest는 `legacy.digest`에 유지한다. 같은 원본의 재시도는 동일 내용만 허용한다.
+
+최초 이전이 완료되면 `appRoot/deployments/legacy-migration.json`에 원래 generation, `dataRoot`, 이전 영수증을 저장한다. 다음 generation 배포는 이후에도 바뀔 수 있는 `command-automation.sqlite`·`agent-cli.sqlite`를 다시 import하지 않는다. 원래 generation의 변경 금지 보관본을 영수증의 SHA-256·행 수와 대조하고, 현재 `operations.sqlite`에서 각 요청키의 `legacy.original`·`legacy.digest`가 보관본과 같은지 검사한 뒤 완료 증거를 재사용한다. 현재 operation의 상태나 결과를 옛 이력으로 덮어쓰지 않는다.
+
+완료 표식이 없는 이전 배포 도구의 상태 파일도, 직전 generation이 `switching`, `start-attempted`, `activated`, `verified`, `recovered` 단계이고 유효한 이전 영수증을 갖고 있으면 같은 보관본·journal 검사를 거쳐 승계할 수 있다. `migrating` 같은 불완전 단계는 완료 증거가 아니다. 영수증 없는 기존 1.8 설치, 손상된 표식, 다른 `dataRoot`, 변경된 보관본, 누락된 canonical 행, 같은 요청키의 원문·digest 충돌은 거부한다. 보관 디렉터리의 symlink와 보관 파일의 symlink·복수 hardlink도 거부한다. 새 키로 바꾸거나 live 원본을 다시 import하여 불완전 증거를 숨기지 않는다. 원본 DB와 canonical journal을 자동 덮어쓰거나 삭제하지 않는다.
 
 기존 `requests.request_key` 컬럼이 있으면 그 값을 정확히 새 journal의 요청키로 사용한다. 컬럼이 없거나 NULL인 구형 행에만 `legacy:<source>:<id>`를 사용한다. 새 journal은 전역 요청키를 사용하므로 두 구형 DB의 같은 키가 서로 다른 이력을 가리키면 `OPERATION_KEY_CONFLICT`로 멈춘다. 이름을 임의로 바꾸거나 기존 결과를 덮어쓰지 않는다. 실패 전에 import된 행은 새 journal에 남을 수 있지만 서비스 전환은 하지 않으며 원본 두 DB와 SHA-256 보관본은 유지한다. 충돌은 별도 명시적 이력 매핑으로 해결해야 하고, 새로운 키로 실행을 재제출해 해결하지 않는다.
 
@@ -63,3 +67,5 @@ sudo /opt/ssh-approval/node/bin/node scripts/deploy180.mjs recover --plan /srv/p
 동시 호출은 `.deploy180.lock`으로 거부한다. 프로세스 강제 종료 뒤 잠금 파일이 남을 수 있다. 배포 프로세스가 실제로 종료됐는지 관리자가 확인한 뒤 해당 잠금만 수동 해제한다. 도구는 다른 프로세스의 잠금을 자동 삭제하지 않는다. 실패한 임시 stage나 보관 자료도 자동 삭제하지 않는다.
 
 각 성공 단계는 `portal.deployment-receipt.v1` JSON과 `deployments/<generation>-<stage>-receipt.json`을 남긴다. 실패는 비밀이나 자식 출력 대신 구분 가능한 `code`와 실패 단계의 JSON을 출력하며 종료 코드 1을 반환한다. 상태 파일과 성공 영수증은 `0600`이다. 제품 시험용 검사는 `node --test test/operation-migration-180.test.mjs`이며 허용된 서버·CI에서 실행한다.
+
+이 문서는 현재 소스의 절차와 실패 경계를 설명하며 실제 설치·운영 전환 완료를 주장하지 않는다. 2026-11-03 재배포의 이전 증거 재사용 수정(`0e0e31190c6f94d8f010013797cabf524110ce0c`)과 보관 경로 검증 보강(`3a3c3f3728a12bd28105250cb7322bb5acceccd4`)은 문서 갱신 시점에 TEST 회귀 결과 확인 중이다. 회귀 시험, 실제 서비스 중지·기동, 운영 데이터 보존과 복구는 각 실행의 고정 commit·명령·종료 코드·영수증으로 별도 확인해야 한다.

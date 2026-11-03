@@ -2,36 +2,77 @@
 
 [한국어](architecture.ko.md) · [README](../README.md)
 
-This document describes responsibilities and validation requirements for the 1.0.0 architecture. The presence of files or a new structure does not establish passing integration tests, real-client acceptance, or deployment validation.
+This document describes the responsibilities and public contracts in the 1.8 source. Implemented contracts, observed tests, and real-client or production acceptance require separate evidence. The existence of a feature does not establish release or deployment readiness.
 
-## Three layers and composition
+## Layers and composition
 
 | Location | Responsibility | Boundary |
 | --- | --- | --- |
-| `src/domain/` | Approval state transitions, invariants, and input validation | No filesystem, HTTP, environment, or host SDK dependencies. |
-| `src/application/` | Command, file, maintenance, and shutdown use cases | Calls injected queues, stores, executors, and file sources. Does not construct MCP responses or HTTP statuses. |
-| `src/adapters/` | MCP, HTTP, public results, authentication, configuration, audit, storage, HTTPS sources, and SSH | Converts external representations to internal contracts and owns I/O. |
-| `src/contracts/ports.mjs` | Neutral outcomes, port contracts, and shared limits | `OperationOutcome` is `{failed,texts,data?}`. |
-| `app.mjs` and `bridge.mjs` | Dependency composition, asset loading, and process startup | Do not duplicate domain rules or HTTP routes. |
+| `src/domain/` | Approval/execution transitions, scheduling, capacity, input and desktop lease invariants | No direct filesystem, HTTP, environment or host SDK access. |
+| `src/application/` | Command, source, file, history, runtime capacity, desktop and shutdown use cases | Calls injected stores, executors and providers. Adapters construct MCP replies and HTTP statuses. |
+| `src/adapters/` | MCP, HTTP, configuration, authentication, audit, SQLite, artifacts, SSH and RFB I/O | Converts external representations and acquires/releases resources. |
+| `src/contracts/ports.mjs` | Neutral outcomes, ports and shared limits | Basic `OperationOutcome` fields are `{failed,texts,data?,output?}`. |
+| `app.mjs` and `bridge.mjs` | Dependency composition, target services, assets and startup | Do not duplicate domain rules or transport routes. |
 
-Internal `Job.result` uses the neutral outcome. Public presenters convert it to the existing `content`, `isError`, and `structuredContent` representation. Legacy injected command callback results are normalized at composition. Vendor deep imports are localized in `src/adapters/ssh/vendor.mjs`.
+Vendor internal imports are localized in `src/adapters/ssh/vendor.mjs`, which checks the `ssh-mcp` 2.18.0 contract. Domain and application code do not expose MCP SDK or vendor profile objects in public results.
 
-## Behavior to preserve
+## Neutral tools and approval
 
-Remote upload execution must occur zero times before approval and once after audit persistence and a valid owner approval. Expiry or audit failure must never restore execution permission. Immediate read failures also attempt a terminal audit and never expose raw internal errors in ordinary responses.
+`src/adapters/mcp/public-contract.mjs` owns input/output schemas and reply validation for `contractVersion: "1.8"`. The model-facing base surface has nine tools.
 
-The artifact store owns reservation, completion, release, and download completion. Application code does not mutate its internal state. Upload approvals bind filename, size, SHA-256, destination, overwrite, and sudo flags. The 64 MiB file limit, default 512 MiB staging budget, ten-minute expiry, and no automatic replay after restart remain in force.
+| Tool | Contract |
+| --- | --- |
+| `targets` | Target revisions, actual capabilities, file policies and limits |
+| `submit` | Submit `command`, explicit Python `source`, or `download` with a stable `operationKey` |
+| `observe` | Inspect the same ID or key; include paginated output only when requested |
+| `cancel` | Request cancellation of the same operation; inspect its returned state for confirmation |
+| `artifact-begin`, `artifact-chunk`, `artifact-status`, `artifact-finish` | Stage and submit authorized bytes bound to size, SHA-256 and target revision |
+| `artifact-read` | Read bounded base64 pages of a verified snapshot for a completed download |
 
-Preserve MCP tool names, public Job fields, error distinctions, and app-only card tools. Approval and download capabilities stay in their existing private delivery channel, outside public output schemas. Register top-level object output schemas accepted by the SDK and validate actual response variants in presenters. Preserve the timing distinction between an MCP running response and the website waiting for completion.
+When a desktop service is composed, four more tools are registered: `desktop-open`, `desktop-observe`, `desktop-input` and `desktop-close`. Registration alone does not establish target availability: check capabilities and current policy. Existing `show-*` and `ui-*` tools are app-only owner card actions, not a model approval path. Public schemas exclude approval/download tickets and internal host objects.
 
-Administrator authentication defaults to `token`. Preserve the separate requirements for owner login, file-download capabilities, and maintenance tokens in `access` mode. `config/settings-contract.json` holds defaults and allowed keys; JavaScript and Python consumers share origin and port validation. Port defaults are 39124/39125, with a supported range of 1–65535. Origin validation uses Node 24's WHATWG URL implementation as its single authority; Python's `settings_contract.validate_origin` also calls `scripts/validate-origin.mjs` without a shell and supplies the value only on stdin.
+Neutral tools do not require a separate local CLI, stdio server or card installation. The caller must already possess upload bytes; platform file references do not automatically supply those bytes. See the [agent-upload guide](agent-upload.en.md) for platform limits. Administrator agent CLI installation, login and update are separate use cases, not prerequisites for neutral tools.
 
-Card file selection and progress belong to their current view. Earlier asynchronous work must not overwrite a later view. Periodic web refresh must not unnecessarily erase another request's focus, selection, or scroll. Verify these behaviors in a real browser separately.
+Server policy and valid owner approval authorize execution. An ID confirms acceptance, not successful execution. The same key with the same immutable input recovers the same operation; conflicting input is refused. Observation timeout or disconnect does not cancel work. Never use a fresh key to replay an uncertain outcome. `terminating` still represents live execution resources; `unknown` requires reconciliation.
 
-## Changes and validation
+## Durable journal and execution queue
 
-Implement features against neutral internal contracts; handle host file references and response shapes in adapters. Do not accept Claude `file_uuid` or an empty URL as an OpenAI file input. Add a provider only after verifying its actual delivery contract and network access. See the [agent-upload guide](agent-upload.en.md) for current limits.
+`operations.sqlite`, owned by `src/adapters/storage/operation-store.mjs`, records request keys, immutable execution contracts, target revisions, state versions and events. SQLite transactions and version comparisons protect acceptance, claims and outcomes. `starting` is durable before external execution. A second bridge is refused concurrent execution authority over the same journal. The store itself does not execute SSH commands.
 
-Run the affected boundary tests after source changes and rebuild UI and web assets. Node, Python, browser, Linux, native, Docker, and Compose validation provide separate evidence. Check non-default ports through maintenance, health, update, and rollback; preserve configured image choices; verify atomic secret persistence and notices for nested dependency versions. Commands and required checks are in the [verification plan](../test/PLAN.md).
+`src/domain/operation-scheduler.mjs` rotates ready targets and applies global and target queue/concurrency limits. `starting`, `running` and `terminating` count as active. On restart these states become `unknown` and are not automatically replayed. Unknown outcomes and conflicting resources have separate constraints. Durable queued work still passes current target revision, policy, expiry and maintenance checks. Old history does not create new execution authority.
 
-Real ChatGPT and Claude cards, platform file inputs, Google/GitHub/Cloudflare sign-in, physical ARM hardware, and production deployment each need their own observed evidence. Local success does not establish these results. The current task covers local changes, validation, and a default-branch merge; a public release, remote push, or production deployment requires separate approval.
+Installation defaults use the available CPU count `N` from `os.availableParallelism()`: `queueCapacity=N*10` and `maxConcurrency=N`. `BRIDGE_QUEUE_CAPACITY` and `BRIDGE_MAX_CONCURRENCY` accept positive safe integers. The corresponding `BRIDGE_TARGETS` fields accept numbers or `null`; omitted or `null` values inherit global settings. `requestCapacity` limits retained approval requests separately from the execution queue.
+
+`src/application/runtime-capacity.mjs` and a separate `capacity.sqlite` own live administrator overrides. GET `/api/capacity` returns revision, available CPUs, configured/effective limits and queued/running counts. POST requires `expectedRevision`, persists a compare-and-set and then configures the scheduler. Installation environment values initialize this state; they do not overwrite saved overrides. Global and target limits both apply. Lowering them does not terminate active work. After a lost save reply, the UI requires an explicit fresh read before saving again.
+
+## SSH connections and file lifetime
+
+The SSH registry owns authenticated connection reuse, host keys and ProxyJump. Each execution opens its own exec/SFTP channel without inheriting another operation's shell state. Exhausted channel-open refusals can mark a connection for retirement, but do not interrupt other active channels. Once resources are idle, a later separately authorized operation can acquire a fresh connection. Command exit status, timeout or an uncertain remote outcome never justifies replaying that operation during connection recovery.
+
+`src/adapters/storage/artifacts.mjs` owns staging bytes, reservations, manifests, completion and release. Synchronized bytes and manifests restore acknowledged chunks after restart, roll back unacknowledged tails and quarantine files without metadata for diagnosis. Durable storage does not authorize SSH upload replay. Approval binds filename, size, SHA-256, destination, overwrite, elevation and target revision.
+
+The per-file maximum is 64 MiB, the default staging budget is 512 MiB, approval expiry is one hour, and staging/download links default to ten minutes. Command output follows its separate store's retention timestamps and output references, with a default one-hour TTL. Public output pages contain redacted adapter outcomes and do not guarantee complete remote stdout/stderr capture. Expired or deleted bytes are not regenerated by replaying commands. See [1.8 deployment and migration](deployment-180.ko.md) for legacy history, redeployment and recovery.
+
+## Real OS desktops
+
+`src/application/desktop.mjs` owns an exclusive lease bound to owner, target revision and epoch, with frames and input order. GUI leases are not reassigned through the operation queue or to another owner. The current MCP shared principal requires the target's explicit TEST bypass authority. Administrator HTTP requests receive their authenticated browser principal on the server. A target needs `desktop: {enabled:true,port:...}` and a connected backend before opening succeeds.
+
+The path is administrator UI or MCP → desktop service → RFB adapter → SSH `direct-tcpip` channel → target loopback VNC server. `direct-tcpip` is a forwarding channel inside authenticated SSH. The browser does not connect directly to the target's VNC TCP port. `src/adapters/desktop/rfb.mjs` supports RFB 3.8 Raw/DesktopSize and explicitly enabled None security only. SSH authenticates transport, not other local users on the target. VNC installation, OS login and graphical session creation are outside this adapter. PTY or terminal text does not substitute for OS screen capture.
+
+Observation returns PNG, `frameId`, physical dimensions, `geometryRevision` and the next input sequence. MCP delivers PNG as the image in `content[1]` with JSON frame metadata; administrator HTTP returns PNG base64. Input binds the same session, epoch and observed geometry to a monotonically increasing sequence and stable requestKey. Repeating identical latest input recovers its receipt without wire replay. Uncertain input is never automatically resent under a new key. Close attempts held-key/button release and channel cleanup; inspect `releaseSent` and `cleanupError`. It does not log out the OS or terminate the shared SSH transport.
+
+The administrator viewer supports clicks, shortcuts and text, but not dragging. It converts CSS coordinates to physical framebuffer coordinates once and reserves Tab for browser focus. Navigation and app logout await close; server logout cleans remaining leases for that owner only.
+
+## Administrator UI, authentication and localization
+
+Administrator authentication defaults to `token`. Owner login in `access` mode, file-download capabilities and maintenance tokens retain separate boundaries. `config/settings-contract.json` is the shared configuration contract. Default ports are 39124/39125, with the range 1–65535. JavaScript and Python use Node 24 WHATWG URL behavior as the common origin authority.
+
+File selection, drafts and progress belong to the current view. Earlier asynchronous results must not overwrite a later view, and periodic refresh must preserve focus, selection and scroll. Concurrent logout calls share one attempt; after a lost reply, session termination is retried only on an explicit user request.
+
+`web/src/locale.js` normalizes BCP 47 locales and validates ko/en catalogs, English fallback and named-placeholder syntax. Korean source strings remain message identifiers; their language alone is not a translation defect. A valid unsupported locale uses English messages while retaining its `Intl` number/date formats. Commands, output, policies and user input are not translated. See the [localization specification](i18n.ko.md).
+
+## Validation boundaries
+
+Source boundary tests, real SSH execution, real OS GUI, administrator browser behavior, platform MCP clients, packaging, installation and deployment each require their own evidence. Follow the [verification plan](../test/PLAN.md) for commands and environments. Product tests run on authorized TEST servers or CI. For this task, browser regression ran locally in headless Chromium as explicitly requested by the user.
+
+The 2026-11-03 browser evidence covers 245 unique legacy cases and six new capacity/desktop cases across pinned commits and partial runs. It is not a single complete suite pass at a final SHA. The six new cases use actual administrator DOM interactions with fixture APIs to check inheritance, CAS, response loss, input ordering, close and logout; they do not prove input against an actual VNC server or OS screen. Actual CLI provider installation/login/update, Linux/Windows OS GUI, ChatGPT/Claude cards and file inputs, external sign-in, physical ARM hardware and production deployment each require execution evidence in their own environment. Updating this document does not mark unverified work complete.
