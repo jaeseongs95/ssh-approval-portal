@@ -38,9 +38,11 @@ export class Artifacts {
   #orphans = [];
   #root;
   #now;
-  constructor(root, { maxBytes = MAX_BYTES, budget = 512 * 1024 * 1024, now = () => Date.now() } = {}) {
+  #canReap;
+  constructor(root, { maxBytes = MAX_BYTES, budget = 512 * 1024 * 1024, now = () => Date.now(), canReap = () => true } = {}) {
     if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0 || maxBytes > MAX_BYTES || !Number.isSafeInteger(budget) || budget < maxBytes) throw Error('Invalid staging limits');
-    this.#root = resolve(root); this.#now = now;
+    if (typeof canReap !== 'function') throw Error('Invalid artifact reaping policy');
+    this.#root = resolve(root); this.#now = now; this.#canReap = canReap;
     Object.defineProperties(this, { maxBytes: { value: maxBytes, enumerable: true }, budget: { value: budget, enumerable: true } });
   }
   get reserved() { return this.#reserved; }
@@ -49,7 +51,7 @@ export class Artifacts {
   list() { return Object.freeze([...this.#items.values()].map(snapshot)); }
   recoveryStatus() { return Object.freeze({ state: this.#orphans.length ? 'recovery-required' : 'clear',
     reservedBytes: this.#orphans.reduce((n, x) => n + x.reservedBytes, 0), entries: Object.freeze(this.#orphans.map(x => Object.freeze({ ...x }))) }); }
-  hasActiveWork() { return [...this.#items.values()].some(x => x.busy || x.pinned || x.state === 'staging'); }
+  hasActiveWork() { return this.#removing.size > 0 || [...this.#items.values()].some(x => x.busy || x.pinned || x.state === 'staging'); }
   async init() {
     await mkdir(this.#root, { recursive: true, mode: 0o700 });
     const s = await lstat(this.#root);
@@ -358,6 +360,10 @@ export class Artifacts {
     try { await work; } finally { this.#removing.delete(id); }
   }
   async reap() {
-    for (const x of this.#items.values()) if (!x.pinned && !x.busy && this.#now() >= x.expiresAt) await this.remove(x.id);
+    if (!this.#canReap()) return;
+    for (const x of this.#items.values()) {
+      if (!this.#canReap()) return;
+      if (!x.pinned && !x.busy && this.#now() >= x.expiresAt) await this.remove(x.id);
+    }
   }
 }

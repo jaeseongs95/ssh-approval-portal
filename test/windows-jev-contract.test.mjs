@@ -9,6 +9,9 @@ import { createApplication } from '../app.mjs';
 import { createJevAssessor } from '../src/adapters/safety/jev.mjs';
 import { explicitUserApproval, AUTOMATION_QUESTION, COMMAND_SET_QUESTION, WINDOWS_COMMAND_SET_QUESTION } from '../src/domain/command-policy.mjs';
 
+// 1.7 baseline: test/legacy-17/windows-jev-contract.test.mjs.17.
+// Removed receiver-only assess-request-risk maps to submit/observe; recorded execution assessment
+// keeps platform binding and owner-only approval, while observe never performs an additional model call.
 // 검사 계획: node --test test/windows-jev-contract.test.mjs (원격 실행 전용).
 // WIN-JEV-NAMES: 공개 승인 함수·어댑터에서 리터럴 이름/불완전 구문/위조를 독립 기대값으로 검사한다.
 // WIN-JEV-APP: 실제 관리자 등록·저장·실행·관측 경계와 Jev 직렬화를 연결한다. SSH와 외부 모델 전송만 대체한다.
@@ -101,16 +104,33 @@ test('WIN-JEV-APP 등록·실행·관측이 실제 target 플랫폼에 결속되
     assert.equal((await api('/api/command-policy/review', { expectedRevision: 1, policy: { targets: [forged] } })).status, 409);
   }
   assert.equal(seen.length, count);
-  const pending = await app.targets.commands.run('whoami.exe /user', 'windows', undefined, '합성 Windows 계정 확인');
-  await app.targets.drain();
-  const job = app.queue.get(pending.job.id);
-  assert.equal(job.state, 'pending'); assert.equal(job.decision.reasonCode, 'observation_only');
-  assert.equal(seen.at(-1).state.targetPlatform, 'windows'); assert.equal(seen.at(-1).state.userApproval.explicit, false);
-  assert.equal(executed.length, 0);
   await new Promise(resolve => app.mcpHttp.listen(0, '127.0.0.1', resolve));
   client = new Client({ name: 'synthetic-windows-jev', version: '1' });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${app.mcpHttp.address().port}/mcp`), { requestInit: { headers: { Authorization: 'Bearer fixture-mcp' } } }));
-  const observation = (await client.callTool({ name: 'assess-request-risk', arguments: { id: job.id, externalDisclosureApproved: true } })).structuredContent;
-  assert.equal(observation.assessment.status, 'assessed');
-  assert.equal(seen.at(-1).state.targetPlatform, 'windows'); assert.equal(seen.at(-1).state.userApproval, undefined);
+  const listed = (await client.callTool({ name: 'targets', arguments: {} })).structuredContent;
+  assert.equal(listed.ok, true);
+  assert.equal(listed.data.targets.find(item => item.id === 'windows').capabilities.commandShell, 'windows-powershell-5.1');
+  const submitted = await client.callTool({ name: 'submit', arguments: { kind: 'command', operationKey: 'windows-jev-platform-bound', target: 'windows', expectedTargetRevision: binding.targetRevision, command: 'whoami.exe /user', context: '합성 Windows 계정 확인' } });
+  assert.equal(submitted.structuredContent.ok, true);
+  let observed = submitted.structuredContent.data;
+  for (let attempt = 0; observed.state !== 'pending' && attempt < 20; attempt++) {
+    const response = await client.callTool({ name: 'observe', arguments: { id: observed.id, waitMs: 1000 } });
+    assert.equal(response.structuredContent.ok, true);
+    observed = response.structuredContent.data;
+    if (!['accepted', 'evaluating'].includes(observed.state)) break;
+  }
+  assert.equal(observed.state, 'pending');
+  const job = app.queue.get(observed.id);
+  assert.equal(job.state, 'pending'); assert.equal(job.decision.reasonCode, 'observation_only');
+  assert.equal(seen.at(-1).state.targetPlatform, 'windows'); assert.equal(seen.at(-1).state.userApproval.explicit, false);
+  assert.equal(executed.length, 0);
+  const evaluations = seen.length;
+  const observation = await client.callTool({ name: 'observe', arguments: { id: job.id, includeOutput: true } });
+  assert.equal(observation.structuredContent.ok, true);
+  assert.equal(observation.structuredContent.data.targetId, 'windows');
+  assert.equal(observation.structuredContent.data.targetRevision, binding.targetRevision);
+  assert.equal(observation.structuredContent.data.state, 'pending');
+  assert.equal(observation.structuredContent.data.outputPage, null);
+  assert.equal(seen.length, evaluations, 'observation neither discloses to the model again nor grants execution');
+  assert.equal(executed.length, 0);
 });

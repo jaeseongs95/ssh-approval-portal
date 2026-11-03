@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { CommandOutputs } from '../src/adapters/storage/command-output.mjs';
 import { capturePreservationSnapshot, comparePreservationSnapshots } from '../src/adapters/storage/preservation-verification.mjs';
+import { createOperationStore } from '../src/adapters/storage/operation-store.mjs';
 
 // CI/test-server only: durable partial output must never require a command replay.
 const binding = { executionId: 'c'.repeat(48), targetId: 'fixture', targetRevision: 'revision' };
@@ -20,7 +21,7 @@ function fixture(t, options = {}) {
 }
 const bytes = page => Buffer.concat(page.events.map(event => Buffer.from(event.bytes, page.bytesEncoding)));
 const streamState = { receivedBytes: 4, retainedBytes: 4, cursor: 4, truncated: false };
-const execution = { phase: 'settled', reason: 'deadline', remoteState: 'unknown', automaticReplay: false, timeoutMs: 120000,
+const execution = { phase: 'settled', reason: 'deadline', remoteState: 'unknown', exitCode: null, signal: null, automaticReplay: false, timeoutMs: 120000,
   cleanupComplete: false, requiresReconciliation: true, outputState: 'partial', captureFailed: false, stdout: streamState, stderr: streamState };
 
 test('partial stdout/stderr bytes are durable before finish, paged by cursor, and independent of UTF8 boundaries', t => {
@@ -56,6 +57,38 @@ test('finish preserves timeout metadata and the legacy immutable snapshot alongs
   const charge = f.store.preservationRows().outputs.find(row => row.id === item.id).charge;
   assert.equal(charge, statSync(f.path(item)).size + statSync(f.path(item, '.out')).size);
   f.restart(); assert.deepEqual(bytes(f.store.readStream({ outputId: item.id }, allow)), Buffer.from('somewarn'));
+});
+
+test('finish preserves exit status and signal through durable operation settlement without changing outcome certainty', t => {
+  const f = fixture(t), operations = createOperationStore(f.root);
+  try {
+    const exited = { ...execution, reason: 'exit', remoteState: 'exited', exitCode: 0, signal: null,
+      cleanupComplete: true, requiresReconciliation: false, outputState: 'complete' };
+    for (const [key, metadata, failed, expectedState] of [
+      ['exit-zero', exited, false, 'completed'],
+      ['exit-nonzero', { ...exited, exitCode: 7 }, true, 'failed'],
+      ['deadline', { ...execution, signal: 'TERM' }, true, 'unknown'],
+      ['transport-lost', { ...execution, reason: 'transport_lost' }, true, 'unknown'],
+    ]) {
+      const job = operations.accept({ requestKey: key, owner: 'owner', targetId: binding.targetId, targetRevision: binding.targetRevision, kind: 'command', input: { command: 'fixture' } });
+      operations.update(job.id, { state: 'queued' }); assert.ok(operations.claim(job.id));
+      const outcome = { failed, texts: ['captured'], execution: metadata };
+      const result = f.store.finish(f.store.reserve({ ...binding, executionId: job.id }), outcome);
+      assert.deepEqual(result.execution, metadata);
+      const settled = operations.outcome(job.id, result);
+      assert.equal(settled.state, expectedState, key); assert.deepEqual(settled.result.execution, metadata);
+      assert.deepEqual(JSON.parse(f.store.read({ outputId: result.output.id, format: 'json' }, actual => assert.equal(actual.executionId, job.id)).text), outcome);
+    }
+  } finally { operations.close(); }
+});
+
+test('finish rejects invalid exit status and signal metadata from its public projection', t => {
+  const f = fixture(t);
+  for (const [exitCode, signal] of [['0', 'PRIVATE secret\n'], [1.5, {}], [Number.MAX_SAFE_INTEGER + 1, 'A'.repeat(33)]]) {
+    const result = f.store.finish(f.store.reserve(binding), { failed: true, texts: [], execution: { ...execution, exitCode, signal } });
+    assert.equal(Object.hasOwn(result.execution, 'exitCode'), false); assert.equal(Object.hasOwn(result.execution, 'signal'), false);
+    assert.equal(JSON.stringify(result).includes('PRIVATE secret'), false);
+  }
 });
 
 test('truncation bounds physical spool bytes, records loss and retains committed bytes after capture failure', t => {

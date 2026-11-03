@@ -10,7 +10,7 @@ import { createSshRuntime, createSshTransport } from '../src/adapters/ssh/vendor
 import { preparePythonSource } from '../src/adapters/ssh/python-source.mjs';
 import { prepareAgentCliPlan } from '../src/adapters/ssh/agent-cli.mjs';
 
-// Real pinned exec/openWithRetry/SftpClient, with only the SSH wire replaced.
+// Owned command supervisor and pinned SftpClient, with only the SSH wire replaced.
 // The regression oracle is externally visible: one failed request, no replay,
 // a distinct future request succeeds, and an unrelated live channel survives.
 const binding = { targetId: 'fixture', targetRevision: 'a'.repeat(64), profile: 'fixture-write' };
@@ -98,7 +98,7 @@ async function fixture(t, { via, closeMode = 'async' } = {}) {
   return { runtime, transport, profile, invoke, connections, get connection() { return current; }, get acquisitions() { return acquisitions; } };
 }
 
-for (const port of ['command', 'source', 'cli', 'helper', 'upload', 'download']) {
+for (const port of ['upload', 'download']) {
   test(`SSH-RECOVER ${port}: exhausted opening fails once; a later request uses a fresh client`, async t => {
     const f = await fixture(t), old = f.connection, client = old.client;
     client[port === 'upload' || port === 'download' ? 'failSftp' : 'failExec'] = true;
@@ -112,9 +112,24 @@ for (const port of ['command', 'source', 'cli', 'helper', 'upload', 'download'])
   });
 }
 
+for (const port of ['command', 'source', 'cli', 'helper']) {
+  test(`SSH-RECOVER ${port}: uncertain opening has one attempt and preserves the transport`, async t => {
+    const f = await fixture(t), old = f.connection, client = old.client;
+    client.failExec = true;
+    const failed = await f.invoke(port);
+    assert.equal(failed.execution.reason, 'channel_open_failed'); assert.equal(failed.execution.remoteState, 'unknown');
+    assert.equal(failed.execution.automaticReplay, false); assert.equal(client.opens.length, 1); assert.equal(client.effects.length, 0);
+    client.failExec = false;
+    assert.equal((await f.runtime.executeCommand(binding.profile, 'successor')).failed, false);
+    assert.equal(f.connection, old); assert.equal(client.ended, 0); assert.deepEqual(client.effects, ['successor']);
+  });
+}
+
 test('SSH-RECOVER transient opening failure and remote nonzero do not discard the connection', async t => {
   const f = await fixture(t), old = f.connection, client = old.client;
   client.refuse = 1;
+  assert.equal((await f.invoke('command')).failed, true);
+  assert.equal(client.opens.length, 1);
   assert.equal((await f.invoke('command')).failed, false);
   assert.equal(client.opens.length, 2); assert.equal(client.ended, 0);
   client.exitCode = 7;
@@ -137,8 +152,8 @@ test('SSH-RECOVER live work blocks retirement; its completion permits future rec
   const f = await fixture(t), old = f.connection, client = old.client;
   const running = f.runtime.executeCommand(binding.profile, 'hold');
   while (!client.held) await tick();
-  client.failExec = true;
-  await assert.rejects(f.invoke('command'));
+  client.failSftp = true;
+  await assert.rejects(f.invoke('upload'));
   await assert.rejects(f.runtime.executeCommand(binding.profile, 'blocked'));
   assert.equal(client.ended, 0); assert.equal(client.held.closed, undefined);
   assert.ok(!client.opens.some(item => item.command === 'blocked'));
@@ -149,11 +164,12 @@ test('SSH-RECOVER live work blocks retirement; its completion permits future rec
 
 test('SSH-RECOVER opening callback still pending after timeout prevents destroying its client', async t => {
   const f = await fixture(t), client = f.connection.client;
-  f.profile.timeout = 20; client.defer = true;
-  await assert.rejects(f.invoke('command'));
+  client.defer = true;
+  const timedOut = await f.runtime.executeCommand(binding.profile, 'deferred', undefined, { timeoutMs: 20, stopGraceMs: 10 });
+  assert.equal(timedOut.execution.reason, 'deadline'); assert.equal(timedOut.execution.remoteState, 'unknown');
   assert.equal(client.ended, 0, 'A command timeout alone is not a channel refusal');
-  f.profile.timeout = 2000; client.failExec = true;
-  await assert.rejects(f.invoke('command'));
+  client.failSftp = true;
+  await assert.rejects(f.invoke('upload'));
   await assert.rejects(f.invoke('command'));
   assert.equal(client.ended, 0, 'Unacknowledged opening may still dispatch remotely');
   client.deferred(Error('Late opening refused'));
@@ -165,7 +181,7 @@ test('SSH-RECOVER original cleanup client is never replaced by a fresh connectio
   const f = await fixture(t), old = f.connection, client = old.client;
   const session = await f.transport.connect(binding.profile, { cleanup: { platform: 'linux', helper: '/synthetic/helper', id: 'c'.repeat(48) } });
   await session.call('first-stage', {});
-  client.failExec = true; await assert.rejects(f.invoke('command'));
+  client.failSftp = true; await assert.rejects(f.invoke('upload'));
   assert.equal((await f.runtime.executeCommand(binding.profile, 'new-request')).failed, false);
   assert.notEqual(f.connection, old);
   await assert.rejects(async () => session.cleanup());
@@ -175,7 +191,7 @@ test('SSH-RECOVER original cleanup client is never replaced by a fresh connectio
 
 test('SSH-RECOVER ProxyJump reconstruction stays in registry and concurrent successors close once', async t => {
   const f = await fixture(t, { via: 'synthetic-bastion', closeMode: 'sync' }), old = f.connection, client = old.client;
-  client.failExec = true; await assert.rejects(f.invoke('command'));
+  client.failSftp = true; await assert.rejects(f.invoke('upload'));
   const result = await Promise.all([f.runtime.executeCommand(binding.profile, 'next-a'), f.runtime.executeCommand(binding.profile, 'next-b')]);
   assert.ok(result.every(item => !item.failed)); assert.equal(client.ended, 1);
   assert.notEqual(f.connection, old); assert.equal(f.connection.profile.via, 'synthetic-bastion');
@@ -184,7 +200,7 @@ test('SSH-RECOVER ProxyJump reconstruction stays in registry and concurrent succ
 
 test('SSH-RECOVER a delayed close never ends a replacement client', async t => {
   const f = await fixture(t, { closeMode: 'stall' }), old = f.connection, client = old.client;
-  client.failExec = true; await assert.rejects(f.invoke('command'));
+  client.failSftp = true; await assert.rejects(f.invoke('upload'));
   assert.equal((await f.runtime.executeCommand(binding.profile, 'after-bounded-close')).failed, false);
   assert.equal(client.ended, 1); assert.equal(client.destroyed, 1);
   const replacement = f.connection.client;

@@ -7,6 +7,7 @@ const terminal = new Set(['completed','failed','cancelled','expired','denied','u
 
 /** One client-neutral operation API. Approval remains a server-side policy boundary. */
 export function createOperations({ targets, queue, commands, files, journal, scheduler, submissions, outputs }) {
+  const admissions = new Map();
   const view = record => {
     if (!record) fail('OPERATION_NOT_FOUND');
     const job = queue.get(record.id) ?? record.metadata?.approval ?? record.legacy?.original;
@@ -21,24 +22,39 @@ export function createOperations({ targets, queue, commands, files, journal, sch
       if (!['command','source','download'].includes(input.kind) || typeof input.operationKey !== 'string' || !/^[A-Za-z0-9_.:-]{16,128}$/.test(input.operationKey)) fail('INVALID_OPERATION_INPUT');
       const target = targets.select(input.target); target.verify();
       if (input.expectedTargetRevision !== undefined && input.expectedTargetRevision !== target.revision) fail('TARGET_REVISION_CONFLICT');
-      const normalized = { ...input, target: target.id, expectedTargetRevision: target.revision };
+      const normalized = structuredClone({ ...input, target: target.id, expectedTargetRevision: target.revision });
       const inputDigest = createHash('sha256').update(canonical(normalized)).digest('hex');
       const previous = journal.find(input.operationKey)?.job;
       if (previous) {
         if (previous.owner !== 'mcp' || previous.inputDigest !== inputDigest || previous.targetRevision !== target.revision) fail('OPERATION_KEY_CONFLICT');
         return view(previous);
       }
-      const identity = { id: randomBytes(24).toString('hex'), requestKey: input.operationKey, owner: 'mcp', inputDigest };
-      const submitted = await submissions.run(identity, async () => {
-        if (input.kind === 'command') return commands.run(input.command, target.id, input.operationKey, input.context ?? '', input.displayContext ?? '');
-        if (input.kind === 'source') return commands.runSource({ source: input.source, argv: input.argv ?? [], cwd: input.cwd,
-          elevate: input.elevate === true, requestKey: input.operationKey, context: input.context ?? '', displayContext: input.displayContext ?? '' }, target.id);
-        return files.requestDownload({ target: target.id, expectedTargetRevision: target.revision, remotePath: input.remotePath, elevate: input.elevate === true });
+      const pending = admissions.get(normalized.operationKey);
+      if (pending) {
+        if (pending.inputDigest !== inputDigest) fail('OPERATION_KEY_CONFLICT');
+        return view(await pending.promise);
+      }
+      const identity = { id: randomBytes(24).toString('hex'), requestKey: normalized.operationKey, owner: 'mcp', inputDigest };
+      // Register before invoking an asynchronous admission port; SQLite remains the durable authority.
+      const promise = Promise.resolve().then(async () => {
+        target.verify();
+        if (target.revision !== normalized.expectedTargetRevision) fail('TARGET_REVISION_CONFLICT');
+        const submitted = await submissions.run(identity, async () => {
+          if (normalized.kind === 'command') return commands.run(normalized.command, normalized.target, normalized.operationKey, normalized.context ?? '', normalized.displayContext ?? '');
+          if (normalized.kind === 'source') return commands.runSource({ source: normalized.source, argv: normalized.argv ?? [], cwd: normalized.cwd,
+            elevate: normalized.elevate === true, requestKey: normalized.operationKey, context: normalized.context ?? '', displayContext: normalized.displayContext ?? '' }, normalized.target);
+          return files.requestDownload({ target: normalized.target, expectedTargetRevision: normalized.expectedTargetRevision, remotePath: normalized.remotePath, elevate: normalized.elevate === true });
+        });
+        const job = submitted?.job ?? submitted;
+        const record = journal.get(job?.id ?? identity.id);
+        if (!record) fail('OPERATION_ACCEPTANCE_NOT_CONFIRMED');
+        if (record.requestKey !== normalized.operationKey || record.owner !== 'mcp' || record.inputDigest !== inputDigest || record.targetId !== normalized.target || record.targetRevision !== normalized.expectedTargetRevision) fail('OPERATION_KEY_CONFLICT');
+        return record;
       });
-      const job = submitted?.job ?? submitted;
-      const record = journal.get(job?.id ?? identity.id);
-      if (!record) fail('OPERATION_ACCEPTANCE_NOT_CONFIRMED');
-      return view(record);
+      const admission = { inputDigest, promise };
+      admissions.set(normalized.operationKey, admission);
+      try { return view(await promise); }
+      finally { if (admissions.get(normalized.operationKey) === admission) admissions.delete(normalized.operationKey); }
     },
     async observe({ id, operationKey, waitMs = 0, includeOutput = false, cursor = 0, maxBytes = 4096 }, { signal } = {}) {
       if ((!id && !operationKey) || (id && operationKey)) fail('OPERATION_SELECTOR_REQUIRED');

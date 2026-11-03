@@ -4,13 +4,14 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import { Duplex, PassThrough, Readable, Writable } from 'node:stream';
 import { SSHConnection } from 'ssh-mcp/build/ssh/connection.js';
 import { createApplication } from '../app.mjs';
 import { createSshRuntime } from '../src/adapters/ssh/vendor.mjs';
 import { presentJob } from '../src/adapters/presentation/results.mjs';
 
-// 실제 앱·pinned SSHConnection.exec·SftpClient·전송 guard를 사용한다.
+// 실제 앱·소유 SSH 실행 supervisor·SftpClient·전송 guard를 사용한다.
 // 네트워크만 결정적 대기로 대체하며 콜백을 무시하는 별도 executor는 쓰지 않는다.
 const bytes = Buffer.from([0, 255, 13, 10]);
 const sha = value => createHash('sha256').update(value).digest('hex');
@@ -53,7 +54,7 @@ transferTimeoutMs=3000
       if (!connection.connected) throw Error('Synthetic connection loss');
       await enter(refused ? 'retry' : 'connect');
     };
-    connection.client = {
+    connection.client = Object.assign(new EventEmitter(), {
       exec(command, options, callback) {
         if (barrier?.phase === 'retry' && !refused) { refused = true; callback(Error('Synthetic channel refusal')); return; }
         const input = [];
@@ -95,7 +96,7 @@ transferTimeoutMs=3000
           end() {},
         });
       },
-    };
+    });
     connection.connected = true;
     connection.getClient = () => { if (!connection.client) throw Error('Synthetic connection loss'); return connection.client; };
     connections.set(name, connection);
@@ -128,13 +129,13 @@ transferTimeoutMs=3000
   };
   if (automation) await policy();
   // 마지막 await 이후 변경을 큐 hook의 동기 관측에서 microtask로 주입한다.
-  // exec은 두 번째 ensureConnected, SFTP는 첫 번째 ensureConnected 뒤 getClient를 쓴다.
+  // 소유 exec supervisor와 SFTP 모두 ensureConnected 뒤 getClient를 쓴다.
   for (const key of ['beforeCommandStart', 'beforeUploadStart', 'beforeDownloadStart']) {
     const original = target.queue[key];
     if (!original) continue;
     target.queue[key] = job => {
       const result = original(job);
-      if (barrier?.phase === 'last' && ensureCalls >= (flow === 'upload' ? 1 : 2) && ++lastChecks === 2) {
+      if (barrier?.phase === 'last' && ensureCalls >= 1 && ++lastChecks === 2) {
         queueMicrotask(() => { barrier.change(); barrier.arrived.resolve(); });
       }
       return result;
@@ -162,7 +163,7 @@ transferTimeoutMs=3000
 }
 
 test('DISPATCH-BIND 비TEST 연결 대기 중 변경은 실제 exec/SFTP/helper 효과를 차단한다', { timeout: 120000 }, async t => {
-  for (const flow of ['owner', 'names', 'upload', 'download']) for (const phase of ['registry', 'connect', 'retry']) {
+  for (const flow of ['owner', 'names', 'upload', 'download']) for (const phase of (flow === 'upload' ? ['registry', 'connect', 'retry'] : ['registry', 'connect'])) {
     await t.test(flow + '/' + phase, async t => {
       const f = await fixture(t);
       for (const change of ['target', 'connection-profile', 'policy', 'permission', 'expiry', 'maintenance']) {

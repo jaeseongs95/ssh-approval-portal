@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ApprovalQueue } from '../src/domain/approval-queue.mjs';
+import { ApprovalQueue } from './support/approval-runtime.mjs';
 import { hash } from '../src/domain/validation.mjs';
 import { Tickets } from '../src/adapters/security/tickets.mjs';
 import { writeAll } from '../src/adapters/audit/jsonl.mjs';

@@ -1,3 +1,7 @@
+// MCP 1.8 port: legacy localized error_code/inputField/ruleId/stage/message bodies
+// are archived in legacy-17/source-input-refusals.test.mjs.17. Their security oracle
+// remains public error.code, no reflected input, zero admission/model/execution,
+// and the separate internal source -> argv -> cwd precedence assertions below.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -11,25 +15,21 @@ import { createApplication } from '../app.mjs';
 const source = "print('정상 원문')\n";
 const context = 'Synthetic source admission regression; no real SSH or model request; no resources changed.';
 const defaults = { source, cwd: '/tmp', context };
-const generic = { isError: true, content: [{ type: 'text', text: 'Request refused or failed. Check authentication, state, limits and permissions.' }] };
 const refusals = {
-  source: { code: 'SOURCE_CREDENTIAL_MATERIAL', ruleId: 'credential-material-v1', text: '제출 원문이 인증정보 입력 금지 규칙에 일치합니다.' },
-  argv: { code: 'SOURCE_ARGUMENTS_SENSITIVE', ruleId: 'sensitive-input-v1', text: '제출 인수가 민감 입력 금지 규칙에 일치합니다.' },
-  cwd: { code: 'SOURCE_WORKDIR_SENSITIVE', ruleId: 'sensitive-input-v1', text: '작업 경로가 민감 입력 금지 규칙에 일치합니다.' },
+  source: { code: 'SOURCE_CREDENTIAL_MATERIAL' },
+  argv: { code: 'SOURCE_ARGUMENTS_SENSITIVE' },
+  cwd: { code: 'SOURCE_WORKDIR_SENSITIVE' },
 };
-function expected(field) {
-  const { code, ruleId, text } = refusals[field];
-  return { isError: true, content: [{ type: 'text', text: JSON.stringify({ error_code: code, inputField: field, ruleId,
-    stage: 'source_admission', requestSubmitted: false, message: `${text} 요청은 등록되지 않았습니다.` }) }] };
+// 1.8 replaces legacy localized admission bodies with one nonreflective error envelope.
+// Internal field precedence remains covered separately below.
+function assertError(reply, code) {
+  assert.equal(reply.isError, true);
+  const value = { contractVersion: '1.8', ok: false, data: null,
+    error: { code, retryable: false, executionAttempted: 'unknown' } };
+  assert.deepEqual(reply.structuredContent, value);
+  assert.deepEqual(JSON.parse(reply.content[0].text), value);
 }
-function assertRefusal(reply, field) {
-  assert.deepEqual(reply, expected(field));
-  assert.equal(reply.structuredContent, undefined, '오류는 정상 작업 출력 스키마를 사용하면 안 됩니다');
-  assert.deepEqual(JSON.parse(reply.content[0].text), {
-    error_code: refusals[field].code, inputField: field, ruleId: refusals[field].ruleId,
-    stage: 'source_admission', requestSubmitted: false, message: `${refusals[field].text} 요청은 등록되지 않았습니다.`,
-  });
-}
+function assertRefusal(reply, field) { assertError(reply, refusals[field].code); }
 
 async function fixture(t, testServer = false) {
   const root = await mkdtemp(join(tmpdir(), 'source-input-refusals-'));
@@ -61,8 +61,9 @@ async function fixture(t, testServer = false) {
   await new Promise(resolve => app.mcpHttp.listen(0, '127.0.0.1', resolve));
   await client.connect(new StreamableHTTPClientTransport(new URL('http://127.0.0.1:' + app.mcpHttp.address().port + '/mcp'), { requestInit: { headers: { Authorization: 'Bearer fixture-mcp' } } }));
   const tools = await client.listTools();
-  assert.ok(tools.tools.find(tool => tool.name === 'run-python-source')?.outputSchema, '표준 SDK의 출력 스키마 캐시를 먼저 채웁니다');
-  const call = (changes = {}) => client.callTool({ name: 'run-python-source', arguments: { ...defaults, ...changes } });
+  assert.ok(tools.tools.find(tool => tool.name === 'submit')?.outputSchema, '표준 SDK의 출력 스키마 캐시를 먼저 채웁니다');
+  let sequence = 0;
+  const call = (changes = {}) => client.callTool({ name: 'submit', arguments: { kind: 'source', operationKey: 'source-refusal-' + String(++sequence).padStart(8, '0'), ...defaults, ...changes } });
   const noAdmission = async () => {
     await app.targets.drain();
     assert.equal(app.queue.listAll().length, 0, '거부 입력은 큐에 등록되면 안 됩니다');
@@ -133,7 +134,7 @@ test('SOURCE-REFUSAL-04 TEST 우회도 세 입력 거부를 건너뛰지 않는�
   }
   const reply = await f.call({ context: '' });
   assert.equal(reply.isError, undefined); await f.app.targets.drain();
-  const job = f.app.queue.get(reply.structuredContent.id);
+  const job = f.app.queue.get(reply.structuredContent.data.id);
   assert.equal(job.state, 'completed'); assert.equal(job.decision.reasonCode, 'test_server_bypass');
   assert.equal(f.executions.length, 1); assert.equal(f.inputs.length, 0);
 });
@@ -143,7 +144,7 @@ test('SOURCE-REFUSAL-05 정상 원문과 유사 문자열 및 원문 민감 경�
   const submitted = "# .env /etc/shadow /home/test/.ssh/id_ed25519 /secrets/service\napi_keys = ['공개']\npassword_hint = '설명'\ntoken_count = 1\nprint('Bearerish')\n";
   const reply = await f.call({ source: submitted, argv: ['.environment', '/secretsish', 'token_count'], cwd: '/tmp/fixture' });
   assert.equal(reply.isError, undefined); await f.app.targets.drain();
-  const job = f.app.queue.get(reply.structuredContent.id);
+  const job = f.app.queue.get(reply.structuredContent.data.id);
   assert.equal(job.state, 'pending'); assert.equal(job.decision.reasonCode, 'source_execution_not_enabled');
   assert.equal(f.app.targets.commands.source(job.id).source, submitted);
   assert.equal(f.app.queue.listAll().length, 1); assert.equal(f.inputs.length, 0); assert.equal(f.executions.length, 0);
@@ -153,16 +154,15 @@ test('SOURCE-REFUSAL-05 정상 원문과 유사 문자열 및 원문 민감 경�
 test('SOURCE-REFUSAL-06 기존 context 사유와 일반 예외 비반사를 유지한다', async t => {
   const f = await fixture(t);
   const reply = await f.call({ context: 'token=FAKE_CONTEXT_CANARY' });
-  assert.equal(reply.isError, true); assert.equal(reply.structuredContent, undefined);
-  assert.match(reply.content[0].text, /^COMMAND_CONTEXT_CONTAINS_SECRET:/);
+  assertError(reply, 'COMMAND_CONTEXT_CONTAINS_SECRET');
   assert.doesNotMatch(JSON.stringify(reply), /FAKE_CONTEXT_CANARY/);
   await f.noAdmission();
-  assert.deepEqual(await f.call({ source: '\0' }), generic);
+  assertError(await f.call({ source: '\0' }), 'REQUEST_REFUSED');
   const original = f.app.targets.commands.runSource;
   try {
     for (const code of [undefined, 'UNKNOWN_SOURCE_REFUSAL']) {
       f.app.targets.commands.runSource = () => { throw Object.assign(Error('FAKE_EXCEPTION_CANARY'), { code, cause: 'FAKE_CAUSE_CANARY', details: 'FAKE_DETAILS_CANARY' }); };
-      assert.deepEqual(await f.call(), generic);
+      assertError(await f.call(), code ?? 'REQUEST_REFUSED');
     }
     for (const field of Object.keys(refusals)) {
       f.app.targets.commands.runSource = () => { throw Object.assign(Error('FAKE_EXCEPTION_CANARY'), { code: refusals[field].code, cause: 'FAKE_CAUSE_CANARY', details: 'FAKE_DETAILS_CANARY' }); };

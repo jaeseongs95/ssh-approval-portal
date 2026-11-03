@@ -55,6 +55,31 @@ test('MCP 1.8 file diagnostics retain policy refusal versus native OS failure', 
   }
 });
 
+test('MCP 1.8 audit persistence failure stays distinct from successful remote execution', () => {
+  const value = presentOperation(job('completed', 'command', { result: { failed: false }, auditError: 'PRIVATE_AUDIT_DETAIL' }));
+  assert.equal(value.state, 'completed');
+  assert.equal(value.failed, false);
+  assert.equal(value.auditFailure, true);
+  assert.equal(value.failureCode, null);
+  assert.doesNotMatch(JSON.stringify(value), /PRIVATE_AUDIT_DETAIL/);
+});
+
+test('MCP 1.8 preserves typed deadline, transport, cancellation and exit evidence without raw output', () => {
+  for (const [reason, remoteState, cleanupComplete] of [['deadline', 'unknown', false], ['transport_lost', 'unknown', true], ['cancel', 'exited', true], ['exit', 'exited', true]]) {
+    const value = presentOperation(job(reason === 'exit' ? 'completed' : 'failed', 'command', { result: { failed: reason !== 'exit', execution: {
+      phase: 'settled', reason, remoteState, cleanupComplete, exitCode: reason === 'exit' ? 0 : null, signal: reason === 'cancel' ? 'TERM' : null,
+      automaticReplay: false, timeoutMs: 120000, requiresReconciliation: remoteState === 'unknown', outputState: 'partial', captureFailed: false,
+      stdout: { receivedBytes: 12, retainedBytes: 8, cursor: 8, truncated: true }, stderr: { receivedBytes: 0, retainedBytes: 0, cursor: 0, truncated: false },
+      rawOutput: 'PRIVATE_EXECUTION_BODY',
+    } } }));
+    assert.equal(value.execution.reason, reason); assert.equal(value.execution.remoteState, remoteState);
+    assert.equal(value.execution.cleanupComplete, cleanupComplete); assert.equal(value.execution.automaticReplay, false);
+    assert.equal(value.execution.exitCode, reason === 'exit' ? 0 : null); assert.equal(value.execution.signal, reason === 'cancel' ? 'TERM' : null);
+    assert.equal(value.execution.stdout.cursor, 8);
+    assert.doesNotMatch(JSON.stringify(value), /PRIVATE_EXECUTION_BODY|rawOutput/);
+  }
+});
+
 test('MCP 1.8 binary contract transfers bytes without UI, URLs, shell or local stdio', async () => {
   // This is an adapter contract fixture; actual Linux/Windows SSH round trips are separate acceptance evidence.
   for (const [target, remotePath] of [['default', '/tmp/bytes.bin'], ['windows', 'C:/files/bytes.bin']]) {

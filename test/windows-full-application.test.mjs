@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { EventEmitter } from 'node:events';
 import { createApplication } from '../app.mjs';
 import { parseTargets, resolveTargets } from '../src/adapters/config/targets.mjs';
 import { validateCommandPolicy } from '../src/domain/command-policy.mjs';
@@ -39,7 +40,14 @@ test('Windows source와 CLI 고정 계획은 같은 SSH 검증 경계를 통과�
   const binding = { targetId: 'windows', targetRevision: 'a'.repeat(64), profile: 'win-write', platform: 'windows' };
   const calls = [];
   let stdout = 'source-ok';
-  const connection = { profile: profiles.get('win-write'), async exec(command, options) { calls.push({ command, options }); return { stdout, stderr: '', exitCode: 0 }; } };
+  const client = new EventEmitter();
+  const connection = { profile: profiles.get('win-write'), ensureConnected: async () => {}, getClient: () => client, applyWorkdir: x => x, channelEnv: () => ({}) };
+  client.exec = (command, _options, callback) => {
+    const stream = new EventEmitter(), chunks = []; stream.stderr = new EventEmitter();
+    stream.write = value => chunks.push(Buffer.from(value)); stream.signal = () => {}; stream.close = () => stream.emit('close');
+    stream.end = () => setImmediate(() => { calls.push({ command, options: { stdin: Buffer.concat(chunks).toString('utf8') } }); stream.emit('data', Buffer.from(stdout)); stream.emit('close', 0); });
+    callback(null, stream);
+  };
   const fake = { getProfile: () => connection.profile, getOrCreate: async () => connection };
   const source = preparePythonSource({ ...binding, source: "print('한글')\n", cwd: 'C:/', pythonExecutable: 'C:/Python313/python.exe' });
   assert.equal((await executePythonSource(fake, source, () => binding)).failed, false);

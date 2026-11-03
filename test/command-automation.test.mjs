@@ -1,3 +1,7 @@
+// MCP 1.8 port: ssh-request-v1 strings map to native submit command/context;
+// wait-for-request approval/completion callbacks map to observe state, approvalMode
+// and failed. Exact old bodies remain in legacy-17/command-automation.test.mjs.17.
+// The AIK port unit test below retains its actual adapter calls, outside public MCP.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -246,14 +250,18 @@ test('partial name approval never tells Jev the whole mixed line was explicitly 
 });
 
 test('AIK adapter never dispatches before authority and keeps host authorization out of MCP', async () => {
+  const { publicReply, presentOperation, publicOutputSchemas } = await import('../src/adapters/mcp/public-contract.mjs');
   const events = [], auth = { status: 'authorized', binding_digest: 'fixture', authorization_revision: 1 };
+  let operationKey;
   const adapter = createAikSshTool({ authority: { authorize: async () => { events.push('authorize'); return auth; },
     revalidate: async value => { assert.equal(value, auth); events.push('revalidate'); }, recordReceipt: async () => events.push('receipt'),
     recordDispatch: async () => events.push('intent'), bindRequest: async () => events.push('bind'), lookupRequest: async () => auth },
-    mcp: { call: async (name, args) => { events.push(name); assert.equal(JSON.stringify(args).includes('binding_digest'), false); if (name === 'run-command') assert.equal(args.context, 'Inspect test identity; no changes'); return { id: 'a'.repeat(48), state: 'completed' }; } } });
+    mcp: { call: async (name, args) => { events.push(name); assert.equal(JSON.stringify(args).includes('binding_digest'), false);
+      if (name === 'submit') { assert.equal(args.context, 'Inspect test identity; no changes'); operationKey = args.operationKey; }
+      return publicReply(presentOperation({ id: 'a'.repeat(48), operationKey, kind: 'command', state: 'completed', createdAt: 1, result: { failed: false } }), publicOutputSchemas[name]); } } });
   const job = await adapter.run({ tool_call_id: 'fixture-call', effect_id: 'fixture-effect', arguments: { target: 'test', command: 'sudo id', context: 'Inspect test identity; no changes' } });
   await adapter.status(job.id);
-  assert.deepEqual(events, ['authorize', 'revalidate', 'intent', 'revalidate', 'run-command', 'bind', 'get-request-status', 'receipt']);
+  assert.deepEqual(events, ['authorize', 'revalidate', 'intent', 'revalidate', 'submit', 'bind', 'observe', 'receipt']);
   let calls = 0;
   const denied = createAikSshTool({ authority: { authorize: async () => { throw Error('AIK denied'); }, revalidate() {}, recordReceipt() {}, recordDispatch() {}, bindRequest() {}, lookupRequest() {} }, mcp: { call: () => calls++ } });
   await assert.rejects(denied.run({}), /AIK denied/); assert.equal(calls, 0);
@@ -389,7 +397,7 @@ test('missing or whitespace-only task context withholds the model call and execu
   assert.equal(f.inputs.length, 0);
 });
 
-test('the legacy command-only MCP path delivers exact task context through automation into the Jev HTTP body', async t => {
+test('the native command MCP submission delivers exact task context through automation into the Jev HTTP body', async t => {
   const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
   const { StreamableHTTPClientTransport } = await import('@modelcontextprotocol/sdk/client/streamableHttp.js');
   const { AUTOMATION_QUESTION } = await import('../src/domain/command-policy.mjs');
@@ -405,9 +413,9 @@ test('the legacy command-only MCP path delivers exact task context through autom
   const command = 'sudo id', context = 'Test only; inspect effective identity to verify the SSH account; no writes or restart; no recovery required';
   try {
     await client.connect(new StreamableHTTPClientTransport(new URL('http://127.0.0.1:' + f.app.mcpHttp.address().port + '/mcp'), { requestInit: { headers: { Authorization: 'Bearer fixture-mcp' } } }));
-    const response = await client.callTool({ name: 'run-command', arguments: { command: 'ssh-request-v1:' + JSON.stringify({ command, context }) } });
+    const response = await client.callTool({ name: 'submit', arguments: { kind: 'command', operationKey: 'command-context-mcp-0001', command, context } });
     assert.equal(response.isError, undefined); await f.app.targets.drain();
-    const job = f.app.queue.get(response.structuredContent.id);
+    const job = f.app.queue.get(response.structuredContent.data.id);
     assert.equal(job.operation.command, command); assert.equal(job.operation.context, context);
     assert.equal(payload.state.command, command); assert.equal(JSON.parse(payload.state.context).callerSituation, context);
     assert.equal(payload.state.userApproval.explicit, false); assert.deepEqual(payload.state.preapprovedCommands, ['sudo']);
@@ -595,16 +603,26 @@ test('test server automatic command waits for execution capacity and replay neve
  try {
   await client.connect(new StreamableHTTPClientTransport(new URL('http://127.0.0.1:'+f.app.mcpHttp.address().port+'/mcp'),{requestInit:{headers:{Authorization:'Bearer fixture-mcp'}}}));
   const first=await f.app.targets.commands.run('sudo first');await entered.promise;
-  const request=await client.callTool({name:'run-command',arguments:{command:'sudo id',requestKey:'test-server-busy-key-0001',context:''}});
-  assert.equal(request.isError,undefined);const job=request.structuredContent;assert.equal(job.state,'queued');assert.equal(job.approvalMode,'automatic');assert.equal(job.decision.reasonCode,'test_server_bypass');assert.equal(job.decision.dispatchFailure,undefined);
-  const approved=await client.callTool({name:'wait-for-request',arguments:{id:job.id,until:'approval',timeoutMs:5000}});
-  assert.equal(approved.structuredContent.state,'queued');assert.equal(approved.structuredContent.callback.approved,true);assert.equal(approved.structuredContent.callback.executionSucceeded,false);
-  const completion=client.callTool({name:'wait-for-request',arguments:{id:job.id,until:'completion',timeoutMs:5000}});
+  const args={kind:'command',command:'sudo id',operationKey:'test-server-busy-key-0001',context:''};
+  const request=await client.callTool({name:'submit',arguments:args});
+  assert.equal(request.isError,undefined);const job=request.structuredContent.data;assert.equal(job.state,'queued');assert.equal(job.approvalMode,'automatic');
+  const privateJob=f.app.queue.get(job.id);assert.equal(privateJob.decision.reasonCode,'test_server_bypass');assert.equal(privateJob.decision.dispatchFailure,undefined);
+  // 1.8 exposes operation state instead of the removed approval/completion callback body.
+  const approved=await client.callTool({name:'observe',arguments:{id:job.id}});
+  assert.equal(approved.structuredContent.data.state,'queued');assert.equal(approved.structuredContent.data.approvalMode,'automatic');assert.equal(approved.structuredContent.data.finishedAt,null);
+  const completion=(async()=>{
+   for(let attempts=0;attempts<20;attempts++){
+    const observed=await client.callTool({name:'observe',arguments:{id:job.id,waitMs:5000}});
+    assert.equal(observed.isError,undefined);
+    if(['completed','failed','denied','expired','unknown','cancelled'].includes(observed.structuredContent.data.state))return observed.structuredContent.data;
+   }
+   assert.fail('Operation did not reach a terminal state within the bounded observation loop');
+  })();
   assert.deepEqual(executed,['sudo first']);
   held.resolve();await f.app.queue.wait(first.job.id);await f.app.queue.wait(job.id);
-  const completed=await completion;assert.equal(completed.structuredContent.state,'completed');assert.equal(completed.structuredContent.callback.executionSucceeded,true);
+  const completed=await completion;assert.equal(completed.state,'completed');assert.equal(completed.failed,false);
   assert.equal(f.app.queue.get(job.id).state,'completed');assert.deepEqual(executed,['sudo first','sudo id']);
-  const replay=await f.app.targets.commands.run('sudo id',undefined,'test-server-busy-key-0001','');assert.equal(replay.job.id,job.id);assert.equal(executed.length,2);
+  const replay=await client.callTool({name:'submit',arguments:args});assert.equal(replay.isError,undefined);assert.equal(replay.structuredContent.data.id,job.id);assert.equal(executed.length,2);
  } finally {held.resolve();await client.close();}
 });
 

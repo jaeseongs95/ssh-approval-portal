@@ -5,6 +5,7 @@ import {spawn,spawnSync} from 'node:child_process';
 import {mkdir,writeFile,readFile,rm} from 'node:fs/promises';
 import {userInfo} from 'node:os';
 import {join} from 'node:path';
+import {EventEmitter} from 'node:events';
 import ssh2 from 'ssh2';
 import {SSHConnection} from 'ssh-mcp/build/ssh/connection.js';
 import {executeAgentCli,executePythonSource,createSshTransport,withDispatchGuard} from '../src/adapters/ssh/vendor.mjs';
@@ -22,7 +23,15 @@ const inspection=provider=>({provider,managed:false,installed:false,version:null
 function value(p,state){return p.agentCli.action==='inspect'?inspection(p.agentCli.provider):{provider:p.agentCli.provider,operationId:p.agentCli.operationId,intentDigest:p.agentCli.intentDigest,state:state??'completed',version:'1.2.3',login:'not_checked'};}
 function fake(p,change={},acquire=()=>{}){
  const calls=[],profile={name:binding.profile,tty:false,readOnly:false,...change};let acquisitions=0;
- const connection={profile,async exec(command,options){calls.push({command,options});return {exitCode:0,stdout:JSON.stringify(value(p)),stderr:''};}};
+ const client=new EventEmitter();client.on('error',()=>{});
+ const connection={profile,ensureConnected:async()=>{},getClient:()=>client,applyWorkdir:x=>x,channelEnv:()=>({}),async respond(command,options){calls.push({command,options});return {exitCode:0,stdout:JSON.stringify(value(p)),stderr:''};}};
+ client.exec=(command,_options,callback)=>{
+  const stream=new EventEmitter();stream.stderr=new EventEmitter();const chunks=[];
+  stream.write=bytes=>chunks.push(Buffer.from(bytes));stream.signal=()=>{};stream.close=()=>stream.emit('close');
+  stream.end=()=>{void Promise.resolve().then(()=>connection.respond(command,{stdin:Buffer.concat(chunks).toString('utf8')})).then(result=>{
+   if(result.stdout)stream.emit('data',Buffer.from(result.stdout));if(result.stderr)stream.stderr.emit('data',Buffer.from(result.stderr));stream.emit('exit',result.exitCode,result.signal);stream.emit('close',result.exitCode,result.signal);
+  },error=>client.emit('error',error));};callback(null,stream);
+ };
  const registry={getProfile:()=>profile,async getOrCreate(){acquisitions++;await acquire();return connection;}};
  return {calls,connection,registry,get acquisitions(){return acquisitions;}};
 }
@@ -32,13 +41,13 @@ test('CLI-DELIVERY fixed timeouts and public projection cover both providers and
  for(const provider of ['codex','claude'])for(const action of ['inspect','install','update','status']){
   const p=plan(action,provider),f=fake(p),outcome=await executeAgentCli(f.registry,p,verify);
   assert.equal(outcome.failed,false);assert.deepEqual(outcome.texts,[]);assert.equal(outcome.data.agentCli.provider,provider);assert.equal(outcome.data.agentCli.action,action);assert.equal(outcome.data.agentCli.login,'not_checked');
-  assert.ok(Object.isFrozen(outcome.data.agentCli));assert.equal(f.calls.length,1);assert.equal(f.calls[0].command,p.command);assert.equal(f.calls[0].options.stdin,p.stdin);assert.equal(f.calls[0].options.timeoutMs,['install','update'].includes(action)?930000:30000);
+  assert.ok(Object.isFrozen(outcome.data.agentCli));assert.equal(f.calls.length,1);assert.equal(f.calls[0].command,p.command);assert.equal(f.calls[0].options.stdin,p.stdin);assert.equal(outcome.execution.timeoutMs,['install','update'].includes(action)?930000:30000);
  }
 });
-test('CLI-DELIVERY generic Python source retains its existing timeout and redacted-text contract',async()=>{
+test('CLI-DELIVERY generic Python source uses the default deadline and redacted-text contract',async()=>{
  const p=preparePythonSource({...binding,source:"print('ok')\n",cwd:'/'}),f=fake(p);
- f.connection.exec=async(command,options)=>{f.calls.push({command,options});return {exitCode:0,stdout:'ok',stderr:''};};
- const outcome=await executePythonSource(f.registry,p,verify);assert.deepEqual(Object.keys(f.calls[0].options),['stdin']);assert.deepEqual(outcome,{failed:false,texts:['ok']});
+ f.connection.respond=async(command,options)=>{f.calls.push({command,options});return {exitCode:0,stdout:'ok',stderr:''};};
+ const outcome=await executePythonSource(f.registry,p,verify);assert.deepEqual(Object.keys(f.calls[0].options),['stdin']);assert.equal(outcome.failed,false);assert.deepEqual(outcome.texts,['ok']);assert.equal(outcome.execution.timeoutMs,120000);
 });
 test('CLI-DELIVERY fixed receipt digest matches the Python helper canonical JSON contract',()=>{
  const p=plan('install'),args=JSON.parse(p.manifest.argvJson);
@@ -60,19 +69,19 @@ test('CLI-DELIVERY TTY/read-only/workdir, changed target and changed registry pr
  const other=fake(p);other.registry.getProfile=()=>({...other.connection.profile,user:'changed'});await assert.rejects(()=>executeAgentCli(other.registry,p,verify),unknown);assert.equal(other.calls.length,0);
 });
 test('CLI-DELIVERY private extras are discarded without redacting validated public hashes',async()=>{
- const p=plan(),f=fake(p);f.connection.exec=async()=>({exitCode:0,stdout:JSON.stringify({...inspection('codex'),private:'SYNTHETIC_PRIVATE',externalIdentity:{token:'SYNTHETIC_PRIVATE'}}),stderr:''});
+ const p=plan(),f=fake(p);f.connection.respond=async()=>({exitCode:0,stdout:JSON.stringify({...inspection('codex'),private:'SYNTHETIC_PRIVATE',externalIdentity:{token:'SYNTHETIC_PRIVATE'}}),stderr:''});
  const outcome=await executeAgentCli(f.registry,p,verify);assert.equal(outcome.data.agentCli.installationRevision,expected);assert.ok(!JSON.stringify(outcome).includes('SYNTHETIC_PRIVATE'));assert.equal(Object.hasOwn(outcome.data.agentCli,'externalIdentity'),false);
 });
 test('CLI-DELIVERY managed and foreign installation paths remain distinct and typed',async()=>{
  const p=plan(),f=fake(p);
  for(const installed of [{...inspection('codex'),managed:true,installed:true,version:'1.2.3',active:'versions/1.2.3-'+'e'.repeat(16)},{...inspection('codex'),installed:true,version:null,active:'/usr/local/bin/codex'}]){
-  f.connection.exec=async()=>({exitCode:0,stdout:JSON.stringify(installed),stderr:''});const outcome=await executeAgentCli(f.registry,p,verify);assert.equal(outcome.data.agentCli.managed,installed.managed);assert.equal(outcome.data.agentCli.active,installed.active);
+  f.connection.respond=async()=>({exitCode:0,stdout:JSON.stringify(installed),stderr:''});const outcome=await executeAgentCli(f.registry,p,verify);assert.equal(outcome.data.agentCli.managed,installed.managed);assert.equal(outcome.data.agentCli.active,installed.active);
  }
 });
 for(const [name,change] of [
  ['wrong provider',{provider:'claude'}],['false login',{login:'authenticated'}],['bad revision',{installationRevision:'SYNTHETIC_PRIVATE'}],['bad version',{version:'1.2.3;id'}],['false flags',{installed:'yes'}],['inactive path',{active:'/tmp/codex'}],['managed version/path mismatch',{managed:true,installed:true,version:'1.2.3',active:'versions/2.0.0-'+'e'.repeat(16)}],['foreign command mismatch',{installed:true,active:'/usr/bin/claude'}],
 ])test('CLI-DELIVERY refuses '+name+' without raw output',async()=>{
- const p=plan(),f=fake(p);f.connection.exec=async()=>({exitCode:0,stdout:JSON.stringify({...inspection('codex'),...change}),stderr:''});await assert.rejects(()=>executeAgentCli(f.registry,p,verify),unknown);
+ const p=plan(),f=fake(p);f.connection.respond=async()=>({exitCode:0,stdout:JSON.stringify({...inspection('codex'),...change}),stderr:''});await assert.rejects(()=>executeAgentCli(f.registry,p,verify),unknown);
 });
 for(const [name,result] of [
  ['nonzero',{exitCode:1,stdout:JSON.stringify({state:'refused',error:'SYNTHETIC_PRIVATE'}),stderr:''}],
@@ -81,10 +90,10 @@ for(const [name,result] of [
  ['invalid JSON',{exitCode:0,stdout:'SYNTHETIC_PRIVATE',stderr:''}],
  ['oversized valid JSON',{exitCode:0,stdout:JSON.stringify({...inspection('codex'),private:'x'.repeat(16384)}),stderr:''}],
 ])test('CLI-DELIVERY '+name+' remains unknown with no replay or private error',async()=>{
- const p=plan(),f=fake(p);let calls=0;f.connection.exec=async()=>{calls++;return result;};await assert.rejects(()=>executeAgentCli(f.registry,p,verify),unknown);assert.equal(calls,1);
+ const p=plan(),f=fake(p);let calls=0;f.connection.respond=async()=>{calls++;return result;};await assert.rejects(()=>executeAgentCli(f.registry,p,verify),unknown);assert.equal(calls,1);
 });
 test('CLI-DELIVERY dispatch exception is unknown and never replayed',async()=>{
- const p=plan(),f=fake(p);let calls=0;f.connection.exec=async()=>{calls++;throw Error('SYNTHETIC_PRIVATE');};await assert.rejects(()=>executeAgentCli(f.registry,p,verify),unknown);assert.equal(calls,1);
+ const p=plan(),f=fake(p);let calls=0;f.connection.respond=async()=>{calls++;throw Error('SYNTHETIC_PRIVATE');};const outcome=await executeAgentCli(f.registry,p,verify);assert.equal(outcome.failed,true);assert.equal(outcome.execution.remoteState,'unknown');assert.ok(!JSON.stringify(outcome).includes('SYNTHETIC_PRIVATE'));assert.equal(calls,1);
 });
 test('CLI-DELIVERY acquisition failure is private and an admitted plan is immutable across acquisition',async()=>{
  const p=plan('install'),f=fake(p,{},()=>{throw Error('SYNTHETIC_PRIVATE');});await assert.rejects(()=>executeAgentCli(f.registry,p,verify),unknown);assert.equal(f.calls.length,0);
@@ -94,16 +103,16 @@ test('CLI-DELIVERY acquisition failure is private and an admitted plan is immuta
 test('CLI-DELIVERY status preserves explicit remote states and generic failure while binding operation/intent',async()=>{
  const p=plan('status'),f=fake(p);
  for(const state of ['preparing','installing','completed','reused','failed','unknown']){
-  f.connection.exec=async()=>({exitCode:0,stdout:JSON.stringify({...value(p,state),error:'SYNTHETIC_PRIVATE'}),stderr:''});const outcome=await executeAgentCli(f.registry,p,verify);assert.equal(outcome.data.agentCli.state,state);assert.ok(!JSON.stringify(outcome).includes('SYNTHETIC_PRIVATE'));if(state==='failed')assert.equal(outcome.data.agentCli.error,'INSTALL_FAILED');
+  f.connection.respond=async()=>({exitCode:0,stdout:JSON.stringify({...value(p,state),error:'SYNTHETIC_PRIVATE'}),stderr:''});const outcome=await executeAgentCli(f.registry,p,verify);assert.equal(outcome.data.agentCli.state,state);assert.ok(!JSON.stringify(outcome).includes('SYNTHETIC_PRIVATE'));if(state==='failed')assert.equal(outcome.data.agentCli.error,'INSTALL_FAILED');
  }
- f.connection.exec=async()=>({exitCode:0,stdout:JSON.stringify({state:'not_found',operationId}),stderr:''});assert.equal((await executeAgentCli(f.registry,p,verify)).data.agentCli.state,'not_found');
- f.connection.exec=async()=>({exitCode:0,stdout:JSON.stringify({...value(p,'completed'),cleanupFailures:2}),stderr:''});assert.equal((await executeAgentCli(f.registry,p,verify)).data.agentCli.cleanupFailures,2);
- for(const change of [{operationId:'f'.repeat(48)},{intentDigest:'f'.repeat(64)},{provider:'claude'},{login:'authenticated'},{version:'latest'},{state:'safe'},{cleanupFailures:0},{cleanupFailures:-1},{cleanupFailures:'1'}]){f.connection.exec=async()=>({exitCode:0,stdout:JSON.stringify({...value(p),...change}),stderr:''});await assert.rejects(()=>executeAgentCli(f.registry,p,verify),unknown);}
- f.connection.exec=async()=>({exitCode:0,stdout:JSON.stringify({state:'not_found',operationId,cleanupFailures:1}),stderr:''});await assert.rejects(()=>executeAgentCli(f.registry,p,verify),unknown);
+ f.connection.respond=async()=>({exitCode:0,stdout:JSON.stringify({state:'not_found',operationId}),stderr:''});assert.equal((await executeAgentCli(f.registry,p,verify)).data.agentCli.state,'not_found');
+ f.connection.respond=async()=>({exitCode:0,stdout:JSON.stringify({...value(p,'completed'),cleanupFailures:2}),stderr:''});assert.equal((await executeAgentCli(f.registry,p,verify)).data.agentCli.cleanupFailures,2);
+ for(const change of [{operationId:'f'.repeat(48)},{intentDigest:'f'.repeat(64)},{provider:'claude'},{login:'authenticated'},{version:'latest'},{state:'safe'},{cleanupFailures:0},{cleanupFailures:-1},{cleanupFailures:'1'}]){f.connection.respond=async()=>({exitCode:0,stdout:JSON.stringify({...value(p),...change}),stderr:''});await assert.rejects(()=>executeAgentCli(f.registry,p,verify),unknown);}
+ f.connection.respond=async()=>({exitCode:0,stdout:JSON.stringify({state:'not_found',operationId,cleanupFailures:1}),stderr:''});await assert.rejects(()=>executeAgentCli(f.registry,p,verify),unknown);
 });
 test('CLI-DELIVERY install cannot report failed, wrong version or a different receipt intent as success',async()=>{
  const p=plan('install'),f=fake(p);
- for(const change of [{state:'failed'},{version:'1.2.4'},{intentDigest:'f'.repeat(64)}]){f.connection.exec=async()=>({exitCode:0,stdout:JSON.stringify({...value(p),...change}),stderr:''});await assert.rejects(()=>executeAgentCli(f.registry,p,verify),unknown);}
+ for(const change of [{state:'failed'},{version:'1.2.4'},{intentDigest:'f'.repeat(64)}]){f.connection.respond=async()=>({exitCode:0,stdout:JSON.stringify({...value(p),...change}),stderr:''});await assert.rejects(()=>executeAgentCli(f.registry,p,verify),unknown);}
 });
 
 const key=()=>generateKeyPairSync('rsa',{modulusLength:2048,privateKeyEncoding:{type:'pkcs1',format:'pem'},publicKeyEncoding:{type:'spki',format:'pem'}}).privateKey;
@@ -158,10 +167,11 @@ async function retryWire(t){
  connection=new SSHConnection(profile,{privateKey:key()},new Map(),'strict');const ensure=connection.ensureConnected.bind(connection);connection.ensureConnected=async()=>{if(rejected&&!passed){reached();await barrier;passed=true;}return ensure();};
  return {profile,retry,release,received,get attempts(){return attempts;},registry:{getProfile:()=>profile,async getOrCreate(){await connection.ensureConnected();return connection;}}};
 }
-test('CLI-LOOPBACK real channel retry rechecks policy/target/profile and never replays admitted bytes',{timeout:30000},async t=>{
+test('CLI-LOOPBACK a distinct request after refusal rechecks policy/target/profile without replay',{timeout:30000},async t=>{
  for(const mode of ['policy','target','profile','unchanged'])await t.test(mode,async t=>{
-  const wire=await retryWire(t),p=plan();let allowed=true,currentRevision=binding.targetRevision;
-  const checked=()=>{if(!allowed)throw Error('Current policy denied');return {...binding,targetRevision:currentRevision};};
+  const wire=await retryWire(t),p=plan(),expectedProfile=JSON.stringify(wire.profile);let allowed=true,currentRevision=binding.targetRevision;
+  const checked=()=>{if(!allowed)throw Error('Current policy denied');if(JSON.stringify(wire.profile)!==expectedProfile)throw Error('Current profile changed');return {...binding,targetRevision:currentRevision};};
+  const refused=await executeAgentCli(wire.registry,p,checked);assert.equal(refused.failed,true);assert.equal(wire.attempts,1);assert.equal(wire.received.length,0);
   const done=executeAgentCli(wire.registry,p,checked).then(result=>({result}),error=>({error}));await wire.retry;assert.equal(wire.attempts,1);assert.equal(wire.received.length,0);
   if(mode==='policy')allowed=false;if(mode==='target')currentRevision='e'.repeat(64);if(mode==='profile')wire.profile.user='changed';wire.release();
   const outcome=await done;
@@ -174,18 +184,18 @@ test('CLI-LOGIN delivery accepts only the fixed helper and discards vendor priva
  for(const provider of ['codex','claude']){
   const p=plan('login-status',provider),f=fake(p);assert.deepEqual(JSON.parse(p.manifest.argvJson),[provider]);assert.ok(p.manifest.sourceBytes<=16384);
   for(const state of ['signed_in','signed_out','not_installed','unavailable']){
-   f.connection.exec=async()=>({exitCode:0,stdout:JSON.stringify({provider,state,token:'SYNTHETIC_PRIVATE',email:'SYNTHETIC_PRIVATE'}),stderr:''});
+   f.connection.respond=async()=>({exitCode:0,stdout:JSON.stringify({provider,state,token:'SYNTHETIC_PRIVATE',email:'SYNTHETIC_PRIVATE'}),stderr:''});
    const r=await executeAgentCli(f.registry,p,verify);assert.deepEqual(r.data.agentCli,{contract:'agent-cli-login-status-v1',provider,state});assert.ok(!JSON.stringify(r).includes('SYNTHETIC_PRIVATE'));
   }
   for(const reason of ['unsafe_path','invalid_installation','timeout','output_limit','unexpected_response','check_failed']){
-   f.connection.exec=async()=>({exitCode:0,stdout:JSON.stringify({provider,state:'unavailable',reason,private:'SYNTHETIC_PRIVATE'}),stderr:''});
+   f.connection.respond=async()=>({exitCode:0,stdout:JSON.stringify({provider,state:'unavailable',reason,private:'SYNTHETIC_PRIVATE'}),stderr:''});
    const r=await executeAgentCli(f.registry,p,verify);assert.equal(r.data.agentCli.reason,reason);assert.ok(!JSON.stringify(r).includes('SYNTHETIC_PRIVATE'));
   }
   for(const reason of ['SYNTHETIC_PRIVATE /unsafe/path',null,{},'__proto__'])for(const state of ['unavailable','signed_in']){
-   f.connection.exec=async()=>({exitCode:0,stdout:JSON.stringify({provider,state,reason}),stderr:''});await assert.rejects(()=>executeAgentCli(f.registry,p,verify));
+   f.connection.respond=async()=>({exitCode:0,stdout:JSON.stringify({provider,state,reason}),stderr:''});await assert.rejects(()=>executeAgentCli(f.registry,p,verify));
   }
-  f.connection.exec=async()=>({exitCode:0,stdout:JSON.stringify({provider,state:'signed_out',reason:'unsafe_path'}),stderr:''});await assert.rejects(()=>executeAgentCli(f.registry,p,verify));
-  for(const change of [{provider:'other',state:'signed_in'},{provider,state:'completed'}]){f.connection.exec=async()=>({exitCode:0,stdout:JSON.stringify(change),stderr:''});await assert.rejects(()=>executeAgentCli(f.registry,p,verify));}
+  f.connection.respond=async()=>({exitCode:0,stdout:JSON.stringify({provider,state:'signed_out',reason:'unsafe_path'}),stderr:''});await assert.rejects(()=>executeAgentCli(f.registry,p,verify));
+  for(const change of [{provider:'other',state:'signed_in'},{provider,state:'completed'}]){f.connection.respond=async()=>({exitCode:0,stdout:JSON.stringify(change),stderr:''});await assert.rejects(()=>executeAgentCli(f.registry,p,verify));}
   for(const changed of [{...p,stdin:p.stdin+'# changed'},{...p,agentCli:{...p.agentCli,provider:'other'}},{...p,manifest:{...p.manifest,argvJson:JSON.stringify([provider,'login'])}}]){const g=fake(p);await assert.rejects(()=>executeAgentCli(g.registry,changed,verify));assert.equal(g.acquisitions,0);}
  }
 });
@@ -197,10 +207,10 @@ for (const port of ['source','cli','command','helper','upload','download']) {
   test(`DISPATCH-GUARD ${port} awaits authority after ${revokeAt}`, async () => {
    const profile={name:binding.profile,tty:false,readOnly:false,timeout:2000,transferTimeoutMs:2000,maxOutputBytes:4096};
    let allowed=true,getClients=0,opens=0,checks=0;
-   const client={
+   const client=Object.assign(new EventEmitter(),{
     exec(_command,_options,callback){opens++;allowed=false;callback(Error('Synthetic channel refusal'));},
     sftp(callback){opens++;allowed=false;callback(Error('Synthetic channel refusal'));},
-   };
+   });
    const connection=new SSHConnection(profile,{},new Map(),'strict');
    connection.connect=async()=>{connection.client=client;connection.connected=true;if(revokeAt==='connect')allowed=false;};
    connection.getClient=()=>{getClients++;return client;};
@@ -218,7 +228,8 @@ for (const port of ['source','cli','command','helper','upload','download']) {
     const transport=await createSshTransport(registry).connect(binding.profile,{beforeDispatch});
     pending=port==='helper'?transport.call('id',{}):port==='upload'?transport.upload(null,'/tmp/file',{maxBytes:1}):transport.download('/tmp/file',null,{maxBytes:1});
    }
-   await assert.rejects(pending);
+   if(revokeAt==='retry'&&['source','cli','helper'].includes(port)){const outcome=await pending;assert.equal(outcome.execution.reason,'channel_open_failed');assert.equal(outcome.execution.remoteState,'unknown');}
+   else await assert.rejects(pending);
    assert.ok(checks>0,'Async authority hook must run');
    assert.equal(getClients,revokeAt==='retry'?1:0,'Revoked authority must never reach getClient');
    assert.equal(opens,revokeAt==='retry'?1:0,'Only the refused channel before revocation may open');

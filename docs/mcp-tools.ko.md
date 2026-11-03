@@ -30,6 +30,10 @@
 
 상태는 `accepted`,`pending`,`evaluating`,`queued`,`starting`,`running`,`terminating`,`completed`,`failed`,`cancelled`,`denied`,`expired`,`unknown`입니다. `waitTimedOut`는 관찰 제한 시간만 나타냅니다. 실행 제한 시간과 별개이며 관찰 종료가 작업을 취소하지 않습니다. 재접속 시 원래 ID나 키를 사용합니다.
 
+`auditFailure:true`는 종료 감사 기록의 영속화 실패를 뜻하며 원격 실행 결과인 `state`·`failed`와 구별합니다. 성공한 원격 실행도 감사 기록 실패가 있으면 별도 확인이 필요합니다. 감사 오류 원문은 공개하지 않습니다.
+
+`execution`은 실행 감독기가 보존한 제한된 metadata입니다. `reason`은 `exit`,`deadline`,`cancel`,`transport_lost`,`channel_open_failed`,`input_failed`, `remoteState`는 `not_dispatched`,`exited`,`unknown`을 구별합니다. `exitCode`,`signal`,`cleanupComplete`,`requiresReconciliation`,`automaticReplay:false`,`timeoutMs`,`outputState`,`captureFailed`와 stdout/stderr 바이트 수·cursor·잘림 여부를 포함합니다. 확인되지 않은 필드는 `null`이며, raw 출력·오류 원문은 넣지 않습니다. 관찰 제한 시간 초과와 실행의 `reason:"deadline"`은 별개입니다.
+
 현재 공개 `streamPage`는 항상 `null`입니다. 실행 중 raw stdout/stderr spool은 내부 보존용이며 MCP로 공개하지 않습니다. 종료·실패·실행 시간 초과 뒤 정제해 보존한 출력은 준비된 `outputPage`로 명시적으로 읽습니다. 실행 중 raw 출력의 즉시 관측을 지원한다고 해석하지 않습니다.
 
 출력 descriptor는 `captureSource:"redacted-adapter-outcome"`,`sshCompleteness:"unknown"`을 표시합니다. 페이지의 해시는 저장된 정제 결과의 무결성을 확인하며 원격 프로그램 출력 전체의 완전성을 증명하지 않습니다.

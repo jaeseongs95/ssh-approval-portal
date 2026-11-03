@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { Artifacts } from '../src/adapters/storage/artifacts.mjs';
-import { ApprovalQueue } from '../src/domain/approval-queue.mjs';
+import { ApprovalQueue } from './support/approval-runtime.mjs';
 import { createFileService } from '../src/application/files.mjs';
 import { hash } from '../src/domain/validation.mjs';
 

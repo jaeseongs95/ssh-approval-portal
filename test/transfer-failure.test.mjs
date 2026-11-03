@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { Artifacts } from '../src/adapters/storage/artifacts.mjs';
 import { Transfers } from '../src/adapters/ssh/transfers.mjs';
 import { hash } from '../src/domain/validation.mjs';
-import { ApprovalQueue } from '../src/domain/approval-queue.mjs';
+import { ApprovalQueue } from './support/approval-runtime.mjs';
 import { presentJob } from '../src/adapters/presentation/results.mjs';
 
 test('failed SSH connection releases reserved download quota and creates no local payload', async () => {

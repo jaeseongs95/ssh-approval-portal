@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { Readable } from 'node:stream';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { ApprovalQueue } from '../src/domain/approval-queue.mjs';
+import { ApprovalQueue } from './support/approval-runtime.mjs';
 import { Artifacts } from '../src/adapters/storage/artifacts.mjs';
 import { createFileService } from '../src/application/files.mjs';
 

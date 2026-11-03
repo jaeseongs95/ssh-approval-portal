@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createJevAssessor } from '../src/adapters/safety/jev.mjs';
 import { assessmentDiagnostic, safetyFailureDetails, validateAssessment } from '../src/domain/safety.mjs';
-import { ApprovalQueue } from '../src/domain/approval-queue.mjs';
+import { ApprovalQueue } from './support/approval-runtime.mjs';
 import { createRequestSafety } from '../src/application/request-safety.mjs';
 import { evaluateSafety } from '../src/application/safety-evaluation.mjs';
 

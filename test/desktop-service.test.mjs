@@ -4,10 +4,10 @@ import { createDesktopService } from '../src/application/desktop.mjs';
 
 const binding = { ownerId: 'owner-a', targetId: 'linux', targetRevision: 'a'.repeat(64), epoch: 1 };
 function fixture(options = {}) {
-  const calls = [], state = { geometry: 1, valid: true, time: 1000 };
+  const calls = [], state = { geometry: 1, valid: true, authorized: true, time: 1000 };
   const desktop = { closed: false, async observe() { return { width: 4, height: 3, geometryRevision: state.geometry, data: Buffer.from('test-image') }; },
     async input(actions) { calls.push(['input', actions]); }, release() { calls.push(['release']); return { sent: true }; }, close() { this.closed = true; calls.push(['close']); } };
-  const service = createDesktopService({ adapter: { async open() { return desktop; } }, authorize: () => true, verifyTarget: () => state.valid,
+  const service = createDesktopService({ adapter: { async open() { return desktop; } }, authorize: () => state.authorized, verifyTarget: () => state.valid,
     now: () => state.time, ...options });
   return { service, state, calls, desktop };
 }
@@ -50,7 +50,7 @@ test('GUI capacity includes pending opens and has a separate per-owner ceiling',
   const adapter = { open: () => new Promise(resolve => { resolveOpen = resolve; }) };
   const { service, desktop } = fixture({ adapter, maxSessions: 1 });
   const opening = service.open(binding);
-  await assert.rejects(service.open({ ...binding, ownerId: 'owner-b' }), error('DESKTOP_CAPACITY'));
+  await assert.rejects(service.open({ ...binding, ownerId: 'owner-b', targetId: 'windows' }), error('DESKTOP_CAPACITY'));
   resolveOpen(desktop); await opening; await service.closeAll(); assert.equal(service.size(), 0);
 });
 
@@ -67,8 +67,55 @@ test('logout closes only that owner including a lease whose open receipt was los
   const { service } = fixture({ maxSessions: 2, adapter: { async open() {
     return { closed: false, release: () => ({ sent: true }), close() { this.closed = true; } };
   } } });
-  await service.open(binding); const other = await service.open({ ...binding, ownerId: 'owner-b' });
+  await service.open(binding); const other = await service.open({ ...binding, targetId: 'windows', ownerId: 'owner-b' });
   const receipts = await service.closeOwner(binding.ownerId); assert.equal(receipts.length, 1); assert.equal(receipts[0].status, 'fulfilled');
   assert.equal(service.size(), 1);
   await service.close({ ownerId: 'owner-b', sessionId: other.sessionId, epoch: 1 }); assert.equal(service.size(), 0);
+});
+
+test('one physical desktop excludes different owners and target aliases while opening and disposing', async () => {
+  let resolveOpen, resolveRelease;
+  const { desktop } = fixture();
+  desktop.release = () => new Promise(resolve => { resolveRelease = resolve; });
+  const { service } = fixture({ leaseKey: () => 'ssh-host:22:vnc:5900', adapter: { open: () => new Promise(resolve => { resolveOpen = resolve; }) } });
+  const opening = service.open(binding);
+  await assert.rejects(service.open({ ...binding, ownerId: 'owner-b' }), error('DESKTOP_RESOURCE_BUSY'));
+  await assert.rejects(service.open({ ...binding, targetId: 'alias', ownerId: 'owner-b' }), error('DESKTOP_RESOURCE_BUSY'));
+  resolveOpen(desktop); const lease = await opening;
+  const closing = service.close({ ownerId: binding.ownerId, sessionId: lease.sessionId, epoch: binding.epoch });
+  await Promise.resolve();
+  await assert.rejects(service.open({ ...binding, targetId: 'alias', ownerId: 'owner-b' }), error('DESKTOP_RESOURCE_BUSY'));
+  resolveRelease({ sent: true }); await closing;
+  assert.equal(service.size(), 0);
+  const next = service.open({ ...binding, targetId: 'alias', ownerId: 'owner-b' });
+  resolveOpen({ release: () => ({ sent: true }), close() {} }); const nextLease = await next;
+  await service.close({ ownerId: 'owner-b', sessionId: nextLease.sessionId, epoch: binding.epoch });
+});
+
+test('authority is rechecked before every observation and input after initial admission', async () => {
+  for (const action of ['observe', 'input']) {
+    const { service, state, calls } = fixture();
+    const lease = await service.open(binding), identity = { ownerId: binding.ownerId, sessionId: lease.sessionId, epoch: binding.epoch };
+    const frame = await service.observe(identity); state.authorized = false;
+    const args = { ...identity, frameId: frame.frameId, geometryRevision: frame.geometryRevision,
+      sequence: 1, requestKey: 'revoked', actions: [{ type: 'text', text: 'forbidden' }] };
+    await assert.rejects(service[action](args), error('DESKTOP_NOT_AUTHORIZED'));
+    assert.equal(calls.filter(item => item[0] === 'input').length, 0); assert.equal(service.size(), 0);
+  }
+});
+
+test('asynchronous authority revocation while geometry is observed prevents input dispatch', async () => {
+  let allowed = true, holdAuthorization = false, resolveAuthorization;
+  const authorize = async () => holdAuthorization ? new Promise(resolve => { resolveAuthorization = resolve; }) : allowed;
+  const { service, desktop, calls } = fixture({ authorize });
+  const lease = await service.open(binding), identity = { ownerId: binding.ownerId, sessionId: lease.sessionId, epoch: binding.epoch };
+  const frame = await service.observe(identity);
+  const observe = desktop.observe;
+  desktop.observe = async options => { const result = await observe(options); holdAuthorization = true; return result; };
+  const input = service.input({ ...identity, frameId: frame.frameId, geometryRevision: frame.geometryRevision,
+    sequence: 1, requestKey: 'async-revoked', actions: [{ type: 'text', text: 'forbidden' }] });
+  while (!resolveAuthorization) await new Promise(resolve => setImmediate(resolve));
+  allowed = false; resolveAuthorization(false);
+  await assert.rejects(input, error('DESKTOP_NOT_AUTHORIZED'));
+  assert.equal(calls.filter(item => item[0] === 'input').length, 0); assert.equal(service.size(), 0);
 });

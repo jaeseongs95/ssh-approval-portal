@@ -17,6 +17,8 @@ import { createApplication } from '../app.mjs';
 // Run in approved CI/server only: node --test test/http-admission.test.mjs.
 // Local product execution and mutation proof are NOT_RUN by assignment.
 const origin = 'https://owner.example.test';
+// 1.7 wait-for-request callbacks map to observe version changes; admission,
+// authority, disconnect, FIFO and no-dispatch assertions remain on real HTTP.
 const limits = { maxActive: 1, maxQueued: 2, maxWaitMs: 5000, maxDetached: 1 };
 
 async function eventually(predicate, message = 'HTTP admission condition did not become true') {
@@ -55,7 +57,8 @@ async function fixture(t, { mcp = {}, admin = {}, executeCommand } = {}) {
   const adminBase = 'http://127.0.0.1:' + app.adminHttp.address().port;
   client = new Client({ name: 'http-admission-contract', version: '1' });
   await client.connect(new StreamableHTTPClientTransport(new URL(mcpBase + '/mcp'), { requestInit: { headers: { Authorization: 'Bearer fixture-mcp' } } }));
-  let rpcId = 1000;
+  let rpcId = 1000, operationSequence = 0;
+  const nativeArgs = (name, args) => name === 'submit' ? { kind: 'command', operationKey: 'admission-contract-' + String(++operationSequence).padStart(8, '0'), ...args } : args;
 
   function raw(base, path, body, { hold = false, headers = {}, method = 'POST' } = {}) {
     let req;
@@ -84,9 +87,9 @@ async function fixture(t, { mcp = {}, admin = {}, executeCommand } = {}) {
   }
   const f = {
     app, client, calls, releases, queue: app.targets.select('default').queue,
-    call: (name, args = {}) => client.callTool({ name, arguments: args }),
+    call: (name, args = {}) => client.callTool({ name, arguments: nativeArgs(name, args) }),
     rawCall(name, args = {}, options = {}) {
-      return raw(mcpBase, '/mcp', JSON.stringify({ jsonrpc: '2.0', id: rpcId++, method: 'tools/call', params: { name, arguments: args } }), {
+      return raw(mcpBase, '/mcp', JSON.stringify({ jsonrpc: '2.0', id: rpcId++, method: 'tools/call', params: { name, arguments: nativeArgs(name, args) } }), {
         ...options, headers: { Authorization: 'Bearer fixture-mcp', Accept: 'application/json, text/event-stream', ...options.headers },
       });
     },
@@ -127,13 +130,13 @@ async function refusal(response, code) {
 
 test('10 requests/second stays bounded before parsing, promotes FIFO, then recovers', { timeout: 20000 }, async t => {
   const f = await fixture(t);
-  const held = f.rawCall('run-command', { command: 'fixture-blocker' }, { hold: true });
+  const held = f.rawCall('submit', { command: 'fixture-blocker' }, { hold: true });
   await eventually(async () => (await f.snapshot()).mcp.active === 1);
   const baselineRss = process.memoryUsage().rss;
   let peakRss = baselineRss, peakActive = 0, peakQueued = 0;
   const burst = [];
   for (let i = 0; i < 10; i++) {
-    burst.push(f.rawCall('run-command', { command: 'fixture-burst-' + i }));
+    burst.push(f.rawCall('submit', { command: 'fixture-burst-' + i }));
     await delay(100);
     const { mcp, admin } = await f.snapshot();
     peakActive = Math.max(peakActive, mcp.active); peakQueued = Math.max(peakQueued, mcp.queued);
@@ -143,7 +146,7 @@ test('10 requests/second stays bounded before parsing, promotes FIFO, then recov
   }
   assert.equal(peakActive, 1); assert.equal(peakQueued, 2);
   assert.equal(f.queue.listAll().length, 0, 'queued requests must not reach submission or SDK handling');
-  const unauthenticated = f.rawCall('run-command', { command: 'fixture-no-authority' }, { headers: { Authorization: 'Bearer invalid-fixture-token' } });
+  const unauthenticated = f.rawCall('submit', { command: 'fixture-no-authority' }, { headers: { Authorization: 'Bearer invalid-fixture-token' } });
   assert.equal((await unauthenticated.response).status, 401, 'authentication remains ahead of saturated admission');
   for (const call of burst.slice(2)) await refusal(await call.response, 'REQUEST_QUEUE_FULL');
   held.finish();
@@ -158,9 +161,9 @@ test('10 requests/second stays bounded before parsing, promotes FIFO, then recov
 
 test('waiting deadline refuses unstarted work and a later release does not submit it', { timeout: 15000 }, async t => {
   const f = await fixture(t, { mcp: { maxWaitMs: 250 } });
-  const held = f.rawCall('run-command', { command: 'fixture-blocker' }, { hold: true });
+  const held = f.rawCall('submit', { command: 'fixture-blocker' }, { hold: true });
   await eventually(async () => (await f.snapshot()).mcp.active === 1);
-  const expired = f.rawCall('run-command', { command: 'fixture-must-not-submit' });
+  const expired = f.rawCall('submit', { command: 'fixture-must-not-submit' });
   await refusal(await expired.response, 'REQUEST_QUEUE_TIMEOUT');
   assert.equal((await f.snapshot()).mcp.queued, 0);
   assert.equal(f.queue.listAll().length, 0); assert.equal(f.calls.length, 0);
@@ -171,14 +174,14 @@ test('waiting deadline refuses unstarted work and a later release does not submi
 
 test('disconnect while queued removes the unstarted body and recovers its FIFO capacity', { timeout: 15000 }, async t => {
   const f = await fixture(t, { mcp: { maxQueued: 1 } });
-  const held = f.rawCall('run-command', { command: 'fixture-blocker' }, { hold: true });
+  const held = f.rawCall('submit', { command: 'fixture-blocker' }, { hold: true });
   await eventually(async () => (await f.snapshot()).mcp.active === 1);
-  const abandoned = f.rawCall('run-command', { command: 'fixture-disconnected' });
+  const abandoned = f.rawCall('submit', { command: 'fixture-disconnected' });
   await eventually(async () => (await f.snapshot()).mcp.queued === 1);
   const disconnected = assert.rejects(abandoned.response);
   abandoned.req.destroy(Error('fixture client disconnected')); await disconnected;
   await eventually(async () => (await f.snapshot()).mcp.queued === 0);
-  const survivor = f.rawCall('run-command', { command: 'fixture-survivor' });
+  const survivor = f.rawCall('submit', { command: 'fixture-survivor' });
   await eventually(async () => (await f.snapshot()).mcp.queued === 1);
   held.finish();
   assert.equal((await held.response).status, 200); assert.equal((await survivor.response).status, 200);
@@ -204,16 +207,16 @@ test('administrator admission is bounded independently and MCP plus health remai
 
 test('validated long waits have a separate finite budget without blocking control or weakening approval', { timeout: 20000 }, async t => {
   const f = await fixture(t);
-  const job = (await f.call('run-command', { command: 'fixture-wait' })).structuredContent;
-  const waited = f.rawCall('wait-for-request', { id: job.id, timeoutMs: 60000 });
-  await eventually(async () => f.queue.requestWaiters.size === 1 && (await f.snapshot()).mcp.detached === 1);
-  const overflow = await f.call('wait-for-request', { id: job.id, timeoutMs: 60000 });
+  const job = (await f.call('submit', { command: 'fixture-wait' })).structuredContent.data;
+  const waited = f.rawCall('observe', { id: job.id, waitMs: 60000 });
+  await eventually(async () => (await f.snapshot()).mcp.detached === 1);
+  const overflow = await f.call('observe', { id: job.id, waitMs: 60000 });
   assert.equal(overflow.isError, true);
   assert.deepEqual(JSON.parse(overflow.content[0].text), {
-    error_code: 'REQUEST_WAIT_LIMIT', stage: 'request_admission', executionAttempted: false, requestSubmitted: false, retryAfterMs: 1000,
+    contractVersion: '1.8', ok: false, data: null, error: { code: 'REQUEST_WAIT_LIMIT', retryable: false, executionAttempted: 'unknown' },
   });
-  assert.equal(f.queue.requestWaiters.size, 1, 'overflow must not register another wait subscription');
-  assert.equal((await f.call('wait-for-request', { id: 'invalid' })).isError, true);
+  assert.equal((await f.snapshot()).mcp.detached, 1, 'overflow must not register another detached observation');
+  assert.equal((await f.call('observe', { id: 'invalid' })).isError, true);
   assert.equal((await f.call('show-ui-probe')).isError, undefined);
   assert.equal((await f.owner('/api/requests')).status, 200);
   const control = await f.owner('/api/maintenance/capabilities', { method: 'POST' });
@@ -223,13 +226,13 @@ test('validated long waits have a separate finite budget without blocking contro
   assert.equal((await f.call('ui-decide-request', { id: job.id, action: 'approve', ticket: 'blind-model-call' })).isError, true);
   assert.equal(f.calls.length, 0); assert.equal(f.queue.get(job.id).state, 'pending');
   assert.equal((await f.owner('/api/' + job.id + '/deny', { method: 'POST' })).status, 200);
-  assert.equal((await waited.response).body.result.structuredContent.callback.event, 'denied');
-  await eventually(async () => f.queue.requestWaiters.size === 0 && (await f.snapshot()).mcp.detached === 0);
-  const next = (await f.call('run-command', { command: 'fixture-recovered-wait' })).structuredContent;
-  const nextWait = f.rawCall('wait-for-request', { id: next.id, timeoutMs: 60000 });
-  await eventually(() => f.queue.requestWaiters.size === 1);
+  assert.equal((await waited.response).body.result.structuredContent.data.state, 'denied');
+  await eventually(async () => (await f.snapshot()).mcp.detached === 0);
+  const next = (await f.call('submit', { command: 'fixture-recovered-wait' })).structuredContent.data;
+  const nextWait = f.rawCall('observe', { id: next.id, waitMs: 60000 });
+  await eventually(async () => (await f.snapshot()).mcp.detached === 1);
   nextWait.req.destroy(Error('fixture long wait disconnected'));
-  await eventually(async () => f.queue.requestWaiters.size === 0 && (await f.snapshot()).mcp.detached === 0);
+  await eventually(async () => (await f.snapshot()).mcp.detached === 0);
   assert.equal(f.queue.get(next.id).state, 'pending'); assert.equal(f.calls.length, 0);
 });
 
@@ -238,8 +241,8 @@ test('slow synchronous approval keeps control available; disconnect does not can
   const gate = new Promise(resolve => { finish = resolve; });
   const f = await fixture(t, { executeCommand: async () => { await gate; return { failed: false, texts: [] }; } });
   f.releases.add(finish);
-  const job = (await f.call('run-command', { command: 'fixture-running' })).structuredContent;
-  const other = (await f.call('run-command', { command: 'fixture-still-pending' })).structuredContent;
+  const job = (await f.call('submit', { command: 'fixture-running' })).structuredContent.data;
+  const other = (await f.call('submit', { command: 'fixture-still-pending' })).structuredContent.data;
   const controller = new AbortController();
   const approval = f.owner('/api/' + job.id + '/approve', { method: 'POST', signal: controller.signal });
   approval.catch(() => {});
@@ -279,18 +282,18 @@ test('slow synchronous approval keeps control available; disconnect does not can
 
 test('shutdown rejects queued bodies without promotion and releases long-wait subscriptions', { timeout: 20000 }, async t => {
   const f = await fixture(t);
-  const job = (await f.call('run-command', { command: 'fixture-before-shutdown' })).structuredContent;
-  const waited = f.rawCall('wait-for-request', { id: job.id, timeoutMs: 60000 });
-  await eventually(async () => f.queue.requestWaiters.size === 1 && (await f.snapshot()).mcp.detached === 1);
-  const held = f.rawCall('run-command', { command: 'fixture-unfinished' }, { hold: true });
+  const job = (await f.call('submit', { command: 'fixture-before-shutdown' })).structuredContent.data;
+  const waited = f.rawCall('observe', { id: job.id, waitMs: 60000 });
+  await eventually(async () => (await f.snapshot()).mcp.detached === 1);
+  const held = f.rawCall('submit', { command: 'fixture-unfinished' }, { hold: true });
   await eventually(async () => (await f.snapshot()).mcp.active === 1);
-  const queued = f.rawCall('run-command', { command: 'fixture-never-promoted' });
+  const queued = f.rawCall('submit', { command: 'fixture-never-promoted' });
   await eventually(async () => (await f.snapshot()).mcp.queued === 1);
   const closing = f.app.close(); assert.equal(f.app.close(), closing);
   await refusal(await queued.response, 'REQUEST_QUEUE_CLOSED');
   await waited.response.catch(() => {});
   await closing;
-  assert.equal(f.queue.requestWaiters.size, 0);
+  assert.equal((await f.snapshot()).mcp.detached, 0);
   assert.deepEqual(f.queue.listAll().map(job => job.command), ['fixture-before-shutdown']);
   assert.equal(f.calls.length, 0);
   await eventually(() => held.req.destroyed, 'shutdown must close the unfinished HTTP body');
@@ -298,16 +301,15 @@ test('shutdown rejects queued bodies without promotion and releases long-wait su
 
 test('JSON-RPC batches cannot detach a shared lease or dispatch multiple command submissions', { timeout: 15000 }, async t => {
   const f = await fixture(t);
-  const job = (await f.call('run-command', { command: 'fixture-existing-pending' })).structuredContent;
+  const job = (await f.call('submit', { command: 'fixture-existing-pending' })).structuredContent.data;
   const before = f.queue.listAll();
-  let waitDispatches = 0, submissionDispatches = 0;
-  const wait = f.queue.waitForRequest.bind(f.queue), submit = f.queue.submitOperation.bind(f.queue);
-  f.queue.waitForRequest = (...args) => { waitDispatches++; return wait(...args); };
+  let submissionDispatches = 0;
+  const submit = f.queue.submitOperation.bind(f.queue);
   f.queue.submitOperation = (...args) => { submissionDispatches++; return submit(...args); };
-  const call = (id, name, args) => ({ jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: args } });
+  const call = (id, name, args) => ({ jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: name === 'submit' ? { kind: 'command', operationKey: 'batch-admission-' + id, ...args } : args } });
   const batches = [
-    [call(2001, 'wait-for-request', { id: job.id, timeoutMs: 60000 }), call(2002, 'run-command', { command: 'fixture-after-detach' })],
-    [call(2003, 'run-command', { command: 'fixture-batch-first' }), call(2004, 'run-command', { command: 'fixture-batch-second' })],
+    [call(2001, 'observe', { id: job.id, waitMs: 60000 }), call(2002, 'submit', { command: 'fixture-after-detach' })],
+    [call(2003, 'submit', { command: 'fixture-batch-first' }), call(2004, 'submit', { command: 'fixture-batch-second' })],
   ];
   for (const contentType of ['application/json', 'Application/JSON', 'application/json;charset=utf-8']) for (const batch of batches) {
     const response = await f.rawBatch(batch, contentType).response;
@@ -317,9 +319,8 @@ test('JSON-RPC batches cannot detach a shared lease or dispatch multiple command
     assert.deepEqual(response.body.error.data, {
       error_code: 'MCP_BATCH_NOT_SUPPORTED', executionAttempted: false, requestSubmitted: false,
     });
-    assert.equal(waitDispatches, 0, 'batch rejection must precede wait dispatch, including transient subscriptions');
     assert.equal(submissionDispatches, 0, 'batch rejection must precede command registration');
-    assert.equal(f.queue.requestWaiters.size, 0); assert.equal(f.calls.length, 0);
+    assert.equal((await f.snapshot()).mcp.detached, 0); assert.equal(f.calls.length, 0);
     assert.deepEqual(f.queue.listAll(), before);
     await eventually(async () => { const { mcp } = await f.snapshot(); return mcp.active === 0 && mcp.queued === 0 && mcp.detached === 0; });
   }

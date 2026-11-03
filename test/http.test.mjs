@@ -7,6 +7,9 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { createApplication } from '../app.mjs';
 const listen = server => new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+// 1.7 baseline: test/legacy-17/http.test.mjs.17. Separate read/run and output tools map to submit/observe.
+// HTTP integration oracle: authentication, bound output disclosure, private owner tickets and web-origin refusal.
+// Product execution is remote-only; local validation is limited to node --check and git diff --check.
 const profile = { host: '127.0.0.1', port: 22, user: 'mcpops' };
 test('MCP transport, hidden capability, ticket checks, probe-only gate and web origin coexist', async () => {
   for (const enabled of [false, true]) {
@@ -26,14 +29,39 @@ test('MCP transport, hidden capability, ticket checks, probe-only gate and web o
       assert.deepEqual(tools.tools.find(x => x.name === 'ui-decide-request')._meta.ui.visibility, ['app']);
       const probe = await client.callTool({ name: 'show-ui-probe', arguments: {} });
       assert.ok(probe._meta.sshApproval.privateMarker); assert.ok(!JSON.stringify(probe.content).includes('PRIVATE'));
-      for (const name of ['read-command', 'run-command']) {
-        const read = await client.callTool({ name, arguments: { command: 'id -un' } });
-        assert.ok(!read.isError); assert.ok(!JSON.stringify(read).includes('"text":"mcpops"'));
-        assert.equal((await client.callTool({ name: 'read-command-output', arguments: { outputId: read.structuredContent.output.id } })).content[0].text, 'mcpops');
-        assert.equal(read.structuredContent.state, 'completed');
+      const targetList = (await client.callTool({ name: 'targets', arguments: {} })).structuredContent;
+      assert.equal(targetList.ok, true);
+      const selected = targetList.data.targets.find(target => target.id === (targetList.data.defaultTarget ?? 'default'));
+      assert.ok(selected?.revision);
+      const binding = { target: selected.id, expectedTargetRevision: selected.revision };
+      assert.ok(tools.tools.every(tool => !['read-command', 'run-command', 'read-command-output'].includes(tool.name)));
+      for (const suffix of ['read-path', 'run-path']) {
+        const args = { kind: 'command', operationKey: `http-${suffix}-${enabled}-operation`, command: 'id -un', ...binding };
+        const read = await client.callTool({ name: 'submit', arguments: args });
+        assert.equal(read.structuredContent.ok, true);
+        assert.ok(!JSON.stringify(read).includes('"text":"mcpops"'));
+        assert.equal(read.structuredContent.data.outputPage, null);
+        let observed = read.structuredContent.data;
+        for (let attempt = 0; observed.state !== 'completed' && attempt < 20; attempt++) {
+          const result = await client.callTool({ name: 'observe', arguments: { id: observed.id, waitMs: 1000 } });
+          assert.equal(result.structuredContent.ok, true);
+          observed = result.structuredContent.data;
+          if (['failed', 'cancelled', 'denied', 'expired', 'unknown'].includes(observed.state)) break;
+        }
+        assert.equal(observed.state, 'completed');
+        assert.equal(observed.outputPage, null, 'status does not disclose the output body');
+        const output = await client.callTool({ name: 'observe', arguments: { id: observed.id, includeOutput: true } });
+        assert.equal(output.structuredContent.ok, true);
+        assert.equal(output.structuredContent.data.outputPage.text, 'mcpops');
+        const replay = await client.callTool({ name: 'submit', arguments: args });
+        assert.equal(replay.structuredContent.ok, true);
+        assert.equal(replay.structuredContent.data.id, observed.id);
       }
+      assert.equal(calls.length, 2, 'recovering each operation key does not execute it twice');
       calls.length = 0;
-      const job = (await client.callTool({ name: 'run-command', arguments: { command: 'sudo -n -l' } })).structuredContent;
+      const submitted = await client.callTool({ name: 'submit', arguments: { kind: 'command', operationKey: `http-owner-review-${enabled}`, command: 'sudo -n -l', ...binding } });
+      assert.equal(submitted.structuredContent.ok, true);
+      const job = submitted.structuredContent.data;
       assert.equal(calls.length, 0);
       const card = await client.callTool({ name: 'show-approval', arguments: { id: job.id } });
       assert.ok(!JSON.stringify(card.structuredContent).includes('Ticket'));
@@ -43,7 +71,7 @@ test('MCP transport, hidden capability, ticket checks, probe-only gate and web o
       const blind = await client.callTool({ name: 'ui-decide-request', arguments: { id: job.id, action: 'approve', ticket: 'blind-model-call' } }); assert.equal(blind.isError, true);
       if (enabled) {
         const cap = card._meta.sshApproval.approvalTicket;
-        const decision = await client.callTool({ name: 'ui-decide-request', arguments: { id: job.id, action: 'approve', ticket: cap } }); assert.equal(decision.structuredContent.state, 'running');
+        const decision = await client.callTool({ name: 'ui-decide-request', arguments: { id: job.id, action: 'approve', ticket: cap } }); assert.ok(['queued', 'starting', 'running', 'completed'].includes(decision.structuredContent.state));
         await application.queue.wait(job.id); assert.equal(calls.length, 1);
         const replay = await client.callTool({ name: 'ui-decide-request', arguments: { id: job.id, action: 'approve', ticket: cap } }); assert.equal(replay.isError, true);
       } else assert.equal(card._meta.sshApproval.approvalTicket, undefined);

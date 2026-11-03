@@ -25,7 +25,8 @@ export function createRuntimeCapacity({ root, settings, targets, scheduler, audi
     validateCapacity(next.settings?.queueCapacity); validateCapacity(next.settings?.maxConcurrency);
     if (!Array.isArray(next.targets) || new Set(next.targets.map(target => target.id)).size !== next.targets.length) throw Error('INVALID_CAPACITY_TARGETS');
     for (const target of next.targets) {
-      if (!targets.some(known => known.id === target.id)) throw Error('UNKNOWN_CAPACITY_TARGET');
+      // Retain overrides for temporarily removed targets, without applying them.
+      if (typeof target.id !== 'string' || !/^[a-z][a-z0-9_-]{0,31}$/.test(target.id)) throw Error('INVALID_CAPACITY_TARGET');
       for (const key of ['queueCapacity', 'maxConcurrency']) if (target[key] !== null) validateCapacity(target[key], key);
     }
   }
@@ -51,13 +52,14 @@ export function createRuntimeCapacity({ root, settings, targets, scheduler, audi
       if (body.expectedRevision !== value.revision) throw Object.assign(Error('CAPACITY_REVISION_CONFLICT'), { code: 'CAPACITY_REVISION_CONFLICT' });
       const next = structuredClone(value);
       if (body.settings !== undefined) {
-        if (!body.settings || Object.keys(body.settings).some(key => !['queueCapacity','maxConcurrency'].includes(key))) throw Error('INVALID_CAPACITY_FIELDS');
+        if (!body.settings || typeof body.settings !== 'object' || Array.isArray(body.settings) || Object.keys(body.settings).some(key => !['queueCapacity','maxConcurrency'].includes(key))) throw Error('INVALID_CAPACITY_FIELDS');
         Object.assign(next.settings, body.settings);
       }
       if (body.targets !== undefined) {
         if (!Array.isArray(body.targets) || new Set(body.targets.map(target => target.id)).size !== body.targets.length) throw Error('INVALID_CAPACITY_TARGETS');
         for (const target of body.targets) {
-          if (!target || Object.keys(target).some(key => !['id','queueCapacity','maxConcurrency'].includes(key))) throw Error('INVALID_CAPACITY_FIELDS');
+          if (!target || typeof target !== 'object' || Array.isArray(target) || Object.keys(target).some(key => !['id','queueCapacity','maxConcurrency'].includes(key))) throw Error('INVALID_CAPACITY_FIELDS');
+          if (!targets.some(known => known.id === target.id)) throw Error('UNKNOWN_CAPACITY_TARGET');
           const prior = next.targets.find(item => item.id === target.id);
           if (prior) Object.assign(prior, target); else next.targets.push({ queueCapacity: null, maxConcurrency: null, ...target });
         }

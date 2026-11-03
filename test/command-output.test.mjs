@@ -126,62 +126,74 @@ test('actual MCP/HTTP defaults omit sentinel and arbitrary command data; explici
   try {
     await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${app.mcpHttp.address().port}/mcp`), { requestInit: { headers: { Authorization: 'Bearer synthetic-mcp', Connection: 'close' } } }));
     const call = (name, args) => client.callTool({ name, arguments: args });
-    const immediate = await call('read-command', { command: 'id' });
+    // 1.7 MCP JSON-format pages are archived; storage tests above retain exact JSON
+    // reconstruction. 1.8 exposes text pages only through explicit observe.
+    let sequence = 0;
+    const submit = async command => {
+      const reply = await call('submit', { kind: 'command', command, operationKey: 'output-contract-' + String(++sequence).padStart(8, '0') });
+      assert.equal(reply.isError, undefined); return reply.structuredContent.data;
+    };
+    const settled = async id => {
+      await app.queue.wait(id);
+      const reply = await call('observe', { id }); assert.equal(reply.isError, undefined); return reply.structuredContent.data;
+    };
+    const submitted = await submit('id'), immediate = await settled(submitted.id);
     assert.equal(JSON.stringify(immediate).includes(marker), false); assert.ok(Buffer.byteLength(JSON.stringify(immediate)) < 2048);
-    const page = await call('read-command-output', { outputId: immediate.structuredContent.output.id, maxBytes: 128 });
-    assert.ok(page.content[0].text.includes(marker));
-    assert.equal(page.structuredContent.text, page.content[0].text, 'structured-only consumers must receive the explicit output body');
-    assert.ok(page.structuredContent.bytes <= 128);
+    const page = await call('observe', { id: immediate.id, includeOutput: true, maxBytes: 128 });
+    assert.ok(page.structuredContent.data.outputPage.text.includes(marker));
+    assert.deepEqual(JSON.parse(page.content[0].text), page.structuredContent);
+    assert.ok(page.structuredContent.data.outputPage.bytes <= 128);
     const advertised = (await client.listTools()).tools;
-    assert.ok(advertised.find(tool => tool.name === 'read-command-output').outputSchema.required.includes('text'));
+    assert.ok(advertised.find(tool => tool.name === 'observe').outputSchema);
     assert.ok(!advertised.find(tool => tool.name === 'ui-read-command-output').outputSchema.required.includes('text'));
-    for (const format of ['text', 'json']) {
-      const pages = []; let offsetBytes = 0;
-      for (;;) {
-        const read = await call('read-command-output', { outputId: immediate.structuredContent.output.id, format, offsetBytes, maxBytes: OUTPUT_PAGE_BYTES - 1 });
-        assert.equal(read.isError, undefined);
-        const value = read.structuredContent;
-        assert.equal(value.text, read.content[0].text);
-        assert.equal(Buffer.byteLength(value.text), value.bytes); assert.ok(value.bytes <= OUTPUT_PAGE_BYTES - 1);
-        assert.ok(!value.text.includes('\ufffd')); pages.push(value.text);
-        if (value.eof) break;
-        assert.ok(value.nextOffset > offsetBytes); offsetBytes = value.nextOffset;
-      }
-      const complete = pages.join('');
-      if (format === 'json') assert.deepEqual(JSON.parse(complete), { failed: false, texts: [body], data: { private: marker } });
-      else assert.equal(complete, body + '\n' + JSON.stringify({ private: marker }, null, 2));
+    const pages = []; let cursor = 0;
+    for (;;) {
+      const read = await call('observe', { id: immediate.id, includeOutput: true, cursor, maxBytes: OUTPUT_PAGE_BYTES - 1 });
+      assert.equal(read.isError, undefined);
+      const value = read.structuredContent.data.outputPage;
+      assert.equal(Buffer.byteLength(value.text), value.bytes); assert.ok(value.bytes <= OUTPUT_PAGE_BYTES - 1);
+      assert.ok(!value.text.includes('\ufffd')); pages.push(value.text);
+      if (value.eof) break;
+      assert.ok(value.nextCursor > cursor); cursor = value.nextCursor;
     }
-    assert.equal((await call('read-command-output', { outputId: immediate.structuredContent.output.id, maxBytes: OUTPUT_PAGE_BYTES + 1 })).isError, true);
-    assert.equal((await call('read-command-output', { outputId: immediate.structuredContent.output.id, target: 'wrong' })).isError, true);
-    const requested = await call('run-command', { command: 'sudo id' }); const id = requested.structuredContent.id;
+    assert.equal(pages.join(''), body + '\n' + JSON.stringify({ private: marker }, null, 2));
+    assert.equal((await call('observe', { id: immediate.id, includeOutput: true, maxBytes: OUTPUT_PAGE_BYTES + 1 })).isError, true);
+    assert.equal((await call('observe', { id: immediate.id, target: 'wrong' })).isError, true);
+    const requested = await submit('sudo id'); const id = requested.id;
     await app.queue.approve(id);
-    for (const name of ['get-request-status', 'show-approval']) assert.equal(JSON.stringify(await call(name, { id })).includes(marker), false);
+    for (const name of ['observe', 'show-approval']) assert.equal(JSON.stringify(await call(name, { id })).includes(marker), false);
     const card = await call('show-approval', { id }); const outputId = card.structuredContent.result.structuredContent.output.id;
     const uiPage = await call('ui-read-command-output', { id, outputId, ticket: card._meta.sshApproval.viewTicket });
     assert.ok(uiPage._meta.sshOutput.text.includes(marker)); assert.equal(JSON.stringify([uiPage.content, uiPage.structuredContent]).includes(marker), false);
-    assert.equal((await call('ui-read-command-output', { id, outputId: immediate.structuredContent.output.id, ticket: card._meta.sshApproval.viewTicket })).isError, true);
+    assert.equal((await call('ui-read-command-output', { id, outputId: immediate.output.id, ticket: card._meta.sshApproval.viewTicket })).isError, true);
     const web = `http://127.0.0.1:${app.adminHttp.address().port}`;
     const history = await fetch(web + '/api/requests', { headers: { Authorization: 'Bearer synthetic-owner' } }); assert.equal((await history.text()).includes(marker), false);
     assert.equal((await fetch(web + `/api/outputs/${outputId}`)).status, 401);
     const ownerPage = await fetch(web + `/api/outputs/${outputId}`, { headers: { Authorization: 'Bearer synthetic-owner' } });
     assert.equal(ownerPage.status, 200); assert.ok((await ownerPage.json()).text.includes(marker));
-    for (let n = 0; n < 2; n++) assert.equal((await call('read-command-output', { outputId })).isError, undefined);
+    for (let n = 0; n < 2; n++) assert.equal((await call('observe', { id, includeOutput: true })).isError, undefined);
     assert.equal(calls, 2);
     failStorage = true;
-    const failedCapture = await call('read-command', { command: 'id' });
-    assert.equal(failedCapture.structuredContent.state, 'completed'); assert.equal(failedCapture.structuredContent.output.state, 'unavailable'); assert.equal(JSON.stringify(failedCapture).includes(marker), false); assert.equal(calls, 3);
+    const failedRequest = await submit('id'), failedCapture = await settled(failedRequest.id);
+    assert.equal(failedCapture.state, 'completed'); assert.equal(failedCapture.output.state, 'unavailable'); assert.equal(JSON.stringify(failedCapture).includes(marker), false); assert.equal(calls, 3);
   } finally { await client.close(); await app.close(); }
 });
 
 test('AIK output observation requires original binding and revalidates after delayed reads', async () => {
+  const { publicReply, presentOperation, publicOutputSchemas } = await import('../src/adapters/mcp/public-contract.mjs');
   const id = 'a'.repeat(48), outputId = 'b'.repeat(48), events = []; let revoked = false;
   const authority = Object.fromEntries(['authorize', 'revalidate', 'recordDispatch', 'bindRequest', 'recordReceipt'].map(name => [name, async () => {}]));
   authority.lookupRequest = async value => { assert.equal(value, id); return { bound: true }; };
-  const mcp = { async call(name) { events.push(name); if (name === 'get-request-status') return { id, result: { structuredContent: { output: { id: outputId, executionId: id, state: 'ready' } } } }; revoked = true; return { content: [{ type: 'text', text: 'PRIVATE' }], structuredContent: { outputId, executionId: id } }; } };
+  const mcp = { async call(name, args) { events.push(name);
+    const job = { id, kind: 'command', state: 'completed', createdAt: 1, result: { failed: false, output: { id: outputId, state: 'ready' } } };
+    if (!args.includeOutput) return publicReply(presentOperation(job), publicOutputSchemas.observe);
+    revoked = true;
+    return publicReply(presentOperation({ job, outputPage: { text: 'PRIVATE', cursor: 0, nextCursor: 7, bytes: 7, totalBytes: 7, sha256: 'c'.repeat(64), eof: true, expiresAt: Date.now() + 60000 } }, { includeOutput: true }), publicOutputSchemas.observe);
+  } };
   await assert.rejects(createAikSshTool({ authority, mcp }).output(id), /capability unavailable/); assert.deepEqual(events, []);
   authority.revalidateObservation = async () => { if (revoked) throw Error('observation revoked'); };
   await assert.rejects(createAikSshTool({ authority, mcp }).output(id), /observation revoked/);
-  assert.deepEqual(events, ['get-request-status', 'read-command-output']);
+  assert.deepEqual(events, ['observe', 'observe']);
 });
 
 test('legacy journal conversion preserves snapshot; expiry and restart retain durable replay protection', async t => {

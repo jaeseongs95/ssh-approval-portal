@@ -8,10 +8,12 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { createApplication } from '../app.mjs';
 import { createCommandState } from '../src/adapters/storage/command-state.mjs';
 import { parseTargets, resolveTargets } from '../src/adapters/config/targets.mjs';
-import { outputSchemas } from '../src/adapters/presentation/results.mjs';
+import { publicOutputSchemas } from '../src/adapters/mcp/public-contract.mjs';
 import { dispatchFailureDetails } from '../src/domain/dispatch-failure.mjs';
 import { hash } from '../src/domain/validation.mjs';
 
+// 1.7 baseline: test/legacy-17/test-mode-file-policy-application.test.mjs.17.
+// TM-APP-07 maps list-targets to targets and validates the versioned strict response envelope.
 // 실제 app closure·정책 저장소·router·MCP 경계를 사용하고 SSH만 대체한다.
 // 아래 fixture는 CI에서만 실행한다. 실제 secret/계정/원격 파일은 사용하지 않는다.
 const bytes = Buffer.from([0, 255, 13, 10, 128]);
@@ -154,20 +156,20 @@ test('TM-APP-06 SFTP 뒤 secret 철회는 publish를 막고 원래 연결 정리
     allowedRoot: 'C:/approved', allowedRootObservedAt: runtime.transfers.rootObservation.observedAt });
 });
 
-test('TM-APP-07 MCP list-targets 출력은 활성 정책을 strict filePolicy 스키마로 공개한다', async t => {
+test('TM-APP-07 MCP targets 출력은 활성 정책을 strict filePolicy 스키마로 공개한다', async t => {
   const f = await fixture(t, { seed: [{ testServer: true }] });
   const tools = await f.client.listTools();
-  assert.ok(tools.tools.find(x => x.name.endsWith('list-targets')).outputSchema);
-  let result = await f.client.callTool({ name: 'list-targets', arguments: {} });
+  assert.ok(tools.tools.find(x => x.name === 'targets').outputSchema);
+  let result = await f.client.callTool({ name: 'targets', arguments: {} });
   assert.equal(result.isError, undefined);
-  assert.deepEqual(outputSchemas.targets.parse(result.structuredContent), result.structuredContent);
-  assert.deepEqual(result.structuredContent.targets.find(x => x.id === 'windows').filePolicy, fixedPolicy('test-server-bypass', true, true));
-  assert.equal(outputSchemas.targets.safeParse({ ...result.structuredContent, targets: result.structuredContent.targets.map(x => x.id === 'windows'
-    ? { ...x, filePolicy: { ...x.filePolicy, bypassRoot: true } } : x) }).success, false);
+  assert.deepEqual(publicOutputSchemas.targets.parse(result.structuredContent), result.structuredContent);
+  assert.deepEqual(result.structuredContent.data.targets.find(x => x.id === 'windows').filePolicy, fixedPolicy('test-server-bypass', true, true));
+  assert.equal(publicOutputSchemas.targets.safeParse({ ...result.structuredContent, data: { ...result.structuredContent.data, targets: result.structuredContent.data.targets.map(x => x.id === 'windows'
+    ? { ...x, filePolicy: { ...x.filePolicy, bypassRoot: true } } : x) } }).success, false);
   f.setMarker(undefined);
-  result = await f.client.callTool({ name: 'list-targets', arguments: {} });
+  result = await f.client.callTool({ name: 'targets', arguments: {} });
   assert.equal(result.isError, undefined);
-  assert.deepEqual(result.structuredContent.targets.find(x => x.id === 'windows').filePolicy, fixedPolicy('configured-root', true, false));
+  assert.deepEqual(result.structuredContent.data.targets.find(x => x.id === 'windows').filePolicy, fixedPolicy('configured-root', true, false));
   assert.doesNotMatch(JSON.stringify(result), /synthetic-owner|secret:\/\/|windows-write|SHA256/);
 });
 

@@ -5,7 +5,7 @@ import {join} from 'node:path';
 // Internal values are sensitive evidence. Callers must not return or log snapshots.
 const hash = value => createHash('sha256').update(value).digest('hex');
 const rowHash = row => hash(JSON.stringify(row));
-const terminal = new Set(['completed', 'failed', 'denied', 'expired', 'unknown']);
+const terminal = new Set(['completed', 'failed', 'cancelled', 'denied', 'expired', 'unknown']);
 const idPattern = /^[a-f0-9]{48}$/;
 const maxPayload = 16 * 1024 * 1024;
 export const BASELINE_PRESERVATION_CONTRACT = 'baseline-preservation-v1';

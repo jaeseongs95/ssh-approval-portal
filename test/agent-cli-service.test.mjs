@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync,lstatSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
-import {ApprovalQueue} from '../src/domain/approval-queue.mjs';
+import {ApprovalQueue} from './support/approval-runtime.mjs';
 import {createClaims} from '../src/application/target-router.mjs';
 import {createCommandState} from '../src/adapters/storage/command-state.mjs';
 import {CommandOutputs} from '../src/adapters/storage/command-output.mjs';

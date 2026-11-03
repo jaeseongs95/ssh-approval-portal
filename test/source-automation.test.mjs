@@ -1,3 +1,6 @@
+// MCP 1.8 port: run-python-source -> submit(kind: source), requestKey ->
+// operationKey at the public boundary, get-request-status -> observe, and successful
+// IDs -> structuredContent.data.id. Internal runSource requestKey coverage remains.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -10,7 +13,7 @@ import { createApplication } from '../app.mjs';
 import { createJevAssessor } from '../src/adapters/safety/jev.mjs';
 import { AUTOMATION_QUESTION } from '../src/domain/command-policy.mjs';
 import { createCommandAutomation } from '../src/application/command-automation.mjs';
-import { ApprovalQueue } from '../src/domain/approval-queue.mjs';
+import { ApprovalQueue } from './support/approval-runtime.mjs';
 import { preparePythonSource } from '../src/adapters/ssh/python-source.mjs';
 import { createRequestSafety } from '../src/application/request-safety.mjs';
 import { generateKeyPairSync, createHash } from 'node:crypto';
@@ -64,17 +67,17 @@ test('SOURCE-PRODUCT-01 exact source reaches the real Jev HTTP adapter via MCP, 
   const client = new Client({ name: 'source-contract-fixture', version: '1' });
   try {
     await client.connect(new StreamableHTTPClientTransport(new URL('http://127.0.0.1:' + f.app.mcpHttp.address().port + '/mcp'), { requestInit: { headers: { Authorization: 'Bearer fixture-mcp' } } }));
-    const args = { source, argv: ['literal 한글'], cwd: '/tmp', elevate: true, context, displayContext: '합성 시험 · 원문 출력만 확인', requestKey: 'source-mcp-once-0001' };
-    const response = await client.callTool({ name: 'run-python-source', arguments: args }); assert.equal(response.isError, undefined);
-    await f.app.targets.drain(); const job = f.app.queue.get(response.structuredContent.id);
+    const args = { source, argv: ['literal 한글'], cwd: '/tmp', elevate: true, context, displayContext: '합성 시험 · 원문 출력만 확인', kind: 'source', operationKey: 'source-mcp-once-0001' };
+    const response = await client.callTool({ name: 'submit', arguments: args }); assert.equal(response.isError, undefined);
+    await f.app.targets.drain(); const job = f.app.queue.get(response.structuredContent.data.id);
     assert.equal(job.state, 'completed'); assert.equal(job.approvalMode, 'automatic'); assert.equal(job.decision.reasonCode, 'model_passed');
     assert.equal(job.decision.threshold.minLowRisk, 0.7); assert.equal(modelCalls, 1); assert.equal(f.executions.length, 1);
     const evidence = JSON.parse(payload.state.context).submittedSource, plan = f.executions[0];
     assert.equal(evidence.source, source); assert.deepEqual(evidence.manifest, plan.manifest); assert.equal(evidence.planDigest, plan.planDigest);
     assert.equal(plan.stdin, source); assert.equal(plan.manifest.elevate, true); assert.match(plan.command, /^'sudo' '-n' '--' '\/usr\/bin\/python3'/);
     assert.equal(payload.state.userApproval.explicit, false); assert.deepEqual(payload.state.preapprovedCommands, []); assert.doesNotMatch(JSON.stringify(payload), /합성 시험/);
-    const publicReply = await client.callTool({ name: 'get-request-status', arguments: { id: job.id } });
-    const replay = await client.callTool({ name: 'run-python-source', arguments: args }); assert.equal(replay.structuredContent.id, job.id); assert.equal(modelCalls, 1);
+    const publicReply = await client.callTool({ name: 'observe', arguments: { id: job.id } });
+    const replay = await client.callTool({ name: 'submit', arguments: args }); assert.equal(replay.structuredContent.data.id, job.id); assert.equal(modelCalls, 1);
     const publicText = JSON.stringify([response, publicReply, f.events, (await f.api('/api/requests')).body]);
     assert.doesNotMatch(publicText, /PRIVATE_BODY_SOURCE_32/);
     assert.equal((await readFile(join(f.root, 'command-automation.sqlite'))).includes(Buffer.from('PRIVATE_BODY_SOURCE_32')), false);

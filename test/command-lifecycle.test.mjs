@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { ApprovalQueue } from '../src/domain/approval-queue.mjs';
+import { ApprovalQueue } from './support/approval-runtime.mjs';
 import { createCommandService } from '../src/application/commands.mjs';
 import { createLifecycleService } from '../src/application/lifecycle.mjs';
 import { createAudit } from '../src/adapters/audit/jsonl.mjs';

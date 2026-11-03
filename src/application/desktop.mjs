@@ -3,15 +3,22 @@ import { desktopBinding, desktopActions, desktopFail } from '../domain/desktop-l
 
 /** authorize enforces existing owner approval. GUI leases are never reassigned or pooled. */
 export function createDesktopService({ adapter, authorize, verifyTarget, maxSessions = 2, maxPerOwner = 1,
-  ttlMs = 900_000, idleTtlMs = 120_000, now = Date.now, id = randomUUID, onClose = () => {} } = {}) {
+  ttlMs = 900_000, idleTtlMs = 120_000, now = Date.now, id = randomUUID, onClose = () => {}, leaseKey = binding => binding.targetId } = {}) {
   if (typeof adapter?.open !== 'function' || typeof authorize !== 'function' || typeof verifyTarget !== 'function'
+    || typeof leaseKey !== 'function'
     || ![maxSessions, maxPerOwner, ttlMs, idleTtlMs].every(value => Number.isSafeInteger(value) && value > 0)) desktopFail('DESKTOP_INVALID_CONFIG');
-  const sessions = new Map(); let shuttingDown = false;
+  const sessions = new Map(), resources = new Map(); let shuttingDown = false;
   const view = item => ({ sessionId: item.id, ...item.binding, expiresAt: item.expiresAt, idleExpiresAt: item.idleExpiresAt, kind: 'desktop' });
-  const active = item => {
+  const live = item => {
     if (item.closed) desktopFail('DESKTOP_CLOSED');
     if (now() >= item.expiresAt || now() >= item.idleExpiresAt) desktopFail('DESKTOP_EXPIRED');
     if (item.desktop?.closed) desktopFail('DESKTOP_TRANSPORT_CLOSED');
+  };
+  const active = async item => {
+    live(item);
+    const authorized = await authorize(item.binding);
+    live(item);
+    if (authorized !== true) desktopFail('DESKTOP_NOT_AUTHORIZED');
     if (verifyTarget(item.binding) !== true) desktopFail('DESKTOP_STALE_TARGET');
   };
   const dispose = item => {
@@ -26,6 +33,7 @@ export function createDesktopService({ adapter, authorize, verifyTarget, maxSess
         try { await item.desktop?.close(); }
         catch (error) { cleanupError ??= error.code ?? 'DESKTOP_CLOSE_FAILED'; }
         sessions.delete(item.id);
+        if (resources.get(item.resourceKey) === item.id) resources.delete(item.resourceKey);
       }
       const receipt = { sessionId: item.id, closed: true, releaseSent, logout: false, ...(cleanupError ? { cleanupError } : {}) };
       onClose(receipt); return receipt;
@@ -49,7 +57,7 @@ export function createDesktopService({ adapter, authorize, verifyTarget, maxSess
     item.pending++;
     const result = item.tail.then(async () => {
       try {
-        active(item); const value = await work(item); active(item);
+        await active(item); const value = await work(item); await active(item);
         item.idleExpiresAt = Math.min(item.expiresAt, now() + idleTtlMs); arm(item); return value;
       } catch (error) {
         if (!['DESKTOP_STALE_FRAME', 'DESKTOP_INVALID_INPUT', 'DESKTOP_INPUT_SEQUENCE', 'DESKTOP_INPUT_CONFLICT'].includes(error.code)) {
@@ -67,17 +75,21 @@ export function createDesktopService({ adapter, authorize, verifyTarget, maxSess
     async open(args) {
       if (shuttingDown) desktopFail('DESKTOP_CLOSED');
       const binding = desktopBinding(args);
-      if (authorize(binding) !== true) desktopFail('DESKTOP_NOT_AUTHORIZED');
+      if (await authorize(binding) !== true) desktopFail('DESKTOP_NOT_AUTHORIZED');
+      if (shuttingDown) desktopFail('DESKTOP_CLOSED');
       if (verifyTarget(binding) !== true) desktopFail('DESKTOP_STALE_TARGET');
+      const resourceKey = leaseKey(binding);
+      if (typeof resourceKey !== 'string' || !resourceKey || resourceKey.length > 512) desktopFail('DESKTOP_INVALID_CONFIG');
+      if (resources.has(resourceKey)) desktopFail('DESKTOP_RESOURCE_BUSY');
       if (sessions.size >= maxSessions || [...sessions.values()].filter(item => item.binding.ownerId === binding.ownerId).length >= maxPerOwner) desktopFail('DESKTOP_CAPACITY');
-      const item = { id: id(), binding, expiresAt: now() + ttlMs, idleExpiresAt: now() + idleTtlMs,
+      const item = { id: id(), binding, resourceKey, expiresAt: now() + ttlMs, idleExpiresAt: now() + idleTtlMs,
         controller: new AbortController(), tail: Promise.resolve(), pending: 0, frameSequence: 0, inputSequence: 0, closed: false };
       // Reserve synchronously before opening the transport; no quota oversubscription.
-      sessions.set(item.id, item); arm(item);
+      sessions.set(item.id, item); resources.set(resourceKey, item.id); arm(item);
       try {
         item.desktop = await adapter.open({ binding, signal: item.controller.signal });
         if (item.closed) { await item.desktop.close(); desktopFail('DESKTOP_EXPIRED'); }
-        active(item); return view(item);
+        await active(item); return view(item);
       } catch (error) {
         try { await dispose(item); } catch (cleanupError) { error.cleanupError = cleanupError.code ?? 'DESKTOP_CLEANUP_FAILED'; }
         throw error;
@@ -107,7 +119,7 @@ export function createDesktopService({ adapter, authorize, verifyTarget, maxSess
         if (!item.frame || args.frameId !== item.frame.frameId || args.geometryRevision !== item.frame.geometryRevision) desktopFail('DESKTOP_STALE_FRAME');
         const actions = desktopActions(args.actions, item.frame.width, item.frame.height);
         // Refresh before dispatch to fence a resize since the agent's observation.
-        const current = await item.desktop.observe({ includeImage: false }); active(item);
+        const current = await item.desktop.observe({ includeImage: false }); await active(item);
         if (current.geometryRevision !== item.frame.geometryRevision || current.width !== item.frame.width || current.height !== item.frame.height) {
           item.frame = undefined; desktopFail('DESKTOP_STALE_FRAME');
         }

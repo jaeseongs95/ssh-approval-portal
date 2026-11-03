@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, appendFile, readFile, writeFile, symlink } from 'node:fs/promises';
+import { mkdtemp, rm, appendFile, readFile, writeFile, symlink, readdir, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Artifacts } from '../src/adapters/storage/artifacts.mjs';
@@ -12,12 +12,12 @@ const binding = { targetId: 'fixture', targetRevision: 'a'.repeat(64) };
 const payload = Buffer.from([0, 255, 128, 65, 2, 3, 4, 5]);
 const meta = { fileName: 'bytes.bin', remotePath: '/tmp/bytes.bin', size: payload.length, sha256: hash(payload),
   overwrite: false, elevate: false, operationKey: 'durable-upload-fixture', uploadProtocol: 'mcp-json-v1', fileTargetBound: true, ...binding };
-async function fixture(t) {
+async function fixture(t, { canReap = () => true } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'artifact-durability-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   let clock = 1_000;
   const openStore = async () => {
-    const store = new Artifacts(root, { maxBytes: 16, budget: 32, now: () => clock });
+    const store = new Artifacts(root, { maxBytes: 16, budget: 32, now: () => clock, canReap });
     await store.init(); return store;
   };
   return { root, openStore, advance: n => { clock += n; }, now: () => clock };
@@ -176,4 +176,35 @@ test('artifact allocation is governed by byte budget rather than a fixed item co
   assert.equal(store.size, 101); assert.equal(store.reserved, 101);
   const restored = new Artifacts(f.root, { maxBytes: 16, budget: 128, now: f.now }); await restored.init();
   assert.equal(restored.size, 101); assert.equal(restored.reserved, 101);
+});
+
+test('maintenance reaping policy preserves expired bytes, manifests and accounting until released', async t => {
+  let maintenance = true;
+  const f = await fixture(t, { canReap: () => !maintenance }), store = await f.openStore();
+  const partial = await store.begin(meta);
+  await store.append(partial.id, 0, payload.subarray(0, 4));
+  const upload = await store.begin({ ...meta, operationKey: 'maintenance-ready-upload' });
+  await store.append(upload.id, 0, payload); await store.finish(upload.id);
+  store.releaseUpload(upload.id);
+  const download = store.reserveDownload({ ...meta, operationKey: undefined });
+  await store.receiveDownload(download.id, { size: payload.length, sha256: hash(payload) }, async out => { out.end(payload); });
+  f.advance(3_600_000);
+  const capture = async () => Promise.all((await readdir(f.root)).sort().map(async name => {
+    const path = join(f.root, name), info = await stat(path, { bigint: true });
+    return { name, bytes: await readFile(path), mtimeNs: info.mtimeNs, ctimeNs: info.ctimeNs };
+  }));
+  const baseline = await capture(), metadata = store.list(), reserved = store.reserved;
+  await store.reap(); await store.reap();
+  assert.deepEqual(await capture(), baseline);
+  assert.deepEqual(store.list(), metadata); assert.equal(store.reserved, reserved); assert.equal(store.size, 3);
+  await assert.rejects(store.append(partial.id, 1, payload.subarray(4)), /not writable/);
+  await assert.rejects(store.finish(partial.id), /expired/);
+  const downloadJob = { id: 'e'.repeat(48), kind: 'download', state: 'completed', operation: { kind: 'download', remotePath: meta.remotePath,
+    elevate: false, fileTargetId: binding.targetId, fileTargetRevision: binding.targetRevision },
+    result: { failed: false, data: { artifactId: download.id, fileName: meta.fileName, size: payload.length, sha256: hash(payload) } } };
+  const service = createFileService({ store: scopedArtifacts(store, binding), queue: { get: () => downloadJob }, now: f.now });
+  await assert.rejects(service.readAgentDownload({ id: downloadJob.id }, () => {}), /retention/);
+  assert.deepEqual(await capture(), baseline);
+  maintenance = false; await store.reap();
+  assert.deepEqual(await readdir(f.root), []); assert.equal(store.size, 0); assert.equal(store.reserved, 0);
 });

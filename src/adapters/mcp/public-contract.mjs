@@ -18,12 +18,29 @@ const outputPage = object({ text: z.string(), cursor: integer, nextCursor: integ
   sha256: digest, eof: z.boolean(), expiresAt: integer });
 const artifact = object({ fileName: z.string(), size: integer, sha256: digest });
 const diagnostic = object({ origin: z.enum(['policy', 'os']), policyReason: z.string().nullable(), nativeStep: z.string().nullable(), nativeError: integer.nullable() });
+const streamMetadata = object({ receivedBytes: integer, retainedBytes: integer, cursor: integer, truncated: z.boolean() });
+const executionFields = {
+  phase: z.literal('settled').nullable(), reason: z.enum(['exit', 'deadline', 'cancel', 'transport_lost', 'channel_open_failed', 'input_failed']).nullable(),
+  remoteState: z.enum(['not_dispatched', 'exited', 'unknown']).nullable(), exitCode: z.number().int().nullable(),
+  signal: z.string().regex(/^[A-Z0-9_-]{1,32}$/).nullable(), automaticReplay: z.literal(false).nullable(),
+  timeoutMs: z.number().int().positive().nullable(), cleanupComplete: z.boolean().nullable(), requiresReconciliation: z.boolean().nullable(),
+  outputState: z.enum(['partial', 'complete']).nullable(), captureFailed: z.boolean().nullable(),
+  stdout: streamMetadata.nullable(), stderr: streamMetadata.nullable(),
+};
+const executionData = object(executionFields);
+function presentExecution(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return Object.fromEntries(Object.entries(executionFields).map(([field, schema]) => {
+    const parsed = schema.safeParse(value[field]);
+    return [field, parsed.success ? parsed.data : null];
+  }));
+}
 export const operationData = object({ id: identifier, operationKey: key.nullable(), kind: z.enum(['command', 'source', 'upload', 'download']), state: operationState,
   targetId: target.nullable(), targetRevision: digest.nullable(), approvalMode: z.enum(['owner', 'automatic']).nullable(),
   createdAt: integer, expiresAt: integer.nullable(), finishedAt: integer.nullable(),
-  failed: z.boolean().nullable(), failureCode: z.string().nullable(), remoteOutcome: z.enum(['not_started', 'completed', 'unknown']).nullable(),
+  failed: z.boolean().nullable(), auditFailure: z.boolean(), failureCode: z.string().nullable(), remoteOutcome: z.enum(['not_started', 'completed', 'unknown']).nullable(),
   allowedRoot: z.string().nullable(), diagnostic: diagnostic.nullable(), remoteCleanup: z.literal('unconfirmed').nullable(),
-  output: outputReference.nullable(), artifact: artifact.nullable(), outputPage: outputPage.nullable(), streamPage: z.null(), waitTimedOut: z.boolean() });
+  execution: executionData.nullable(), output: outputReference.nullable(), artifact: artifact.nullable(), outputPage: outputPage.nullable(), streamPage: z.null(), waitTimedOut: z.boolean() });
 const policy = object({ testServerConfigured: z.boolean(), testServerActive: z.boolean(), mode: z.enum(['configured-root', 'test-server-bypass', 'ssh-account-permissions']),
   allowedRoot: z.string().nullable(), allowedRootObservedAt: integer.nullable(), osPermissionsEnforced: z.literal(true),
   pathSafetyEnforced: z.literal(true), elevationRequiresExplicitRequest: z.literal(true) });
@@ -93,10 +110,11 @@ export function presentOperation(value, { includeOutput = false } = {}) {
     kind: job.operation?.sourceContract ? 'source' : job.kind, state: job.state,
     targetId: job.targetId ?? null, targetRevision: job.targetRevision ?? null, approvalMode: job.approvalMode ?? null,
     createdAt: job.createdAt, expiresAt: job.expiresAt ?? null, finishedAt: job.finishedAt ?? null,
-    failed: typeof result.failed === 'boolean' ? result.failed : null, failureCode: result.failure?.code ?? file?.errorCode ?? null,
+    failed: typeof result.failed === 'boolean' ? result.failed : null, auditFailure: Boolean(job.auditError), failureCode: result.failure?.code ?? file?.errorCode ?? null,
     remoteOutcome: result.failure?.remoteOutcome ?? null, allowedRoot: file?.allowedRoot ?? null,
     diagnostic: detail ? { origin: detail.origin, policyReason: detail.policyReason ?? null, nativeStep: detail.nativeStep ?? null, nativeError: detail.nativeError ?? null } : null,
     remoteCleanup: file?.remoteCleanup ?? null,
+    execution: presentExecution(result.execution),
     output: output ? { version: 1, captureSource: 'redacted-adapter-outcome', sshCompleteness: 'unknown',
       id: output.id ?? null, state: typeof output.expiresAt === 'number' && Date.now() >= output.expiresAt ? 'expired' : output.state,
       bytes: output.bytes ?? null, snapshotBytes: output.snapshotBytes ?? null,

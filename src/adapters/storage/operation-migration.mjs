@@ -24,12 +24,14 @@ function readSource(path) {
     if (!['id', 'body', 'digest'].every(name => columns.includes(name))) fail('UNSUPPORTED_LEGACY_SCHEMA');
     const usage = db.prepare('SELECT count(*) AS n,coalesce(sum(length(CAST(body AS BLOB))),0) AS bytes FROM requests').get();
     if (usage.n > 10000 || usage.bytes > 64 * 1024 * 1024) fail('LEGACY_HISTORY_CAPACITY');
-    return db.prepare('SELECT id,body,digest FROM requests ORDER BY id').all().map(row => {
+    const requestKeyColumn = columns.includes('request_key') ? 'request_key' : 'NULL AS request_key';
+    return db.prepare(`SELECT id,body,digest,${requestKeyColumn} FROM requests ORDER BY id`).all().map(row => {
       if (typeof row.body !== 'string' || typeof row.digest !== 'string') fail('INVALID_LEGACY_HISTORY');
+      if (row.request_key !== null && (typeof row.request_key !== 'string' || !row.request_key)) fail('INVALID_LEGACY_REQUEST_KEY');
       if (Buffer.byteLength(row.body) > 256 * 1024) fail('LEGACY_ENTRY_TOO_LARGE');
       let job; try { job = JSON.parse(row.body); } catch { fail('INVALID_LEGACY_HISTORY'); }
       if (typeof job?.id !== 'string' || job.id !== row.id || typeof job.state !== 'string') fail('INVALID_LEGACY_HISTORY');
-      return { job, digest: row.digest };
+      return { job, digest: row.digest, requestKey: row.request_key ?? undefined };
     });
   } finally { db.close(); }
 }
@@ -60,19 +62,21 @@ export function migrateLegacyOperations({ legacyRoot, archiveRoot, store, now = 
   // Archive all sources before the first target write; reruns require identical original bytes.
   for (const { source, sha256 } of inventory) {
     const original = join(legacyRoot, source), archive = join(archiveRoot, source);
-    if (!existsSync(archive)) copyFileSync(original, archive, constants.COPYFILE_EXCL);
+    const created = !existsSync(archive);
+    if (created) copyFileSync(original, archive, constants.COPYFILE_EXCL);
     regular(archive);
     if (hash(readFileSync(archive)) !== sha256 || hash(readFileSync(original)) !== sha256) fail('LEGACY_ARCHIVE_MISMATCH');
+    // Windows FlushFileBuffers needs a writable handle; flush before making the archive readonly.
+    if (created) { const fd = openSync(archive, 'r+'); try { fsyncSync(fd); } finally { closeSync(fd); } }
     chmodSync(archive, 0o400);
-    const fd = openSync(archive, 'r'); try { fsyncSync(fd); } finally { closeSync(fd); }
   }
   if (process.platform !== 'win32') {
     const fd = openSync(archiveRoot, 'r'); try { fsyncSync(fd); } finally { closeSync(fd); }
   }
   for (const { source, sha256, rows } of inventory) {
     let unknown = 0;
-    for (const { job, digest } of rows) {
-      store.importLegacy(job, { source, digest });
+    for (const { job, digest, requestKey } of rows) {
+      store.importLegacy(job, { source, digest, requestKey });
       if (!terminal.has(job.state) || job.state === 'unknown') unknown++;
     }
     if (hash(readFileSync(join(legacyRoot, source))) !== sha256) fail('LEGACY_CHANGED_DURING_IMPORT');

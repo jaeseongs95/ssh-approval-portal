@@ -13,7 +13,7 @@ import { hash } from '../src/domain/validation.mjs';
 
 // Standard remote MCP -> real application/router/store/queue; only SSH is synthetic.
 // No local file chooser, local MCP process, real credentials or external source URL.
-const names = ['begin-upload', 'upload-chunk', 'get-upload-status', 'finish-upload'];
+const names = ['artifact-begin', 'artifact-chunk', 'artifact-status', 'artifact-finish'];
 const privateMarker = 'SYNTHETIC-PRIVATE-CHUNK-CREDENTIAL';
 async function fixture(t, { maxBytes = CHUNK_BYTES * 2, uiEnabled = false } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'remote-mcp-json-')), effects = [], published = [];
@@ -57,16 +57,17 @@ async function fixture(t, { maxBytes = CHUNK_BYTES * 2, uiEnabled = false } = {}
     return result;
   };
   const ok = async (name, args) => { const result = await call(name, args); assert.notEqual(result.isError, true, JSON.stringify(result));
-    assert.deepEqual(JSON.parse(result.content[0].text), result.structuredContent); return result.structuredContent; };
+    assert.deepEqual(JSON.parse(result.content[0].text), result.structuredContent); return result.structuredContent.data; };
+  let operationSequence = 0;
   const meta = (bytes, { target = 'linux', remotePath = target === 'windows' ? 'C:/upload/fixture.bin' : '/tmp/fixture.bin', ...extra } = {}) => ({
-    target, expectedTargetRevision: app.targets.list().targets.find(item => item.id === target)?.revision,
+    operationKey: 'remote-upload-contract-' + (++operationSequence), target, expectedTargetRevision: app.targets.list().targets.find(item => item.id === target)?.revision,
     fileName: 'fixture.bin', remotePath, size: bytes.length, sha256: hash(bytes), ...extra });
   return { root, app, client, url, call, ok, meta, profiles, effects, published,
     jobs: () => app.queue.listAll().filter(job => job.kind === 'upload'),
     bytes: id => readFile(join(root, id + '.part')) };
 }
 const transferKeys = ['id', 'received', 'sequence', 'size', 'sha256', 'expiresAt', 'targetId', 'targetRevision'].sort();
-const refusalCode = result => { assert.equal(result.isError, true); return JSON.parse(result.content[0].text).error_code; };
+const refusalCode = result => { assert.equal(result.isError, true); return JSON.parse(result.content[0].text).error.code; };
 
 test('REMOTE-JSON schemas expose strict model tools without Apps or private upload tickets', { timeout: 30000 }, async t => {
   for (const uiEnabled of [false, true]) {
@@ -76,14 +77,16 @@ test('REMOTE-JSON schemas expose strict model tools without Apps or private uplo
       assert.equal(descriptor.inputSchema.additionalProperties, false); assert.notDeepEqual(descriptor._meta?.ui?.visibility, ['app']);
       assert.equal(descriptor._meta?.['openai/fileParams'], undefined);
     }
-    const begin = tools.find(tool => tool.name === 'begin-upload').inputSchema;
-    assert.deepEqual([...begin.required].sort(), ['target', 'expectedTargetRevision', 'fileName', 'remotePath', 'size', 'sha256'].sort());
-    assert.deepEqual(Object.keys(begin.properties).sort(), ['target', 'expectedTargetRevision', 'fileName', 'remotePath', 'size', 'sha256', 'overwrite', 'elevate'].sort());
+    const begin = tools.find(tool => tool.name === 'artifact-begin').inputSchema;
+    assert.deepEqual([...begin.required].sort(), ['operationKey', 'target', 'expectedTargetRevision', 'fileName', 'remotePath', 'size', 'sha256'].sort());
+    assert.deepEqual(Object.keys(begin.properties).sort(), ['operationKey', 'target', 'expectedTargetRevision', 'fileName', 'remotePath', 'size', 'sha256', 'overwrite', 'elevate'].sort());
     assert.equal(begin.properties.size.maximum, MAX_BYTES);
-    const selected = await f.ok('begin-upload', f.meta(Buffer.alloc(0)));
-    assert.deepEqual(Object.keys(selected).sort(), ['transferId', 'received', 'sequence', 'size', 'sha256', 'expiresAt', 'targetId', 'targetRevision', 'maxChunkBytes'].sort());
+    const input = f.meta(Buffer.alloc(0)), selected = await f.ok('artifact-begin', input);
+    assert.equal((await f.ok('artifact-begin', input)).id, selected.id);
+    assert.equal((await f.call('artifact-begin', { ...input, remotePath: '/tmp/conflicting-key.bin' })).isError, true);
+    assert.deepEqual(Object.keys(selected).sort(), ['id', 'received', 'sequence', 'size', 'sha256', 'expiresAt', 'targetId', 'targetRevision', 'maxChunkBytes'].sort());
     assert.equal(selected.maxChunkBytes, CHUNK_BYTES); assert.equal(selected.sequence, 0); assert.equal(selected.received, 0);
-    const status = await f.ok('get-upload-status', { id: selected.transferId });
+    const status = await f.ok('artifact-status', { id: selected.id });
     assert.equal(status.state, 'staging'); assert.deepEqual(Object.keys(status.transfer).sort(), transferKeys);
     assert.equal(f.effects.length, 0); assert.equal(f.jobs().length, 0);
   }
@@ -93,44 +96,44 @@ test('REMOTE-JSON real binary and empty uploads bind bytes and target without ef
   const binary = Buffer.alloc(CHUNK_BYTES + 17); for (let i = 0; i < binary.length; i++) binary[i] = i % 256;
   for (const [target, bytes, remotePath] of [['linux', binary, '/tmp/binary.bin'], ['linux', Buffer.alloc(0), '/tmp/empty.bin'],
     ['windows', Buffer.from([0, 255, 128, 13, 10]), 'C:/upload/binary.bin'], ['windows', Buffer.alloc(0), 'C:\\upload\\empty.bin']]) {
-    const f = await fixture(t), input = f.meta(bytes, { target, remotePath }), begin = await f.ok('begin-upload', input), id = begin.transferId;
+    const f = await fixture(t), input = f.meta(bytes, { target, remotePath }), begin = await f.ok('artifact-begin', input), id = begin.id;
     assert.match(id, /^[a-f0-9]{48}$/); assert.equal(begin.size, bytes.length); assert.equal(begin.sha256, hash(bytes));
     assert.equal(begin.targetId, target); assert.equal(begin.targetRevision, input.expectedTargetRevision);
     assert.equal(f.app.store.get(id).uploadProtocol, 'mcp-json-v1'); assert.equal(f.app.store.get(id).fileTargetBound, true);
     for (let offset = 0, sequence = 0; offset < bytes.length; offset += CHUNK_BYTES, sequence++) {
-      const part = bytes.subarray(offset, offset + CHUNK_BYTES), ack = await f.ok('upload-chunk', { id, sequence, data: part.toString('base64') });
+      const part = bytes.subarray(offset, offset + CHUNK_BYTES), ack = await f.ok('artifact-chunk', { id, sequence, data: part.toString('base64') });
       assert.deepEqual(ack, { sequence: sequence + 1, received: Math.min(offset + CHUNK_BYTES, bytes.length) });
     }
     assert.deepEqual(await f.bytes(id), bytes); assert.equal(f.effects.length, 0); assert.equal(f.jobs().length, 0);
-    const pending = await f.ok('finish-upload', { id }); assert.equal(pending.state, 'pending'); assert.equal(pending.kind, 'upload');
-    assert.equal(pending.operation.artifactId, id); assert.equal(pending.operation.fileTargetId, target);
-    assert.equal(pending.operation.fileTargetRevision, input.expectedTargetRevision); assert.equal(pending.operation.uploadProtocol, 'mcp-json-v1');
-    assert.equal(pending.operation.overwrite, false); assert.equal(pending.operation.elevate, false); assert.equal(f.effects.length, 0);
-    const submitted = await f.ok('get-upload-status', { id }); assert.equal(submitted.state, 'submitted'); assert.equal(submitted.request.id, pending.id);
+    const pending = await f.ok('artifact-finish', { id }); assert.equal(pending.state, 'pending'); assert.equal(pending.kind, 'upload');
+    assert.equal(f.app.queue.get(pending.id).operation.artifactId, id); assert.equal(f.app.queue.get(pending.id).operation.fileTargetId, target);
+    assert.equal(f.app.queue.get(pending.id).operation.fileTargetRevision, input.expectedTargetRevision); assert.equal(f.app.queue.get(pending.id).operation.uploadProtocol, 'mcp-json-v1');
+    assert.equal(f.app.queue.get(pending.id).operation.overwrite, false); assert.equal(f.app.queue.get(pending.id).operation.elevate, false); assert.equal(f.effects.length, 0);
+    const submitted = await f.ok('artifact-status', { id }); assert.equal(submitted.state, 'submitted'); assert.equal(submitted.request.id, pending.id);
     assert.equal(f.jobs().length, 1); assert.equal(f.effects.length, 0);
     const completed = await f.app.queue.approve(pending.id); assert.equal(completed.state, 'completed');
     assert.deepEqual(f.published, [{ target, path: remotePath, bytes }]);
-    const completedStatus = await f.ok('get-upload-status', { id });
+    const completedStatus = await f.ok('artifact-status', { id });
     assert.equal(completedStatus.request.id, pending.id); assert.equal(completedStatus.request.state, 'completed');
     const effectsAfterCompletion = structuredClone(f.effects);
     await f.app.store.reap();
     assert.equal(f.app.store.has(id), false); assert.equal(f.app.store.reserved, 0);
     await assert.rejects(f.bytes(id), { code: 'ENOENT' });
-    assert.deepEqual(await f.ok('get-upload-status', { id }), completedStatus);
-    assert.equal(refusalCode(await f.call('finish-upload', { id })), 'REMOTE_UPLOAD_ALREADY_SUBMITTED');
+    assert.deepEqual(await f.ok('artifact-status', { id }), completedStatus);
+    assert.equal((await f.ok('artifact-finish', { id })).id, pending.id);
     assert.equal(f.jobs().length, 1); assert.equal(f.published.length, 1); assert.deepEqual(f.effects, effectsAfterCompletion);
   }
 });
 
 test('REMOTE-JSON missing binding invalid metadata and extra authority allocate nothing', { timeout: 30000 }, async t => {
   const f = await fixture(t, { maxBytes: 16 }), input = f.meta(Buffer.from([0, 255]));
-  assert.equal(refusalCode(await f.call('begin-upload', { ...input, expectedTargetRevision: 'f'.repeat(64) })), 'REMOTE_UPLOAD_STALE_TARGET');
-  const { target, ...noTarget } = input, { expectedTargetRevision, ...noRevision } = input;
-  for (const bad of [noTarget, noRevision, { ...input, expectedTargetRevision: 'f'.repeat(64) }, { ...input, target: 'offline' },
+  assert.equal(refusalCode(await f.call('artifact-begin', { ...input, expectedTargetRevision: 'f'.repeat(64) })), 'ARTIFACT_STALE_TARGET');
+  const { target, ...noTarget } = input, { expectedTargetRevision, ...noRevision } = input, { operationKey, ...noKey } = input;
+  for (const bad of [noKey, noTarget, noRevision, { ...input, expectedTargetRevision: 'f'.repeat(64) }, { ...input, target: 'offline' },
     { ...input, target: 'missing' }, { ...input, size: -1 }, { ...input, size: MAX_BYTES + 1 }, { ...input, size: 17 },
     { ...input, sha256: 'INVALID' }, { ...input, fileName: '../unsafe' }, { ...input, remotePath: 'C:/wrong-platform.bin' },
     { ...input, remotePath: 'relative' }, { ...input, overwrite: 'true' }, { ...input, elevate: 'true' }, { ...input, approve: true }]) {
-    assert.equal((await f.call('begin-upload', bad)).isError, true); assert.equal(f.app.store.size, 0); assert.equal(f.app.store.reserved, 0);
+    assert.equal((await f.call('artifact-begin', bad)).isError, true); assert.equal(f.app.store.size, 0); assert.equal(f.app.store.reserved, 0);
   }
   for (const name of names.slice(1)) {
     for (const bad of [{ id: 'z'.repeat(48) }, { id: 'a'.repeat(48), approve: true }]) assert.equal((await f.call(name, bad)).isError, true);
@@ -139,72 +142,73 @@ test('REMOTE-JSON missing binding invalid metadata and extra authority allocate 
 });
 
 test('REMOTE-JSON canonical chunk bounds duplicate ACK and rejected sequence preserve staged bytes', { timeout: 30000 }, async t => {
-  const f = await fixture(t), bytes = Buffer.from([0, 255, 128, 65]), begin = await f.ok('begin-upload', f.meta(bytes)), id = begin.transferId;
+  const f = await fixture(t), bytes = Buffer.from([0, 255, 128, 65]), begin = await f.ok('artifact-begin', f.meta(bytes)), id = begin.id;
   for (const data of ['', 'AA', 'AA==\n', '__8=', 'Zh==', privateMarker, Buffer.alloc(CHUNK_BYTES + 1).toString('base64')]) {
-    assert.equal((await f.call('upload-chunk', { id, sequence: 0, data })).isError, true);
+    assert.equal((await f.call('artifact-chunk', { id, sequence: 0, data })).isError, true);
     assert.deepEqual(await f.bytes(id), Buffer.alloc(0));
   }
-  for (const sequence of [-1, 0.5, 1]) assert.equal((await f.call('upload-chunk', { id, sequence, data: 'AP8=' })).isError, true);
+  for (const sequence of [-1, 0.5, 1]) assert.equal((await f.call('artifact-chunk', { id, sequence, data: 'AP8=' })).isError, true);
   const first = { id, sequence: 0, data: bytes.subarray(0, 2).toString('base64') };
-  assert.deepEqual(await f.ok('upload-chunk', first), { sequence: 1, received: 2 });
-  assert.deepEqual(await f.ok('upload-chunk', first), { sequence: 1, received: 2 });
+  assert.deepEqual(await f.ok('artifact-chunk', first), { sequence: 1, received: 2 });
+  assert.deepEqual(await f.ok('artifact-chunk', first), { sequence: 1, received: 2 });
   for (const bad of [{ id, sequence: 0, data: 'Zm8=' }, { id, sequence: 3, data: 'gEE=' }, { id, sequence: 1, data: 'gEEA' }, { ...first, approve: true }]) {
-    assert.equal((await f.call('upload-chunk', bad)).isError, true); assert.deepEqual(await f.bytes(id), bytes.subarray(0, 2));
+    assert.equal((await f.call('artifact-chunk', bad)).isError, true); assert.deepEqual(await f.bytes(id), bytes.subarray(0, 2));
   }
-  const status = await f.ok('get-upload-status', { id }); assert.equal(status.transfer.received, 2); assert.equal(status.transfer.sequence, 1);
-  await f.ok('upload-chunk', { id, sequence: 1, data: bytes.subarray(2).toString('base64') });
-  assert.equal((await f.ok('finish-upload', { id })).state, 'pending'); assert.equal(f.jobs().length, 1); assert.equal(f.effects.length, 0);
+  const status = await f.ok('artifact-status', { id }); assert.equal(status.transfer.received, 2); assert.equal(status.transfer.sequence, 1);
+  await f.ok('artifact-chunk', { id, sequence: 1, data: bytes.subarray(2).toString('base64') });
+  assert.equal((await f.ok('artifact-finish', { id })).state, 'pending'); assert.equal(f.jobs().length, 1); assert.equal(f.effects.length, 0);
 });
 
 test('REMOTE-JSON incomplete and hash-mismatched finishes create no upload job', { timeout: 30000 }, async t => {
   const f = await fixture(t), bytes = Buffer.from([0, 255, 128, 65]);
-  const incomplete = await f.ok('begin-upload', f.meta(bytes));
-  await f.ok('upload-chunk', { id: incomplete.transferId, sequence: 0, data: bytes.subarray(0, 2).toString('base64') });
-  assert.equal(refusalCode(await f.call('finish-upload', { id: incomplete.transferId })), 'REMOTE_UPLOAD_INCOMPLETE_OR_EXPIRED');
-  const staging = await f.ok('get-upload-status', { id: incomplete.transferId }); assert.equal(staging.state, 'staging'); assert.equal(staging.transfer.received, 2);
-  const corrupt = await f.ok('begin-upload', f.meta(bytes, { sha256: hash(Buffer.from('different')) }));
-  await f.ok('upload-chunk', { id: corrupt.transferId, sequence: 0, data: bytes.toString('base64') });
-  assert.equal(refusalCode(await f.call('finish-upload', { id: corrupt.transferId })), 'REMOTE_UPLOAD_HASH_MISMATCH');
-  assert.equal(f.app.store.has(corrupt.transferId), false);
-  assert.equal(refusalCode(await f.call('get-upload-status', { id: corrupt.transferId })), 'REMOTE_UPLOAD_UNKNOWN');
+  const incomplete = await f.ok('artifact-begin', f.meta(bytes));
+  await f.ok('artifact-chunk', { id: incomplete.id, sequence: 0, data: bytes.subarray(0, 2).toString('base64') });
+  assert.equal(refusalCode(await f.call('artifact-finish', { id: incomplete.id })), 'ARTIFACT_INCOMPLETE_OR_EXPIRED');
+  const staging = await f.ok('artifact-status', { id: incomplete.id }); assert.equal(staging.state, 'staging'); assert.equal(staging.transfer.received, 2);
+  const corrupt = await f.ok('artifact-begin', f.meta(bytes, { sha256: hash(Buffer.from('different')) }));
+  await f.ok('artifact-chunk', { id: corrupt.id, sequence: 0, data: bytes.toString('base64') });
+  assert.equal(refusalCode(await f.call('artifact-finish', { id: corrupt.id })), 'ARTIFACT_HASH_MISMATCH');
+  assert.equal(f.app.store.has(corrupt.id), false);
+  assert.equal(refusalCode(await f.call('artifact-status', { id: corrupt.id })), 'ARTIFACT_UNKNOWN');
   assert.equal(f.jobs().length, 0); assert.equal(f.effects.length, 0); assert.equal(f.app.store.reserved, bytes.length);
 });
 
 test('REMOTE-JSON simultaneous finish and lost reply recover one immutable request through status', { timeout: 30000 }, async t => {
-  const f = await fixture(t), bytes = Buffer.from([0, 255]), begin = await f.ok('begin-upload', f.meta(bytes, { overwrite: true, elevate: true })), id = begin.transferId;
-  await f.ok('upload-chunk', { id, sequence: 0, data: bytes.toString('base64') });
-  const finished = await Promise.all([f.call('finish-upload', { id }), f.call('finish-upload', { id })]);
-  const successes = finished.filter(result => result.isError !== true); assert.equal(successes.length, 1);
-  const job = successes[0].structuredContent; assert.equal(job.state, 'pending'); assert.equal(job.operation.overwrite, true); assert.equal(job.operation.elevate, true);
-  assert.equal(f.jobs().length, 1); assert.equal((await f.ok('get-upload-status', { id })).request.id, job.id);
-  assert.equal((await f.call('finish-upload', { id })).isError, true); assert.equal(f.jobs().length, 1); assert.equal(f.effects.length, 0);
+  const f = await fixture(t), bytes = Buffer.from([0, 255]), begin = await f.ok('artifact-begin', f.meta(bytes, { overwrite: true, elevate: true })), id = begin.id;
+  await f.ok('artifact-chunk', { id, sequence: 0, data: bytes.toString('base64') });
+  const finished = await Promise.all([f.call('artifact-finish', { id }), f.call('artifact-finish', { id })]);
+  const successes = finished.filter(result => result.isError !== true); assert.equal(successes.length, 2); assert.equal(successes[0].structuredContent.data.id, successes[1].structuredContent.data.id);
+  const job = successes[0].structuredContent.data; assert.equal(job.state, 'pending'); assert.equal(f.app.queue.get(job.id).operation.overwrite, true); assert.equal(f.app.queue.get(job.id).operation.elevate, true);
+  assert.equal(f.jobs().length, 1); assert.equal((await f.ok('artifact-status', { id })).request.id, job.id);
+  assert.equal((await f.ok('artifact-finish', { id })).id, job.id); assert.equal(f.jobs().length, 1); assert.equal(f.effects.length, 0);
 });
 
 test('REMOTE-JSON status distinguishes ready while UI artifacts and stale targets cannot enter the JSON path', { timeout: 30000 }, async t => {
   const f = await fixture(t), bytes = Buffer.from([0, 255]), input = f.meta(bytes);
-  const legacy = await f.app.targets.files.beginUpload(input);
-  for (const name of ['get-upload-status', 'finish-upload']) assert.equal(refusalCode(await f.call(name, { id: legacy.id })), 'REMOTE_UPLOAD_WRONG_PROTOCOL');
-  assert.equal(refusalCode(await f.call('upload-chunk', { id: legacy.id, sequence: 0, data: bytes.toString('base64') })), 'REMOTE_UPLOAD_WRONG_PROTOCOL');
+  const { operationKey: _unusedKey, ...legacyInput } = input;
+  const legacy = await f.app.targets.files.beginUpload(legacyInput);
+  for (const name of ['artifact-status', 'artifact-finish']) assert.equal(refusalCode(await f.call(name, { id: legacy.id })), 'ARTIFACT_WRONG_PROTOCOL');
+  assert.equal(refusalCode(await f.call('artifact-chunk', { id: legacy.id, sequence: 0, data: bytes.toString('base64') })), 'ARTIFACT_WRONG_PROTOCOL');
   assert.equal(f.app.store.get(legacy.id).received, 0); assert.equal(f.jobs().length, 0);
-  const ready = await f.ok('begin-upload', input); await f.ok('upload-chunk', { id: ready.transferId, sequence: 0, data: bytes.toString('base64') });
-  await f.app.store.finish(ready.transferId);
-  assert.equal((await f.ok('get-upload-status', { id: ready.transferId })).state, 'ready');
-  assert.equal(refusalCode(await f.call('finish-upload', { id: ready.transferId })), 'REMOTE_UPLOAD_INCOMPLETE_OR_EXPIRED'); assert.equal(f.jobs().length, 0);
-  const stale = await f.ok('begin-upload', input), runtime = f.app.targets.select('linux');
+  const ready = await f.ok('artifact-begin', input); await f.ok('artifact-chunk', { id: ready.id, sequence: 0, data: bytes.toString('base64') });
+  await f.app.store.finish(ready.id);
+  assert.equal((await f.ok('artifact-status', { id: ready.id })).state, 'ready');
+  assert.equal(refusalCode(await f.call('artifact-finish', { id: ready.id })), 'ARTIFACT_INCOMPLETE_OR_EXPIRED'); assert.equal(f.jobs().length, 0);
+  const stale = await f.ok('artifact-begin', { ...input, operationKey: input.operationKey + '-stale' }), runtime = f.app.targets.select('linux');
   f.profiles.get(runtime.writeProfile).host = 'changed.example.test';
-  for (const name of ['get-upload-status', 'finish-upload']) assert.equal(refusalCode(await f.call(name, { id: stale.transferId })), 'REMOTE_UPLOAD_STALE_TARGET');
-  assert.equal(refusalCode(await f.call('upload-chunk', { id: stale.transferId, sequence: 0, data: bytes.toString('base64') })), 'REMOTE_UPLOAD_STALE_TARGET');
-  assert.equal(f.app.store.get(stale.transferId).received, 0); assert.equal(f.effects.length, 0); assert.equal(f.jobs().length, 0);
+  for (const name of ['artifact-status', 'artifact-finish']) assert.equal(refusalCode(await f.call(name, { id: stale.id })), 'ARTIFACT_STALE_TARGET');
+  assert.equal(refusalCode(await f.call('artifact-chunk', { id: stale.id, sequence: 0, data: bytes.toString('base64') })), 'ARTIFACT_STALE_TARGET');
+  assert.equal(f.app.store.get(stale.id).received, 0); assert.equal(f.effects.length, 0); assert.equal(f.jobs().length, 0);
 });
 
 test('REMOTE-JSON authentication and opaque public failures never echo bytes or allocate uploads', { timeout: 30000 }, async t => {
   const f = await fixture(t), input = f.meta(Buffer.from([0, 255]));
   const response = await fetch(f.url, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'begin-upload', arguments: input } }) });
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'artifact-begin', arguments: input } }) });
   assert.equal(response.status, 401); await response.body?.cancel();
-  for (const name of ['get-upload-status', 'finish-upload']) assert.equal(refusalCode(await f.call(name, { id: 'a'.repeat(48) })), 'REMOTE_UPLOAD_UNKNOWN');
+  for (const name of ['artifact-status', 'artifact-finish']) assert.equal(refusalCode(await f.call(name, { id: 'a'.repeat(48) })), 'ARTIFACT_UNKNOWN');
   f.app.targets.files.beginAgentUpload = async () => { throw Object.assign(Error(privateMarker), { code: privateMarker, cause: Error('/PRIVATE-BACKING-PATH') }); };
-  const refused = await f.call('begin-upload', input); assert.equal(refusalCode(refused), 'REMOTE_UPLOAD_FAILED'); assert.doesNotMatch(JSON.stringify(refused), /PRIVATE-BACKING-PATH/);
+  const refused = await f.call('artifact-begin', input); assert.equal(refusalCode(refused), 'REQUEST_REFUSED'); assert.doesNotMatch(JSON.stringify(refused), /PRIVATE-BACKING-PATH/);
   assert.equal(f.app.store.size, 0); assert.equal(f.jobs().length, 0); assert.equal(f.effects.length, 0);
 });
 
@@ -213,7 +217,7 @@ test('REMOTE-JSON real service and artifact clock report expiry without writing 
   const store = new Artifacts(root, { maxBytes: 16, budget: 32, now: () => now }); await store.init();
   const service = createFileService({ store, queue: { listAll: () => [], maintenance: false }, now: () => now });
   t.after(async () => { await service.close(); assert.ok(root.startsWith(join(tmpdir(), 'remote-mcp-json-clock-'))); await rm(root, { recursive: true }); });
-  const bytes = Buffer.from([0, 255]), item = await service.beginAgentUpload({ fileName: 'clock.bin', remotePath: '/tmp/clock.bin', size: bytes.length, sha256: hash(bytes) },
+  const bytes = Buffer.from([0, 255]), item = await service.beginAgentUpload({ operationKey: 'remote-upload-clock-180', fileName: 'clock.bin', remotePath: '/tmp/clock.bin', size: bytes.length, sha256: hash(bytes) },
     { targetId: 'linux', targetRevision: 'd'.repeat(64) });
   assert.equal(service.agentUploadStatus(item.id).state, 'staging'); now = item.expiresAt;
   assert.equal(service.agentUploadStatus(item.id).state, 'expired');

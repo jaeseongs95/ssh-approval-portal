@@ -28,6 +28,10 @@ test('all actual ko/en catalogs have valid message syntax, identical keys and pl
   assert.throws(() => validateCatalogs({ en: { key: 'Ready' }, ko: {} }), /Incomplete/);
   assert.throws(() => validateCatalogs({ en: { key: '{count}' }, ko: { key: '{wrong}' } }), /placeholder/);
   assert.throws(() => validateCatalogs({ en: { key: '{broken' }, ko: { key: '준비' } }), /syntax/);
+  assert.throws(() => validateCatalogs({ en: { key: undefined }, ko: { key: '준비' } }), /syntax/);
+  assert.equal(validateCatalogs({ en: { '개': '' }, ko: { '개': '개' } }), true);
+  assert.equal(translate(uiCatalogs, 'en', '개'), '');
+  assert.equal(translate(uiCatalogs, 'ko', '개'), '개');
   assert.equal(translate(capacityCatalogs, 'en-GB', '현재 실행 대기 {queued}개 · 실행 중 {running}개', { queued: 3, running: 2 }), 'Currently queued: 3 · running: 2');
   assert.equal(translate({ en: { key: 'Fallback' } }, 'ko', 'key'), 'Fallback');
 });

@@ -10,7 +10,7 @@ import { join, dirname, win32 } from 'node:path';
 import { createSshRuntime, createSshTransport } from '../src/adapters/ssh/vendor.mjs';
 import { Artifacts } from '../src/adapters/storage/artifacts.mjs';
 import { createTransferExecutor } from '../src/adapters/ssh/transfers.mjs';
-import { ApprovalQueue } from '../src/domain/approval-queue.mjs';
+import { ApprovalQueue } from './support/approval-runtime.mjs';
 import { prepareAgentCliPlan } from '../src/adapters/ssh/agent-cli.mjs';
 import { buildWindowsCliFixtureScript } from './windows-agent-cli-fixture.mjs';
 import { WINDOWS_STDIN_READER } from '../src/adapters/ssh/windows-stdin.mjs';

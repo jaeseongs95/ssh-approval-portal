@@ -19,9 +19,9 @@ async function fixture(t) {
 function legacy(path, jobs) {
   const db = new DatabaseSync(path);
   try {
-    db.exec('CREATE TABLE requests(id TEXT PRIMARY KEY,body TEXT,digest TEXT); CREATE TABLE policy(id INTEGER,revision INTEGER,body TEXT);');
+    db.exec('CREATE TABLE requests(id TEXT PRIMARY KEY,body TEXT,digest TEXT,request_key TEXT); CREATE TABLE policy(id INTEGER,revision INTEGER,body TEXT);');
     db.prepare('INSERT INTO policy VALUES(1,7,?)').run('{"targets":[]}');
-    for (const job of jobs) db.prepare('INSERT INTO requests VALUES(?,?,?)').run(job.id, JSON.stringify(job), hash(JSON.stringify(job)));
+    for (const job of jobs) db.prepare('INSERT INTO requests VALUES(?,?,?,?)').run(job.id, JSON.stringify(job), hash(JSON.stringify(job)), job.requestKey ?? 'original:' + job.id);
   } finally { db.close(); }
 }
 
@@ -34,7 +34,9 @@ test('migration retains exact history/policies and source bytes, archives readon
   try {
     const receipt = migrateLegacyOperations({ legacyRoot: dataRoot, archiveRoot, store, now: 100 });
     assert.equal(receipt.imported, 2); assert.equal(receipt.unknown, 1);
+    assert.equal(receipt.sources[0].sha256, hash(before));
     assert.deepEqual(store.get(completed.id).legacy.original, completed);
+    assert.equal(store.find('original:' + completed.id).job.id, completed.id);
     assert.equal(store.get(completed.id).state, 'completed');
     assert.equal(store.get(running.id).state, 'unknown');
     assert.equal(store.get(running.id).requiresReconciliation, true);
@@ -45,6 +47,20 @@ test('migration retains exact history/policies and source bytes, archives readon
     assert.deepEqual(await readFile(join(archiveRoot, 'command-automation.sqlite')), before);
     if (process.platform !== 'win32') assert.equal((await lstat(join(archiveRoot, 'command-automation.sqlite'))).mode & 0o777, 0o400);
     assert.match(receipt.outputRetention.unavailable, /never replay/);
+  } finally { store.close(); }
+});
+
+test('legacy global request-key collisions fail explicitly without overwriting either original journal', async t => {
+  const { root, dataRoot } = await fixture(t), requestKey = 'shared-original-request-key';
+  const firstPath = join(dataRoot, 'command-automation.sqlite'), secondPath = join(dataRoot, 'agent-cli.sqlite');
+  legacy(firstPath, [{ id: 'a'.repeat(48), requestKey, state: 'completed', createdAt: 10 }]);
+  legacy(secondPath, [{ id: 'b'.repeat(48), requestKey, state: 'failed', createdAt: 11 }]);
+  const firstBytes = await readFile(firstPath), secondBytes = await readFile(secondPath), store = createOperationStore(dataRoot);
+  try {
+    assert.throws(() => migrateLegacyOperations({ legacyRoot: dataRoot, archiveRoot: join(root, 'archive'), store }), { code: 'OPERATION_KEY_CONFLICT' });
+    assert.equal(store.find(requestKey).job.id, 'a'.repeat(48));
+    assert.equal(store.get('b'.repeat(48)), null);
+    assert.deepEqual(await readFile(firstPath), firstBytes); assert.deepEqual(await readFile(secondPath), secondBytes);
   } finally { store.close(); }
 });
 
@@ -74,6 +90,8 @@ test('recovery checks payloads and new durable stores, not only operations rows'
 test('recover refuses a downmigration after new writes and leaves candidate selected and data intact', { skip: process.platform === 'win32' }, async t => {
   const { root, dataRoot } = await fixture(t), appRoot = join(root, 'app'), generation = 'a'.repeat(64);
   const release = join(appRoot, 'releases', generation), previousRelease = join(appRoot, 'releases', 'previous');
+  // Keep the deploy fixture private even when the test host's umask permits group writes.
+  await mkdir(appRoot, { mode: 0o700 });
   await mkdir(release, { recursive: true }); await mkdir(previousRelease);
   await mkdir(join(appRoot, 'deployments'), { mode: 0o700 });
   const activePath = join(appRoot, 'approval-bridge'); await symlink(release, activePath);

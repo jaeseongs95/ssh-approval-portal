@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ApprovalQueue } from '../src/domain/approval-queue.mjs';
+import { ApprovalQueue } from './support/approval-runtime.mjs';
 import { createCommandService } from '../src/application/commands.mjs';
 import { executionFailure, executionFailureDetails, safeExecutionFailure } from '../src/domain/execution-failure.mjs';
 import { jobResult, refused } from '../src/adapters/presentation/results.mjs';

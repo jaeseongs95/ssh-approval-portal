@@ -23,7 +23,8 @@ export function validateCatalogs(catalogs) {
     if (!catalog || JSON.stringify(Object.keys(catalog).sort()) !== JSON.stringify(keys)) throw Error('Incomplete message catalog: ' + language);
     for (const key of keys) {
       const placeholders = value => {
-        if (typeof value !== 'string' || !value.length || /[{}]/.test(value.replace(/\{[A-Za-z][A-Za-z0-9_]*\}/g, ''))) throw Error('Invalid message syntax: ' + key);
+        // Empty translations can intentionally omit language-specific suffixes (for example 개).
+        if (typeof value !== 'string' || /[{}]/.test(value.replace(/\{[A-Za-z][A-Za-z0-9_]*\}/g, ''))) throw Error('Invalid message syntax: ' + key);
         return [...value.matchAll(/\{([A-Za-z][A-Za-z0-9_]*)\}/g)].map(match => match[1]).sort().join(',');
       };
       if (placeholders(catalog[key]) !== placeholders(catalogs.en[key])) throw Error('Message placeholder mismatch: ' + key);

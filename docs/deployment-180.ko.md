@@ -46,6 +46,8 @@ sudo /opt/ssh-approval/node/bin/node scripts/deploy180.mjs verify --plan /srv/po
 
 먼저 두 원본을 `appRoot/legacy-archives/<generation>/`에 복사하고 해시를 대조한다. 보관 파일은 `0400`이다. root 배포에서는 이전 성공 뒤 보관 파일과 디렉터리를 root 소유로 고정한다. 원본 DB는 그대로 둔다. `completed`, `failed`, `cancelled`, `expired`, `denied`, `unknown` 이력을 같은 상태로 새 operation store에 명시적으로 import한다. 나머지 예전 작업은 `unknown` 증거로만 import하며 대기열에 넣거나 재실행하지 않는다. 원문은 `legacy.original`, 기존 digest는 `legacy.digest`에 유지한다. 같은 원본의 재시도는 동일 내용만 허용한다.
 
+기존 `requests.request_key` 컬럼이 있으면 그 값을 정확히 새 journal의 요청키로 사용한다. 컬럼이 없거나 NULL인 구형 행에만 `legacy:<source>:<id>`를 사용한다. 새 journal은 전역 요청키를 사용하므로 두 구형 DB의 같은 키가 서로 다른 이력을 가리키면 `OPERATION_KEY_CONFLICT`로 멈춘다. 이름을 임의로 바꾸거나 기존 결과를 덮어쓰지 않는다. 실패 전에 import된 행은 새 journal에 남을 수 있지만 서비스 전환은 하지 않으며 원본 두 DB와 SHA-256 보관본은 유지한다. 충돌은 별도 명시적 이력 매핑으로 해결해야 하고, 새로운 키로 실행을 재제출해 해결하지 않는다.
+
 기존 command output은 기존 파일과 만료 시각을 그대로 따른다. 기본 보존 TTL은 1시간이다. 이미 만료·삭제된 출력과 처음부터 영구 저장하지 않은 출력은 복원할 수 없다. 이력 이전이 출력 보존 기간을 연장하지 않는다. 출력 재생성을 위해 명령을 재실행하지 않는다. 1.7의 메모리 기반 transfer ID도 재개하지 않는다. 출력·정책을 실제 앱에서 읽는 경로는 1.8 앱 통합 검증으로 별도 확인해야 한다.
 
 ## 복구 경계

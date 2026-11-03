@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ApprovalQueue } from '../src/domain/approval-queue.mjs';
+import { ApprovalQueue } from './support/approval-runtime.mjs';
 import { createRequestSafety } from '../src/application/request-safety.mjs';
 import { assessmentContext, callerContext, commandRequest, sensitiveText, ASSESSMENT_CONTEXT_LIMIT, SOURCE_EVIDENCE_MAX_BYTES } from '../src/domain/execution-context.mjs';
 import { preparePythonSource } from '../src/adapters/ssh/python-source.mjs';

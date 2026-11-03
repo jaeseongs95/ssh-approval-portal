@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {ApprovalQueue} from '../src/domain/approval-queue.mjs';
+import {ApprovalQueue} from './support/approval-runtime.mjs';
 import {createCommandAutomation} from '../src/application/command-automation.mjs';
 import {preparePythonSource} from '../src/adapters/ssh/python-source.mjs';
 import {dispatchFailureDetails} from '../src/domain/dispatch-failure.mjs';
