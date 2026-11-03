@@ -59,7 +59,10 @@ test('actual MCP HTTP preserves 5 KiB and 32 KiB native commands plus bilingual 
       assert.deepEqual(f.calls.submit.at(-1), input); assert.equal(Buffer.byteLength(f.calls.submit.at(-1).command), size);
       assert.equal(result.structuredContent.data.id, identifier); assert.doesNotMatch(JSON.stringify(result), /id_ed25519|shadow|printf/);
     }
-    assert.equal(f.calls.submit.length, 2);
+    const detailed = { kind: 'command', operationKey, command: 'printf fixture', context: 'a'.repeat(8192), displayContext: '가'.repeat(8192) };
+    assert.equal((await f.call('submit', detailed)).isError, undefined);
+    assert.deepEqual(f.calls.submit.at(-1), detailed);
+    assert.equal(f.calls.submit.length, 3);
   } finally { await f.close(); }
 });
 
@@ -145,7 +148,7 @@ test('text-only MCP clients reconstruct bounded UTF-8 output and digest with no 
     const status = await f.call('observe', { id: identifier }); assert.equal(JSON.stringify(status).includes(text), false); assert.equal(status.structuredContent.data.outputPage, null);
     let cursor = 0, reconstructed = '', pages = 0;
     while (true) { const reply = await f.call('observe', { id: identifier, includeOutput: true, cursor, maxBytes: 4 }), page = JSON.parse(reply.content[0].text).data.outputPage;
-      assert.equal(page.cursor, cursor); assert.equal(page.bytes, Buffer.byteLength(page.text)); assert.equal(page.sha256, digest); assert.equal(page.totalBytes, 7); assert.ok(page.nextCursor > cursor);
+      assert.equal(page.cursor, cursor); assert.equal(page.bytes, Buffer.byteLength(page.text)); assert.equal(page.sha256, digest); assert.equal(page.totalBytes, 7); assert.equal(page.expiresAt, 100); assert.ok(page.nextCursor > cursor);
       reconstructed += page.text; cursor = page.nextCursor; pages++; if (page.eof) break; assert.ok(pages < 3);
     }
     assert.equal(reconstructed, text); assert.equal(pages, 2); assert.equal(createHash('sha256').update(reconstructed).digest('hex'), digest); assert.equal(f.calls.submit.length, 0);

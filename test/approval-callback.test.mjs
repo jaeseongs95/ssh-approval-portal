@@ -259,7 +259,7 @@ test('approval and completion race with abort exactly once, including duplicate 
     const original = g.queue.submit('fixture-command'), cancel = new AbortController();
     const result = g.wait(original.id, { until: 'completion', signal: cancel.signal });
     const observed = result.then(value => ({ value }), error => ({ error }));
-    g.queue.start(original.id); await Promise.resolve();
+    g.queue.start(original.id); await eventually(() => typeof finish === 'function');
     if (order === 'abort-first') cancel.abort();
     finish({ failed: false, texts: [] });
     if (order === 'completion-first') await g.queue.wait(original.id);

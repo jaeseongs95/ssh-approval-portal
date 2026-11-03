@@ -5,6 +5,7 @@ import { mkdtemp, readFile, rm, access } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import ssh2 from 'ssh2';
 import { SSHConnection } from 'ssh-mcp/build/ssh/connection.js';
 import { executePythonSource } from '../src/adapters/ssh/vendor.mjs';
@@ -15,7 +16,18 @@ const prepare = (source = 'pass\n', rest = {}) => preparePythonSource({ ...bindi
 const verify = () => ({ ...binding });
 function fake(profileChanges = {}, acquire = () => {}) {
   const calls = [], profile = { name: binding.profile, tty: false, readOnly: false, ...profileChanges };
-  const connection = { profile, async exec(...args) { calls.push(args); return { stdout: 'ok', stderr: '', exitCode: 0 }; } };
+  const client = new EventEmitter(); client.on('error', () => {});
+  const connection = { profile, ensureConnected: async () => {}, getClient: () => client, applyWorkdir: x => x, channelEnv: () => ({}),
+    async respond(...args) { calls.push(args); return { stdout: 'ok', stderr: '', exitCode: 0 }; } };
+  client.exec = (command, _options, callback) => {
+    const stream = new EventEmitter(), chunks = []; stream.stderr = new EventEmitter();
+    stream.write = bytes => chunks.push(Buffer.from(bytes)); stream.signal = () => {}; stream.close = () => stream.emit('close');
+    stream.end = () => { void Promise.resolve().then(() => connection.respond(command, { stdin: Buffer.concat(chunks).toString('utf8') })).then(result => {
+      if (result.stdout) stream.emit('data', Buffer.from(result.stdout)); if (result.stderr) stream.stderr.emit('data', Buffer.from(result.stderr));
+      stream.emit('exit', result.exitCode, result.signal); stream.emit('close', result.exitCode, result.signal);
+    }, error => client.emit('error', error)); };
+    callback(null, stream);
+  };
   let acquisitions = 0;
   return { calls, connection, get acquisitions() { return acquisitions; }, registry: {
     getProfile: () => profile,
@@ -54,8 +66,10 @@ test('SOURCE-SSH-03 admitted plan is an immutable snapshot and dispatch exceptio
   assert.equal((await executePythonSource(f.registry, submitted, verify)).failed, false);
   assert.equal(f.calls.length, 1); assert.equal(f.calls[0][0], original.command); assert.equal(f.calls[0][1].stdin, original.stdin);
   const failing = fake(); let calls = 0;
-  failing.connection.exec = async () => { calls++; throw Error('private-body-marker'); };
-  await assert.rejects(executePythonSource(failing.registry, original, verify), error => /unknown; do not retry/.test(error.message) && !error.message.includes('private-body-marker'));
+  failing.connection.respond = async () => { calls++; throw Error('private-body-marker'); };
+  const failure = await executePythonSource(failing.registry, original, verify);
+  assert.equal(failure.failed, true); assert.equal(failure.execution.remoteState, 'unknown');
+  assert.equal(failure.execution.automaticReplay, false); assert.ok(!JSON.stringify(failure).includes('private-body-marker'));
   assert.equal(calls, 1);
 });
 

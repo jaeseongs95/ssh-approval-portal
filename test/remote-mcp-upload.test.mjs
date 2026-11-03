@@ -183,7 +183,7 @@ test('REMOTE-JSON simultaneous finish and lost reply recover one immutable reque
   assert.equal((await f.ok('artifact-finish', { id })).id, job.id); assert.equal(f.jobs().length, 1); assert.equal(f.effects.length, 0);
 });
 
-test('REMOTE-JSON status distinguishes ready while UI artifacts and stale targets cannot enter the JSON path', { timeout: 30000 }, async t => {
+test('REMOTE-JSON ready upload recovers one request while UI artifacts and stale targets cannot enter the JSON path', { timeout: 30000 }, async t => {
   const f = await fixture(t), bytes = Buffer.from([0, 255]), input = f.meta(bytes);
   const { operationKey: _unusedKey, ...legacyInput } = input;
   const legacy = await f.app.targets.files.beginUpload(legacyInput);
@@ -193,12 +193,17 @@ test('REMOTE-JSON status distinguishes ready while UI artifacts and stale target
   const ready = await f.ok('artifact-begin', input); await f.ok('artifact-chunk', { id: ready.id, sequence: 0, data: bytes.toString('base64') });
   await f.app.store.finish(ready.id);
   assert.equal((await f.ok('artifact-status', { id: ready.id })).state, 'ready');
-  assert.equal(refusalCode(await f.call('artifact-finish', { id: ready.id })), 'ARTIFACT_INCOMPLETE_OR_EXPIRED'); assert.equal(f.jobs().length, 0);
+  const recovered = await f.ok('artifact-finish', { id: ready.id });
+  assert.equal(recovered.state, 'pending'); assert.equal(f.jobs().length, 1);
+  assert.equal(f.app.queue.get(recovered.id).operation.artifactId, ready.id);
+  assert.equal((await f.ok('artifact-finish', { id: ready.id })).id, recovered.id);
+  assert.equal((await f.ok('artifact-status', { id: ready.id })).request.id, recovered.id);
+  assert.equal(f.jobs().length, 1); assert.equal(f.effects.length, 0);
   const stale = await f.ok('artifact-begin', { ...input, operationKey: input.operationKey + '-stale' }), runtime = f.app.targets.select('linux');
   f.profiles.get(runtime.writeProfile).host = 'changed.example.test';
   for (const name of ['artifact-status', 'artifact-finish']) assert.equal(refusalCode(await f.call(name, { id: stale.id })), 'ARTIFACT_STALE_TARGET');
   assert.equal(refusalCode(await f.call('artifact-chunk', { id: stale.id, sequence: 0, data: bytes.toString('base64') })), 'ARTIFACT_STALE_TARGET');
-  assert.equal(f.app.store.get(stale.id).received, 0); assert.equal(f.effects.length, 0); assert.equal(f.jobs().length, 0);
+  assert.equal(f.app.store.get(stale.id).received, 0); assert.equal(f.effects.length, 0); assert.equal(f.jobs().length, 1);
 });
 
 test('REMOTE-JSON authentication and opaque public failures never echo bytes or allocate uploads', { timeout: 30000 }, async t => {

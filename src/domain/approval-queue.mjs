@@ -264,8 +264,13 @@ export class ApprovalQueue {
     try { return await this.executeOperation(job.operation, job.id, options); }
     catch (error) {
       const failure = executionFailureDetails(error);
+      const refusal = dispatchFailureDetails(error);
+      const notStarted = refusal.dispatchFailureStage !== 'unknown' || failure.remoteOutcome === 'not_started';
+      if (notStarted) job.decision = { ...job.decision, dispatchFailure: 'not_dispatched', ...refusal };
       return { failed: true, texts: [`Operation failed (${failure.code}, ${failure.stage}); do not replay automatically.`], failure,
-        execution: { phase: 'settled', reason: 'transport_lost', remoteState: 'unknown', cleanupComplete: false, requiresReconciliation: true } };
+        execution: notStarted
+          ? { phase: 'settled', reason: 'input_failed', remoteState: 'not_dispatched', cleanupComplete: true, requiresReconciliation: false }
+          : { phase: 'settled', reason: 'transport_lost', remoteState: 'unknown', cleanupComplete: false, requiresReconciliation: true } };
     }
   }
   async drain() { await Promise.all([...this.jobs.values()].filter(job => ['queued', 'running'].includes(job.state)).map(job => job.completion ?? this.awaitOperation(job.id))); }

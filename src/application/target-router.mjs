@@ -48,7 +48,7 @@ export function createClaims(limit, { maxWaiting = 32, onSubscriberError = () =>
 }
 
 /** Routing and process-wide maintenance; target services retain all approval/file policy. */
-export function createTargetRouter(runtimes, { defaultTarget, legacy, store, audit }) {
+export function createTargetRouter(runtimes, { defaultTarget, legacy, store, audit, executionBusy = () => false }) {
   const byId = new Map(runtimes.map(runtime => [runtime.id, runtime]));
   const select = id => {
     const target = byId.get(id === undefined ? defaultTarget : id);
@@ -110,10 +110,10 @@ export function createTargetRouter(runtimes, { defaultTarget, legacy, store, aud
     },
     listAll: () => runtimes.flatMap(runtime => runtime.queue.listAll()),
     list: () => runtimes.flatMap(runtime => runtime.queue.list()),
-    busy: () => runtimes.some(runtime => runtime.queue.busy()),
+    busy: () => executionBusy() || runtimes.some(runtime => runtime.queue.busy()),
     reap() { let failure; for (const runtime of runtimes) { try { runtime.queue.reap(); } catch (error) { failure ??= error; } } if (failure) throw failure; },
     reserveMaintenance() {
-      if (maintenance || runtimes.some(runtime => runtime.commands.busy() || runtime.files.busy() || runtime.queue.busy() || runtime.queue.listAll().some(job => ['pending', 'evaluating', 'queued'].includes(job.state))) || store.hasActiveWork()) throw Error('All targets must finish before maintenance');
+      if (maintenance || executionBusy() || runtimes.some(runtime => runtime.commands.busy() || runtime.files.busy() || runtime.queue.busy() || runtime.queue.listAll().some(job => ['pending', 'evaluating', 'queued'].includes(job.state))) || store.hasActiveWork()) throw Error('All targets must finish before maintenance');
       audit({ action: 'maintenance-reserved' }); queue.maintenance = true;
     },
     releaseMaintenance() { audit({ action: 'maintenance-released' }); queue.maintenance = false; },

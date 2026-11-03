@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp,rm,readdir} from 'node:fs/promises';
+import {lstatSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createHash} from 'node:crypto';
@@ -82,7 +83,19 @@ test('file bootstrap, staged bytes, approval tickets and cleanup remain target-o
    await f.call('ui-decide-request',{id:job.structuredContent.id,action:'approve',ticket:job._meta.sshApproval.approvalTicket});await f.app.queue.wait(job.structuredContent.id);
   }
   assert.deepEqual(f.calls.map(x=>x.artifactId),[a.id,b.id]);await f.app.store.reap();assert.equal(f.app.store.reserved,0);
-  const retained=await readdir(f.root);assert.ok(retained.includes('command-outputs'));assert.deepEqual(retained.filter(name=>!/^command-outputs$|^(maintenance|operations|capacity)\.sqlite(?:-wal|-shm)?$/.test(name)),[],'only durable service stores remain after artifact cleanup');
+  const retained=await readdir(f.root),stores=['maintenance.sqlite','operations.sqlite','capacity.sqlite'];
+  assert.ok(retained.includes('command-outputs'));
+  const allowed=new Set(['command-outputs']);
+  for(const base of stores){
+   assert.ok(retained.includes(base),base+' must be present');
+   for(const name of [base,base+'-journal',base+'-wal',base+'-shm'].filter(name=>retained.includes(name))){
+    const info=lstatSync(join(f.root,name));
+    assert.equal(info.isFile(),true,name);assert.equal(info.isSymbolicLink(),false,name);assert.equal(info.nlink,1,name);
+    if(process.platform!=='win32'){assert.equal(info.mode&0o077,0,name);assert.equal(info.uid,process.getuid(),name);}
+    allowed.add(name);
+   }
+  }
+  assert.deepEqual(retained.filter(name=>!allowed.has(name)),[],'only verified durable service stores and their observed SQLite sidecars remain after artifact cleanup');
   const reserve=target=>f.app.targets.files.beginUpload({target,fileName:'quota.bin',remotePath:'/tmp/quota.bin',size:64,sha256,overwrite:false,elevate:false});
   const first=await reserve('alpha'),second=await reserve('beta');assert.equal(f.app.store.reserved,128);
   await assert.rejects(reserve('gamma'));assert.equal(f.app.store.size,2);

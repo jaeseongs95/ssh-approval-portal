@@ -41,7 +41,9 @@ async function fixture(t, { mcp = {}, admin = {}, executeCommand } = {}) {
     },
     audit: () => {}, transferRoot: root, uiHtml: '<html></html>',
     requestAdmission: { mcp: { ...limits, ...mcp }, admin: { ...limits, ...admin } },
-    env: { BRIDGE_MCP_TOKEN: 'fixture-mcp', BRIDGE_ADMIN_TOKEN: 'fixture-owner', BRIDGE_UI_TICKET_KEY: 'b'.repeat(64), BRIDGE_ADMIN_ORIGIN: origin },
+    // Execution serialization is a fixture requirement; 1.8 production defaults
+    // follow available CPUs and must not determine this HTTP admission oracle.
+    env: { BRIDGE_MCP_TOKEN: 'fixture-mcp', BRIDGE_ADMIN_TOKEN: 'fixture-owner', BRIDGE_UI_TICKET_KEY: 'b'.repeat(64), BRIDGE_ADMIN_ORIGIN: origin, BRIDGE_MAX_CONCURRENCY: '1' },
   });
   let client;
   t.after(async () => {
@@ -293,10 +295,10 @@ test('shutdown rejects queued bodies without promotion and releases long-wait su
   await refusal(await queued.response, 'REQUEST_QUEUE_CLOSED');
   await waited.response.catch(() => {});
   await closing;
-  assert.equal((await f.snapshot()).mcp.detached, 0);
+  assert.equal(f.app.mcpHttp.listening, false, 'shutdown closes the HTTP observation endpoint');
   assert.deepEqual(f.queue.listAll().map(job => job.command), ['fixture-before-shutdown']);
   assert.equal(f.calls.length, 0);
-  await eventually(() => held.req.destroyed, 'shutdown must close the unfinished HTTP body');
+  await eventually(() => held.req.destroyed && waited.req.destroyed && queued.req.destroyed, 'shutdown must close the unfinished body, queued request and detached observation');
 });
 
 test('JSON-RPC batches cannot detach a shared lease or dispatch multiple command submissions', { timeout: 15000 }, async t => {

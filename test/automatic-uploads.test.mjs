@@ -64,7 +64,12 @@ test('busy automatic upload queues and starts exactly once when a slot becomes f
 }));
 
 test('execution audit failure grants no upload and is not silently retried',async()=>fixture(async f=>{
- await f.set(true);const job=await f.upload();assert.equal(job.state,'pending');assert.equal(job.approvalMode,undefined);assert.equal(f.effects.length,0);assert.throws(()=>f.app.targets.select('alpha').queue.startUpload(job.id),/Dispatch unavailable/);assert.equal(f.effects.length,0);f.app.queue.deny(job.id);
+ await f.set(true);const job=await f.upload();assert.equal(job.state,'queued');assert.equal(job.approvalMode,'automatic');assert.equal(f.effects.length,0);
+ assert.throws(()=>f.app.targets.select('alpha').queue.startUpload(job.id),/not pending/);
+ const failed=await f.finish(job);assert.equal(failed.state,'failed');assert.equal(failed.targetId,'alpha');
+ assert.equal(failed.decision.dispatchFailure,'not_dispatched');assert.equal(failed.decision.dispatchFailureReason,'audit_failed');assert.equal(failed.decision.dispatchFailureStage,'start_audit');
+ assert.equal(failed.result.execution.remoteState,'not_dispatched');assert.equal(f.effects.length,0);
+ assert.throws(()=>f.app.targets.select('alpha').queue.startUpload(job.id),/not pending/);await f.finish(job);assert.equal(f.effects.length,0);
 },{auditFails:e=>e.action==='policy-execution-started'}));
 
 test('global automation off and blocked file source cannot cause automatic transmission',async()=>{

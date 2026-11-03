@@ -6,9 +6,11 @@ import { createOperationStore } from './src/adapters/storage/operation-store.mjs
 import { createOperationScheduler } from './src/domain/operation-scheduler.mjs';
 import { createOperations } from './src/application/operations.mjs';
 import { createRuntimeCapacity } from './src/application/runtime-capacity.mjs';
+import { createRuntimeCapacityState } from './src/adapters/storage/runtime-capacity-state.mjs';
 import { createDesktopService } from './src/application/desktop.mjs';
 import { createRfbDesktopAdapter } from './src/adapters/desktop/rfb.mjs';
-import { dispatchStep, dispatchRefusal } from './src/domain/dispatch-failure.mjs';
+import { dispatchStep, dispatchRefusal, dispatchFailureDetails } from './src/domain/dispatch-failure.mjs';
+import { executionFailureDetails } from './src/domain/execution-failure.mjs';
 import { ApprovalQueue } from './src/domain/approval-queue.mjs';
 import { createCommandService } from './src/application/commands.mjs';
 import { createFileService } from './src/application/files.mjs';
@@ -75,7 +77,8 @@ export async function createApplication({ registry, classify, executeCommand, ex
   const submissions = new AsyncLocalStorage();
   const probeExecutors = new Map();
   try {
-  // Open the durable fence before output construction can expire baseline data.
+  // Prepare only the private directory; opening the fence must precede any TTL cleanup.
+  await store.prepareRoot();
   maintenanceState = createMaintenanceState(transferRoot);
   await store.init();
   outputs = new CommandOutputs(transferRoot, {canReap: () => !maintenanceState.occupied()});
@@ -164,7 +167,10 @@ export async function createApplication({ registry, classify, executeCommand, ex
       };
       const beforeDispatch = async () => {
         verify();
-        if (rule?.testServer === true || submitted?.decision?.reasonCode === 'test_server_bypass') await testServerMode.require();
+        if (rule?.testServer === true || submitted?.decision?.reasonCode === 'test_server_bypass') {
+          try { await testServerMode.require(); }
+          catch { dispatchRefusal('authority', 'policy_guard', 'Test authority is unavailable'); }
+        }
         verify();
       };
       // The adapter also calls this synchronously at getClient(), after the final await.
@@ -181,7 +187,14 @@ export async function createApplication({ registry, classify, executeCommand, ex
       const stream = outputs.beginStream(reservation);
       if (operationStore.get(id)) operationStore.update(id, { outputRef: { outputId: reservation.id, stream: true } });
       try { return outputs.finish(reservation, await execute(profile, dispatch.command, beforeDispatch, { ...options, onOutput: event => stream.append(event), ...(dispatch.stdin === undefined ? {} : { stdin: dispatch.stdin }) })); }
-      catch (error) { return outputs.finish(reservation, { failed: true, texts: [], execution: { phase: 'settled', reason: 'transport_lost', remoteState: 'unknown', cleanupComplete: false, requiresReconciliation: true } }); }
+      catch (error) {
+        const refusal = dispatchFailureDetails(error), failure = executionFailureDetails(error);
+        if (refusal.dispatchFailureStage !== 'unknown' || failure.remoteOutcome === 'not_started') {
+          outputs.abandon(reservation); throw error;
+        }
+        return outputs.finish(reservation, { failed: true, texts: [], failure,
+          execution: { phase: 'settled', reason: 'transport_lost', remoteState: 'unknown', cleanupComplete: false, requiresReconciliation: true } });
+      }
     };
     const targetAudit = event => audit({ ...event, ...identity });
     let commands, files, automation, cli;
@@ -282,7 +295,8 @@ export async function createApplication({ registry, classify, executeCommand, ex
       },
       cliProbe:checkedCliProbe,cliDrain:()=>Promise.allSettled([...cliProbes]) };
   });
-  const targets = createTargetRouter(runtimes, { defaultTarget: settings.targets === null ? 'default' : settings.defaultTarget, legacy: settings.targets === null, store, audit });
+  const targets = createTargetRouter(runtimes, { defaultTarget: settings.targets === null ? 'default' : settings.defaultTarget, legacy: settings.targets === null, store, audit,
+    executionBusy: () => { const state = scheduler.snapshot(); return state.active > 0 || state.queued > 0; } });
   const { queue, commands, files } = targets;
   const maintenanceProperty = Object.getOwnPropertyDescriptor(queue, 'maintenance');
   Object.defineProperty(queue, 'maintenance', { enumerable: true, configurable: true,
@@ -316,7 +330,8 @@ export async function createApplication({ registry, classify, executeCommand, ex
     if (runtime && !runtime.queue.get(record.id) && record.metadata?.approval) runtime.queue.restore(record.metadata.approval);
     if (runtime) runtime.queue.syncOperation(record);
   }
-  capacity = createRuntimeCapacity({ root: transferRoot, settings, targets: definitions,
+  capacity = createRuntimeCapacity({ state: createRuntimeCapacityState(transferRoot), settings, targets: definitions,
+    newRevision: () => randomBytes(16).toString('hex'),
     scheduler: { ...scheduler, list: () => operationStore.list() }, audit, maintenance: () => targets.queue.maintenance });
   const operations = createOperations({ targets, queue, commands, files, journal: operationStore, scheduler, submissions, outputs });
   files.readDownload = args => {
@@ -352,7 +367,7 @@ export async function createApplication({ registry, classify, executeCommand, ex
       authorize: authorizeDesktop,
       leaseKey: binding => {
         const runtime = targets.select(binding.targetId), profile = registry.getProfile(runtime.writeProfile);
-        return hash(JSON.stringify([profile.host.toLowerCase(), profile.port, runtime.desktop.port]));
+        return hash(JSON.stringify([profile.trustedHostKey, runtime.desktop.port]));
       },
       verifyTarget: binding => { try { const runtime = targets.select(binding.targetId); runtime.verify(); return runtime.revision === binding.targetRevision && !queue.maintenance; } catch { return false; } },
       onClose: receipt => {

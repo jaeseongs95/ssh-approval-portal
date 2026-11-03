@@ -32,11 +32,15 @@ for(const mode of ['access','oidc'])test(mode+' web requires signed owner, cooki
     assert.equal((await fetch(action,{method:'POST',headers:owner})).status,200);await app.queue.wait(job.id);assert.equal(calls,1);
     assert.equal((await fetch(action,{method:'POST',headers:owner})).status,409);assert.equal(calls,1);
     const result=await(await fetch(url+'/api/requests',{headers:owner})).text();for(const secret of [token,'fixture-admin',env.BRIDGE_UI_TICKET_KEY])assert.ok(!result.includes(secret));
-    const bytes=Buffer.from([0,255,7]),fileName='fixture.bin';
-    const artifact=await app.store.begin({fileName,remotePath:'/tmp/fixture.bin',size:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')});
-    await app.store.append(artifact.id,0,bytes);await app.store.finish(artifact.id);
-    app.transfers.download=async()=>({failed:false,texts:[],data:{artifactId:artifact.id,fileName}});
-    const fileJob=app.queue.submitOperation({kind:'download',remotePath:'/tmp/fixture.bin',elevate:false});app.queue.start(fileJob.id);await app.queue.wait(fileJob.id);
+    const bytes=Buffer.from([0,255,7]),fileName='fixture.bin',runtime=app.targets.select('default');
+    const metadata={size:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')};
+    // A download fixture carries the same target/revision binding as its request.
+    // Global unbound upload bytes cannot stand in for a prepared download in 1.8.
+    const reserved=runtime.store.reserveDownload({fileName,remotePath:'/tmp/fixture.bin',elevate:false,targetId:runtime.id,targetRevision:runtime.revision,fileTargetBound:true});
+    const artifact=await runtime.store.receiveDownload(reserved.id,metadata,async output=>{output.end(bytes);});
+    app.transfers.download=async()=>({failed:false,texts:[],data:{artifactId:artifact.id,fileName,...metadata}});
+    const fileJob=app.targets.files.requestDownload({target:runtime.id,expectedTargetRevision:runtime.revision,remotePath:'/tmp/fixture.bin',elevate:false});
+    app.queue.start(fileJob.id);await app.queue.wait(fileJob.id);assert.equal(app.queue.get(fileJob.id).state,'completed');
     const linkReply=await fetch(url+`/api/${fileJob.id}/download`,{method:'POST',headers:owner});assert.equal(linkReply.status,200);
     const link=new URL((await linkReply.json()).downloadUrl),local=url+link.pathname+link.search;
     assert.equal((await fetch(local)).status,401,'file capability alone does not replace owner login in Access mode');

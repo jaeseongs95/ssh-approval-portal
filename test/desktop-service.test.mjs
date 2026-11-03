@@ -73,22 +73,24 @@ test('logout closes only that owner including a lease whose open receipt was los
   await service.close({ ownerId: 'owner-b', sessionId: other.sessionId, epoch: 1 }); assert.equal(service.size(), 0);
 });
 
-test('one physical desktop excludes different owners and target aliases while opening and disposing', async () => {
-  let resolveOpen, resolveRelease;
+test('one physical desktop excludes different owners and target aliases while opening and disposing', { timeout: 2000 }, async () => {
+  const firstOpen = Promise.withResolvers(), secondOpen = Promise.withResolvers(), release = Promise.withResolvers();
+  let opens = 0;
   const { desktop } = fixture();
-  desktop.release = () => new Promise(resolve => { resolveRelease = resolve; });
-  const { service } = fixture({ leaseKey: () => 'ssh-host:22:vnc:5900', adapter: { open: () => new Promise(resolve => { resolveOpen = resolve; }) } });
+  desktop.release = () => release.promise;
+  const { service } = fixture({ leaseKey: () => 'ssh-host:22:vnc:5900', adapter: { open: () => (++opens === 1 ? firstOpen : secondOpen).promise } });
   const opening = service.open(binding);
   await assert.rejects(service.open({ ...binding, ownerId: 'owner-b' }), error('DESKTOP_RESOURCE_BUSY'));
   await assert.rejects(service.open({ ...binding, targetId: 'alias', ownerId: 'owner-b' }), error('DESKTOP_RESOURCE_BUSY'));
-  resolveOpen(desktop); const lease = await opening;
+  firstOpen.resolve(desktop); const lease = await opening;
   const closing = service.close({ ownerId: binding.ownerId, sessionId: lease.sessionId, epoch: binding.epoch });
   await Promise.resolve();
   await assert.rejects(service.open({ ...binding, targetId: 'alias', ownerId: 'owner-b' }), error('DESKTOP_RESOURCE_BUSY'));
-  resolveRelease({ sent: true }); await closing;
+  release.resolve({ sent: true }); await closing;
   assert.equal(service.size(), 0);
   const next = service.open({ ...binding, targetId: 'alias', ownerId: 'owner-b' });
-  resolveOpen({ release: () => ({ sent: true }), close() {} }); const nextLease = await next;
+  secondOpen.resolve({ release: () => ({ sent: true }), close() {} }); const nextLease = await next;
+  assert.equal(opens, 2);
   await service.close({ ownerId: 'owner-b', sessionId: nextLease.sessionId, epoch: binding.epoch });
 });
 
@@ -118,4 +120,17 @@ test('asynchronous authority revocation while geometry is observed prevents inpu
   allowed = false; resolveAuthorization(false);
   await assert.rejects(input, error('DESKTOP_NOT_AUTHORIZED'));
   assert.equal(calls.filter(item => item[0] === 'input').length, 0); assert.equal(service.size(), 0);
+});
+
+test('closing a pending open keeps the physical resource reserved until its late channel is closed', async () => {
+  let resolveOpen;
+  const { desktop } = fixture();
+  const { service } = fixture({ leaseKey: () => 'same-endpoint', adapter: { open: () => new Promise(resolve => { resolveOpen = resolve; }) } });
+  const opening = service.open(binding);
+  while (!resolveOpen) await new Promise(resolve => setImmediate(resolve));
+  const rejected = assert.rejects(opening, error('DESKTOP_EXPIRED'));
+  const closing = service.closeOwner(binding.ownerId);
+  await assert.rejects(service.open({ ...binding, targetId: 'alias', ownerId: 'owner-b' }), error('DESKTOP_RESOURCE_BUSY'));
+  resolveOpen(desktop); await rejected; await closing;
+  assert.equal(desktop.closed, true); assert.equal(service.size(), 0);
 });

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { Artifacts } from '../src/adapters/storage/artifacts.mjs';
-import { ApprovalQueue } from './support/approval-runtime.mjs';
+import { ApprovalQueue, settledOutcome } from './support/approval-runtime.mjs';
 import { createFileService } from '../src/application/files.mjs';
 import { hash } from '../src/domain/validation.mjs';
 
@@ -16,8 +16,8 @@ async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'ssh-file-contract-')); let time = 1_000, files;
   const store = new Artifacts(root, { maxBytes: 16, budget: 32, now: () => time }); await store.init();
   const effects = [];
-  const transfers = { upload: async operation => { const fd = await store.verified(operation.artifactId); await fd.close(); effects.push(operation); return { failed: false, texts: ['published'] }; },
-    download: async operation => { effects.push(operation); return { failed: false, texts: ['download'] }; } };
+  const transfers = { upload: async operation => { const fd = await store.verified(operation.artifactId); await fd.close(); effects.push(operation); return settledOutcome({ failed: false, texts: ['published'] }); },
+    download: async operation => { effects.push(operation); return settledOutcome({ failed: false, texts: ['download'] }); } };
   const queue = new ApprovalQueue({ classify: () => ({ class: 'safe' }), profile: 'write', target: 'fixture', now: () => time,
     executeOperation: operation => transfers[operation.kind](operation), onTerminal: job => files.onTerminal(job) });
   files = createFileService({ store, queue, transfers, now: () => time });
@@ -76,7 +76,7 @@ test('manual and imported uploads share immutable approval and terminal release;
     assert.deepEqual(imported.job.operation, { kind: 'upload', artifactId: imported.job.operation.artifactId, remotePath: meta.remotePath,
       fileName: meta.fileName, size: 4, sha256: hash(bytes), overwrite: true, elevate: true });
     const completed = await f.queue.approve(manual.id);
-    assert.equal(completed.state, 'completed'); assert.deepEqual(completed.result, { failed: false, texts: ['published'] });
+    assert.equal(completed.state, 'completed'); assert.deepEqual(completed.result, settledOutcome({ failed: false, texts: ['published'] }));
     assert.throws(() => f.queue.start(manual.id), /not pending/); assert.equal(f.effects.length, 1);
     f.queue.deny(imported.job.id); await f.files.reap();
     assert.equal(f.store.reserved, 0); assert.equal(f.store.size, 0);

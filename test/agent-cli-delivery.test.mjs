@@ -12,6 +12,8 @@ import {executeAgentCli,executePythonSource,createSshTransport,withDispatchGuard
 import {prepareAgentCliPlan} from '../src/adapters/ssh/agent-cli.mjs';
 import {preparePythonSource} from '../src/adapters/ssh/python-source.mjs';
 import {validateAgentRelease} from '../src/domain/agent-cli.mjs';
+import {executionFailureDetails} from '../src/domain/execution-failure.mjs';
+import {dispatchFailureDetails} from '../src/domain/dispatch-failure.mjs';
 
 const binding={targetId:'fixture',targetRevision:'a'.repeat(64),profile:'fixture-write'};
 const verify=()=>({...binding}),operationId='c'.repeat(48),expected='b'.repeat(64);
@@ -35,7 +37,7 @@ function fake(p,change={},acquire=()=>{}){
  const registry={getProfile:()=>profile,async getOrCreate(){acquisitions++;await acquire();return connection;}};
  return {calls,connection,registry,get acquisitions(){return acquisitions;}};
 }
-const unknown=error=>/unknown|changed|requires|binding|plan|fields|required/i.test(error.message)&&!error.message.includes('SYNTHETIC_PRIVATE');
+const unknown=error=>/unknown|changed|requires|binding|plan|fields|required|dispatch/i.test(error.message)&&!error.message.includes('SYNTHETIC_PRIVATE');
 
 test('CLI-DELIVERY fixed timeouts and public projection cover both providers and all actions',async()=>{
  for(const provider of ['codex','claude'])for(const action of ['inspect','install','update','status']){
@@ -96,7 +98,7 @@ test('CLI-DELIVERY dispatch exception is unknown and never replayed',async()=>{
  const p=plan(),f=fake(p);let calls=0;f.connection.respond=async()=>{calls++;throw Error('SYNTHETIC_PRIVATE');};const outcome=await executeAgentCli(f.registry,p,verify);assert.equal(outcome.failed,true);assert.equal(outcome.execution.remoteState,'unknown');assert.ok(!JSON.stringify(outcome).includes('SYNTHETIC_PRIVATE'));assert.equal(calls,1);
 });
 test('CLI-DELIVERY acquisition failure is private and an admitted plan is immutable across acquisition',async()=>{
- const p=plan('install'),f=fake(p,{},()=>{throw Error('SYNTHETIC_PRIVATE');});await assert.rejects(()=>executeAgentCli(f.registry,p,verify),unknown);assert.equal(f.calls.length,0);
+ const p=plan('install'),f=fake(p,{},()=>{throw Error('SYNTHETIC_PRIVATE');});await assert.rejects(()=>executeAgentCli(f.registry,p,verify),error=>unknown(error)&&executionFailureDetails(error,false)?.remoteOutcome==='not_started');assert.equal(f.calls.length,0);
  const submitted={...p,manifest:{...p.manifest},agentCli:{...p.agentCli}},other=fake(p,{},()=>{submitted.stdin='changed';submitted.agentCli.intentDigest='e'.repeat(64);});
  assert.equal((await executeAgentCli(other.registry,submitted,verify)).failed,false);assert.equal(other.calls[0].options.stdin,p.stdin);assert.equal(other.calls[0].command,p.command);
 });
@@ -244,6 +246,6 @@ test('DISPATCH-GUARD source retains sync binding verification after async author
  const connection=new SSHConnection(profile,{},new Map(),'strict');let revision=binding.targetRevision,getClients=0;
  connection.ensureConnected=async()=>{};connection.getClient=()=>{getClients++;throw Error('Must not obtain client');};
  const registry={getProfile:()=>profile,async getOrCreate(){return connection;}};
- await assert.rejects(executePythonSource(registry,preparePythonSource({...binding,source:'pass\n',cwd:'/'}),()=>({...binding,targetRevision:revision}),async()=>{await Promise.resolve();revision='e'.repeat(64);}));
+ await assert.rejects(executePythonSource(registry,preparePythonSource({...binding,source:'pass\n',cwd:'/'}),()=>({...binding,targetRevision:revision}),async()=>{await Promise.resolve();revision='e'.repeat(64);}),error=>dispatchFailureDetails(error).dispatchFailureStage==='target_guard');
  assert.equal(getClients,0);
 });

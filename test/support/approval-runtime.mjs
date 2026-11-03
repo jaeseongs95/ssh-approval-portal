@@ -29,3 +29,6 @@ export class ApprovalQueue extends ProductionApprovalQueue {
     });
   }
 }
+// Explicit fixture receipt: this controlled executor has exited and released resources.
+export const settledOutcome = outcome => ({ ...outcome, execution: { phase: 'settled', reason: 'exit',
+  remoteState: 'exited', exitCode: outcome.failed ? 1 : 0, cleanupComplete: true, requiresReconciliation: false } });

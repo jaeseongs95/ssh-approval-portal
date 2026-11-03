@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { Artifacts } from '../src/adapters/storage/artifacts.mjs';
 import { Transfers } from '../src/adapters/ssh/transfers.mjs';
 import { hash } from '../src/domain/validation.mjs';
-import { ApprovalQueue } from './support/approval-runtime.mjs';
+import { ApprovalQueue, settledOutcome } from './support/approval-runtime.mjs';
 import { presentJob } from '../src/adapters/presentation/results.mjs';
 
 test('failed SSH connection releases reserved download quota and creates no local payload', async () => {
@@ -121,25 +121,35 @@ test('download transfer and hash failures clean local quota and attempt remote c
   }
 });
 
-test('missing remote parent stays a failed queue result with safe Korean guidance through the presenter', async () => {
-  const f = await fixture({ helperResponse: { exitCode: 1, stdout: JSON.stringify({ errorCode: 'PARENT_NOT_FOUND', error: '/private/secret: denied', stack: 'private stack' }) }, cleanupError: true });
-  try {
-    const operation = await uploadOperation(f);
-    const queue = new ApprovalQueue({ classify: () => ({ class: 'safe' }), profile: 'writer', target: 'fixture',
-      executeOperation: op => f.transfers.upload(op) });
-    const pending = queue.submitOperation(operation);
-    const failed = await queue.approve(pending.id);
-    assert.equal(failed.state, 'failed'); assert.equal(failed.result.failed, true);
-    const result = presentJob(failed).result;
-    assert.equal(result.isError, true);
-    assert.deepEqual(result.structuredContent, { errorCode: 'PARENT_NOT_FOUND' });
-    assert.deepEqual(result.content, [{ type: 'text', text: 'PARENT_NOT_FOUND: 원격 상위 폴더가 없습니다. 관리자가 폴더를 준비한 뒤 새 전송을 요청하세요.' }]);
-    assert.doesNotMatch(JSON.stringify(result), /private|secret|stack|diagnostics/);
-    await assert.rejects(queue.approve(pending.id), /not pending/);
-    assert.deepEqual(f.calls.map(x => x.payload.action), ['publish', 'cleanup']);
-    assert.deepEqual(f.profiles, ['writer']); assert.deepEqual(f.handles.map(x => x.closed), [1]);
-    assert.equal(f.calls[0].payload.overwrite, false); assert.doesNotMatch(f.calls[0].command, /^sudo /);
-  } finally { await f.close(); }
+test('missing remote parent keeps safe guidance after confirmed cleanup while cleanup loss stays unknown without replay', async () => {
+  for (const cleanupError of [false, true]) {
+    const f = await fixture({ helperResponse: { exitCode: 1, stdout: JSON.stringify({ errorCode: 'PARENT_NOT_FOUND', error: '/private/secret: denied', stack: 'private stack' }) }, cleanupError });
+    try {
+      const operation = await uploadOperation(f);
+      const queue = new ApprovalQueue({ classify: () => ({ class: 'safe' }), profile: 'writer', target: 'fixture',
+        executeOperation: async op => { const outcome = await f.transfers.upload(op); return outcome.execution ? outcome : settledOutcome(outcome); } });
+      const pending = queue.submitOperation(operation);
+      const failed = await queue.approve(pending.id);
+      assert.equal(failed.state, cleanupError ? 'unknown' : 'failed'); assert.equal(failed.result.failed, true);
+      const result = presentJob(failed).result;
+      assert.equal(result.isError, true);
+      if (cleanupError) {
+        assert.equal(failed.result.execution.remoteState, 'unknown');
+        assert.equal(failed.result.execution.cleanupComplete, false); assert.equal(failed.result.execution.requiresReconciliation, true);
+        assert.equal(result.structuredContent.errorCode, 'OPERATION_FAILED'); assert.equal(result.structuredContent.remoteCleanup, 'unconfirmed');
+        assert.match(result.content[0].text, /자동으로 재시도하지 않습니다/);
+      } else {
+        assert.equal(failed.result.execution.cleanupComplete, true); assert.equal(failed.result.execution.requiresReconciliation, false);
+        assert.deepEqual(result.structuredContent, { errorCode: 'PARENT_NOT_FOUND' });
+        assert.deepEqual(result.content, [{ type: 'text', text: 'PARENT_NOT_FOUND: 원격 상위 폴더가 없습니다. 관리자가 폴더를 준비한 뒤 새 전송을 요청하세요.' }]);
+      }
+      assert.doesNotMatch(JSON.stringify(result), /private|secret|stack|diagnostics/);
+      await assert.rejects(queue.approve(pending.id), /not pending/);
+      assert.deepEqual(f.calls.map(x => x.payload.action), ['publish', 'cleanup']);
+      assert.deepEqual(f.profiles, ['writer']); assert.deepEqual(f.handles.map(x => x.closed), [1]);
+      assert.equal(f.calls[0].payload.overwrite, false); assert.doesNotMatch(f.calls[0].command, /^sudo /);
+    } finally { await f.close(); }
+  }
 });
 
 test('known helper failure codes preserve download failure, quota release and cleanup without retry', async () => {
@@ -233,10 +243,11 @@ test('WRITER-DIAG-02 OS 원점은 검증한 단계와 정수만 공개하고 que
   const f = await fixture({ platform: 'windows', helperResponse: refusedResponse({ origin: 'os', nativeStep: 'open', nativeError: 5 }) });
   try {
     const queue = new ApprovalQueue({ classify: () => ({ class: 'safe' }), profile: 'writer', target: 'fixture',
-      executeOperation: operation => f.transfers.upload(operation) });
+      executeOperation: async operation => { const outcome = await f.transfers.upload(operation); return outcome.execution ? outcome : settledOutcome(outcome); } });
     const pending = queue.submitOperation(await uploadOperation(f));
     const job = await queue.approve(pending.id);
     assert.equal(job.state, 'failed');
+    assert.equal(job.result.execution.cleanupComplete, true); assert.equal(job.result.execution.requiresReconciliation, false);
     assert.equal(presentJob(job).result.isError, true);
     assert.deepEqual(presentJob(job).result.structuredContent, { errorCode: 'PERMISSION_DENIED',
       diagnostic: { origin: 'os', nativeStep: 'open', nativeError: 5 } });

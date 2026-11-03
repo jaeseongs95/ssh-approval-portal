@@ -103,14 +103,17 @@ export function createWebController({ state, view, api, document, location, time
     return result;
   }
   async function logout() {
-    if (loggingOut || state.signedOut) return;
+    if (loggingOut) return;
     loggingOut = true;
-    try { if (beforeLogout) await beforeLogout(); }
-    catch (error) { loggingOut = false; throw error; }
-    state.signedOut = true; generation++; historyGeneration++; historyRead?.abort(); activeRead?.abort(); stopPolling(); view.signedOut();
-    if(!state.accessMode){location.replace('/');return;}
-    try{await api.endAdminSession();location.replace('/signed-out');}
-    catch{view.error(view.logoutErrorMessage?.()??'Administrator sign-out could not be confirmed. Please retry.');view.logoutRetry?.();}
+    try {
+      if (!state.signedOut) {
+        if (beforeLogout) await beforeLogout();
+        state.signedOut = true; generation++; historyGeneration++; historyRead?.abort(); activeRead?.abort(); stopPolling(); view.signedOut();
+      }
+      if(!state.accessMode){location.replace('/');return;}
+      try{await api.endAdminSession();location.replace('/signed-out');}
+      catch{view.error(view.logoutErrorMessage?.()??'Administrator sign-out could not be confirmed. Please retry.');view.logoutRetry?.();}
+    } finally { loggingOut = false; }
   }
   async function reconnect() {
     if(state.signedOut||!state.accessMode)return;

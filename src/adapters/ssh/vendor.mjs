@@ -7,9 +7,20 @@ import { redactText } from 'ssh-mcp/build/guard/redactor.js';
 import { preparePythonSource, preparePythonHelper } from './python-source.mjs';
 import { validateAgentCliPlan, projectAgentCliResult } from './agent-cli.mjs';
 import { windowsRemotePath } from '../../domain/validation.mjs';
-import { executionFailure } from '../../domain/execution-failure.mjs';
+import { executionFailure, executionFailureDetails } from '../../domain/execution-failure.mjs';
+import { dispatchRefusal, dispatchFailureDetails } from '../../domain/dispatch-failure.mjs';
 import { acquireSshConnection, withConnectionLifecycle, rawSshClient } from './connection-lifecycle.mjs';
 import { superviseExecution, presentStderr, DEFAULT_RUN_TIMEOUT_MS, DEFAULT_OUTPUT_BYTES } from './execution-supervisor.mjs';
+
+const isDispatchRefusal = error => dispatchFailureDetails(error).dispatchFailureStage !== 'unknown';
+// This helper is called only before client.exec, never around its Promise/result.
+function notDispatched(error) {
+  if (isDispatchRefusal(error)) return error;
+  const previous = executionFailureDetails(error, false);
+  const failure = executionFailure(Error('Command was not dispatched'), { stage: previous?.stage ?? 'ssh_execution', code: previous?.code ?? 'SSH_EXECUTION_FAILED', remoteOutcome: 'not_started' });
+  failure.message = 'SSH execution unavailable before dispatch';
+  return failure;
+}
 
 /** Per-operation view: dispatch authorization follows every connect/retry wait. */
 export function withDispatchGuard(connection, beforeDispatch = async () => {}, verifyConnection = () => {}, { connectedOnly = false, clientView = client => client } = {}) {
@@ -34,10 +45,11 @@ export function withDispatchGuard(connection, beforeDispatch = async () => {}, v
 
 async function connectionBinding(registry, profile) {
   const configured = registry.getProfile && JSON.stringify(registry.getProfile(profile));
-  const connection = await acquireSshConnection(registry, profile);
+  let connection;
+  try { connection = await acquireSshConnection(registry, profile); } catch (error) { throw notDispatched(error); }
   const snapshot = configured ?? JSON.stringify(connection.profile);
   const verify = () => {
-    if (JSON.stringify(connection.profile) !== snapshot || registry.getProfile && JSON.stringify(registry.getProfile(profile)) !== snapshot) throw Error('SSH dispatch profile changed');
+    if (JSON.stringify(connection.profile) !== snapshot || registry.getProfile && JSON.stringify(registry.getProfile(profile)) !== snapshot) dispatchRefusal('target_changed', 'target_guard', 'SSH dispatch profile changed');
   };
   return { connection, verify };
 }
@@ -62,10 +74,13 @@ function commandOutcome(result, auditRedact = defaultRedact) {
 /** Registry owns authentication, host keys, ProxyJump and profile binding.
  * Only this narrow port knows ssh-mcp/ssh2; the supervisor owns execution. */
 async function executeOnChannel(connection, command, options = {}) {
-  await connection.ensureConnected();
-  const client = connection.getClient();
-  const exactCommand = connection.applyWorkdir(command), channelOptions = connection.channelEnv();
-  if (connection.profile.tty) channelOptions.pty = { term: 'xterm-256color', cols: 200, rows: 50 };
+  let client, exactCommand, channelOptions;
+  try {
+    await connection.ensureConnected();
+    client = connection.getClient();
+    exactCommand = connection.applyWorkdir(command); channelOptions = connection.channelEnv();
+    if (connection.profile.tty) channelOptions.pty = { term: 'xterm-256color', cols: 200, rows: 50 };
+  } catch (error) { throw notDispatched(error); }
   return superviseExecution({
     open: (value, callback) => client.exec(value, channelOptions, callback),
     onTransportLost(callback) {
@@ -80,30 +95,32 @@ async function executeOnChannel(connection, command, options = {}) {
  * that no effect occurred and must never trigger a source replay.
  */
 async function executeSourcePlan(registry, plan, verify, options = {}, prepare = preparePythonSource, beforeDispatch = async () => {}) {
-  if (typeof verify !== 'function' || !plan?.manifest) throw Error('Source target verification required');
+  if (typeof verify !== 'function' || !plan?.manifest) dispatchRefusal('private_plan', 'source_plan', 'Source target verification required');
   const submitted = plan.manifest;
   const exact = prepare({ source: plan.stdin, argv: JSON.parse(submitted.argvJson), cwd: submitted.cwd, elevate: submitted.elevate,
     targetId: submitted.targetId, targetRevision: submitted.targetRevision, profile: submitted.profile, environmentRevision: submitted.environmentRevision, ...(submitted.platform === 'windows' ? { platform: 'windows', pythonExecutable: submitted.interpreter } : {}) });
   if (exact.command !== plan.command || exact.planDigest !== plan.planDigest
     || exact.transportStdin !== plan.transportStdin
-    || JSON.stringify(exact.manifest) !== JSON.stringify(submitted) || JSON.stringify(exact.args) !== JSON.stringify(plan.args)) throw Error('Source execution plan changed');
+    || JSON.stringify(exact.manifest) !== JSON.stringify(submitted) || JSON.stringify(exact.args) !== JSON.stringify(plan.args)) dispatchRefusal('private_plan', 'source_plan', 'Source execution plan changed');
   const m = exact.manifest;
   const check = () => {
-    const binding = verify();
-    if (!binding || binding.targetId !== m.targetId || binding.targetRevision !== m.targetRevision || binding.profile !== m.profile) throw Error('Source target binding changed');
+    let binding;
+    try { binding = verify(); } catch (error) { throw notDispatched(error); }
+    if (!binding || binding.targetId !== m.targetId || binding.targetRevision !== m.targetRevision || binding.profile !== m.profile) dispatchRefusal('target_changed', 'target_guard', 'Source target binding changed');
   };
   check();
-  const connection = await acquireSshConnection(registry, m.profile);
+  let connection;
+  try { connection = await acquireSshConnection(registry, m.profile); } catch (error) { throw notDispatched(error); }
   check();
-  if (connection.profile.tty === true || connection.profile.readOnly !== false) throw Error('Source execution requires a writable non-TTY profile');
-  if (connection.profile.workdir) throw Error('Source execution requires an explicit cwd without profile workdir');
-  if (JSON.stringify(connection.profile) !== JSON.stringify(registry.getProfile(m.profile))) throw Error('Source SSH profile changed');
+  if (connection.profile.tty === true || connection.profile.readOnly !== false) dispatchRefusal('private_plan', 'source_plan', 'Source execution requires a writable non-TTY profile');
+  if (connection.profile.workdir) dispatchRefusal('private_plan', 'source_plan', 'Source execution requires an explicit cwd without profile workdir');
+  if (JSON.stringify(connection.profile) !== JSON.stringify(registry.getProfile(m.profile))) dispatchRefusal('target_changed', 'target_guard', 'Source SSH profile changed');
   const profileSnapshot = JSON.stringify(connection.profile);
   const execute = observed => {
     const guarded = new Proxy(withDispatchGuard(observed, beforeDispatch), { get(target, key) {
       if (key === 'getClient') return () => {
         check();
-        if (JSON.stringify(target.profile) !== profileSnapshot || JSON.stringify(registry.getProfile(m.profile)) !== profileSnapshot) throw Error('Source SSH profile changed');
+        if (JSON.stringify(target.profile) !== profileSnapshot || JSON.stringify(registry.getProfile(m.profile)) !== profileSnapshot) dispatchRefusal('target_changed', 'target_guard', 'Source SSH profile changed');
         return target.getClient();
       };
       const value = Reflect.get(target, key, target);
@@ -113,6 +130,7 @@ async function executeSourcePlan(registry, plan, verify, options = {}, prepare =
   };
   try { return await withConnectionLifecycle(connection, execute); }
   catch (error) {
+    if (isDispatchRefusal(error) || executionFailureDetails(error, false)?.remoteOutcome === 'not_started') throw error;
     const failure = executionFailure(error, { stage: 'ssh_execution', code: 'SSH_EXECUTION_FAILED' });
     failure.message = 'Source execution result unknown; do not retry automatically'; throw failure;
   }
@@ -132,6 +150,7 @@ export async function executeAgentCli(registry, plan, verify, beforeDispatch = a
   const prepare = exact.manifest.contract === 'agent-cli-powershell-v1' ? () => validateAgentCliPlan(exact) : preparePythonHelper;
   try { result = await executeSourcePlan(registry, exact, verify, { ...options, timeoutMs }, prepare, beforeDispatch); }
   catch (error) {
+    if (isDispatchRefusal(error) || executionFailureDetails(error, false)?.remoteOutcome === 'not_started') throw error;
     const failure = executionFailure(error, { stage: 'ssh_execution', code: 'SSH_EXECUTION_FAILED' });
     failure.message = 'CLI result unknown; inspect saved status, never retry automatically'; throw failure;
   }

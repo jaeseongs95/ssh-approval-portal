@@ -49,7 +49,7 @@ export function createAgentCliService({queue,journal,resolveTarget,readInstallat
    if(!exact(body,['targetId','provider']))throw Error('Invalid CLI login status fields');
    agentCliProvider(body.provider);
    const binding=snapshot(definitionFor(body.targetId));
-   if(queue.maintenance||queue.busy())throw Error('CLI target is busy');
+   if(queue.maintenance)throw Error('CLI maintenance in progress');
    if(typeof readLoginState!=='function')throw Error('CLI login status unavailable');
    let value;
    try{value=await readLoginState(body.provider,binding);}catch{value={provider:body.provider,state:'unavailable',reason:'check_failed'};}
@@ -64,7 +64,7 @@ export function createAgentCliService({queue,journal,resolveTarget,readInstallat
    agentCliProvider(body.provider);reap();
    if(previews.size>=64)throw Error('CLI preview capacity reached');
    const binding=snapshot(definitionFor(body.targetId));
-   if(queue.maintenance||queue.busy())throw Error('CLI target is busy');
+   if(queue.maintenance)throw Error('CLI maintenance in progress');
    const installed=await readInstallation(body.provider,binding);open();verifyBinding(binding);if(queue.maintenance)throw Error('CLI maintenance in progress');
    if(!record(installed)||installed.provider!==body.provider||typeof installed.managed!=='boolean'||typeof installed.installed!=='boolean'||installed.login!=='not_checked'||!hex(installed.installationRevision)||!(installed.version===null||typeof installed.version==='string'&&/^(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$/.test(installed.version))||(!installed.installed&&(installed.managed||installed.version!==null))||(installed.managed&&!installed.version))throw Error('CLI inspection unavailable');
    const installation=Object.freeze(Object.fromEntries(['provider','managed','installed','version','installationRevision','login'].map(key=>[key,installed[key]])));

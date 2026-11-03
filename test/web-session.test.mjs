@@ -232,12 +232,17 @@ test('administrator logout waits for bootstrap and never sends a global logout r
  const begin=api.beginAdminSession(),end=api.endAdminSession();assert.deepEqual(calls,['/api/session/start']);release();await begin;await end;assert.deepEqual(calls,['/api/session/start','/api/session/logout']);
 });
 test('administrator logout response loss stays unconfirmed until explicit idempotent retry',async()=>{
- const state=createWebState(true),navigations=[],errors=[];let attempts=0,retries=0;
- const api=async()=>[];api.endAdminSession=async()=>{if(++attempts===1)throw Error('SYNTHETIC_PRIVATE');};
- const view={initialize(){},signedOut(){},error:s=>errors.push(s),logoutRetry(){retries++;}};
- const controller=createWebController({state,view,api,document:{body:{dataset:{}}},location:{replace:p=>navigations.push(p)},timers:{clearInterval(){}}});
+ const state=createWebState(true),navigations=[],errors=[];let attempts=0,retries=0,desktopCloses=0,cleanups=0,releaseRetry;
+ const retryGate=new Promise(resolve=>releaseRetry=resolve);
+ const api=async()=>[];api.endAdminSession=async()=>{if(++attempts===1)throw Error('SYNTHETIC_PRIVATE');await retryGate;};
+ const view={initialize(){},signedOut(){cleanups++;},error:s=>errors.push(s),logoutRetry(){retries++;}};
+ const controller=createWebController({state,view,api,document:{body:{dataset:{}}},location:{replace:p=>navigations.push(p)},timers:{clearInterval(){}},beforeLogout:async()=>{desktopCloses++;}});
  await controller.logout();assert.equal(state.signedOut,true);assert.deepEqual(navigations,[]);assert.equal(retries,1);assert.ok(!errors.join('').includes('SYNTHETIC_PRIVATE'));
- await controller.logout();assert.deepEqual(navigations,['/signed-out']);assert.equal(attempts,2);
+ await settle();assert.equal(attempts,1,'response loss must not trigger an automatic session retry');
+ const retry=controller.logout();await controller.logout();
+ assert.equal(attempts,2,'concurrent explicit retries share one in-flight session cancellation');assert.deepEqual(navigations,[]);
+ releaseRetry();await retry;assert.deepEqual(navigations,['/signed-out']);assert.equal(attempts,2);
+ assert.equal(desktopCloses,1,'an explicit session retry does not reopen or close the desktop again');assert.equal(cleanups,1,'the signed-out view is cleared once');
 });
 
 for(const failure of ['http','network','json'])test('bootstrap '+failure+' failure exposes explicit administrator reconnect',async()=>{

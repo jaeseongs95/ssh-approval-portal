@@ -34,19 +34,21 @@ function noLeak(value) {
 
 async function failedJob(error) {
   const events = [], persisted = [];
-  let executions = 0, releases = 0;
+  let executions = 0, terminals = 0;
   const queue = new ApprovalQueue({
     classify: () => ({ class: 'privileged' }), profile: 'fixture-write', target: 'fixture-target',
     idFactory: () => 'a'.repeat(48),
     executeOperation: async () => { executions++; throw error; },
-    claimExecution: () => () => { releases++; },
+    onTerminal: () => { terminals++; },
     audit: event => events.push(structuredClone(event)),
   });
   const requested = queue.submit('sudo id');
   queue.track(requested.id, snapshot => persisted.push(structuredClone(snapshot)));
   const job = await queue.approve(requested.id);
   assert.equal(executions, 1, 'A failure must not automatically replay the executor');
-  assert.equal(releases, 1);
+  assert.equal(terminals, 1);
+  assert.equal(queue.scheduler.snapshot().active, 0);
+  assert.equal(queue.operationStore.get(requested.id).state, job.state);
   assert.equal(queue.busy(), false);
   assert.deepEqual(await queue.wait(requested.id), job);
   return { job, queue, events, persisted, terminal: events.find(event => event.action === job.state) };
@@ -98,14 +100,22 @@ test('durable diagnostic data is copied through the allowlist without raw fields
 test('tagged execution causes survive the queue result, terminal persistence, audit and job presenter', async t => {
   for (const metadata of cases) await t.test(`${metadata.code}/${metadata.remoteOutcome}`, async () => {
     const expected = { ...metadata, automaticReplay: false };
+    const notStarted = metadata.remoteOutcome === 'not_started';
+    const expectedState = notStarted ? 'failed' : 'unknown';
+    const expectedExecution = notStarted
+      ? { phase: 'settled', reason: 'input_failed', remoteState: 'not_dispatched', cleanupComplete: true, requiresReconciliation: false }
+      : { phase: 'settled', reason: 'transport_lost', remoteState: 'unknown', cleanupComplete: false, requiresReconciliation: true };
     const f = await failedJob(executionFailure(privateError(), metadata));
-    assert.equal(f.job.state, 'failed');
+    assert.equal(f.job.state, expectedState);
+    assert.deepEqual(f.job.result.execution, expectedExecution);
     assert.equal(f.job.result.failed, true);
     assert.deepEqual(f.job.result.failure, expected);
     assert.deepEqual(f.queue.get(f.job.id).result.failure, expected);
-    const stored = f.persisted.find(snapshot => snapshot.state === 'failed');
+    const stored = f.persisted.find(snapshot => snapshot.state === expectedState);
     assert.ok(stored, 'A terminal snapshot must be persisted');
     assert.deepEqual(stored.result.failure, expected);
+    assert.deepEqual(stored.result.execution, expectedExecution);
+    assert.deepEqual(f.queue.operationStore.get(f.job.id).result, f.job.result);
     assert.deepEqual(f.terminal.failure, expected);
     const reply = jobResult(f.job);
     assert.deepEqual(reply.structuredContent.result.structuredContent.failure, expected);
@@ -117,6 +127,9 @@ test('tagged execution causes survive the queue result, terminal persistence, au
 test('unknown execution rejection keeps fixed fallback diagnostics through the same queue boundaries', async () => {
   const forged = Object.assign(privateError(), cases[0], { automaticReplay: true, failure: cases[0] });
   const f = await failedJob(forged);
+  assert.equal(f.job.state, 'unknown');
+  assert.equal(f.job.result.execution.cleanupComplete, false);
+  assert.equal(f.job.result.execution.requiresReconciliation, true);
   assert.deepEqual(f.job.result.failure, fallback);
   assert.deepEqual(f.terminal.failure, fallback);
   assert.deepEqual(f.persisted.at(-1).result.failure, fallback);
@@ -125,42 +138,57 @@ test('unknown execution rejection keeps fixed fallback diagnostics through the s
   noLeak([f.job, f.events, f.persisted, reply]);
 });
 
-test('read failure preserves tagged diagnostics without changing refusal safety or replaying execution', async t => {
+test('read failure preserves tagged diagnostics in its durable job without leaking raw text or replaying execution', async t => {
   for (const metadata of [...cases, null]) await t.test(metadata ? `${metadata.code}/${metadata.remoteOutcome}` : 'untrusted-error', async () => {
     const expected = metadata ? { ...metadata, automaticReplay: false } : fallback;
+    const notStarted = metadata?.remoteOutcome === 'not_started';
+    const expectedState = notStarted ? 'failed' : 'unknown';
     const source = metadata ? executionFailure(privateError(), metadata)
       : Object.assign(privateError(), cases[0], { automaticReplay: true, failure: cases[0] });
     const events = [];
-    let executions = 0, releases = 0, caught;
-    const queue = new ApprovalQueue({ classify: () => ({ class: 'read-only' }), profile: 'fixture-write', target: 'fixture-target',
-      executeOperation: async () => assert.fail('A direct read must not execute a queued operation') });
-    const commands = createCommandService({ queue, classify: () => ({ class: 'read-only' }),
-      target: 'fixture-target', readProfile: 'fixture-read',
-      claimExecution: () => () => { releases++; },
-      executeCommand: async () => { executions++; throw source; },
+    let executions = 0, terminals = 0, caught;
+    const queue = new ApprovalQueue({ classify: () => ({ class: 'read-only' }), profile: 'fixture-write', readProfile: 'fixture-read', target: 'fixture-target',
+      executeOperation: async operation => { assert.equal(operation.readOnly, true); executions++; throw source; },
+      onTerminal: () => { terminals++; },
       audit: event => events.push(structuredClone(event)),
     });
-    await assert.rejects(commands.read('id'), error => {
-      caught = error;
-      assert.equal(error.code, 'READ_COMMAND_EXECUTION_UNKNOWN');
-      noLeak([error.message, error.stack, error.cause]);
-      return true;
-    });
+    const commands = createCommandService({ queue, classify: () => ({ class: 'read-only' }) });
+    if (notStarted) {
+      const result = await commands.read('id');
+      assert.equal(result.failed, true); assert.deepEqual(result.failure, expected);
+      assert.equal(result.execution.remoteState, 'not_dispatched');
+      assert.equal(result.execution.cleanupComplete, true); assert.equal(result.execution.requiresReconciliation, false);
+      noLeak(result);
+    } else await assert.rejects(commands.read('id'), error => {
+        caught = error;
+        assert.equal(error.code, 'READ_COMMAND_EXECUTION_UNKNOWN');
+        noLeak([error.message, error.stack, error.cause]);
+        return true;
+      });
     await commands.drain();
     assert.equal(executions, 1);
-    assert.equal(releases, 1);
+    assert.equal(terminals, 1);
+    assert.equal(queue.scheduler.snapshot().active, 0);
     assert.equal(commands.busy(), false);
-    assert.deepEqual(queue.listAll(), []);
-    assert.deepEqual(events.find(event => event.action === 'read-failed').failure, expected);
-    const reply = refused(caught), payload = JSON.parse(reply.content[0].text);
-    assert.equal(reply.isError, true);
-    assert.equal(Object.hasOwn(reply, 'structuredContent'), false, 'A refusal must not advertise a normal output');
-    assert.equal(payload.error_code, 'READ_COMMAND_EXECUTION_UNKNOWN');
-    assert.equal(payload.stage, 'read_execution');
-    assert.equal(payload.executionAttempted, true);
-    assert.equal(payload.requestSubmitted, false);
-    if (metadata) assert.deepEqual(payload.failure, expected);
-    else assert.equal(Object.hasOwn(payload, 'failure'), false, 'Untagged read failures preserve the existing refusal contract');
-    noLeak([events, reply]);
+    const [job] = queue.listAll();
+    assert.equal(queue.listAll().length, 1); assert.equal(job.state, expectedState); assert.equal(job.profile, 'fixture-read');
+    assert.deepEqual(job.result.failure, expected);
+    assert.deepEqual(queue.operationStore.get(job.id).result.failure, expected);
+    assert.equal(job.result.execution.cleanupComplete, notStarted);
+    assert.equal(job.result.execution.requiresReconciliation, !notStarted);
+    assert.deepEqual(events.find(event => event.action === expectedState).failure, expected);
+    assert.deepEqual(jobResult(job).structuredContent.result.structuredContent.failure, expected);
+    if (caught) {
+      const reply = refused(caught), payload = JSON.parse(reply.content[0].text);
+      assert.equal(reply.isError, true);
+      assert.equal(Object.hasOwn(reply, 'structuredContent'), false, 'A refusal must not advertise a normal output');
+      assert.equal(payload.error_code, 'READ_COMMAND_EXECUTION_UNKNOWN');
+      assert.equal(payload.stage, 'read_execution');
+      assert.equal(payload.executionAttempted, true);
+      assert.equal(payload.requestSubmitted, false);
+      assert.equal(Object.hasOwn(payload, 'failure'), false, 'The generic wait refusal carries no executor exception identity; the durable job carries the fixed diagnostic');
+      noLeak(reply);
+    }
+    noLeak([events, job]);
   });
 });

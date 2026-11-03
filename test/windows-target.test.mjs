@@ -217,7 +217,7 @@ test('WIN-CAPABILITY Windows CLI·이름승인·승격파일을 표시하고 sou
   const listed = (await f.api('/api/targets')).body.targets[0];
   assert.equal(listed.platform, 'windows');
   assert.deepEqual(listed.capabilities, { commandShell: 'windows-powershell-5.1', fileTransfer: true,
-    elevatedFileTransfer: true, pythonSource: false, agentCli: true, commandNameApproval: true });
+    elevatedFileTransfer: true, pythonSource: false, agentCli: true, commandNameApproval: true, desktop: false });
   const cli = (await f.api('/api/agent-cli')).body.bindings[0];
   assert.equal(cli.platform, 'windows');
   assert.equal(cli.supported, true);

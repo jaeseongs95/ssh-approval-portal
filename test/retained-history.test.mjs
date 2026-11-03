@@ -198,6 +198,10 @@ test('HIST-AUTH 기존 관리자 인증·브라우저 세션·출처를 보존�
 // 비교 경로의 순서를 번갈아 쓰며 강제 GC·인위적 배수 문턱을 넣지 않는다.
 // 독립 기대값: N개 보관 행 불변, 추가 대기 요청 1개, 보관 첫 페이지 20개,
 // 읽기만으로 감사·실행 0회, 함께 보낸 승인은 202 후 실행 1회·완료한다.
+// 1.8 실행 정본: 승인 fixture는 현재 대상 revision의 accepted intent를 먼저 저장한다.
+// 복원만 한 legacy pending은 실행 기록이 없으므로 승인 가능한 native 요청이 아니다.
+// 202 본문은 queued이며 이후 running/실행 1회와 completed를 별도로 확인한다.
+// 승인당 감사는 execution-queued, approved, completed의 3회다(제출 seed는 측정 밖).
 // 실행: 지정 시험 환경에서 node --test --test-name-pattern=HIST-MEASURE test/retained-history.test.mjs
 // 로컬 제품 시험·표적 변이는 미실행이며 원시 숫자는 node:test 진단 JSON으로 남긴다.
 const memorySample = () => {
@@ -226,11 +230,12 @@ for (const records of [100, 1000, 10000]) test('HIST-MEASURE 기존 조회·보�
     db.exec('COMMIT');
   } finally { db.close(); }
   let app, executions = 0, audits = 0, release = () => {}, executionGate;
+  const auditActions = [];
   try {
     app = await createApplication({ registry: { getProfile: name => ({ host: '127.0.0.1', port: 22, user: 'fixture', readOnly: name === 'aws-readonly' }), closeAll: async () => {} },
-      classify: () => ({ class: 'privileged' }), executeCommand: async () => { executions++; await executionGate; return { failed: false, texts: [] }; }, audit: () => { audits++; },
+      classify: () => ({ class: 'privileged' }), executeCommand: async () => { executions++; await executionGate; return { failed: false, texts: [] }; }, audit: event => { audits++; auditActions.push(event.action); },
       transferRoot: root, uiHtml: '<html></html>', env: { BRIDGE_MCP_TOKEN: 'fixture-mcp', BRIDGE_ADMIN_TOKEN: 'fixture-admin', BRIDGE_ADMIN_ORIGIN: 'https://example.test', BRIDGE_UI_TICKET_KEY: 'd'.repeat(64) } });
-    const queue = app.targets.select('default').queue;
+    const runtime = app.targets.select('default'), queue = runtime.queue;
     // 승인 서비스의 정상 복원 포트를 사용한다. 생성·입장 상한 변경은 시험 범위가 아니다.
     for (const value of retained) queue.restore(value);
     await new Promise(resolve => app.adminHttp.listen(0, '127.0.0.1', resolve));
@@ -241,8 +246,15 @@ for (const records of [100, 1000, 10000]) test('HIST-MEASURE 기존 조회·보�
     let pendingId, sequence = 0;
     const installPending = () => {
       if (pendingId) queue.jobs.delete(pendingId);
-      pendingId = id(1000000 + sequence++); queue.restore(fixtureJob(pendingId, 'pending'));
+      pendingId = id(1000000 + sequence++);
       executionGate = new Promise(resolve => { release = resolve; });
+      const pending = { ...fixtureJob(pendingId, 'pending'), targetId: runtime.id, targetRevision: runtime.revision,
+        targetDisplayName: runtime.displayName, profile: runtime.writeProfile, target: runtime.target };
+      // Historical rows remain legacy/read-only. Only this extra approval fixture gets a
+      // native accepted intent, without submitting N restored rows through admission limits.
+      const accepted = queue.operationStore.accept(queue.operationRecord(pending));
+      assert.equal(accepted.state, 'accepted'); assert.equal(accepted.targetRevision, runtime.revision);
+      queue.restore(pending);
     };
     const requestSample = async (path, approve = false) => {
       const before = memorySample(), startedMs = performance.now();
@@ -251,7 +263,7 @@ for (const records of [100, 1000, 10000]) test('HIST-MEASURE 기존 조회·보�
       const sample = { startedMs, finishedMs, elapsedMs: finishedMs - startedMs, responseBytes: bytes.length, status: response.status, before, after };
       assert.equal(response.status, approve ? 202 : 200);
       const value = JSON.parse(bytes.toString('utf8'));
-      if (approve) { assert.equal(value.id, pendingId); assert.equal(value.state, 'running'); }
+      if (approve) { assert.equal(value.id, pendingId); assert.equal(value.state, 'queued'); assert.equal(value.targetRevision, runtime.revision); }
       else if (path === '/api/requests') assert.equal(value.length, records + 1);
       else { assert.equal(value.items.length, 20); assert.ok(sample.responseBytes <= HISTORY_RESPONSE_BYTES); assert.equal(value.coverage.snapshot, false); }
       return sample;
@@ -274,9 +286,18 @@ for (const records of [100, 1000, 10000]) test('HIST-MEASURE 기존 조회·보�
         const reading = path ? requestSample(path) : undefined;
         const approving = requestSample('/api/'+pendingId+'/approve', true);
         [read, accepted] = await Promise.all([reading, approving]);
+        // Acceptance is not execution. Keep the executor blocked until its actual start
+        // and the durable running state are observed outside the HTTP timing interval.
+        const startDeadline = performance.now() + 10000;
+        while (executions === executionBefore && performance.now() < startDeadline) await new Promise(resolve => setImmediate(resolve));
+        assert.equal(executions, executionBefore + 1);
+        assert.equal(queue.scheduler.get(pendingId).state, 'running');
+        assert.equal(queue.scheduler.get(pendingId).targetRevision, runtime.revision);
       } finally { release(); }
       await app.queue.wait(pendingId);
-      assert.equal(queue.jobs.get(pendingId).state, 'completed'); assert.equal(executions, executionBefore + 1); assert.equal(audits, auditBefore + 2);
+      assert.equal(queue.jobs.get(pendingId).state, 'completed'); assert.equal(queue.scheduler.get(pendingId).state, 'completed');
+      assert.equal(executions, executionBefore + 1); assert.equal(audits, auditBefore + 3);
+      assert.deepEqual(auditActions.slice(auditBefore), ['execution-queued', 'approved', 'completed']);
       assert.equal(retainedSnapshot(), retainedBefore);
       if (!path) return accepted;
       const inFlightOverlap = Number(read.startedMs <= accepted.finishedMs && accepted.startedMs <= read.finishedMs);

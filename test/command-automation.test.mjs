@@ -11,6 +11,7 @@ import { classifyCommand } from 'ssh-mcp/build/policy/classifier.js';
 import { createApplication } from '../app.mjs';
 import { inspectCommand, validateCommandPolicy } from '../src/domain/command-policy.mjs';
 import { createCommandState } from '../src/adapters/storage/command-state.mjs';
+import { createOperationStore } from '../src/adapters/storage/operation-store.mjs';
 import { createAikSshTool } from '../src/adapters/aik/ssh-tool.mjs';
 import { createJevAssessor } from '../src/adapters/safety/jev.mjs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -189,27 +190,35 @@ test('durable admission restores interrupted evaluation/execution as unknown and
   assert.deepEqual(state.list().map(job => job.state), ['unknown', 'unknown', 'unknown', 'expired']); state.close();
 });
 
-test('startup restores a persisted queued command as unknown and never automatically replays it', { timeout: 10000 }, async t => {
-  const f = await fixture(t); await f.policy({});
+test('startup restores a natively claimed command as unknown and never automatically replays it', { timeout: 10000 }, async t => {
+  const f = await fixture(t); await f.policy({ commands: [], externalDisclosure: false });
   const key = 'fixture-queued-restart-0001', command = 'sudo id';
-  const completed = await f.run(command, key);
-  assert.equal(completed.state, 'completed'); assert.equal(f.executions.length, 1);
+  const pending = await f.run(command, key);
+  assert.equal(pending.state, 'pending'); assert.equal(f.executions.length, 0);
   await f.app.close();
-  const state = createCommandState(f.root);
+  const state = createCommandState(f.root), operations = createOperationStore(f.root);
   try {
     const persisted = state.find(key);
-    assert.equal(persisted.job.id, completed.id);
-    const queued = { ...persisted.job, state: 'queued', approvalMode: 'automatic' };
+    assert.equal(persisted.job.id, pending.id);
+    // Simulate a crash after owner approval and the native durable dispatch claim,
+    // before an executor exists. Mutating only the legacy row after completion
+    // leaves a valid completed operation, which must win during restoration.
+    const queued = { ...persisted.job, state: 'queued', approvalMode: 'owner' };
     delete queued.result; delete queued.finishedAt;
     state.save(queued);
-  } finally { state.close(); }
+    const accepted = operations.get(pending.id);
+    assert.equal(accepted.state, 'accepted');
+    operations.update(pending.id, { state: 'queued', metadata: { ...accepted.metadata, approval: queued } }, { expectedVersion: accepted.version });
+    assert.equal(operations.claim(pending.id).state, 'starting');
+  } finally { operations.close(); state.close(); }
   await f.restart();
-  const restored = f.app.queue.get(completed.id);
-  assert.equal(restored.state, 'unknown'); assert.equal(restored.approvalMode, 'automatic');
-  assert.equal(f.executions.length, 1, 'startup adds no execution');
+  const restored = f.app.queue.get(pending.id), durable = f.app.targets.select().queue.operationStore.get(pending.id);
+  assert.equal(restored.state, 'unknown'); assert.equal(restored.approvalMode, 'owner');
+  assert.equal(durable.state, 'unknown'); assert.equal(durable.recoveryReason, 'bridge_restart'); assert.equal(durable.requiresReconciliation, true);
+  assert.equal(f.executions.length, 0, 'startup adds no execution');
   const replay = await f.run(command, key);
-  assert.equal(replay.id, completed.id); assert.equal(replay.state, 'unknown');
-  assert.equal(f.executions.length, 1, 'the same request key cannot replay a recovered queued command');
+  assert.equal(replay.id, pending.id); assert.equal(replay.state, 'unknown');
+  assert.equal(f.executions.length, 0, 'the same request key cannot replay an interrupted native claim');
 });
 
 test('owner authentication, exact Origin, revision and target bindings protect policy mutations', async t => {
@@ -300,20 +309,32 @@ test('concurrent duplicate key observes the same evaluating job and does not eva
 
 test('execution admission audit failure cannot dispatch a preapproved command', async t => {
   const f = await fixture(t, { audit: event => { if (event.action === 'policy-execution-started') throw Error('audit unavailable'); } });
-  await f.policy({}); const job = await f.run('sudo id');
-  assert.equal(job.state, 'pending'); assert.equal(job.decision.reasonCode, 'execution_start_failed'); assert.equal(job.decision.dispatchFailureReason, 'audit_failed'); assert.equal(job.decision.dispatchFailureStage, 'start_audit'); assert.equal(f.executions.length, 0);
-  assert.equal(job.approvalMode, undefined);
+  await f.policy({}); const key = 'audit-preapproved-failed-0001', job = await f.run('sudo id', key);
+  // This audit is after durable scheduling, before the executor: it settles as
+  // failed/not_dispatched, retaining the policy decision that authorized admission.
+  assert.equal(job.state, 'failed'); assert.equal(job.decision.reasonCode, 'command_set'); assert.equal(job.decision.dispatchFailure, 'not_dispatched');
+  assert.equal(job.decision.dispatchFailureReason, 'audit_failed'); assert.equal(job.decision.dispatchFailureStage, 'start_audit'); assert.equal(f.executions.length, 0);
+  assert.equal(job.approvalMode, 'automatic'); assert.equal(job.result.failed, true); assert.equal(job.result.execution.remoteState, 'not_dispatched'); assert.equal(job.result.execution.requiresReconciliation, false);
+  assert.equal(f.app.targets.select().queue.operationStore.get(job.id).state, 'failed');
+  await f.restart(); const replay = await f.run('sudo id', key);
+  assert.equal(replay.id, job.id); assert.equal(replay.state, 'failed'); assert.equal(f.executions.length, 0);
 });
 
 test('an evaluated command retains observed usage when execution admission fails', async t => {
-  const f = await fixture(t, { riskEvaluators: { jev: { model: 'jev-1.14.0', assess: async () => ({ ...low, inputTokens: 17, outputTokens: 3 }) } },
+  let modelCalls = 0;
+  const f = await fixture(t, { riskEvaluators: { jev: { model: 'jev-1.14.0', assess: async () => { modelCalls++; return { ...low, inputTokens: 17, outputTokens: 3 }; } } },
     audit: event => { if (event.action === 'policy-execution-started') throw Error('synthetic audit unavailable'); } });
   await f.policy({ commands: [], modelExecution: true, thresholds: { jev: threshold('jev-1.14.0') } });
-  const job = await f.run('sudo id');
-  assert.equal(job.state, 'pending'); assert.equal(job.decision.reasonCode, 'execution_start_failed'); assert.equal(job.decision.dispatchFailureReason, 'audit_failed'); assert.equal(job.decision.dispatchFailureStage, 'start_audit');
-  assert.equal(job.decision.decision, 'review'); assert.equal(job.approvalMode, undefined);
+  const key = 'audit-evaluated-failed-0001', job = await f.run('sudo id', key);
+  assert.equal(job.state, 'failed'); assert.equal(job.decision.reasonCode, 'model_passed'); assert.equal(job.decision.dispatchFailure, 'not_dispatched');
+  assert.equal(job.decision.dispatchFailureReason, 'audit_failed'); assert.equal(job.decision.dispatchFailureStage, 'start_audit');
+  assert.equal(job.decision.decision, 'execute'); assert.equal(job.approvalMode, 'automatic');
   assert.equal(job.decision.assessment.inputTokens, 17); assert.equal(job.decision.assessment.outputTokens, 3);
-  assert.equal(f.executions.length, 0);
+  assert.equal(job.result.failed, true); assert.equal(job.result.execution.remoteState, 'not_dispatched'); assert.equal(job.result.execution.requiresReconciliation, false);
+  assert.equal(f.app.targets.select().queue.operationStore.get(job.id).state, 'failed'); assert.equal(f.executions.length, 0);
+  await f.restart(); const replay = await f.run('sudo id', key);
+  assert.equal(replay.id, job.id); assert.equal(replay.state, 'failed');
+  assert.equal(replay.decision.assessment.inputTokens, 17); assert.equal(replay.decision.assessment.outputTokens, 3); assert.equal(modelCalls, 1); assert.equal(f.executions.length, 0);
 });
 
 test('unknown elevated programs and interpreter carriers route to independent evaluation', async t => {
@@ -596,7 +617,8 @@ test('test server bypass overrides deny, sudo and missing evaluators only after 
 
 test('test server automatic command waits for execution capacity and replay never dispatches twice', async t => {
  const held=Promise.withResolvers(),entered=Promise.withResolvers(),executed=[];
- const f=await fixture(t,{executeCommand:async(_profile,command)=>{executed.push(command);if(command==='sudo first'){entered.resolve();await held.promise;}return{failed:false,texts:['ok']};}});
+ // This case owns one execution slot regardless of host CPU capacity.
+ const f=await fixture(t,{env:{...env,BRIDGE_MAX_CONCURRENCY:'1'},executeCommand:async(_profile,command)=>{executed.push(command);if(command==='sudo first'){entered.resolve();await held.promise;}return{failed:false,texts:['ok']};}});
  await f.policy({commands:[],testServer:true,externalDisclosure:false});
  await new Promise(resolve=>f.app.mcpHttp.listen(0,'127.0.0.1',resolve));
  const client=new Client({name:'execution-queue-contract',version:'1'});
@@ -628,7 +650,8 @@ test('test server automatic command waits for execution capacity and replay neve
 
 test('application shutdown cancels queued automatic work and drains only the active command', {timeout:10000}, async t => {
  const held=Promise.withResolvers(),entered=Promise.withResolvers(),executed=[];
- const f=await fixture(t,{executeCommand:async(_profile,command)=>{executed.push(command);entered.resolve();await held.promise;return{failed:false,texts:['ok']};}});
+ // Shutdown must find one active operation and a second awaiting the same slot.
+ const f=await fixture(t,{env:{...env,BRIDGE_MAX_CONCURRENCY:'1'},executeCommand:async(_profile,command)=>{executed.push(command);entered.resolve();await held.promise;return{failed:false,texts:['ok']};}});
  await f.policy({commands:[],testServer:true,externalDisclosure:false});
  try {
   const first=await f.app.targets.commands.run('sudo first');await entered.promise;
@@ -653,7 +676,11 @@ test('test server secret is mandatory for policy registration, rechecked on save
  assert.equal((await f.api('/api/command-policy',{...proposal,reviewToken:review.reviewToken,acknowledged:true})).status,409);
  assert.equal((await f.api('/api/command-policy/review',proposal)).status,409);
  value='2'.repeat(64);await f.policy({testServer:true,commands:[],externalDisclosure:false});value=undefined;
- const job=await f.run('sudo id');assert.equal(job.state,'failed');assert.equal(f.executions.length,0);
+ // Revocation is refused by the server guard before any adapter invocation;
+ // transport ambiguity cannot replace this known not-dispatched outcome.
+ const key='test-secret-revoked-key-0001',job=await f.run('sudo id',key);assert.equal(job.state,'failed');assert.equal(f.executions.length,0);assert.equal(f.inputs.length,0);
+ assert.equal(job.result.execution.remoteState,'not_dispatched');assert.equal(job.result.execution.requiresReconciliation,false);
+ const replay=await f.run('sudo id',key);assert.equal(replay.id,job.id);assert.equal(replay.state,'failed');assert.equal(f.executions.length,0);assert.equal(f.inputs.length,0);
  assert.doesNotMatch(JSON.stringify([current,job,f.events,(await f.api('/api/command-policy')).body]),/2222222222222222|secret:\/\/fixture\/test-server|BRIDGE_TEST_SERVER_SECRET_REF/);
  await f.policy({testServer:false,commands:[],externalDisclosure:false});assert.equal((await f.run('sudo id')).state,'pending');
 });

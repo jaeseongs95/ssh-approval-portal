@@ -6,11 +6,13 @@ import { tmpdir } from 'node:os';
 import { Readable } from 'node:stream';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { ApprovalQueue } from './support/approval-runtime.mjs';
+import { ApprovalQueue, settledOutcome } from './support/approval-runtime.mjs';
 import { Artifacts } from '../src/adapters/storage/artifacts.mjs';
 import { createFileService } from '../src/application/files.mjs';
 
 const root = dirname(fileURLToPath(new URL('../package.json', import.meta.url)));
+// Lease identities and idempotent operation digests use native cryptographic primitives.
+const applicationCrypto = new Set(['desktop.mjs', 'operations.mjs'].map(name => resolve(root, 'src', 'application', name)));
 function importSpecifiers(text) {
   // 문자열·주석을 먼저 소비하고 import 구문에 속한 모듈 이름만 추출한다.
   const syntax = /\/\/[^\r\n]*|\/\*[\s\S]*?\*\/|"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|`(?:\\[\s\S]|[^`\\$]|\$(?!\{))*`|(?<![\w$.])import\b\s*(?:\(\s*|(?:[^"'`;]*?\bfrom\s*)?)(?<quote>['"])(?<specifier>[^'"\r\n]+)\k<quote>/g;
@@ -18,7 +20,7 @@ function importSpecifiers(text) {
 }
 function assertInwardImports(area, file, text) {
   for (const specifier of importSpecifiers(text)) {
-    if (area === 'domain' && specifier === 'node:crypto') continue;
+    if (specifier === 'node:crypto' && (area === 'domain' || (area === 'application' && applicationCrypto.has(resolve(file))))) continue;
     assert.ok(specifier.startsWith('.'), `${area} must not import infrastructure ${specifier}`);
     const target = resolve(dirname(file), specifier);
     const allowed = ['contracts', 'domain', ...(area === 'application' ? ['application'] : [])];
@@ -56,6 +58,8 @@ test('ARCH-IMPORT 일반 from 문자열은 무시하고 실제 정적·동적 �
   assert.deepEqual(importSpecifiers(source), ['../domain/validation.mjs', '../contracts/ports.mjs', '../domain/agent-cli.mjs', '../application/history.mjs', '../application/files.mjs']);
   const file = join(root, 'src', 'application', 'synthetic.mjs');
   assert.doesNotThrow(() => assertInwardImports('application', file, source));
+  for (const allowedFile of applicationCrypto) assert.doesNotThrow(() => assertInwardImports('application', allowedFile, "import { createHash } from 'node:crypto';"));
+  assert.throws(() => assertInwardImports('application', file, "import { createHash } from 'node:crypto';"), /must not import infrastructure node:crypto/);
   for (const text of ["import fs from 'node:fs';", "await import('node:fs');", "import 'node:fs';", "const value = `${await import('node:fs')}`;"]) {
     assert.throws(() => assertInwardImports('application', file, text), /must not import infrastructure node:fs/);
   }
@@ -71,7 +75,7 @@ test('PORT-01 stream and async-iterator FileSource substitutes preserve approval
     try {
       const store = new Artifacts(directory, { maxBytes: 16, budget: 32 }); await store.init();
       let service, executions = 0, closes = 0;
-      const queue = new ApprovalQueue({ classify: () => ({ class: 'safe' }), profile: 'fixture-write', target: 'fixture-target', executeOperation: async () => { executions++; return { failed: false, texts: ['done'] }; }, onTerminal: job => service.onTerminal(job) });
+      const queue = new ApprovalQueue({ classify: () => ({ class: 'safe' }), profile: 'fixture-write', target: 'fixture-target', executeOperation: async () => { executions++; return settledOutcome({ failed: false, texts: ['done'] }); }, onTerminal: job => service.onTerminal(job) });
       service = createFileService({ store, queue, transfers: {} });
       const source = { inspect: () => ({ allowed: true, sourceHost: 'files.example.test' }), open: async () => ({
         stream: kind === 'readable-stream' ? Readable.from([payload]) : (async function* () { yield payload.subarray(0, 2); yield payload.subarray(2); })(),

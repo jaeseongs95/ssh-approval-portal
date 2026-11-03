@@ -234,7 +234,11 @@ test('DISPATCH-BIND 큐 없는 읽기와 기존 수동 파일 승인은 유지�
 
 test('DISPATCH-BIND 원격 효과 뒤 응답 유실은 자동 재실행하지 않는다', async t => {
   const f = await fixture(t); f.loseReply(); const id = await f.submit('names');
-  assert.equal((await f.app.queue.wait(id)).state, 'failed');
+  const result = await f.app.queue.wait(id);
+  assert.equal(result.state, 'unknown');
+  assert.equal(result.result.execution.reason, 'transport_lost');
+  assert.equal(result.result.execution.remoteState, 'unknown');
+  assert.equal(result.result.execution.automaticReplay, false);
   assert.equal(f.effects.command, 1); assert.throws(() => f.app.queue.start(id)); assert.equal(f.effects.command, 1);
 });
 
@@ -251,6 +255,9 @@ test('DISPATCH-CLEANUP 부분 전송 뒤 승인 철회는 게시·수신을 막�
     gate.release.resolve();
     const result = await f.app.queue.wait(id);
     assert.equal(result.state, 'failed'); assert.equal(f.effects.publish, 0);
+    assert.equal(result.result.execution.reason, 'input_failed'); assert.equal(result.result.execution.remoteState, 'exited');
+    assert.equal(result.result.execution.exitCode, 1); assert.equal(result.result.execution.cleanupComplete, true);
+    assert.equal(result.result.execution.requiresReconciliation, false); assert.equal(result.result.data.remoteCleanup, 'confirmed');
     assert.equal(f.effects.sftp, flow === 'upload' ? 1 : 0);
     assert.equal(f.effects.snapshot, flow === 'download' ? 1 : 0);
     assert.equal(f.effects.cleanup, 1); assert.equal(f.remote.has(ownStage), false);
@@ -276,7 +283,9 @@ test('DISPATCH-CLEANUP 원래 대상·연결이 달라지면 삭제하지 않고
     if (change === 'replaced-client') connection.client = { ...connection.client };
     gate.release.resolve();
     const result = await f.app.queue.wait(id);
-    assert.equal(result.state, 'failed'); assert.equal(result.result.data.remoteCleanup, 'unconfirmed');
+    assert.equal(result.state, 'unknown'); assert.equal(result.result.data.remoteCleanup, 'unconfirmed');
+    assert.equal(result.result.execution.remoteState, 'unknown'); assert.equal(result.result.execution.cleanupComplete, false);
+    assert.equal(result.result.execution.requiresReconciliation, true); assert.equal(result.result.execution.automaticReplay, false);
     const transferId = ownStage.split('/').at(-1).slice(0, -5);
     assert.equal(result.result.data.transferId, transferId);
     const presented = presentJob(result);
@@ -293,12 +302,29 @@ test('DISPATCH-CLEANUP 본 작업 뒤 정리 응답이 거부·불완전이면 �
   for (const flow of ['upload', 'download']) for (const mode of ['refused', 'missing-confirmation']) await t.test(flow + '/' + mode, async t => {
     const f = await fixture(t); f.failCleanup(mode); const id = await f.submit(flow);
     const result = await f.app.queue.wait(id), [ownStage] = [...f.stages];
-    assert.equal(result.state, 'failed'); assert.equal(result.result.data.remoteCleanup, 'unconfirmed');
+    assert.equal(result.state, 'unknown'); assert.equal(result.result.data.remoteCleanup, 'unconfirmed');
+    assert.equal(result.result.execution.remoteState, 'unknown'); assert.equal(result.result.execution.cleanupComplete, false);
+    assert.equal(result.result.execution.requiresReconciliation, true); assert.equal(result.result.execution.automaticReplay, false);
     assert.equal(presentJob(result).result.structuredContent.transferId, ownStage.split('/').at(-1).slice(0, -5));
     assert.match(result.result.texts[0], /이미 반영됐거나.*남아 있을 수/);
     assert.equal(f.effects[flow === 'upload' ? 'publish' : 'snapshot'], 1); assert.equal(f.effects.sftp, 1);
     assert.equal(f.effects.cleanup, 1); assert.deepEqual(f.remote.get(ownStage), bytes);
     if (flow === 'upload') assert.deepEqual(f.remote.get('C:/approved/output.bin'), bytes);
     assert.throws(() => f.app.queue.start(id));
+  });
+});
+
+test('DISPATCH-CLEANUP 파일 헬퍼 효과 뒤 응답 유실은 정리 효과가 있어도 unknown을 보존한다', async t => {
+  for (const flow of ['upload', 'download']) await t.test(flow, async t => {
+    const f = await fixture(t); f.loseReply(); const id = await f.submit(flow);
+    const result = await f.app.queue.wait(id);
+    assert.equal(result.state, 'unknown'); assert.equal(result.result.execution.remoteState, 'unknown');
+    assert.equal(result.result.execution.requiresReconciliation, true); assert.equal(result.result.execution.automaticReplay, false);
+    assert.equal(f.effects[flow === 'upload' ? 'publish' : 'snapshot'], 1); assert.equal(f.effects.cleanup, 1);
+    assert.equal(f.effects.sftp, flow === 'upload' ? 1 : 0);
+    assert.equal(f.remote.has('C:/approved/output.bin'), flow === 'upload');
+    assert.deepEqual(f.remote.get('C:/approved/input.bin'), bytes);
+    assert.throws(() => f.app.queue.start(id));
+    assert.equal(f.effects[flow === 'upload' ? 'publish' : 'snapshot'], 1);
   });
 });

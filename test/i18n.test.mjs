@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
+import { Script } from 'node:vm';
 import { resolveLocale, validateCatalogs, translate } from '../web/src/locale.js';
 import { createWebI18n, webCatalogs } from '../web/src/i18n.js';
 import { createCardI18n, cardCatalogs } from '../ui/src/i18n.js';
@@ -32,6 +33,9 @@ test('all actual ko/en catalogs have valid message syntax, identical keys and pl
   assert.equal(validateCatalogs({ en: { '개': '' }, ko: { '개': '개' } }), true);
   assert.equal(translate(uiCatalogs, 'en', '개'), '');
   assert.equal(translate(uiCatalogs, 'ko', '개'), '개');
+  const windowsHint = '예: whoami.exe, Microsoft.PowerShell.Management\\Get-Location, C:\\Tools\\tool.exe. 이름은 UTF-8 512바이트까지이며 대소문자를 구분하지 않습니다.';
+  assert.equal(translate(uiCatalogs, 'ko', windowsHint), windowsHint);
+  assert.equal(translate(uiCatalogs, 'en', windowsHint), 'Examples: whoami.exe, Microsoft.PowerShell.Management\\Get-Location, C:\\Tools\\tool.exe. Names allow up to 512 UTF-8 bytes and are case-insensitive.');
   assert.equal(translate(capacityCatalogs, 'en-GB', '현재 실행 대기 {queued}개 · 실행 중 {running}개', { queued: 3, running: 2 }), 'Currently queued: 3 · running: 2');
   assert.equal(translate({ en: { key: 'Fallback' } }, 'ko', 'key'), 'Fallback');
 });
@@ -41,8 +45,12 @@ test('literal Korean UI translation callsites exist in their actual English cata
     for (const file of await readdir(new URL('../' + folder, import.meta.url))) {
       if (!file.endsWith('.js') || ['capacity.js', 'desktop.js'].includes(file)) continue;
       const source = await readFile(new URL('../' + folder + file, import.meta.url), 'utf8');
-      const calls = new RegExp('\\b' + name + "\\('([^'\\n]*)'\\)", 'g');
-      for (const [, key] of source.matchAll(calls)) if (/[가-힣]/.test(key)) assert.ok(Object.hasOwn(catalogs.en, key), file + ': ' + key);
+      const calls = new RegExp(String.raw`\b${name}\('((?:\\.|[^'\\\r\n])*)'\)`, 'g');
+      for (const [, literal] of source.matchAll(calls)) {
+        // The regex admits only one quoted literal; use the JS parser to decode escapes as callers do.
+        const key = new Script("'" + literal + "'").runInThisContext();
+        if (/[가-힣]/.test(key)) assert.ok(Object.hasOwn(catalogs.en, key), file + ': ' + key);
+      }
     }
   }
 });

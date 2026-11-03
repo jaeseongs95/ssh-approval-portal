@@ -52,10 +52,13 @@ export class Artifacts {
   recoveryStatus() { return Object.freeze({ state: this.#orphans.length ? 'recovery-required' : 'clear',
     reservedBytes: this.#orphans.reduce((n, x) => n + x.reservedBytes, 0), entries: Object.freeze(this.#orphans.map(x => Object.freeze({ ...x }))) }); }
   hasActiveWork() { return this.#removing.size > 0 || [...this.#items.values()].some(x => x.busy || x.pinned || x.state === 'staging'); }
-  async init() {
+  async prepareRoot() {
     await mkdir(this.#root, { recursive: true, mode: 0o700 });
     const s = await lstat(this.#root);
     if (!privateDirectory(s)) throw Error('Transfer root must be private and owned by the service');
+  }
+  async init() {
+    await this.prepareRoot();
     if (this.#items.size) throw Error('Artifact store already initialized');
     // Each synced manifest is the commit point. A crash may leave an unacknowledged
     // byte tail, which is rolled back before accepting another chunk.

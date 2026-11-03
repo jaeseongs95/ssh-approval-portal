@@ -30,6 +30,10 @@ export function createDesktopService({ adapter, authorize, verifyTarget, maxSess
       catch (error) { cleanupError = error.code ?? 'DESKTOP_RELEASE_FAILED'; }
       finally {
         item.controller.abort();
+        // Keep the physical resource reserved until even a late open settles and closes.
+        if (!item.desktop && item.opening) {
+          try { item.desktop = await item.opening; } catch { /* The original open caller receives its failure. */ }
+        }
         try { await item.desktop?.close(); }
         catch (error) { cleanupError ??= error.code ?? 'DESKTOP_CLOSE_FAILED'; }
         sessions.delete(item.id);
@@ -87,7 +91,8 @@ export function createDesktopService({ adapter, authorize, verifyTarget, maxSess
       // Reserve synchronously before opening the transport; no quota oversubscription.
       sessions.set(item.id, item); resources.set(resourceKey, item.id); arm(item);
       try {
-        item.desktop = await adapter.open({ binding, signal: item.controller.signal });
+        item.opening = Promise.resolve(adapter.open({ binding, signal: item.controller.signal }));
+        item.desktop = await item.opening;
         if (item.closed) { await item.desktop.close(); desktopFail('DESKTOP_EXPIRED'); }
         await active(item); return view(item);
       } catch (error) {

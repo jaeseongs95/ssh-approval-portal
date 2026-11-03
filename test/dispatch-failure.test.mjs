@@ -43,7 +43,8 @@ test('DISPATCH-05 finishEvaluation persistence failure is not busy and normal re
 test('DISPATCH-06 a rejected test-server source releases its plan even when failure persistence also fails',async()=>{
  let rejectWrites=false;
  const f=fixture({testServer:true,audit:e=>{if(e.action==='policy-execution-started'){rejectWrites=true;throw Error('SYNTHETIC_PRIVATE_AUDIT');}},save:()=>{if(rejectWrites)throw Error('SYNTHETIC_PRIVATE_REJECTION_SAVE');}});
- const request=await f.automation.runSource({source:'pass\n',cwd:'/tmp'});await assert.rejects(f.automation.drain());
+ const request=await f.automation.runSource({source:'pass\n',cwd:'/tmp'});await f.automation.drain();await f.q.wait(request.job.id);
  const job=f.q.get(request.job.id);assert.equal(job.state,'failed');assert.equal(job.decision.dispatchFailureReason,'audit_failed');assert.equal(job.decision.dispatchFailureStage,'start_audit');assert.equal(f.effects,0);assert.equal(f.terminals,1);assert.deepEqual(f.budget,{bytes:0,count:0});assert.throws(()=>f.automation.sourcePlan(job.id));
+ assert.match(job.auditError,/must not be retried/);assert.equal(f.q.operationStore.get(job.id).result.execution.remoteState,'not_dispatched');
  assert.doesNotMatch(JSON.stringify([job,f.events]),/SYNTHETIC_PRIVATE/);
 });

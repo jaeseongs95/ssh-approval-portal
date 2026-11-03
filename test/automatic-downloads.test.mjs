@@ -58,7 +58,14 @@ test('automatic download queues behind busy execution but stale target and audit
     try{const first=f.download(),second=f.download();assert.equal(second.state,'queued');assert.equal(second.approvalMode,'automatic');assert.equal(f.effects.length,0);release();await f.finish(first);await f.finish(second);assert.equal(f.app.queue.get(second.id).state,'completed');assert.equal(f.effects.length,2);}finally{release();}
     f.profiles.get('alpha-read').host='changed.test';const stale=f.download();assert.equal(stale.state,'pending');f.app.queue.deny(stale.id);assert.equal(f.effects.length,2);
   });
-  await fixture(async f=>{await f.set(true);const job=f.download();assert.equal(job.state,'pending');assert.equal(job.approvalMode,undefined);assert.equal(f.effects.length,0);f.app.queue.deny(job.id);},{failAudit:true});
+  await fixture(async f=>{
+    await f.set(true);const job=f.download();assert.equal(job.state,'queued');assert.equal(job.approvalMode,'automatic');assert.equal(f.effects.length,0);
+    assert.throws(()=>f.app.targets.select('alpha').queue.startDownload(job.id),/not pending/);
+    const failed=await f.finish(job);assert.equal(failed.state,'failed');assert.equal(failed.targetId,'alpha');
+    assert.equal(failed.decision.dispatchFailure,'not_dispatched');assert.equal(failed.decision.dispatchFailureReason,'audit_failed');assert.equal(failed.decision.dispatchFailureStage,'start_audit');
+    assert.equal(failed.result.execution.remoteState,'not_dispatched');assert.equal(f.effects.length,0);
+    assert.throws(()=>f.app.targets.select('alpha').queue.startDownload(job.id),/not pending/);await f.finish(job);assert.equal(f.effects.length,0);
+  },{failAudit:true});
 });
 
 test('global automation OFF still permits owner-approved downloads, never policy execution',async()=>fixture(async f=>{

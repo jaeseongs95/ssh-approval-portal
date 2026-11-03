@@ -11,6 +11,18 @@ export function createFileService({ store, queue, transfers, platform = 'linux',
   const shutdown = new AbortController(), imports = new Set(), submissions = new Map();
   const guard = () => { if (shutdown.signal.aborted || queue.maintenance) throw Error('Maintenance or file service closed'); };
   const submittedUpload = id => queue.listAll().find(job => job.kind === 'upload' && job.operation.artifactId === id);
+  const originalUpload = artifact => {
+    const matches = queue.listAll().filter(job => job.kind === 'upload' && job.operation.artifactId === artifact.id);
+    if (matches.length > 1) throw Error('Ambiguous upload request');
+    const job = matches[0];
+    if (artifact.submissionId && (!job || job.id !== artifact.submissionId || !queue.get(artifact.submissionId))) throw Error('Original upload request unavailable; do not replay');
+    if (!job) return;
+    const operation = job.operation, binding = fileTargetBinding(operation);
+    if (['fileName', 'remotePath', 'size', 'sha256', 'overwrite', 'elevate', 'uploadProtocol', 'operationKey'].some(key => operation[key] !== artifact[key]) ||
+        (artifact.fileTargetBound === true ? !binding || binding.targetId !== artifact.targetId || binding.targetRevision !== artifact.targetRevision : binding !== undefined) ||
+        (job.targetId !== undefined && (job.targetId !== artifact.targetId || job.targetRevision !== artifact.targetRevision))) throw Error('Upload does not match original request');
+    return job;
+  };
   const submitUpload = artifact => {
     validate(artifact.remotePath, artifact.elevate);
     const job = queue.submitOperation({ kind: 'upload', artifactId: artifact.id, remotePath: artifact.remotePath,
@@ -68,9 +80,14 @@ export function createFileService({ store, queue, transfers, platform = 'linux',
     async beginUpload(meta, binding) { validate(meta.remotePath, meta.elevate); guard(); return store.begin({ ...meta, ...(binding ? { ...binding, fileTargetBound: true } : {}) }); },
     async appendUpload({ id, sequence, bytes }) { guard(); return store.append(id, sequence, bytes); },
     async finishUpload(id, verifyTarget) {
-      guard(); const artifact = await store.finish(id);
+      guard();
+      // Legacy HTTP/UI completion keeps its one-shot contract. Check durable
+      // submission identity before allocating another approval request.
+      if (originalUpload(store.get(id))) throw Error('Upload already submitted');
+      const artifact = await store.finish(id);
       try {
         guard();
+        if (originalUpload(artifact)) throw Error('Upload already submitted');
         if (artifact.fileTargetBound === true) {
           if (typeof verifyTarget !== 'function') throw Error('Bound file target verifier unavailable');
           verifyTarget();
