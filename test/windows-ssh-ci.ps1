@@ -201,6 +201,57 @@ try {
     Set-FixtureAcl $outsideRoot $accountSid 'Modify' -MachineOnly
     $outsideFile = Join-Path $outsideRoot 'outside.bin'
     Write-Utf8 $outsideFile '영역 밖 원본'
+
+    # Keep the existing controlled positive destination. Separate fixtures retain
+    # inherit-only Creator Owner and ordinary inherited Users create ACEs instead
+    # of repairing the live-style ACL until it becomes an artificial success.
+    $writerIoRoot = Join-Path $fixtureRoot 'writer-io-only'
+    New-Item -ItemType Directory -Path $writerIoRoot | Out-Null
+    Set-FixtureAcl $writerIoRoot $accountSid 'Modify' -MachineOnly
+    $creatorOwner = [Security.Principal.SecurityIdentifier]::new('S-1-3-0')
+    $usersSid = [Security.Principal.SecurityIdentifier]::new('S-1-5-32-545')
+    $ioAcl = Get-Acl -LiteralPath $writerIoRoot
+    $ioAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($creatorOwner, 'FullControl',
+        [Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit',
+        [Security.AccessControl.PropagationFlags]::InheritOnly, [Security.AccessControl.AccessControlType]::Allow))
+    Set-Acl -LiteralPath $writerIoRoot -AclObject $ioAcl
+
+    $writerDefaultParent = Join-Path $fixtureRoot 'writer-default-parent'
+    New-Item -ItemType Directory -Path $writerDefaultParent | Out-Null
+    Set-FixtureAcl $writerDefaultParent $accountSid 'Modify' -MachineOnly
+    $defaultAcl = Get-Acl -LiteralPath $writerDefaultParent
+    $defaultAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($usersSid, 'ReadAndExecute',
+        [Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit',
+        [Security.AccessControl.PropagationFlags]::None, [Security.AccessControl.AccessControlType]::Allow))
+    foreach ($rights in @([Security.AccessControl.FileSystemRights]::CreateFiles, [Security.AccessControl.FileSystemRights]::CreateDirectories)) {
+        $defaultAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($usersSid, $rights,
+            [Security.AccessControl.InheritanceFlags]::ContainerInherit,
+            [Security.AccessControl.PropagationFlags]::None, [Security.AccessControl.AccessControlType]::Allow))
+    }
+    Set-Acl -LiteralPath $writerDefaultParent -AclObject $defaultAcl
+    $writerDefaultChild = Join-Path $writerDefaultParent 'inherited-child'
+    New-Item -ItemType Directory -Path $writerDefaultChild | Out-Null
+    # Add CO after child creation so no separate runner writer ACE can become an
+    # alternative refusal cause. The Users create ACEs stay genuinely inherited.
+    $childAcl = Get-Acl -LiteralPath $writerDefaultChild
+    $childAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($creatorOwner, 'FullControl',
+        [Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit',
+        [Security.AccessControl.PropagationFlags]::InheritOnly, [Security.AccessControl.AccessControlType]::Allow))
+    Set-Acl -LiteralPath $writerDefaultChild -AclObject $childAcl
+    $writerAclFixtures = foreach ($directory in @($writerIoRoot, $writerDefaultChild)) {
+        $sddl = [string](Get-Acl -LiteralPath $directory).Sddl
+        $descriptor = [Security.AccessControl.RawSecurityDescriptor]::new($sddl)
+        $aces = foreach ($ace in $descriptor.DiscretionaryAcl) {
+            if ($ace -isnot [Security.AccessControl.QualifiedAce]) { throw 'writer fixture unsupported ACE' }
+            $actor = if ($ace.SecurityIdentifier.Value -ceq 'S-1-3-0') { 'creator-owner' }
+                elseif ($ace.SecurityIdentifier.Value -ceq 'S-1-5-32-545') { 'users' } else { 'trusted' }
+            @{ actor = $actor; kind = $ace.AceQualifier.ToString(); flags = [int]$ace.AceFlags; mask = [int]$ace.AccessMask }
+        }
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try { $aclHash = [BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($sddl))).Replace('-', '').ToLowerInvariant() }
+        finally { $sha.Dispose() }
+        @{ directory = $directory; aclSha256 = $aclHash; aces = @($aces) }
+    }
     New-Item -ItemType Junction -Path (Join-Path $fileRoot 'junction') -Target $outsideRoot | Out-Null
     New-Item -ItemType SymbolicLink -Path (Join-Path $fileRoot 'symlink.bin') -Target $outsideFile | Out-Null
 
@@ -314,6 +365,7 @@ Subsystem sftp $sftpPath
         configPath = $configPath; wrongClientConfig = $wrongClientConfig; wrongHostConfig = $wrongHostConfig
         helper = $installed.helper; stageRoot = $installed.stageRoot; fileRoot = $installed.fileRoot
         artifactRoot = $artifactRoot; outsideFile = $outsideFile
+        writerAclFixtures = @($writerAclFixtures)
         modulesRoot = $modulesRoot; moduleMarkers = $moduleMarkers
         pythonExecutable = $pythonExecutable
         cliSmokeIsolation = @{ ephemeral = $true; accountName = $accountName; accountSid = $accountSid; nodeExecutable = @(Get-Command node.exe -CommandType Application -ErrorAction Stop)[0].Source }
@@ -321,7 +373,7 @@ Subsystem sftp $sftpPath
         serverLog = $serverLog
         adminConfigPath = $adminConfigPath; adminHelper = $adminInstalled.helper
         adminFileRoot = $adminInstalled.fileRoot; adminStageRoot = $adminInstalled.stageRoot
-    } | ConvertTo-Json -Compress)
+    } | ConvertTo-Json -Compress -Depth 6)
     Set-FixtureAcl $fixturePath ''
     $env:AGS_WINDOWS_SSH_FIXTURE = $fixturePath
     if ($env:AGS_WINDOWS_CLI_PACKAGE_SMOKE -eq '1') {

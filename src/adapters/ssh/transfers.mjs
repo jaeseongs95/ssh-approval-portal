@@ -17,9 +17,28 @@ const fileFailures = new Map([
   ['OPERATION_FAILED', '파일 작업이 실패했습니다. 관리자가 보호된 서버 진단과 대상 상태를 확인하세요. 파일이 이미 반영됐을 수 있으므로 대상 상태를 확인하기 전 재전송하지 마세요. 자동으로 재시도하지 않습니다.'],
 ]);
 
+const policyReasons = new Set(['UNTRUSTED_OWNER', 'MISSING_DACL', 'UNSAFE_ANCESTOR', 'UNTRUSTED_WRITER', 'UNSUPPORTED_ACE', 'SECURITY_DESCRIPTOR_TOO_LARGE']);
+const nativeSteps = new Set(['native', 'create_directory', 'inspect', 'open', 'filesystem', 'final_path', 'read_input', 'read_security', 'remove',
+  'rename_replace', 'rename_new', 'write_security', 'write_times', 'verify_security', 'verify_owner', 'verify_dacl', 'verify_control', 'verify_times', 'read_label', 'write_label', 'verify_label']);
+const trustPolicyFailure = '현재 경로는 신뢰된 소유자·DACL·상위 경로와 제한된 쓰기 허용 주체를 요구합니다. 이 신뢰 정책이 작업을 거부했습니다. 관리자가 현재 경로의 신뢰 요건과 대상 상태를 확인하세요. ACL 변경·권한 승격·재전송은 자동으로 수행하지 않습니다.';
+
+function fileDiagnostic(data) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return undefined;
+  // Accept only explicit, typed helper diagnostics; an error code alone proves no origin.
+  if (data.origin === 'policy' && policyReasons.has(data.policyReason) && data.nativeStep === undefined && data.nativeError === undefined) {
+    return { origin: 'policy', policyReason: data.policyReason };
+  }
+  if (data.origin === 'os' && data.policyReason === undefined && nativeSteps.has(data.nativeStep) &&
+      Number.isInteger(data.nativeError) && data.nativeError >= 0 && data.nativeError <= 2147483647) {
+    return { origin: 'os', nativeStep: data.nativeStep, nativeError: data.nativeError };
+  }
+  return undefined;
+}
+
 class RemoteFileError extends Error {
-  constructor(code = 'OPERATION_FAILED', allowedRoot) {
+  constructor(code = 'OPERATION_FAILED', allowedRoot, diagnostic) {
     super('Remote file operation failed'); this.code = code;
+    if (diagnostic) this.diagnostic = diagnostic;
     if (code === 'PATH_OUTSIDE_ALLOWED_ROOT' && typeof allowedRoot === 'string') {
       try { windowsRemotePath(allowedRoot); this.allowedRoot = allowedRoot; } catch { /* Ignore invalid helper metadata. */ }
     }
@@ -28,8 +47,13 @@ class RemoteFileError extends Error {
 
 function fileFailure(error) {
   if (!(error instanceof RemoteFileError)) throw error;
-  return { failed: true, texts: [`${error.code}: ${fileFailures.get(error.code)}`], data: { errorCode: error.code,
-    ...(error.allowedRoot ? { allowedRoot: error.allowedRoot } : {}) } };
+  let message = fileFailures.get(error.code);
+  if (error.diagnostic?.origin === 'policy') message = trustPolicyFailure;
+  else if (error.code === 'PERMISSION_DENIED' && error.diagnostic?.origin === 'os' && [32, 33].includes(error.diagnostic.nativeError)) {
+    message = '원격 파일에 공유·잠금 충돌이 발생했습니다. 관리자가 대상 파일과 사용 중인 작업의 상태를 확인하세요. 대상 상태를 확인하기 전 재전송하지 마세요. 자동으로 재시도하지 않습니다.';
+  }
+  return { failed: true, texts: [`${error.code}: ${message}`], data: { errorCode: error.code,
+    ...(error.allowedRoot ? { allowedRoot: error.allowedRoot } : {}), ...(error.diagnostic ? { diagnostic: error.diagnostic } : {}) } };
 }
 
 const cleanupUnconfirmed = transferId => ({ failed: true,
@@ -61,9 +85,11 @@ export class Transfers {
     let data;
     try { data = JSON.parse(result.stdout); } catch { throw new RemoteFileError(); }
     if (result.exitCode !== 0 || result.signal) {
-      // Trust only the installed helper's failure code, never its text or extra fields.
+      // Trust only the installed helper's failure code and bounded diagnostics, never its text.
       if (result.exitCode === 1 && !result.signal && data?.errorCode === 'PATH_OUTSIDE_ALLOWED_ROOT') this.observeRoot(data.allowedRoot);
-      throw new RemoteFileError(result.exitCode === 1 && !result.signal && fileFailures.has(data?.errorCode) ? data.errorCode : undefined, data?.allowedRoot);
+      const recognized = result.exitCode === 1 && !result.signal && fileFailures.has(data?.errorCode);
+      throw new RemoteFileError(recognized ? data.errorCode : undefined, data?.allowedRoot,
+        recognized && this.platform === 'windows' ? fileDiagnostic(data) : undefined);
     }
     if (!data || typeof data !== 'object' || Array.isArray(data) || data.error || data.errorCode) throw new RemoteFileError();
     if (bypassRoot && data.rootPolicyApplied !== 'test-server-bypass') throw new RemoteFileError('PATH_POLICY_UNSUPPORTED');

@@ -20,7 +20,8 @@ test('failed SSH connection releases reserved download quota and creates no loca
 });
 
 const bytes = Buffer.from([0, 255, 1, 128]);
-async function fixture({ uploadError = false, downloadError = false, wrongHash = false, cleanupError = false, helperResponse } = {}) {
+async function fixture({ uploadError = false, downloadError = false, wrongHash = false, cleanupError = false, helperResponse,
+  platform = 'linux', pathPolicy } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'ssh-transport-contract-'));
   const store = new Artifacts(root, { maxBytes: 16, budget: 16 }); await store.init();
   const calls = [], profiles = [], uploaded = [], handles = [];
@@ -36,6 +37,8 @@ async function fixture({ uploadError = false, downloadError = false, wrongHash =
       async call(command, payload) {
         calls.push({ command, payload });
         if (payload.action === 'cleanup' && cleanupError) throw Error('cleanup disconnected');
+        if (payload.action === 'policy') return { exitCode: 0, stdout: JSON.stringify({ protocol: 'file-path-policy-v1',
+          rootPolicyApplied: 'test-server-bypass', allowedRoot: 'C:/approved' }) };
         if (payload.action !== 'cleanup' && helperResponse) return helperResponse;
         const data = payload.action === 'snapshot' ? { size: bytes.length, sha256: wrongHash ? '0'.repeat(64) : hash(bytes) } :
           payload.action === 'publish' ? { published: true, size: bytes.length, sha256: hash(bytes) } : { cleaned: true };
@@ -53,12 +56,13 @@ async function fixture({ uploadError = false, downloadError = false, wrongHash =
       },
     };
   } };
-  const transfers = new Transfers(null, store, { readProfile: 'reader', writeProfile: 'writer', transport });
-  return { store, transfers, calls, profiles, uploaded, handles, root, close: () => rm(root, { recursive: true }) };
+  const transfers = new Transfers(null, store, { platform, readProfile: 'reader', writeProfile: 'writer', transport,
+    ...(pathPolicy ? { pathPolicy } : {}) });
+  return { store, transfers, calls, profiles, uploaded, handles, root, platform, close: () => rm(root, { recursive: true }) };
 }
 
 async function uploadOperation(f) {
-  const item = await f.store.begin({ fileName: 'x', remotePath: '/tmp/missing-parent/x', size: 4, sha256: hash(bytes) });
+  const item = await f.store.begin({ fileName: 'x', remotePath: f.platform === 'windows' ? 'C:/outside/x' : '/tmp/missing-parent/x', size: 4, sha256: hash(bytes) });
   await f.store.append(item.id, 0, bytes); await f.store.finish(item.id);
   return { kind: 'upload', artifactId: item.id, fileName: 'x', remotePath: item.remotePath,
     size: 4, sha256: hash(bytes), overwrite: false, elevate: false };
@@ -173,5 +177,100 @@ test('legacy, unknown, malformed and signalled helper errors expose only the fix
       assert.deepEqual(f.calls.map(x => x.payload.action), ['publish', 'cleanup']);
       assert.deepEqual(f.profiles, ['writer']); assert.deepEqual(f.handles.map(x => x.closed), [1]);
     } finally { await f.close(); }
+  }
+});
+
+// 진단 계약은 오류 원점의 allowlist만 공개한다. 실제 ACL·Win32 원점은
+// Windows helper/SSH suite가 검사하며 이 mock으로 실호스트 성공을 주장하지 않는다.
+const privateDiagnostic = 'RAW_HELPER credential=must-not-leak SDDL private-path';
+const refusedResponse = data => ({ exitCode: 1, stdout: JSON.stringify({ errorCode: 'PERMISSION_DENIED',
+  error: privateDiagnostic, message: privateDiagnostic, ...data }), stderr: privateDiagnostic });
+async function diagnosticFailure(data, direction = 'upload', options = {}) {
+  const f = await fixture({ platform: 'windows', pathPolicy: async () => ({ bypassRoot: true }),
+    helperResponse: refusedResponse(data), ...options });
+  try {
+    const operation = direction === 'upload' ? await uploadOperation(f)
+      : { kind: 'download', remotePath: f.platform === 'windows' ? 'C:/outside/x' : '/tmp/x', elevate: false };
+    const outcome = await f.transfers[direction](operation);
+    assert.equal(outcome.failed, true);
+    assert.doesNotMatch(JSON.stringify(outcome), /RAW_HELPER|credential|must-not-leak|SDDL|private-path/);
+    assert.deepEqual(f.calls.map(x => x.payload.action), [...(f.platform === 'windows' ? ['policy'] : []),
+      direction === 'upload' ? 'publish' : 'snapshot', 'cleanup']);
+    assert.deepEqual(f.profiles, [direction === 'upload' ? 'writer' : 'reader']);
+    for (const { command, payload } of f.calls) {
+      assert.notEqual(payload.elevate, true);
+      assert.doesNotMatch(command, /runas|Start-Process|sudo/);
+    }
+    if (direction === 'upload') { assert.deepEqual(Buffer.concat(f.uploaded), bytes); assert.deepEqual(f.handles.map(x => x.closed), [1]); }
+    else { assert.equal(f.store.reserved, 0); assert.equal(f.store.size, 0); assert.deepEqual(await readdir(f.root), []); }
+    return outcome;
+  } finally { await f.close(); }
+}
+
+test('WRITER-DIAG-01 정책 원점은 명시한 bounded reason만 보존하고 승격·재시도하지 않는다', async () => {
+  for (const policyReason of ['UNTRUSTED_OWNER', 'MISSING_DACL', 'UNSAFE_ANCESTOR', 'UNTRUSTED_WRITER',
+    'UNSUPPORTED_ACE', 'SECURITY_DESCRIPTOR_TOO_LARGE']) {
+    for (const direction of ['upload', 'download']) {
+      const outcome = await diagnosticFailure({ origin: 'policy', policyReason, arbitrary: privateDiagnostic }, direction);
+      assert.deepEqual(outcome.data, { errorCode: 'PERMISSION_DENIED', diagnostic: { origin: 'policy', policyReason } });
+    }
+  }
+});
+
+test('WRITER-DIAG-02 OS 원점은 검증한 단계와 정수만 공개하고 queue 실패를 유지한다', async () => {
+  for (const [nativeStep, nativeError] of [['open', 5], ['read_security', 32], ['rename_new', 33],
+    ['native', 0], ['write_security', 2147483647]]) {
+    for (const direction of ['upload', 'download']) {
+      const outcome = await diagnosticFailure({ origin: 'os', nativeStep, nativeError }, direction);
+      assert.deepEqual(outcome.data, { errorCode: 'PERMISSION_DENIED', diagnostic: { origin: 'os', nativeStep, nativeError } });
+      if ([32, 33].includes(nativeError)) assert.match(outcome.texts.join(' '), /공유·잠금 충돌.*대상.*상태.*자동으로 재시도하지 않습니다/);
+      else assert.doesNotMatch(outcome.texts.join(' '), /공유·잠금 충돌/);
+    }
+  }
+  const otherCode = await diagnosticFailure({ errorCode: 'OPERATION_FAILED', origin: 'os', nativeStep: 'open', nativeError: 32 });
+  assert.equal(otherCode.data.errorCode, 'OPERATION_FAILED');
+  assert.doesNotMatch(otherCode.texts.join(' '), /공유·잠금 충돌/);
+  const f = await fixture({ platform: 'windows', helperResponse: refusedResponse({ origin: 'os', nativeStep: 'open', nativeError: 5 }) });
+  try {
+    const queue = new ApprovalQueue({ classify: () => ({ class: 'safe' }), profile: 'writer', target: 'fixture',
+      executeOperation: operation => f.transfers.upload(operation) });
+    const pending = queue.submitOperation(await uploadOperation(f));
+    const job = await queue.approve(pending.id);
+    assert.equal(job.state, 'failed');
+    assert.equal(presentJob(job).result.isError, true);
+    assert.deepEqual(presentJob(job).result.structuredContent, { errorCode: 'PERMISSION_DENIED',
+      diagnostic: { origin: 'os', nativeStep: 'open', nativeError: 5 } });
+    assert.deepEqual(f.calls.map(x => x.payload.action), ['publish', 'cleanup']);
+    await assert.rejects(queue.approve(pending.id), /not pending/);
+  } finally { await f.close(); }
+});
+
+test('WRITER-DIAG-03 누락·위조·부분 진단은 추론 없이 전체 제외한다', async () => {
+  const malformed = [{}, { nativeStep: 'open', nativeError: 5 }, { origin: 'policy' },
+    { origin: 'policy', policyReason: privateDiagnostic }, { origin: 'policy', policyReason: true },
+    { origin: 'other', policyReason: 'UNTRUSTED_WRITER' }, { nativeStep: 'verify_owner', nativeError: 0 },
+    { origin: 'policy', policyReason: 'UNTRUSTED_WRITER', nativeStep: 'open' },
+    { origin: 'policy', policyReason: 'UNTRUSTED_WRITER', nativeError: 5 },
+    { origin: 'os', nativeStep: 'open', nativeError: 5, policyReason: 'UNTRUSTED_WRITER' },
+    { diagnostic: { origin: 'policy', policyReason: 'UNTRUSTED_WRITER' } },
+    ...[undefined, null, '5', true, -1, 1.5, 2147483648, 4294967295].map(nativeError => ({ origin: 'os', nativeStep: 'open', nativeError })),
+    ...[undefined, null, true, privateDiagnostic, 'OPEN'].map(nativeStep => ({ origin: 'os', nativeStep, nativeError: 5 }))];
+  for (const data of malformed) {
+    const outcome = await diagnosticFailure(data);
+    assert.deepEqual(outcome.data, { errorCode: 'PERMISSION_DENIED' });
+  }
+});
+
+test('WRITER-DIAG-04 진단은 Windows의 정상 helper 실패 protocol에서만 수용한다', async () => {
+  const data = { origin: 'policy', policyReason: 'UNTRUSTED_WRITER' };
+  const linux = await diagnosticFailure(data, 'upload', { platform: 'linux' });
+  assert.deepEqual(linux.data, { errorCode: 'PERMISSION_DENIED' });
+  for (const helperResponse of [
+    { ...refusedResponse(data), exitCode: 2 }, { ...refusedResponse(data), signal: 'TERM' },
+    refusedResponse({ ...data, errorCode: 'UNKNOWN_CODE' }),
+    { exitCode: 0, stdout: JSON.stringify({ errorCode: 'PERMISSION_DENIED', ...data }) },
+  ]) {
+    const outcome = await diagnosticFailure(data, 'upload', { helperResponse });
+    assert.deepEqual(outcome.data, { errorCode: 'OPERATION_FAILED' });
   }
 });

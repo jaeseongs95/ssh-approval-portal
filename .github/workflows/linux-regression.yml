@@ -79,6 +79,22 @@ jobs:
       - run: npm ci --ignore-scripts
       - name: Node regression
         run: node --test --test-skip-pattern='^CLI-LOOPBACK exact helper executes inspection/status over pinned SSH and preserves authentication bytes$' test/*.test.mjs
+      - name: Windows file diagnostics detect information loss in the previous adapter
+        shell: bash
+        run: |
+          set -euo pipefail
+          isolated="$(mktemp -d "$RUNNER_TEMP/writer-diagnostic.XXXXXX")"
+          git archive HEAD | tar -x -C "$isolated"
+          ln -s "$GITHUB_WORKSPACE/node_modules" "$isolated/node_modules"
+          git archive e01652dbb827a1dd5d5d0a85eea0ffcc5d25ef72 src/adapters/ssh/transfers.mjs | tar -x -C "$isolated"
+          red=0
+          (cd "$isolated" && node --test --test-reporter=tap --test-name-pattern='^WRITER-DIAG-0[12] ' test/transfer-failure.test.mjs) > "$RUNNER_TEMP/writer-diagnostic-red.tap" 2>&1 || red=$?
+          cat "$RUNNER_TEMP/writer-diagnostic-red.tap"
+          printf 'WRITER_DIAGNOSTIC_RED_EXIT=%s\n' "$red"
+          test "$red" -eq 1
+          grep -q '^# fail 2$' "$RUNNER_TEMP/writer-diagnostic-red.tap"
+          node --test --test-reporter=tap --test-name-pattern='^WRITER-DIAG-0[12] ' test/transfer-failure.test.mjs
+          sha256sum src/adapters/ssh/transfers.mjs test/transfer-failure.test.mjs
       - name: Test-mode file path regression detects the previous boundary
         shell: bash
         run: |

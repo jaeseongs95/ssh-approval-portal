@@ -2,7 +2,8 @@
 [CmdletBinding()]
 param(
     [string]$PowerShellExe = 'powershell.exe',
-    [string]$WorkRoot = (Join-Path 'C:/ProgramData' ('ssh-approval-helper-' + [Guid]::NewGuid().ToString('N')))
+    [string]$WorkRoot = (Join-Path 'C:/ProgramData' ('ssh-approval-helper-' + [Guid]::NewGuid().ToString('N'))),
+    [switch]$WriterInheritOnlyOnly
 )
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -92,6 +93,47 @@ function Refused($request, [string]$code) {
     Assert-True (!$result.raw.Contains('sensitive-marker')) 'content must never be returned'
 }
 function Stage($request) { [IO.File]::WriteAllBytes((Join-Path $script:stage ($request.id + '.part')), $script:bytes) }
+function Test-InheritOnlyWriter([string]$Parent) {
+    # INHERIT_ONLY_ACE is not effective on this directory (Microsoft Win32 contract).
+    # Keep the same assertion body for the full suite and the isolated old-native red run.
+    $directory = Join-Path $Parent 'writer-inherit-only'
+    $null = [IO.Directory]::CreateDirectory($directory)
+    $acl = Get-Acl -LiteralPath $directory
+    $creator = [Security.Principal.SecurityIdentifier]::new('S-1-3-0')
+    $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($creator,
+        [Security.AccessControl.FileSystemRights]::FullControl,
+        [Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit',
+        [Security.AccessControl.PropagationFlags]::InheritOnly, [Security.AccessControl.AccessControlType]::Allow))
+    Set-Acl -LiteralPath $directory -AclObject $acl
+    $before = (Get-Acl -LiteralPath $directory).Sddl
+    $descriptor = [Security.AccessControl.RawSecurityDescriptor]::new([string]$before)
+    $creatorAces = @($descriptor.DiscretionaryAcl | Where-Object {
+        $_ -is [Security.AccessControl.QualifiedAce] -and $_.SecurityIdentifier.Value -ceq 'S-1-3-0'
+    })
+    Assert-True ($creatorAces.Count -gt 0 -and @($creatorAces | Where-Object {
+        (([int]$_.AceFlags -band 8) -eq 0) -or (([int]$_.AccessMask -band 0x500D0156) -eq 0)
+    }).Count -eq 0) 'WRITER-ACL-01 fixture has only inherit-only Creator Owner writer ACEs'
+    $publish = Request 'publish' (Join-Path $directory 'binary.bin')
+    $publish.bypassRoot = $true
+    $snapshot = Request 'snapshot' $publish.remotePath
+    $snapshot.bypassRoot = $true
+    Stage $publish
+    try {
+        $result = Call $publish
+        Assert-True ($result.exitCode -eq 0 -and $result.data.published -and $result.data.rootPolicyApplied -ceq 'test-server-bypass') ('WRITER-ACL-01 inherit-only Creator Owner permits publish; ' + (Describe-Result $result))
+        Assert-True ([Convert]::ToBase64String([IO.File]::ReadAllBytes($publish.remotePath)) -ceq [Convert]::ToBase64String($script:bytes)) 'WRITER-ACL-01 published binary equals independent input'
+        $result = Call $snapshot
+        Assert-True ($result.exitCode -eq 0 -and $result.data.sha256 -ceq $script:digest) 'WRITER-ACL-01 inherit-only Creator Owner permits snapshot'
+        Assert-True ([Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $script:stage ($snapshot.id + '.part')))) -ceq [Convert]::ToBase64String($script:bytes)) 'WRITER-ACL-01 snapshot binary equals independent input'
+        Assert-True ((Get-Acl -LiteralPath $directory).Sddl -ceq $before) 'WRITER-ACL-01 helper never repairs directory ACL'
+    } finally {
+        foreach ($id in @($publish.id, $snapshot.id)) {
+            $cleanup = Request 'cleanup'
+            $cleanup.id = $id
+            Assert-True ((Call $cleanup).exitCode -eq 0) 'WRITER-ACL-01 original session stage can be cleaned'
+        }
+    }
+}
 try {
     [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
     if (Test-Path -LiteralPath $WorkRoot) { throw 'fixture path already exists' }
@@ -195,6 +237,12 @@ public static class RestrictedAdministratorTest {
     $script:bytes = [Text.Encoding]::UTF8.GetBytes("sensitive-marker`r`nUnicode: 한글`n")
     $sha = [Security.Cryptography.SHA256]::Create()
     try { $script:digest = [BitConverter]::ToString($sha.ComputeHash($script:bytes)).Replace('-', '').ToLowerInvariant() } finally { $sha.Dispose() }
+
+    Test-InheritOnlyWriter $WorkRoot
+    if ($WriterInheritOnlyOnly) {
+        [Console]::Out.WriteLine((@{ passed = $passed; selectedCase = 'WRITER-ACL-01' } | ConvertTo-Json -Compress))
+        exit 0
+    }
 
     $eofRequest = Request 'publish' (Join-Path $root 'eof-probe.bin')
     Stage $eofRequest
@@ -328,6 +376,62 @@ public static class RestrictedAdministratorTest {
         }
     } finally { [IO.Directory]::Move($parkedRoot, $root) }
 
+    # The live directory also had effective Users create ACEs. Skipping IO alone
+    # must never turn these effective untrusted writers into an accepted destination.
+    $effectiveDirectory = Join-Path $WorkRoot 'writer-effective-create'
+    $null = [IO.Directory]::CreateDirectory($effectiveDirectory)
+    $effectiveAcl = Get-Acl -LiteralPath $effectiveDirectory
+    $effectiveAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($users,
+        ([Security.AccessControl.FileSystemRights]::CreateFiles -bor [Security.AccessControl.FileSystemRights]::CreateDirectories),
+        [Security.AccessControl.AccessControlType]::Allow))
+    Set-Acl -LiteralPath $effectiveDirectory -AclObject $effectiveAcl
+    $effectiveSddl = (Get-Acl -LiteralPath $effectiveDirectory).Sddl
+    $descriptor = [Security.AccessControl.RawSecurityDescriptor]::new([string]$effectiveSddl)
+    Assert-True (@($descriptor.DiscretionaryAcl | Where-Object {
+        $_ -is [Security.AccessControl.QualifiedAce] -and $_.SecurityIdentifier.Value -ceq 'S-1-5-32-545' -and
+        (([int]$_.AceFlags -band 8) -eq 0) -and (([int]$_.AccessMask -band 6) -eq 6)
+    }).Count -gt 0) 'WRITER-ACL-02 fixture has effective Users create rights'
+    $effectiveRequest = Request 'publish' (Join-Path $effectiveDirectory 'must-not-exist.bin')
+    $effectiveRequest.bypassRoot = $true
+    Stage $effectiveRequest
+    $effectiveResult = Call $effectiveRequest
+    Assert-True ($effectiveResult.exitCode -eq 1 -and $effectiveResult.data.errorCode -ceq 'PERMISSION_DENIED' -and
+        $effectiveResult.data.origin -ceq 'policy' -and $effectiveResult.data.policyReason -ceq 'UNTRUSTED_WRITER') 'WRITER-ACL-02 effective Users writer is policy refusal'
+    Assert-True (!$effectiveResult.data.PSObject.Properties['nativeStep'] -and !$effectiveResult.data.published -and
+        !(Test-Path -LiteralPath $effectiveRequest.remotePath)) 'WRITER-ACL-02 policy refusal never claims OS open or publication'
+    Assert-True ((Get-Acl -LiteralPath $effectiveDirectory).Sddl -ceq $effectiveSddl) 'WRITER-ACL-02 refused directory ACL stays unchanged'
+    $cleanup = Request 'cleanup'
+    $cleanup.id = $effectiveRequest.id
+    Assert-True ((Call $cleanup).exitCode -eq 0) 'WRITER-ACL-02 refused stage is cleaned'
+
+    $inheritParent = Join-Path $WorkRoot 'writer-inheritance-parent'
+    $null = [IO.Directory]::CreateDirectory($inheritParent)
+    $inheritAcl = Get-Acl -LiteralPath $inheritParent
+    $inheritAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($users,
+        ([Security.AccessControl.FileSystemRights]::CreateFiles -bor [Security.AccessControl.FileSystemRights]::CreateDirectories),
+        [Security.AccessControl.InheritanceFlags]::ContainerInherit,
+        [Security.AccessControl.PropagationFlags]::InheritOnly, [Security.AccessControl.AccessControlType]::Allow))
+    Set-Acl -LiteralPath $inheritParent -AclObject $inheritAcl
+    $inheritChild = Join-Path $inheritParent 'child'
+    $null = [IO.Directory]::CreateDirectory($inheritChild)
+    $childSddl = (Get-Acl -LiteralPath $inheritChild).Sddl
+    $descriptor = [Security.AccessControl.RawSecurityDescriptor]::new([string]$childSddl)
+    Assert-True (@($descriptor.DiscretionaryAcl | Where-Object {
+        $_ -is [Security.AccessControl.QualifiedAce] -and $_.SecurityIdentifier.Value -ceq 'S-1-5-32-545' -and
+        (([int]$_.AceFlags -band 16) -ne 0) -and (([int]$_.AceFlags -band 8) -eq 0) -and (([int]$_.AccessMask -band 6) -eq 6)
+    }).Count -gt 0) 'WRITER-ACL-03 child inherited Users ACE is effective, not inherit-only'
+    $childRequest = Request 'publish' (Join-Path $inheritChild 'must-not-exist.bin')
+    $childRequest.bypassRoot = $true
+    Stage $childRequest
+    $childResult = Call $childRequest
+    Assert-True ($childResult.exitCode -eq 1 -and $childResult.data.errorCode -ceq 'PERMISSION_DENIED' -and
+        $childResult.data.origin -ceq 'policy' -and $childResult.data.policyReason -ceq 'UNTRUSTED_WRITER') 'WRITER-ACL-03 effective child inherited writer remains refused'
+    Assert-True (!(Test-Path -LiteralPath $childRequest.remotePath) -and
+        (Get-Acl -LiteralPath $inheritChild).Sddl -ceq $childSddl) 'WRITER-ACL-03 no file or ACL repair on inherited child'
+    $cleanup = Request 'cleanup'
+    $cleanup.id = $childRequest.id
+    Assert-True ((Call $cleanup).exitCode -eq 0) 'WRITER-ACL-03 refused stage is cleaned'
+
     $deniedDirectory = Join-Path $WorkRoot 'denied-destination'
     $null = [IO.Directory]::CreateDirectory($deniedDirectory)
     $deniedAcl = Get-Acl -LiteralPath $deniedDirectory
@@ -343,6 +447,7 @@ public static class RestrictedAdministratorTest {
         $deniedResult = Call $deniedRequest
         Assert-True ($deniedResult.exitCode -eq 1 -and $deniedResult.data.errorCode -ceq 'PERMISSION_DENIED' -and
             $deniedResult.data.nativeStep -ceq 'open' -and $deniedResult.data.nativeError -eq 5) 'bypass retains actual destination OS write denial'
+        Assert-True ($deniedResult.data.origin -ceq 'os' -and !$deniedResult.data.PSObject.Properties['policyReason']) 'WRITER-ACL-04 actual OS open denial is distinct from policy refusal'
         Assert-True (!$deniedResult.data.published -and !(Test-Path -LiteralPath $deniedRequest.remotePath)) 'permission denial cannot report or create published destination'
         Assert-True ((Get-Acl -LiteralPath $deniedDirectory).Sddl -ceq $deniedSddl) 'bypass never repairs destination directory permissions'
         $cleanup = Request 'cleanup'

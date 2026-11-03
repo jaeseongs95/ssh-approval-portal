@@ -10,15 +10,20 @@ using System.Text.RegularExpressions;
 using Microsoft.Win32.SafeHandles;
 
 namespace SshApproval {
+    enum FilePolicyReason { UNTRUSTED_OWNER, MISSING_DACL, UNSAFE_ANCESTOR, UNTRUSTED_WRITER, UNSUPPORTED_ACE, SECURITY_DESCRIPTOR_TOO_LARGE }
     public sealed class FileFailure : Exception {
         public string Code { get; private set; }
+        public string Origin { get; private set; }
+        public string PolicyReason { get; private set; }
         public string NativeStep { get; private set; }
         public int NativeError { get; private set; }
         public int SecurityControlBefore { get; private set; }
         public int SecurityControlAfter { get; private set; }
         public FileFailure(string code) : base(code) { Code = code; SecurityControlBefore = -1; SecurityControlAfter = -1; }
-        public FileFailure(string code, string step, int error, int controlBefore = -1, int controlAfter = -1) : this(code) {
+        internal FileFailure(string code, FilePolicyReason reason) : this(code) { Origin = "policy"; PolicyReason = reason.ToString(); }
+        public FileFailure(string code, string step, int error, int controlBefore = -1, int controlAfter = -1, bool fromOs = false) : this(code) {
             NativeStep = step; NativeError = error; SecurityControlBefore = controlBefore; SecurityControlAfter = controlAfter;
+            if (fromOs) Origin = "os";
         }
     }
 
@@ -70,6 +75,7 @@ namespace SshApproval {
         static extern bool CreateDirectory(string path, ref SecurityAttributes security);
 
         static void Fail(string code) { throw new FileFailure(code); }
+        static void PolicyFailure(string code, FilePolicyReason reason) { throw new FileFailure(code, reason); }
         public static string ReadMetadataInput() {
             const int maximumBytes = 16384, maximumChars = 16384;
             IntPtr input = GetStdHandle(-10);
@@ -86,7 +92,7 @@ namespace SshApproval {
                     if (!ReadFile(handle, buffer, requested, out count, IntPtr.Zero)) {
                         int error = Marshal.GetLastWin32Error();
                         if (error == 109) break;
-                        throw new FileFailure("OPERATION_FAILED", "read_input", error);
+                        throw new FileFailure("OPERATION_FAILED", "read_input", error, fromOs: true);
                     }
                     if (count == 0) continue;
                     if (count > requested) Fail("INVALID_REQUEST");
@@ -113,7 +119,7 @@ namespace SshApproval {
             int error = Marshal.GetLastWin32Error();
             string code = error == 2 || error == 3 ? missing : error == 5 || error == 32 || error == 33 ? "PERMISSION_DENIED" :
                 error == 80 || error == 183 ? "DESTINATION_EXISTS" : error == 1920 || error == 4390 ? "UNSAFE_PATH" : "OPERATION_FAILED";
-            throw new FileFailure(code, step, error);
+            throw new FileFailure(code, step, error, fromOs: true);
         }
         public static string CheckedPath(string value) {
             if (value == null || value.Length < 4 || value.Length > 4096 || !Regex.IsMatch(value, @"\A[A-Za-z]:[/\\]")) Fail("UNSAFE_PATH");
@@ -218,7 +224,7 @@ namespace SshApproval {
             uint size;
             GetKernelObjectSecurity(handle, information, null, 0, out size);
             if (size == 0) NativeFailure("OPERATION_FAILED", step);
-            if (size > 65536) Fail("PERMISSION_DENIED");
+            if (size > 65536) PolicyFailure("PERMISSION_DENIED", FilePolicyReason.SECURITY_DESCRIPTOR_TOO_LARGE);
             byte[] descriptor = new byte[size];
             if (!GetKernelObjectSecurity(handle, information, descriptor, size, out size)) NativeFailure("OPERATION_FAILED", step);
             return descriptor;
@@ -230,11 +236,12 @@ namespace SshApproval {
             RawSecurityDescriptor descriptor = new RawSecurityDescriptor(Security(handle), 0);
             // Ownership normally grants WRITE_DAC even without an explicit allow ACE.
             if (descriptor.Owner == null || (!Trusted(descriptor.Owner.Value, account, installer, trustAccount) &&
-                !(volumeRoot && descriptor.Owner.Value == TrustedInstaller)) || descriptor.DiscretionaryAcl == null) Fail("PERMISSION_DENIED");
+                !(volumeRoot && descriptor.Owner.Value == TrustedInstaller))) PolicyFailure("PERMISSION_DENIED", FilePolicyReason.UNTRUSTED_OWNER);
+            if (descriptor.DiscretionaryAcl == null) PolicyFailure("PERMISSION_DENIED", FilePolicyReason.MISSING_DACL);
             foreach (GenericAce ace in descriptor.DiscretionaryAcl) {
                 if ((ace.AceFlags & AceFlags.InheritOnly) != 0) continue;
                 QualifiedAce allowed = ace as QualifiedAce;
-                if (allowed == null) Fail("PERMISSION_DENIED");
+                if (allowed == null) PolicyFailure("PERMISSION_DENIED", FilePolicyReason.UNSUPPORTED_ACE);
                 if (allowed.AceQualifier != AceQualifier.AccessAllowed) continue;
                 // Creation alone cannot replace an existing protected child. Deletion or
                 // security-control rights can; the volume root's ordinary create grants stay valid.
@@ -243,18 +250,21 @@ namespace SshApproval {
                 // attribute-only opens bypass share checks and could set a reparse point.
                 int unsafeRights = unchecked((int)0x100D0040) | (last ? unchecked((int)0x40000100) : 0);
                 if ((allowed.AccessMask & unsafeRights) != 0 &&
-                    !Trusted(allowed.SecurityIdentifier.Value, account, installer, trustAccount)) Fail("PERMISSION_DENIED");
+                    !Trusted(allowed.SecurityIdentifier.Value, account, installer, trustAccount)) PolicyFailure("PERMISSION_DENIED", FilePolicyReason.UNSAFE_ANCESTOR);
             }
         }
         static void CheckWriters(SafeFileHandle handle, string account, string failure) {
             RawSecurityDescriptor descriptor = new RawSecurityDescriptor(Security(handle), 0);
-            if (descriptor.DiscretionaryAcl == null) Fail(failure);
+            if (descriptor.DiscretionaryAcl == null) PolicyFailure(failure, FilePolicyReason.MISSING_DACL);
             foreach (GenericAce ace in descriptor.DiscretionaryAcl) {
+                // Inherit-only ACEs govern descendants, not writers of this object.
+                // Once inherited as effective ACEs, the same writer policy still applies.
+                if ((ace.AceFlags & AceFlags.InheritOnly) != 0) continue;
                 QualifiedAce allowed = ace as QualifiedAce;
-                if (allowed == null) Fail(failure);
+                if (allowed == null) PolicyFailure(failure, FilePolicyReason.UNSUPPORTED_ACE);
                 if (allowed.AceQualifier != AceQualifier.AccessAllowed) continue;
                 string sid = allowed.SecurityIdentifier.Value;
-                if ((allowed.AccessMask & unchecked((int)0x500D0156)) != 0 && sid != account && sid != "S-1-5-18" && sid != "S-1-5-32-544") Fail(failure);
+                if ((allowed.AccessMask & unchecked((int)0x500D0156)) != 0 && sid != account && sid != "S-1-5-18" && sid != "S-1-5-32-544") PolicyFailure(failure, FilePolicyReason.UNTRUSTED_WRITER);
             }
         }
         static bool Same(Info a, Info b) {
@@ -295,7 +305,7 @@ namespace SshApproval {
                     bool present, defaulted;
                     if (!GetSecurityDescriptorSacl(pin.AddrOfPinnedObject(), out present, out acl, out defaulted)) NativeFailure("OPERATION_FAILED", "read_label");
                     uint error = SetSecurityInfo(destination, 1, 0x10, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, present ? acl : IntPtr.Zero);
-                    if (error != 0) throw new FileFailure(error == 5 || error == 1314 ? "PERMISSION_DENIED" : "OPERATION_FAILED", "write_label", (int)error);
+                    if (error != 0) throw new FileFailure(error == 5 || error == 1314 ? "PERMISSION_DENIED" : "OPERATION_FAILED", "write_label", (int)error, fromOs: true);
                 } finally { pin.Free(); }
             }
             if (!SameBytes(expected, LabelAcl(Security(previous, 0x10, "read_label"))) ||
@@ -306,7 +316,8 @@ namespace SshApproval {
             // Other SACL entries and ADS are not copied.
             byte[] security = Security(previous);
             RawSecurityDescriptor before = new RawSecurityDescriptor(security, 0);
-            if (before.Owner == null || before.DiscretionaryAcl == null) Fail("PERMISSION_DENIED");
+            if (before.Owner == null) PolicyFailure("PERMISSION_DENIED", FilePolicyReason.UNTRUSTED_OWNER);
+            if (before.DiscretionaryAcl == null) PolicyFailure("PERMISSION_DENIED", FilePolicyReason.MISSING_DACL);
             string expectedSecurity = before.GetSddlForm(AccessControlSections.Owner | AccessControlSections.Access);
             bool protectedAcl = (before.ControlFlags & ControlFlags.DiscretionaryAclProtected) != 0;
             // A new file in the same parent can already have exactly the required
@@ -318,9 +329,10 @@ namespace SshApproval {
                     bool defaulted, present;
                     if (!GetSecurityDescriptorOwner(pin.AddrOfPinnedObject(), out owner, out defaulted)) NativeFailure("OPERATION_FAILED", "read_security");
                     if (!GetSecurityDescriptorDacl(pin.AddrOfPinnedObject(), out present, out dacl, out defaulted)) NativeFailure("OPERATION_FAILED", "read_security");
-                    if (owner == IntPtr.Zero || !present || dacl == IntPtr.Zero) Fail("PERMISSION_DENIED");
+                    if (owner == IntPtr.Zero) PolicyFailure("PERMISSION_DENIED", FilePolicyReason.UNTRUSTED_OWNER);
+                    if (!present || dacl == IntPtr.Zero) PolicyFailure("PERMISSION_DENIED", FilePolicyReason.MISSING_DACL);
                     uint error = SetSecurityInfo(destination, 1, 5u | (protectedAcl ? 0x80000000u : 0x20000000u), owner, IntPtr.Zero, dacl, IntPtr.Zero);
-                    if (error != 0) throw new FileFailure(error == 5 || error == 1307 || error == 1314 ? "PERMISSION_DENIED" : "OPERATION_FAILED", "write_security", (int)error);
+                    if (error != 0) throw new FileFailure(error == 5 || error == 1307 || error == 1314 ? "PERMISSION_DENIED" : "OPERATION_FAILED", "write_security", (int)error, fromOs: true);
                 } finally { pin.Free(); }
             }
             RawSecurityDescriptor after = new RawSecurityDescriptor(Security(destination), 0);

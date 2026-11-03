@@ -511,6 +511,63 @@ test('실제 Windows SSH 명령·승인·파일 전송 경계', {
       assert.equal(result.stderr, '');
     });
 
+    await t.test('WRITER-ACL-01/02/03 실제 SSH는 IO-only와 effective inherited writer를 구분한다', async () => {
+      assert.equal(fixture.writerAclFixtures.length, 2);
+      const [io, inherited] = fixture.writerAclFixtures;
+      const ioCreators = io.aces.filter(ace => ace.actor === 'creator-owner' && ace.kind === 'AccessAllowed');
+      assert.ok(ioCreators.length > 0);
+      assert.ok(ioCreators.every(ace => (ace.flags & 8) !== 0));
+      const effectiveCreates = inherited.aces.filter(ace => ace.actor === 'users' && ace.kind === 'AccessAllowed'
+        && (ace.flags & 16) !== 0 && (ace.flags & 8) === 0);
+      assert.equal(effectiveCreates.reduce((mask, ace) => mask | ace.mask, 0) & 6, 6);
+      assert.ok(inherited.aces.some(ace => ace.actor === 'creator-owner' && (ace.flags & 8) !== 0));
+      // The snapshot is fixture metadata; compare the actual post-transfer ACL via
+      // the connected SSH identity as well, without printing SID/SDDL or repairing it.
+      const aclHash = async directory => {
+        const encoded = Buffer.from(directory, 'utf8').toString('base64');
+        const result = await call(`$ErrorActionPreference='Stop';$path=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encoded}'));$sddl=[string](Get-Acl -LiteralPath $path).Sddl;$sha=[Security.Cryptography.SHA256]::Create();try{[Console]::Write([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($sddl))).Replace('-','').ToLowerInvariant())}finally{$sha.Dispose()}`);
+        assert.equal(result.exitCode, 0);
+        const value = result.stdout.trim();
+        assert.match(value, /^[a-f0-9]{64}$/);
+        return value;
+      };
+      for (const entry of [io, inherited]) assert.equal(await aclHash(entry.directory), entry.aclSha256);
+      const bypass = createTransferExecutor(runtime.registry, store, { platform: 'windows', helper: fixture.helper,
+        remoteStage: fixture.stageRoot, readProfile: 'windows-read', writeProfile: 'windows-write', transport,
+        pathPolicy: async () => ({ bypassRoot: true }) });
+      const binary = Buffer.from([0, 255, 13, 10, 128]);
+      const operationAt = async directory => {
+        const meta = { fileName: 'writer-contract.bin', remotePath: win32.join(directory, 'writer-contract.bin'),
+          size: binary.length, sha256: digest(binary), overwrite: false, elevate: false };
+        const item = await store.begin(meta);
+        await store.append(item.id, 0, binary); await store.finish(item.id);
+        return { kind: 'upload', artifactId: item.id, ...meta };
+      };
+      const positive = await operationAt(io.directory);
+      assert.equal((await bypass.upload(positive)).failed, false);
+      assert.deepEqual(await readFile(positive.remotePath), binary);
+      const snapshot = await bypass.download({ kind: 'download', remotePath: positive.remotePath, elevate: false });
+      assert.equal(snapshot.failed, false);
+      assert.equal(snapshot.data.sha256, digest(binary));
+      const fd = await store.verified(snapshot.data.artifactId);
+      const received = Buffer.alloc(binary.length);
+      try { await fd.read(received, 0, received.length, 0); } finally { await fd.close(); }
+      assert.deepEqual(received, binary);
+      const refused = await operationAt(inherited.directory);
+      const policyFailure = await bypass.upload(refused);
+      assert.equal(policyFailure.failed, true);
+      assert.deepEqual(policyFailure.data, { errorCode: 'PERMISSION_DENIED',
+        diagnostic: { origin: 'policy', policyReason: 'UNTRUSTED_WRITER' } });
+      await absent(refused.remotePath);
+      const osRefused = await operationAt(fixture.adminFileRoot);
+      const osFailure = await bypass.upload(osRefused);
+      assert.equal(osFailure.failed, true);
+      assert.deepEqual(osFailure.data, { errorCode: 'PERMISSION_DENIED', diagnostic: { origin: 'os', nativeStep: 'open', nativeError: 5 } });
+      await absent(osRefused.remotePath);
+      for (const entry of [io, inherited]) assert.equal(await aclHash(entry.directory), entry.aclSha256);
+      assert.deepEqual(await readdir(fixture.stageRoot), []);
+    });
+
     await t.test('테스트 모드의 루트 우회는 실제 SSH 계정 권한을 유지한다', async () => {
       const session = await transport.connect('windows-write');
       const helperCommand = `powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "${fixture.helper}"`;
@@ -552,6 +609,8 @@ test('실제 Windows SSH 명령·승인·파일 전송 경계', {
         assert.equal(denied.data.errorCode, 'PERMISSION_DENIED');
         assert.equal(denied.data.nativeStep, 'open');
         assert.equal(denied.data.nativeError, 5);
+        assert.equal(denied.data.origin, 'os');
+        assert.equal(denied.data.policyReason, undefined);
         assert.notEqual(denied.data.published, true);
         await absent(forbiddenPath);
       } finally {

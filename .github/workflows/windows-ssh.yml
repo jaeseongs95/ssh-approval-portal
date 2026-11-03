@@ -28,6 +28,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24.21.0'
@@ -71,6 +72,36 @@ jobs:
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         shell: pwsh
         run: ./test/windows-file-helper.tests.ps1 -PowerShellExe powershell.exe
+      - name: Inherit-only writer regression detects the previous helper
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $isolated = Join-Path $env:RUNNER_TEMP ('writer-inherit-only-' + [Guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Path $isolated | Out-Null
+          $candidate = Join-Path $env:RUNNER_TEMP ('writer-candidate-' + [Guid]::NewGuid().ToString('N') + '.tar')
+          $previous = Join-Path $env:RUNNER_TEMP ('writer-previous-' + [Guid]::NewGuid().ToString('N') + '.tar')
+          git archive --format=tar -o $candidate HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'candidate archive failed' }
+          tar -xf $candidate -C $isolated
+          if ($LASTEXITCODE -ne 0) { throw 'candidate extraction failed' }
+          git archive --format=tar -o $previous e01652dbb827a1dd5d5d0a85eea0ffcc5d25ef72 scripts/windows-file-native.cs
+          if ($LASTEXITCODE -ne 0) { throw 'previous native archive failed' }
+          tar -xf $previous -C $isolated
+          if ($LASTEXITCODE -ne 0) { throw 'previous native extraction failed' }
+          $redLog = Join-Path $env:RUNNER_TEMP 'writer-inherit-only-red.log'
+          Push-Location $isolated
+          try {
+            & powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File test/windows-file-helper.tests.ps1 -PowerShellExe powershell.exe -WriterInheritOnlyOnly *> $redLog
+            $redExit = $LASTEXITCODE
+          } finally { Pop-Location }
+          Get-Content -LiteralPath $redLog
+          Write-Output "WRITER_INHERIT_ONLY_RED_EXIT=$redExit"
+          if ($redExit -ne 1 -or !(Select-String -LiteralPath $redLog -SimpleMatch 'WRITER-ACL-01 inherit-only Creator Owner permits publish' -Quiet)) { throw 'previous helper did not fail the inherit-only publish oracle' }
+          & powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File test/windows-file-helper.tests.ps1 -PowerShellExe powershell.exe -WriterInheritOnlyOnly
+          if ($LASTEXITCODE -ne 0) { throw 'candidate inherit-only regression failed' }
+          Get-FileHash scripts/windows-file-native.cs,test/windows-file-helper.tests.ps1 -Algorithm SHA256
       - name: PowerShell 7 파일 보조프로그램 시험
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         shell: pwsh
