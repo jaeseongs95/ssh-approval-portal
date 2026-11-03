@@ -327,10 +327,16 @@ export class Artifacts {
       throw err;
     } finally { x.busy = false; }
   }
-  releaseUpload(id, { expiresAt = this.#now() } = {}) {
-    const x = this.#items.get(id); if (!x) return;
+  releaseUpload(id, { expiresAt = this.#now() } = {}, authorize) {
+    if (!idValid(id)) throw Error('Invalid transfer ID');
+    if (authorize !== undefined && typeof authorize !== 'function') throw Error('Invalid artifact release authorization');
+    const x = this.#items.get(id);
+    // Terminal cleanup is repeatable after TTL reaping; no bytes or authority are reconstructed.
+    if (!x) return Object.freeze({ state: 'unavailable' });
+    authorize?.(snapshot(x));
     x.pinned = false; x.expiresAt = expiresAt;
     this.#persist(x);
+    return Object.freeze({ state: 'released' });
   }
   recordSubmission(id, submissionId) {
     const x = this.#get(id);

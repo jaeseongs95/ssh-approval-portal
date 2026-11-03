@@ -40,7 +40,7 @@ export const utf8WithinLimit = (value, maxBytes) => typeof value === 'string' &&
  * @property {(meta:Object)=>Readonly<Artifact>} reserveDownload
  * @property {(id:string,metadata:{size:number,sha256:string},writeTo:(destination:unknown)=>Promise<void>)=>Promise<Readonly<Artifact>>} receiveDownload
  * @property {(id:string)=>Promise<VerifiedArtifact>} verified
- * @property {(id:string,options:{expiresAt:number})=>void} releaseUpload
+ * @property {(id:string,options?:{expiresAt?:number},authorize?:(item:Object)=>void)=>{state:'released'|'unavailable'}} releaseUpload
  * @property {(id:string)=>Promise<void>} remove
  * @property {()=>boolean} hasActiveWork
  * @property {()=>Promise<void>} reap
