@@ -99,6 +99,69 @@ export async function durableFingerprint(dataRoot) {
   return hash(JSON.stringify(rows));
 }
 
+async function migrationControl(path) {
+  const st = await optionalStat(path);
+  if (!st) return null;
+  if (!st.isFile() || st.isSymbolicLink() || st.nlink !== 1 || st.size > 2 * 1024 * 1024) fail('UNSAFE_MIGRATION_RECEIPT');
+  return JSON.parse(await readFile(path, 'utf8'));
+}
+function validMigration(receipt) {
+  return receipt?.type === 'portal.operation-migration.v1' && Array.isArray(receipt.sources)
+    && new Set(receipt.sources.map(source => source?.source)).size === receipt.sources.length
+    && receipt.sources.every(source => source && ['command-automation.sqlite', 'agent-cli.sqlite'].includes(source.source)
+      && /^[a-f0-9]{64}$/.test(source.sha256) && Number.isSafeInteger(source.imported) && source.imported >= 0
+      && Number.isSafeInteger(source.unknown) && source.unknown >= 0 && source.unknown <= source.imported)
+    && receipt.imported === receipt.sources.reduce((sum, source) => sum + source.imported, 0)
+    && receipt.unknown === receipt.sources.reduce((sum, source) => sum + source.unknown, 0);
+}
+
+/** Completed migration archives are immutable evidence; live 1.8 journals are no longer import sources. */
+export async function prepareDeploymentMigration(plan, release, { previousGeneration, previousRelease } = {}) {
+  const control = join(plan.appRoot, 'deployments'), markerPath = join(control, 'legacy-migration.json');
+  const owner = await lstat(plan.dataRoot);
+  if (!owner.isDirectory() || owner.isSymbolicLink()) fail('UNSAFE_DEPLOY_DATA');
+  let completed = await migrationControl(markerPath);
+  if (!completed && previousGeneration) {
+    const prior = await migrationControl(join(control, previousGeneration + '.json'));
+    if (prior?.generation === previousGeneration && ['switching', 'start-attempted', 'activated', 'verified', 'recovered'].includes(prior.phase) && validMigration(prior.migration)) {
+      completed = { type: 'portal.deployment-migration.v1', generation: prior.migration.reused === true ? prior.migration.originalGeneration : previousGeneration, dataRoot: plan.dataRoot, migration: prior.migration };
+    }
+  }
+  const childOptions = { uid: process.platform === 'win32' ? undefined : owner.uid, gid: process.platform === 'win32' ? undefined : owner.gid, typedReceipt: true };
+  if (completed) {
+    if (completed.type !== 'portal.deployment-migration.v1' || completed.dataRoot !== plan.dataRoot || !/^[a-f0-9]{64}$/.test(completed.generation) || !validMigration(completed.migration)) fail('INVALID_MIGRATION_RECEIPT');
+    const archiveRoot = join(plan.appRoot, 'legacy-archives', completed.generation);
+    for (const source of completed.migration.sources) if (await fileDigest(join(archiveRoot, source.source)) !== source.sha256) fail('LEGACY_ARCHIVE_MISMATCH');
+    const { readLegacyOperationHistory } = await import('../src/adapters/storage/operation-migration.mjs');
+    const inventory = readLegacyOperationHistory(archiveRoot);
+    if (inventory.length !== completed.migration.sources.length || completed.migration.sources.some(source => !inventory.some(item => item.source === source.source && item.sha256 === source.sha256 && item.rows.length === source.imported))) fail('LEGACY_ARCHIVE_MISMATCH');
+    const operations = await optionalStat(join(plan.dataRoot, 'operations.sqlite'));
+    if (!operations || !operations.isFile() || operations.isSymbolicLink() || operations.nlink !== 1) fail('LEGACY_MIGRATION_STORE_MISSING');
+    command([process.execPath, join(release, 'scripts/deploy180.mjs'), '--migration-check'], {
+      ...childOptions, input: JSON.stringify({ legacyRoot: plan.dataRoot, inventory }),
+    });
+    await atomicJson(markerPath, completed);
+    return { ...completed.migration, reused: true, originalGeneration: completed.generation };
+  }
+  if (previousRelease && /^1\.8\./.test(JSON.parse(await readFile(join(previousRelease, 'release-manifest.json'), 'utf8')).version)) fail('LEGACY_MIGRATION_RECEIPT_REQUIRED');
+  const archiveRoot = join(plan.appRoot, 'legacy-archives', plan.generation);
+  await mkdir(dirname(archiveRoot), { recursive: true, mode: 0o755 });
+  await mkdir(archiveRoot, { recursive: true, mode: 0o700 });
+  const archiveStat = await lstat(archiveRoot);
+  if (!archiveStat.isDirectory() || archiveStat.isSymbolicLink()) fail('UNSAFE_LEGACY_ARCHIVE');
+  if (process.platform !== 'win32' && process.getuid() === 0) await chown(archiveRoot, owner.uid, owner.gid);
+  const migration = JSON.parse(command([process.execPath, join(release, 'scripts/deploy180.mjs'), '--migration-child'], {
+    ...childOptions, input: JSON.stringify({ legacyRoot: plan.dataRoot, archiveRoot }),
+  }));
+  if (!validMigration(migration)) fail('INVALID_MIGRATION_RECEIPT');
+  if (process.platform !== 'win32' && process.getuid() === 0) {
+    for (const entry of migration.sources) await chown(join(archiveRoot, entry.source), 0, 0);
+    await chown(archiveRoot, 0, 0); await chmod(archiveRoot, 0o700);
+  }
+  await atomicJson(markerPath, { type: 'portal.deployment-migration.v1', generation: plan.generation, dataRoot: plan.dataRoot, migration });
+  return migration;
+}
+
 /** The plan is operator input, never a remote request. Each invocation owns a short deployment lock. */
 export async function runDeployment(stage, input, { fetchImpl = fetch } = {}) {
   if (!['inspect', 'stage', 'activate', 'verify', 'recover'].includes(stage)) fail('INVALID_DEPLOY_STAGE');
@@ -158,24 +221,7 @@ export async function runDeployment(stage, input, { fetchImpl = fetch } = {}) {
         command(plan.service.stop, { failureCode: 'DEPLOY_SERVICE_STOP_FAILED' });
         command(plan.service.status, { expected: plan.service.stoppedExitCode ?? 3, failureCode: 'DEPLOY_SERVICE_STILL_ACTIVE' });
         await save({ phase: 'migrating' });
-        const owner = await lstat(plan.dataRoot), archiveRoot = join(plan.appRoot, 'legacy-archives', plan.generation);
-        if (!owner.isDirectory() || owner.isSymbolicLink()) fail('UNSAFE_DEPLOY_DATA');
-        await mkdir(dirname(archiveRoot), { recursive: true, mode: 0o755 });
-        await mkdir(archiveRoot, { recursive: true, mode: 0o700 });
-        const archiveStat = await lstat(archiveRoot);
-        if (!archiveStat.isDirectory() || archiveStat.isSymbolicLink()) fail('UNSAFE_LEGACY_ARCHIVE');
-        // The store enforces service ownership, so migration executes as the data owner.
-        if (process.platform !== 'win32' && process.getuid() === 0) {
-          await chown(archiveRoot, owner.uid, owner.gid);
-        }
-        const migration = JSON.parse(command([process.execPath, join(release, 'scripts/deploy180.mjs'), '--migration-child'], {
-          input: JSON.stringify({ legacyRoot: plan.dataRoot, archiveRoot }), uid: process.platform === 'win32' ? undefined : owner.uid,
-          gid: process.platform === 'win32' ? undefined : owner.gid, typedReceipt: true,
-        }));
-        if (process.platform !== 'win32' && process.getuid() === 0) {
-          for (const entry of migration.sources) await chown(join(archiveRoot, entry.source), 0, 0);
-          await chown(archiveRoot, 0, 0); await chmod(archiveRoot, 0o700);
-        }
+        const migration = await prepareDeploymentMigration(plan, release, state);
         const baseline = await durableFingerprint(plan.dataRoot);
         await save({ phase: 'switching', migration, baseline });
         await swapActive(plan, release);
@@ -219,12 +265,20 @@ export async function runDeployment(stage, input, { fetchImpl = fetch } = {}) {
 
 if (import.meta.main) {
   try {
-    if (process.argv[2] === '--migration-child') {
+    if (['--migration-child', '--migration-check'].includes(process.argv[2])) {
       const { createOperationStore } = await import('../src/adapters/storage/operation-store.mjs');
       const { migrateLegacyOperations } = await import('../src/adapters/storage/operation-migration.mjs');
       let text = ''; for await (const chunk of process.stdin) text += chunk;
       const options = JSON.parse(text), store = createOperationStore(options.legacyRoot);
-      try { process.stdout.write(JSON.stringify(migrateLegacyOperations({ ...options, store }))); } finally { store.close(); }
+      try {
+        if (process.argv[2] === '--migration-check') {
+          for (const { source, rows } of options.inventory) for (const { job, digest, requestKey } of rows) {
+            if (!store.find(requestKey ?? `legacy:${source}:${job.id}`)) fail('LEGACY_MIGRATION_RECORD_MISSING');
+            store.importLegacy(job, { source, digest, requestKey });
+          }
+          process.stdout.write(JSON.stringify({ type: 'portal.operation-migration-check.v1', status: 'completed' }));
+        } else process.stdout.write(JSON.stringify(migrateLegacyOperations({ ...options, store })));
+      } finally { store.close(); }
     } else {
       const [stage, flag, path, ...rest] = process.argv.slice(2);
       if (flag !== '--plan' || !path || rest.length) fail('USAGE_DEPLOY180_STAGE_PLAN');

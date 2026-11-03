@@ -4,10 +4,14 @@ import { mkdtemp, mkdir, readFile, writeFile, rm, lstat, symlink, readlink } fro
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { createOperationStore } from '../src/adapters/storage/operation-store.mjs';
+import { createCommandState } from '../src/adapters/storage/command-state.mjs';
+import { createAgentCliState } from '../src/adapters/storage/agent-cli-state.mjs';
+import { AGENT_CLI_CONTRACT } from '../src/domain/agent-cli.mjs';
 import { migrateLegacyOperations, readLegacyOperationHistory } from '../src/adapters/storage/operation-migration.mjs';
-import { durableFingerprint, runDeployment } from '../scripts/deploy180.mjs';
+import { durableFingerprint, runDeployment, prepareDeploymentMigration } from '../scripts/deploy180.mjs';
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 async function fixture(t) {
@@ -72,6 +76,63 @@ test('unsupported and unclean old schemas fail before import without changing th
   assert.deepEqual(await readFile(path), before);
   await writeFile(path + '-journal', 'interrupted');
   assert.throws(() => migrateLegacyOperations({ legacyRoot: dataRoot, archiveRoot: join(root, 'archive'), store: { importLegacy() { assert.fail('must not import'); } } }), { code: 'LEGACY_NOT_QUIESCENT' });
+});
+
+test('redeployment preserves the first import after real 1.8 journal recovery and still detects conflicting original evidence', async t => {
+  const { root, dataRoot } = await fixture(t), appRoot = join(root, 'app'), generation = 'a'.repeat(64);
+  const release = fileURLToPath(new URL('../', import.meta.url)), control = join(appRoot, 'deployments');
+  await mkdir(control, { recursive: true, mode: 0o700 });
+  const commandJobs = ['running', 'pending'].map((state, index) => ({ id: String(index + 1).repeat(48), kind: 'command', state, createdAt: 10 + index, operation: { kind: 'command', command: 'printf preserved' } }));
+  const cliJobs = ['queued', 'pending'].map((state, index) => ({ id: String(index + 3).repeat(48), kind: 'command', state, createdAt: 12 + index, operation: { agentCliContract: AGENT_CLI_CONTRACT } }));
+  let commands = createCommandState(dataRoot), cli = createAgentCliState(dataRoot);
+  try {
+    for (const job of commandJobs) commands.insert(job, 'command:' + job.id, hash(JSON.stringify(job)));
+    for (const job of cliJobs) cli.insert(job, 'agent-cli:' + job.id, hash(JSON.stringify(job)));
+  } finally { commands.close(); cli.close(); }
+  const plan = { appRoot, dataRoot, generation }, first = await prepareDeploymentMigration(plan, release);
+  assert.equal(first.imported, 4); assert.equal(first.unknown, 4);
+  await writeFile(join(control, generation + '.json'), JSON.stringify({ generation, phase: 'activated', migration: first }));
+  commands = createCommandState(dataRoot); cli = createAgentCliState(dataRoot);
+  try {
+    assert.deepEqual(commands.list().map(job => job.state), ['unknown', 'expired']);
+    assert.deepEqual(cli.list().map(job => job.state), ['unknown', 'expired']);
+  } finally { commands.close(); cli.close(); }
+  const paths = ['command-automation.sqlite', 'agent-cli.sqlite', 'operations.sqlite'];
+  const before = await Promise.all(paths.map(name => readFile(join(dataRoot, name))));
+  const second = await prepareDeploymentMigration({ ...plan, generation: 'b'.repeat(64) }, release, { previousGeneration: generation });
+  assert.equal(second.reused, true); assert.equal(second.originalGeneration, generation);
+  for (let i = 0; i < paths.length; i++) assert.deepEqual(await readFile(join(dataRoot, paths[i])), before[i]);
+  await assert.rejects(lstat(join(appRoot, 'legacy-archives', 'b'.repeat(64))), { code: 'ENOENT' });
+  // A receipt written by the previous deployer is authoritative even without the new global marker.
+  await rm(join(control, 'legacy-migration.json'));
+  const adopted = await prepareDeploymentMigration({ ...plan, generation: 'c'.repeat(64) }, release, { previousGeneration: generation });
+  assert.equal(adopted.reused, true); assert.equal(adopted.originalGeneration, generation);
+  const store = createOperationStore(dataRoot);
+  try {
+    assert.equal(store.list().length, 4); assert.equal(store.list({ state: 'queued' }).length, 0);
+    const original = store.get(commandJobs[0].id);
+    assert.deepEqual(original.legacy.original, commandJobs[0]);
+    store.update(original.id, { legacy: { ...original.legacy, original: { ...original.legacy.original, state: 'failed' } } });
+  } finally { store.close(); }
+  const conflicted = await readFile(join(dataRoot, 'operations.sqlite'));
+  await assert.rejects(prepareDeploymentMigration({ ...plan, generation: 'd'.repeat(64) }, release), { code: 'OPERATION_KEY_CONFLICT' });
+  assert.deepEqual(await readFile(join(dataRoot, 'operations.sqlite')), conflicted);
+  for (let i = 0; i < 2; i++) assert.deepEqual(await readFile(join(dataRoot, paths[i])), before[i]);
+});
+
+test('an existing 1.8 deployment requires authoritative completed migration evidence and never guesses from a partial state', async t => {
+  const { root, dataRoot } = await fixture(t), appRoot = join(root, 'app'), previousGeneration = 'a'.repeat(64);
+  const control = join(appRoot, 'deployments'), previousRelease = join(root, 'previous');
+  await mkdir(control, { recursive: true, mode: 0o700 }); await mkdir(previousRelease);
+  await writeFile(join(previousRelease, 'release-manifest.json'), JSON.stringify({ version: '1.8.0' }));
+  const path = join(dataRoot, 'command-automation.sqlite'); legacy(path, [{ id: 'a'.repeat(48), state: 'running', createdAt: 10 }]);
+  const before = await readFile(path), plan = { appRoot, dataRoot, generation: 'b'.repeat(64) }, release = fileURLToPath(new URL('../', import.meta.url));
+  for (const prior of [null, { generation: previousGeneration, phase: 'migrating', migration: { type: 'portal.operation-migration.v1', sources: [], imported: 0, unknown: 0 } }]) {
+    if (prior) await writeFile(join(control, previousGeneration + '.json'), JSON.stringify(prior));
+    await assert.rejects(prepareDeploymentMigration(plan, release, { previousGeneration, previousRelease }), { code: 'LEGACY_MIGRATION_RECEIPT_REQUIRED' });
+    assert.deepEqual(await readFile(path), before);
+    await assert.rejects(lstat(join(dataRoot, 'operations.sqlite')), { code: 'ENOENT' });
+  }
 });
 
 test('recovery checks payloads and new durable stores, not only operations rows', async t => {
