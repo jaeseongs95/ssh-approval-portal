@@ -375,8 +375,8 @@
     },
     {
       "path": "scripts/deploy180.mjs",
-      "size": 22406,
-      "sha256": "90a6c974895087a58557812a0d9db08f630a38b2ad2c785ad72fb24ce91dca73"
+      "size": 22976,
+      "sha256": "cd55d085364ef901ba6ea967afa137df1a9bb6041fd774f07747cca2050fca69"
     },
     {
       "path": "scripts/docker-secrets.py",
@@ -1427,6 +1427,11 @@
       "path": "test/delivery-runtime.mjs",
       "size": 793,
       "sha256": "6a4ffbca1f201f20b726ed9f2da08b4e7330583234d883366a63ccdb1117509a"
+    },
+    {
+      "path": "test/deploy180-archive-permissions.test.mjs",
+      "size": 6519,
+      "sha256": "91be57ea5e2c0985ae4b3e9e2168d272cd3af5b91147b96b6a1de1952f151bcf"
     },
     {
       "path": "test/deploy180-output-sidecars.test.mjs",
