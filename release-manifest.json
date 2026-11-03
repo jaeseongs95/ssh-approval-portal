@@ -1,6 +1,6 @@
 {
   "version": "1.7.6",
-  "status": "release",
+  "status": "candidate-pending-live-host-verification",
   "runtime": "Node.js 24",
   "files": [
     {
@@ -30,8 +30,8 @@
     },
     {
       "path": "app.mjs",
-      "size": 31858,
-      "sha256": "63d82a03a61720d1ed310b880439af1792f80ca697e4674cba0dd5da85f3be47"
+      "size": 33472,
+      "sha256": "f6acaa6ca063a5ad5158e54f604ccf057b9bd978b979458301a159e4003a67ae"
     },
     {
       "path": "bridge.mjs",
@@ -115,8 +115,8 @@
     },
     {
       "path": "docs/agent-clients.ko.md",
-      "size": 20489,
-      "sha256": "970ec169f51fd7d433ed359c21743d2352a645c6ff7dc3fcc86556e7eebe5e32"
+      "size": 22050,
+      "sha256": "323cfe209b14710f1cbf31c4d7a9f49ef6ee1de782f6d8cf18f155c6e58c5677"
     },
     {
       "path": "docs/agent-upload.en.md",
@@ -235,8 +235,8 @@
     },
     {
       "path": "docs/windows-targets.ko.md",
-      "size": 17107,
-      "sha256": "d5cbc003aca26afb084d9ad3b19841d30d12596cbc40e8fc506ea5e70e49a737"
+      "size": 18382,
+      "sha256": "18c79abaa6e5d1a0086a917bce1c9c78020c3ce5b2d73b686e266029bf1580cb"
     },
     {
       "path": "helper/environment-helper.py",
@@ -520,13 +520,13 @@
     },
     {
       "path": "scripts/windows-file-helper.ps1",
-      "size": 5436,
-      "sha256": "31273d0ea351a576117d8be167e8f19631f587173652ceacac6a42832bbecbd9"
+      "size": 6002,
+      "sha256": "b22071e75fa75cbeb051ecf9b90b78d0143b179d72aeccc4af044c0e66c476ee"
     },
     {
       "path": "scripts/windows-file-native.cs",
-      "size": 34038,
-      "sha256": "5295c323a8be6e5d35c86264e91b3a2eeac52e17fb7fe80c558d61ceb820b80c"
+      "size": 35161,
+      "sha256": "6046b0fa79fda35ac0b96b576564aab9ae47e01b0ea7203fd6218dc6e3b979f2"
     },
     {
       "path": "src/adapters/aik/ssh-tool.mjs",
@@ -610,8 +610,8 @@
     },
     {
       "path": "src/adapters/mcp/server.mjs",
-      "size": 40893,
-      "sha256": "011754b9d04337ed0d6f2f2805d26d9f1c377f6856646c8e8c83321e5912efb9"
+      "size": 42604,
+      "sha256": "2b44f542b7b308d252fdc4acf1f3be2e6c509bca86f79d2ef91a2d59fd335812"
     },
     {
       "path": "src/adapters/presentation/capabilities.mjs",
@@ -620,8 +620,8 @@
     },
     {
       "path": "src/adapters/presentation/results.mjs",
-      "size": 12301,
-      "sha256": "38be38d60741c53f1a9b5ae8d0ce6252d27059707cab051777400585277805ac"
+      "size": 12753,
+      "sha256": "33a533ff21a448d3c667edf86eeb579e81ebccd258781efd26bedbcdd231c695"
     },
     {
       "path": "src/adapters/releases/agent-cli.mjs",
@@ -695,8 +695,8 @@
     },
     {
       "path": "src/adapters/ssh/transfers.mjs",
-      "size": 8939,
-      "sha256": "b4e497fe4d695e5c627bfc7b04560293cb18e27ee91befe049585e4a10614b31"
+      "size": 11684,
+      "sha256": "e93b8af28aa7aa26305a57b6ef7edf21a399a95257031f38c5e5c0781fcd1497"
     },
     {
       "path": "src/adapters/ssh/vendor.mjs",
@@ -785,8 +785,8 @@
     },
     {
       "path": "src/application/command-policy-review.mjs",
-      "size": 15038,
-      "sha256": "7e1a6a23dd72a4bcff4ecf17da39b9631c9d064cd3e1a714a4ca44de03b2d8c1"
+      "size": 15420,
+      "sha256": "37367b1b2b6b86950e49add731e44ebb75efeefbcaae565587231290b84c0943"
     },
     {
       "path": "src/application/commands.mjs",
@@ -835,8 +835,8 @@
     },
     {
       "path": "src/application/target-router.mjs",
-      "size": 9861,
-      "sha256": "95d29496eb992a49f3cdbdba64c9abce00b3c4e1e7d6bd4438a38b79b62de3ca"
+      "size": 10195,
+      "sha256": "e8363316eddac5a40fd54fdc939e8b0c346ac9a41ffd3ff0c98a14b8649c872f"
     },
     {
       "path": "src/application/test-server-mode.mjs",
@@ -1754,6 +1754,16 @@
       "sha256": "9c64ac3327eac19a174afd4db9c9cf931da1ae6b38fb10968fefa0ae0b8501b1"
     },
     {
+      "path": "test/test-mode-file-path-policy.test.mjs",
+      "size": 14705,
+      "sha256": "fec18ebb7ae6a50088a35dda773fec658d82476a05ba3bae4cc04593f4381a85"
+    },
+    {
+      "path": "test/test-mode-file-policy-application.test.mjs",
+      "size": 12649,
+      "sha256": "17bf94038375c9077ab51ade07ba0ee523f85dff3737a907ca89ca770ab1353a"
+    },
+    {
       "path": "test/test-server-mode.test.mjs",
       "size": 1368,
       "sha256": "e7492445505c746e2c535b3e8640678c9d2625eadd98150a72b4f4cad26b3155"
@@ -1950,8 +1960,8 @@
     },
     {
       "path": "test/windows-file-helper.tests.ps1",
-      "size": 25831,
-      "sha256": "3d360d78c9862fbce6dbdc1e565b4d5a8c7fbe194ddb025e20bf9180fde73250"
+      "size": 30934,
+      "sha256": "541af1dd242889eeca722ba381008a36712e54722f8c415101e6fe8dd64e4e68"
     },
     {
       "path": "test/windows-full-application.test.mjs",
@@ -1975,8 +1985,8 @@
     },
     {
       "path": "test/windows-ssh-integration.test.mjs",
-      "size": 40156,
-      "sha256": "a405568e6b17803d682cc30ce0c99fcc6b0c0fb18cc01dfb3219dd90610be71f"
+      "size": 43629,
+      "sha256": "8272c6cf78fe2c6b74bbb951c79f5c5418c4f01b284f10d301830d52f8c06f67"
     },
     {
       "path": "test/windows-ssh-log-read.ps1",

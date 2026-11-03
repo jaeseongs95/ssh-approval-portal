@@ -44,7 +44,7 @@ test('실제 Windows SSH 명령·승인·파일 전송 경계', {
         let data;
         try { data = JSON.parse(result.stdout); } catch { data = {}; }
         const steps = ['write_security', 'write_times', 'verify_security', 'verify_owner', 'verify_dacl', 'verify_control', 'verify_times', 'read_label', 'write_label', 'verify_label'];
-        const codes = ['PARENT_NOT_FOUND', 'FILE_NOT_FOUND', 'PERMISSION_DENIED', 'DESTINATION_EXISTS', 'UNSAFE_PATH', 'STAGING_UNAVAILABLE', 'FILE_CHANGED', 'FILE_TOO_LARGE', 'INVALID_REQUEST', 'OPERATION_FAILED'];
+        const codes = ['PARENT_NOT_FOUND', 'FILE_NOT_FOUND', 'PERMISSION_DENIED', 'DESTINATION_EXISTS', 'UNSAFE_PATH', 'PATH_OUTSIDE_ALLOWED_ROOT', 'STAGING_UNAVAILABLE', 'FILE_CHANGED', 'FILE_TOO_LARGE', 'INVALID_REQUEST', 'OPERATION_FAILED'];
         helperFailures.push({ ...(['authorize', 'publish', 'snapshot', 'cleanup'].includes(payload.action) ? { action: payload.action } : {}),
           ...(codes.includes(data.errorCode) ? { errorCode: data.errorCode } : {}),
           ...(steps.includes(data.nativeStep) ? { nativeStep: data.nativeStep } : {}),
@@ -511,15 +511,68 @@ test('실제 Windows SSH 명령·승인·파일 전송 경계', {
       assert.equal(result.stderr, '');
     });
 
+    await t.test('테스트 모드의 루트 우회는 실제 SSH 계정 권한을 유지한다', async () => {
+      const session = await transport.connect('windows-write');
+      const helperCommand = `powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "${fixture.helper}"`;
+      const invoke = async payload => {
+        const result = await session.call(helperCommand, payload);
+        return { ...result, data: JSON.parse(result.stdout) };
+      };
+      const outsidePath = win32.join(win32.dirname(fixture.outsideFile), 'testmode-upload.bin');
+      const bytes = Buffer.from([0, 255, 17, 13, 10]);
+      const id = '1'.repeat(48), snapshotId = '2'.repeat(48), deniedId = '3'.repeat(48);
+      const payload = { action: 'publish', id, remotePath: outsidePath, size: bytes.length,
+        sha256: digest(bytes), maxBytes: 1_048_576, overwrite: false, elevate: false };
+      const policy = await invoke({ action: 'policy', id, bypassRoot: true });
+      assert.equal(policy.exitCode, 0);
+      assert.equal(policy.data.protocol, 'file-path-policy-v1');
+      assert.equal(policy.data.allowedRoot, fixture.fileRoot);
+      assert.equal(policy.data.rootPolicyApplied, 'test-server-bypass');
+      try {
+        await writeFile(join(fixture.stageRoot, id + '.part'), bytes);
+        const deniedRoot = await invoke({ ...payload, allowedRoot: win32.dirname(fixture.outsideFile) });
+        assert.equal(deniedRoot.exitCode, 1);
+        assert.equal(deniedRoot.data.errorCode, 'PATH_OUTSIDE_ALLOWED_ROOT');
+        assert.equal(deniedRoot.data.allowedRoot, fixture.fileRoot);
+        await absent(outsidePath);
+        const published = await invoke({ ...payload, bypassRoot: true });
+        assert.equal(published.exitCode, 0, JSON.stringify(published.data));
+        assert.equal(published.data.published, true);
+        assert.equal(published.data.rootPolicyApplied, 'test-server-bypass');
+        assert.deepEqual(await readFile(outsidePath), bytes);
+        const snapshot = await invoke({ action: 'snapshot', id: snapshotId, remotePath: outsidePath,
+          maxBytes: 1_048_576, bypassRoot: true });
+        assert.equal(snapshot.exitCode, 0, JSON.stringify(snapshot.data));
+        assert.equal(snapshot.data.rootPolicyApplied, 'test-server-bypass');
+        assert.deepEqual(await readFile(join(fixture.stageRoot, snapshotId + '.part')), bytes);
+        await writeFile(join(fixture.stageRoot, deniedId + '.part'), bytes);
+        const forbiddenPath = win32.join(fixture.adminFileRoot, 'testmode-must-not-exist.bin');
+        const denied = await invoke({ ...payload, id: deniedId, remotePath: forbiddenPath, bypassRoot: true });
+        assert.equal(denied.exitCode, 1);
+        assert.equal(denied.data.errorCode, 'PERMISSION_DENIED');
+        assert.equal(denied.data.nativeStep, 'open');
+        assert.equal(denied.data.nativeError, 5);
+        assert.notEqual(denied.data.published, true);
+        await absent(forbiddenPath);
+      } finally {
+        for (const stagedId of [id, snapshotId, deniedId]) {
+          const cleaned = await invoke({ action: 'cleanup', id: stagedId, bypassRoot: true });
+          assert.equal(cleaned.exitCode, 0, JSON.stringify(cleaned.data));
+        }
+      }
+      assert.deepEqual(await readdir(fixture.stageRoot), []);
+    });
+
     await t.test('보조프로그램은 위험 경로·상태 변경·크기 초과를 거부한다', async () => {
       const session = await transport.connect('windows-write');
       // 전송 계층 검사에 앞서 설치된 보조프로그램의 별도 방어 경계를 직접 검사한다.
       const helperCommand = `powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "${fixture.helper}"`;
-      const unsafe = [remote('x:stream'), '//localhost/C$/outside.bin', '//?/C:/Windows/win.ini', 'C:/Windows/win.ini',
+      const unsafe = [remote('x:stream'), '//localhost/C$/outside.bin', '//?/C:/Windows/win.ini',
         remote('CON'), remote('NUL.txt'), remote('COM1.log'), remote('LPT9'), fixture.fileRoot + '/../outside.bin',
         remote('trailing.'), remote('trailing '), remote('junction/outside.bin'), remote('symlink.bin')];
+      // 일반 정책과 우회 정책의 전체 문법/링크 대조는 PowerShell helper suite가 맡는다.
       for (const remotePath of unsafe) {
-        const result = await session.call(helperCommand, { action: 'snapshot', id: 'a'.repeat(48), remotePath, maxBytes: 1_048_576 });
+        const result = await session.call(helperCommand, { action: 'snapshot', id: 'a'.repeat(48), remotePath, maxBytes: 1_048_576, bypassRoot: true });
         assert.equal(result.exitCode, 1, `위험 경로 허용: ${remotePath}`);
         assert.equal(JSON.parse(result.stdout).errorCode, 'UNSAFE_PATH');
       }

@@ -55,7 +55,7 @@
 4. 응답 유실·중단 시 `get-upload-status`에 같은 `id`를 보내 `sequence`·`received`를 확인한 뒤 그 위치부터 명시적으로 재개합니다. 직전 청크의 동일 재전달은 중복 쓰기 없이 확인될 수 있지만 상태를 보지 않고 청크·begin을 자동 반복하지 않습니다.
 5. `finish-upload`에 같은 `id`를 한 번 보냅니다. 최종 크기와 전체 SHA-256 검증 후 기존 파일 정책에 따라 승인·실행 요청을 제출합니다. 성공 응답도 원격 파일 저장 완료는 아닙니다. 반환된 요청 ID로 실제 완료를 확인합니다.
 
-중복·동시 finish는 새 요청을 만들지 않고 거절합니다. finish 응답을 잃었거나 `REMOTE_UPLOAD_*`가 반환되면 같은 전송 ID의 `get-upload-status`에서 기존 `submitted` 요청을 회수합니다. 이 거절만으로 미실행을 보장하지 않습니다. 같은 ID의 상태 회수와 중복 finish 거절도 원격 실행의 exactly-once 보장은 아닙니다. `submitted`의 요청이 `pending`·`queued`·`failed`일 수 있으므로 원 요청 ID로 `get-request-status`·`wait-for-request`를 사용합니다. 같은 ID의 상태 회수는 동일 중계기 프로세스와 기존 queue 기록 보존 기간에 한정됩니다. 완료 기록은 통상 1시간 후 정리됩니다. 중계기 재시작은 staging을 무효화하고 제출된 파일 요청 기록도 잃을 수 있으며, 만료·없음·불명 결과를 새 ID로 자동 대체하지 않습니다. 대상 revision·Windows fileRoot·덮어쓰기·권한 상승·소유자 승인 정책은 그대로 적용됩니다.
+중복·동시 finish는 새 요청을 만들지 않고 거절합니다. finish 응답을 잃었거나 `REMOTE_UPLOAD_*`가 반환되면 같은 전송 ID의 `get-upload-status`에서 기존 `submitted` 요청을 회수합니다. 이 거절만으로 미실행을 보장하지 않습니다. 같은 ID의 상태 회수와 중복 finish 거절도 원격 실행의 exactly-once 보장은 아닙니다. `submitted`의 요청이 `pending`·`queued`·`failed`일 수 있으므로 원 요청 ID로 `get-request-status`·`wait-for-request`를 사용합니다. 같은 ID의 상태 회수는 동일 중계기 프로세스와 기존 queue 기록 보존 기간에 한정됩니다. 완료 기록은 통상 1시간 후 정리됩니다. 중계기 재시작은 staging을 무효화하고 제출된 파일 요청 기록도 잃을 수 있으며, 만료·없음·불명 결과를 새 ID로 자동 대체하지 않습니다. 대상 revision·덮어쓰기·권한 상승·소유자 승인 정책은 그대로 적용됩니다. Windows `fileRoot`의 일반 모드 제한과 테스트 모드 예외는 아래 경로·권한 안내를 따릅니다.
 
 다음은 실제 바이트가 `abc`인 3바이트 파일의 형식 예시입니다. `expectedTargetRevision`의 0 값은 `list-targets`가 반환한 현재 값으로 교체하고 실제 허용 목적지를 사용합니다.
 
@@ -72,6 +72,12 @@
 `get-upload-status`·`finish-upload`의 입력은 각각 `{"id":"같은48자리transferId"}`입니다. 파일 내용은 파일 전송 도구에서만 전달하며 셸 명령·인증 도구·대화 본문으로 우회하지 않습니다.
 
 `begin-upload` 응답을 잃어 전송 ID를 받지 못했다면 새 begin을 자동으로 제출하지 않습니다. 아래 로컬 CLI·stdio는 큰 파일 전송을 효율적으로 처리하려는 경우의 선택 경로입니다.
+
+## 원격 파일 경로와 권한
+
+Windows 일반 모드에서는 도우미에 설정된 `fileRoot` 밖의 경로를 `PATH_OUTSIDE_ALLOWED_ROOT`로 거부합니다. 응답의 `allowedRoot`는 해당 서버 도우미 설정에서 확인한 값이며, `C:/upload/ssh-mcp` 같은 예시를 모든 서버의 실제 루트로 사용하지 않습니다. 개별 승인만으로 루트 제한은 해제되지 않습니다. 관리자가 설정한 `testServer=true`와 유효한 서버 비밀정보를 중계기가 확인한 테스트 모드에서만 이 루트 소속 검사를 생략합니다. 도우미의 우회 지원을 확인하지 못하면 `PATH_POLICY_UNSUPPORTED`로 중단합니다. 경로 형식·재분석 지점·하드링크·경로 변경 경쟁·목적지 소유자와 쓰기 권한의 신뢰 검증·크기 제한은 계속 적용합니다. Linux에는 이 Windows용 루트 제한을 새로 추가하지 않습니다.
+
+테스트 모드도 실제 SSH 계정의 파일 권한을 늘리지 않습니다. 권한이 부족하면 `PERMISSION_DENIED`로 실패하며 ACL 수정·새 자격 증명 취득·UAC 요청이나 우회를 자동으로 하지 않습니다. 권한 실행은 요청에 `elevate:true`를 명시한 경우에만 기존 Linux `sudo` 또는 Windows의 이미 활성화된 관리자 토큰을 사용합니다. 실패나 불명확한 결과를 자동 재전송하지 않고 대상 상태와 승인된 계정의 권한을 확인합니다.
 
 ## 선택적인 로컬 CLI
 

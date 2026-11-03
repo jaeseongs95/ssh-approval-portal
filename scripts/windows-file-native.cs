@@ -395,22 +395,34 @@ namespace SshApproval {
             } finally { Marshal.FreeHGlobal(data); }
         }
         public static Dictionary<string, object> Execute(string action, string id, string path, string hash, long size, long maximum, bool overwrite, string root, string stage, string account, string installer) {
-            root = CheckedPath(root); stage = CheckedPath(stage);
-            if (root.Equals(stage, StringComparison.OrdinalIgnoreCase) || Within(root, stage) || Within(stage, root)) Fail("STAGING_UNAVAILABLE");
+            return Execute(action, id, path, hash, size, maximum, overwrite, root, stage, account, installer, false);
+        }
+        public static Dictionary<string, object> Execute(string action, string id, string path, string hash, long size, long maximum, bool overwrite, string root, string stage, string account, string installer, bool bypassRoot) {
+            string rootPolicy = bypassRoot ? "test-server-bypass" : "configured-root";
+            stage = CheckedPath(stage);
+            if (action != "cleanup" && action != "policy") {
+                root = CheckedPath(root);
+                if (root.Equals(stage, StringComparison.OrdinalIgnoreCase) || Within(root, stage) || Within(stage, root)) Fail("STAGING_UNAVAILABLE");
+                path = CheckedPath(path);
+                if (!bypassRoot && !Within(path, root)) Fail("PATH_OUTSIDE_ALLOWED_ROOT");
+            }
             using (DirectoryChain stages = new DirectoryChain(stage, "STAGING_UNAVAILABLE"))
-            using (DirectoryChain roots = new DirectoryChain(root, "PARENT_NOT_FOUND")) {
+            using (DirectoryChain roots = bypassRoot || action == "cleanup" || action == "policy" ? null : new DirectoryChain(root, "PARENT_NOT_FOUND")) {
                 stages.CheckTrust(account, installer, true);
-                roots.CheckTrust(account, installer, true);
                 CheckWriters(stages.Last, account, "STAGING_UNAVAILABLE");
-                CheckWriters(roots.Last, account, "PERMISSION_DENIED");
+                if (roots != null) {
+                    roots.CheckTrust(account, installer, true);
+                    CheckWriters(roots.Last, account, "PERMISSION_DENIED");
+                }
+                if (action == "policy") return new Dictionary<string, object> {
+                    { "protocol", "file-path-policy-v1" }, { "allowedRoot", root }, { "rootPolicyApplied", rootPolicy }
+                };
                 string staged = stage + "\\" + id + ".part";
                 if (action == "cleanup") {
                     try { using (SafeFileHandle file = Open(staged, Delete, 1, 3, false, "FILE_NOT_FOUND")) Remove(file); }
                     catch (FileFailure failure) { if (failure.Code != "FILE_NOT_FOUND") throw; }
-                    return new Dictionary<string, object> { { "cleaned", true } };
+                    return new Dictionary<string, object> { { "cleaned", true }, { "rootPolicyApplied", rootPolicy } };
                 }
-                path = CheckedPath(path);
-                if (!Within(path, root)) Fail("UNSAFE_PATH");
                 using (DirectoryChain parents = new DirectoryChain(Path.GetDirectoryName(path), "PARENT_NOT_FOUND")) {
                     parents.CheckTrust(account, installer, true);
                     CheckWriters(parents.Last, account, "PERMISSION_DENIED");
@@ -426,6 +438,7 @@ namespace SshApproval {
                                         Dictionary<string, object> result = Copy(input, output, maximum);
                                         if (!Same(before, Inspect(source, false))) Fail("FILE_CHANGED");
                                         complete = true;
+                                        result.Add("rootPolicyApplied", rootPolicy);
                                         return result;
                                     }
                                 } finally { if (!complete && !destination.IsClosed) Remove(destination); }
@@ -460,6 +473,7 @@ namespace SshApproval {
                                         Rename(destination, path, previous != null && overwrite);
                                         published = true;
                                         result.Add("published", true);
+                                        result.Add("rootPolicyApplied", rootPolicy);
                                         return result;
                                     }
                                 } finally { if (!published && !destination.IsClosed) Remove(destination); }

@@ -122,6 +122,13 @@ export function createTargetRouter(runtimes, { defaultTarget, legacy, store, aud
     legacy, select, jobOwner, artifactOwner, queue,
     list: () => ({ targets: runtimes.map(runtime => ({ id: runtime.id, displayName: runtime.displayName, enabled: runtime.enabled, revision: runtime.revision, isDefault: runtime.id === defaultTarget,
       platform: platformOf(runtime), capabilities: targetCapabilities(runtime) })), defaultTarget: defaultTarget ?? null }),
+    async listFilePolicies() {
+      const listed = this.list();
+      return { ...listed, targets: await Promise.all(listed.targets.map(async item => {
+        const runtime = byId.get(item.id);
+        return typeof runtime.filePolicy === 'function' ? { ...item, filePolicy: await runtime.filePolicy() } : item;
+      })) };
+    },
     canonicalTransfer(args) { const runtime = select(args.target); return legacy && args.target === undefined ? args : { ...args, target: runtime.id }; },
     commands: { read: (command, target) => select(target).commands.read(command), run: (command, target, requestKey, context, displayContext) => select(target).commands.run(command, requestKey, context, displayContext),
       runSource: (args, target) => select(target).commands.runSource(args), source: id => { const runtime = jobOwner(id); select(runtime.id).verify(); return runtime.commands.source(id); },

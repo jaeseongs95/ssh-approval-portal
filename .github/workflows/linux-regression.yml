@@ -79,6 +79,24 @@ jobs:
       - run: npm ci --ignore-scripts
       - name: Node regression
         run: node --test --test-skip-pattern='^CLI-LOOPBACK exact helper executes inspection/status over pinned SSH and preserves authentication bytes$' test/*.test.mjs
+      - name: Test-mode file path regression detects the previous boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          path=src/adapters/ssh/transfers.mjs
+          cp "$path" "$RUNNER_TEMP/testmode-transfers-final.mjs"
+          restore_testmode_transfer() { cp "$RUNNER_TEMP/testmode-transfers-final.mjs" "$path"; }
+          trap restore_testmode_transfer EXIT
+          git show bef841dd94625983fa8ae5a27d6ed1e9af143e9f:"$path" > "$path"
+          set +e
+          node --test test/test-mode-file-path-policy.test.mjs > "$RUNNER_TEMP/testmode-path-red.tap" 2>&1
+          red=$?
+          set -e
+          cat "$RUNNER_TEMP/testmode-path-red.tap"
+          test "$red" -ne 0
+          grep -Eq '^# fail [1-9][0-9]*$' "$RUNNER_TEMP/testmode-path-red.tap"
+          restore_testmode_transfer
+          node --test test/test-mode-file-path-policy.test.mjs test/test-mode-file-policy-application.test.mjs
       - name: Remote JSON upload detects missing provider-neutral transport
         shell: bash
         run: |

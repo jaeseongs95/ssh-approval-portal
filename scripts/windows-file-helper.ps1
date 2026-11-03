@@ -12,11 +12,16 @@ try {
     } catch { throw 'INVALID_REQUEST' }
     if ($null -eq $request -or $request -isnot [pscustomobject] -or
         $request.id -isnot [string] -or $request.id -cnotmatch '^[a-f0-9]{48}$' -or
-        $request.action -cnotin @('publish', 'snapshot', 'cleanup', 'authorize')) { throw 'INVALID_REQUEST' }
+        $request.action -cnotin @('publish', 'snapshot', 'cleanup', 'authorize', 'policy')) { throw 'INVALID_REQUEST' }
     $elevate = $false
     if ($null -ne $request.PSObject.Properties['elevate']) {
         if ($request.elevate -isnot [bool]) { throw 'INVALID_REQUEST' }
         $elevate = $request.elevate
+    }
+    $bypassRoot = $false
+    if ($null -ne $request.PSObject.Properties['bypassRoot']) {
+        if ($request.bypassRoot -isnot [bool]) { throw 'INVALID_REQUEST' }
+        $bypassRoot = $request.bypassRoot
     }
     if ($request.action -eq 'authorize' -and !$elevate) { throw 'INVALID_REQUEST' }
     $maximum = 67108864L
@@ -35,7 +40,7 @@ try {
         $size = [long]$request.size
         $overwrite = $request.overwrite
     }
-    if ($request.action -ne 'cleanup' -and $request.remotePath -isnot [string]) { throw 'UNSAFE_PATH' }
+    if ($request.action -cnotin @('cleanup', 'policy') -and $request.remotePath -isnot [string]) { throw 'UNSAFE_PATH' }
     $config = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'windows-file-helper.config.json') -Raw -Encoding UTF8 | ConvertFrom-Json
     if ($config.version -ne 1 -or $config.accountSid -isnot [string] -or
         $config.installerSid -isnot [string] -or $config.installerSid -notmatch '^S-1-5-21-[0-9-]+$') { throw 'OPERATION_FAILED' }
@@ -44,16 +49,17 @@ try {
     if ($elevate) { [SshApproval.WindowsFiles]::RequireAdministrator() }
     $installLease = [SshApproval.WindowsFiles]::PinTrustedDirectory($PSScriptRoot, $config.accountSid, $config.installerSid, $false)
     if ($request.action -eq 'authorize') {
-        [Console]::Out.WriteLine('{"authorized":true,"elevated":true}')
+        $rootPolicy = if ($bypassRoot) { 'test-server-bypass' } else { 'configured-root' }
+        [Console]::Out.WriteLine((@{ authorized = $true; elevated = $true; rootPolicyApplied = $rootPolicy } | ConvertTo-Json -Compress))
         exit 0
     }
     $result = [SshApproval.WindowsFiles]::Execute($request.action, $request.id, $request.remotePath,
-        $request.sha256, $size, $maximum, $overwrite, $config.fileRoot, $config.stageRoot, $config.accountSid, $config.installerSid)
+        $request.sha256, $size, $maximum, $overwrite, $config.fileRoot, $config.stageRoot, $config.accountSid, $config.installerSid, $bypassRoot)
     [Console]::Out.WriteLine(($result | ConvertTo-Json -Compress -Depth 4))
     exit 0
 } catch {
     $codes = @('PARENT_NOT_FOUND', 'FILE_NOT_FOUND', 'PERMISSION_DENIED', 'DESTINATION_EXISTS',
-        'UNSAFE_PATH', 'STAGING_UNAVAILABLE', 'FILE_CHANGED', 'FILE_TOO_LARGE', 'INVALID_REQUEST', 'OPERATION_FAILED')
+        'UNSAFE_PATH', 'PATH_OUTSIDE_ALLOWED_ROOT', 'STAGING_UNAVAILABLE', 'FILE_CHANGED', 'FILE_TOO_LARGE', 'INVALID_REQUEST', 'OPERATION_FAILED')
     $code = 'OPERATION_FAILED'
     $nativeStep = $null
     $nativeError = 0
@@ -79,6 +85,7 @@ try {
         $failure = $failure.InnerException
     }
     $response = @{ error = 'File operation refused or failed'; errorCode = $code }
+    if ($code -ceq 'PATH_OUTSIDE_ALLOWED_ROOT' -and $config.fileRoot -is [string]) { $response.allowedRoot = $config.fileRoot }
     if ($null -ne $nativeStep) { $response.nativeStep = $nativeStep; $response.nativeError = $nativeError }
     if ($null -ne $securityControl) { $response.securityControl = $securityControl }
     [Console]::Out.WriteLine(($response | ConvertTo-Json -Compress))

@@ -72,7 +72,7 @@ function Describe-Result($result) {
     # Whitelist-only failure metadata; never emit the helper response, path or exception text.
     $code = 'unclassified'
     if ($result.data.errorCode -cin @('PARENT_NOT_FOUND', 'FILE_NOT_FOUND', 'PERMISSION_DENIED', 'DESTINATION_EXISTS',
-        'UNSAFE_PATH', 'STAGING_UNAVAILABLE', 'FILE_CHANGED', 'FILE_TOO_LARGE', 'INVALID_REQUEST', 'OPERATION_FAILED')) { $code = $result.data.errorCode }
+        'UNSAFE_PATH', 'PATH_OUTSIDE_ALLOWED_ROOT', 'STAGING_UNAVAILABLE', 'FILE_CHANGED', 'FILE_TOO_LARGE', 'INVALID_REQUEST', 'OPERATION_FAILED')) { $code = $result.data.errorCode }
     $step = 'none'
     if ($result.data.nativeStep -cin @('native', 'create_directory', 'inspect', 'open', 'filesystem', 'final_path', 'read_input', 'read_security',
         'remove', 'rename_replace', 'rename_new', 'write_security', 'write_times', 'verify_security', 'verify_owner', 'verify_dacl', 'verify_control', 'verify_times', 'read_label', 'write_label', 'verify_label')) { $step = $result.data.nativeStep }
@@ -216,6 +216,7 @@ public static class RestrictedAdministratorTest {
     Stage $request
     $result = Call $request
     Assert-True ($result.exitCode -eq 0 -and $result.data.published -and $result.data.sha256 -ceq $script:digest -and $result.data.size -eq $script:bytes.Length) 'publish metadata'
+    Assert-True ($result.data.rootPolicyApplied -ceq 'configured-root') 'default request applies configured root policy'
     Assert-True ([Convert]::ToBase64String([IO.File]::ReadAllBytes($script:target)) -ceq [Convert]::ToBase64String($script:bytes)) 'binary publish bytes'
     Refused $request 'DESTINATION_EXISTS'
     $request.overwrite = $true
@@ -289,25 +290,92 @@ public static class RestrictedAdministratorTest {
     Refused $changed 'FILE_CHANGED'
     Refused (Request 'snapshot' (Join-Path $root 'missing.bin')) 'FILE_NOT_FOUND'
     Refused (Request 'publish' (Join-Path $root 'missing-parent/file.bin')) 'PARENT_NOT_FOUND'
-    Refused (Request 'snapshot' (Join-Path $WorkRoot 'files-other/file.bin')) 'UNSAFE_PATH'
+    $outsideRequest = Request 'snapshot' (Join-Path $WorkRoot 'files-other/file.bin')
+    $outsideRequest.allowedRoot = $WorkRoot
+    $outsideResult = Call $outsideRequest
+    Assert-True ($outsideResult.exitCode -eq 1 -and $outsideResult.data.errorCode -ceq 'PATH_OUTSIDE_ALLOWED_ROOT') 'normal mode distinguishes root policy from unsafe path'
+    Assert-True ($outsideResult.data.allowedRoot -ceq $root) 'allowed root metadata comes from helper config, never request'
 
-    $racePath = Join-Path $root 'race.bin'
-    $first = Request 'publish' $racePath
-    $second = Request 'publish' $racePath
-    Stage $first
-    Stage $second
-    $one = Start-Script $script:helper '' ($first | ConvertTo-Json -Compress)
-    $two = Start-Script $script:helper '' ($second | ConvertTo-Json -Compress)
-    $results = @((Complete-Script $one), (Complete-Script $two))
-    Assert-True (@($results | Where-Object { $_.exitCode -eq 0 -and $_.data.published }).Count -eq 1) 'concurrent new publish has exactly one winner'
-    Assert-True (@($results | Where-Object { $_.exitCode -eq 1 -and $_.data.errorCode -ceq 'DESTINATION_EXISTS' }).Count -eq 1) 'concurrent publish loser cannot overwrite'
+    $bypassDirectory = Join-Path $WorkRoot 'bypass'
+    $null = [IO.Directory]::CreateDirectory($bypassDirectory)
+    $bypass = Request 'publish' (Join-Path $bypassDirectory 'uploaded.bin')
+    $bypass.bypassRoot = $true
+    Stage $bypass
+    $parkedRoot = Join-Path $WorkRoot 'parked-files'
+    [IO.Directory]::Move($root, $parkedRoot)
+    try {
+        $policy = Request 'policy'
+        foreach ($flag in @($false, $true)) {
+            $policy.bypassRoot = $flag
+            $policyResult = Call $policy
+            $expectedPolicy = if ($flag) { 'test-server-bypass' } else { 'configured-root' }
+            Assert-True ($policyResult.exitCode -eq 0 -and $policyResult.data.protocol -ceq 'file-path-policy-v1' -and
+                $policyResult.data.allowedRoot -ceq $root -and $policyResult.data.rootPolicyApplied -ceq $expectedPolicy) 'policy probe is independent of destination root availability'
+        }
+        $result = Call $bypass
+        Assert-True ($result.exitCode -eq 0 -and $result.data.published -and $result.data.rootPolicyApplied -ceq 'test-server-bypass') 'bypass publishes outside an unavailable configured root'
+        Assert-True ([Convert]::ToBase64String([IO.File]::ReadAllBytes($bypass.remotePath)) -ceq [Convert]::ToBase64String($script:bytes)) 'outside publish has exact input bytes'
+        $outsideSnapshot = Request 'snapshot' $bypass.remotePath
+        $outsideSnapshot.bypassRoot = $true
+        $result = Call $outsideSnapshot
+        Assert-True ($result.exitCode -eq 0 -and $result.data.sha256 -ceq $script:digest -and $result.data.rootPolicyApplied -ceq 'test-server-bypass') 'bypass snapshots outside configured root'
+        foreach ($id in @($bypass.id, $outsideSnapshot.id)) {
+            $cleanup = Request 'cleanup'
+            $cleanup.id = $id
+            $result = Call $cleanup
+            Assert-True ($result.exitCode -eq 0 -and $result.data.cleaned) 'normal cleanup works without configured destination root'
+            Assert-True (!(Test-Path -LiteralPath (Join-Path $script:stage ($id + '.part')))) 'cleanup removes stage with unavailable destination root'
+        }
+    } finally { [IO.Directory]::Move($parkedRoot, $root) }
+
+    $deniedDirectory = Join-Path $WorkRoot 'denied-destination'
+    $null = [IO.Directory]::CreateDirectory($deniedDirectory)
+    $deniedAcl = Get-Acl -LiteralPath $deniedDirectory
+    $restoreAcl = Get-Acl -LiteralPath $deniedDirectory
+    $deniedAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($sid),
+        [Security.AccessControl.FileSystemRights]::CreateFiles, [Security.AccessControl.AccessControlType]::Deny))
+    try {
+        Set-Acl -LiteralPath $deniedDirectory -AclObject $deniedAcl
+        $deniedSddl = (Get-Acl -LiteralPath $deniedDirectory).Sddl
+        $deniedRequest = Request 'publish' (Join-Path $deniedDirectory 'must-not-exist.bin')
+        $deniedRequest.bypassRoot = $true
+        Stage $deniedRequest
+        $deniedResult = Call $deniedRequest
+        Assert-True ($deniedResult.exitCode -eq 1 -and $deniedResult.data.errorCode -ceq 'PERMISSION_DENIED' -and
+            $deniedResult.data.nativeStep -ceq 'open' -and $deniedResult.data.nativeError -eq 5) 'bypass retains actual destination OS write denial'
+        Assert-True (!$deniedResult.data.published -and !(Test-Path -LiteralPath $deniedRequest.remotePath)) 'permission denial cannot report or create published destination'
+        Assert-True ((Get-Acl -LiteralPath $deniedDirectory).Sddl -ceq $deniedSddl) 'bypass never repairs destination directory permissions'
+        $cleanup = Request 'cleanup'
+        $cleanup.id = $deniedRequest.id
+        Assert-True ((Call $cleanup).exitCode -eq 0) 'permission-denied publish can clean its stage'
+    } finally { Set-Acl -LiteralPath $deniedDirectory -AclObject $restoreAcl }
+
+    foreach ($flag in @($false, $true)) {
+        $raceDirectory = if ($flag) { $bypassDirectory } else { $root }
+        $racePath = Join-Path $raceDirectory 'race.bin'
+        $first = Request 'publish' $racePath
+        $second = Request 'publish' $racePath
+        $first.bypassRoot = $flag
+        $second.bypassRoot = $flag
+        Stage $first
+        Stage $second
+        $one = Start-Script $script:helper '' ($first | ConvertTo-Json -Compress)
+        $two = Start-Script $script:helper '' ($second | ConvertTo-Json -Compress)
+        $results = @((Complete-Script $one), (Complete-Script $two))
+        Assert-True (@($results | Where-Object { $_.exitCode -eq 0 -and $_.data.published }).Count -eq 1) 'concurrent new publish has exactly one winner with either root policy'
+        Assert-True (@($results | Where-Object { $_.exitCode -eq 1 -and $_.data.errorCode -ceq 'DESTINATION_EXISTS' }).Count -eq 1) 'concurrent publish loser cannot overwrite with either root policy'
+    }
     $locked = [IO.File]::Open($script:target, [IO.FileMode]::Open, [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite)
     try { Refused (Request 'snapshot') 'PERMISSION_DENIED' } finally { $locked.Dispose() }
 
     foreach ($path in @('relative.txt', '\\server\share\file', '\\?\C:\file', 'C:relative', 'C:\file:stream',
         ($root + '\..\escape'), ($root + '\.\file'), ($root + '\a\\b'), ($root + '\NUL.txt'),
         ($root + '\COM1'), ($root + '\name.'), ($root + '\name '), ($root + '\folder\'))) {
-        Refused (Request 'snapshot' $path) 'UNSAFE_PATH'
+        foreach ($flag in @($false, $true)) {
+            $unsafe = Request 'snapshot' $path
+            $unsafe.bypassRoot = $flag
+            Refused $unsafe 'UNSAFE_PATH'
+        }
     }
     $invalid = Request
     $invalid.id = '../sensitive-marker'
@@ -317,6 +385,9 @@ public static class RestrictedAdministratorTest {
     Refused $invalid 'INVALID_REQUEST'
     $invalid = Request
     $invalid.elevate = 'true'
+    Refused $invalid 'INVALID_REQUEST'
+    $invalid = Request
+    $invalid.bypassRoot = 'true'
     Refused $invalid 'INVALID_REQUEST'
     Refused (Request 'authorize') 'INVALID_REQUEST'
     $invalid = Request
@@ -366,6 +437,11 @@ public static class RestrictedAdministratorTest {
     $symlink = Join-Path $root 'symlink.bin'
     $null = New-Item -ItemType SymbolicLink -Path $symlink -Target (Join-Path $outside 'secret.bin')
     Refused (Request 'snapshot' $symlink) 'UNSAFE_PATH'
+    foreach ($path in @((Join-Path $junction 'secret.bin'), $hardlink, $symlink)) {
+        $unsafe = Request 'snapshot' $path
+        $unsafe.bypassRoot = $true
+        Refused $unsafe 'UNSAFE_PATH'
+    }
     $badStage = Request 'cleanup'
     $null = New-Item -ItemType SymbolicLink -Path (Join-Path $script:stage ($badStage.id + '.part')) -Target (Join-Path $outside 'secret.bin')
     Refused $badStage 'UNSAFE_PATH'

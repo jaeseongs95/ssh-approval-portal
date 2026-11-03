@@ -109,7 +109,17 @@ export async function createApplication({ registry, classify, executeCommand, ex
     const platform = platformOf(definition), targetClassify = classifyForTarget(definition, classify);
     const targetStore = identity ? scopedArtifacts(store, identity) : store;
     const checkedRegistry = { getProfile: profile => registry.getProfile(profile), getOrCreate(profile) { definition.verify(); return registry.getOrCreate(profile); } };
-    const transfers = createTransferExecutor(checkedRegistry, targetStore, { readProfile, writeProfile, platform });
+    const pathPolicy = async () => {
+      definition.verify();
+      const policy = commandState?.policy();
+      const rule = policy?.targets.find(rule => rule.targetId === definition.id && rule.targetRevision === definition.revision && rule.profile === writeProfile);
+      if (rule?.testServer !== true) return { bypassRoot: false };
+      await testServerMode.require();
+      definition.verify();
+      if (commandState?.policy().revision !== policy.revision) dispatchRefusal('policy_changed', 'policy_guard', 'File path policy changed');
+      return { bypassRoot: true };
+    };
+    const transfers = createTransferExecutor(checkedRegistry, targetStore, { readProfile, writeProfile, platform, pathPolicy });
     const binding = (profile, command, executionId) => ({ executionId, targetId: definition.id, targetRevision: definition.revision, profile, operationDigest: hash(command) });
     const dispatchGuard = id => {
       const before = commandState?.policy(), submitted = id ? queue.get(id) : undefined;
@@ -222,6 +232,18 @@ export async function createApplication({ registry, classify, executeCommand, ex
     commands = createCommandService({ queue, classify: targetClassify, executeCommand: checkedExecute, audit: targetAudit, target, readProfile, claimExecution, automation });
     files = createFileService({ store: targetStore, queue, transfers, claimImport, platform });
     return { ...definition, queue, commands, files, transfers, store: targetStore,cli,
+      async filePolicy() {
+        const policy = commandState?.policy();
+        const rule = policy?.targets.find(rule => rule.targetId === definition.id && rule.targetRevision === definition.revision && rule.profile === writeProfile);
+        const active = rule?.testServer === true && await testServerMode.available();
+        definition.verify();
+        if (commandState?.policy().revision !== policy?.revision) throw Error('File policy changed during discovery');
+        return { testServerConfigured: rule?.testServer === true, testServerActive: active,
+          mode: platform === 'windows' ? active ? 'test-server-bypass' : 'configured-root' : 'ssh-account-permissions',
+          allowedRoot: platform === 'windows' ? transfers.rootObservation?.allowedRoot ?? null : null,
+          allowedRootObservedAt: platform === 'windows' ? transfers.rootObservation?.observedAt ?? null : null,
+          osPermissionsEnforced: true, pathSafetyEnforced: true, elevationRequiresExplicitRequest: true };
+      },
       cliProbe:checkedCliProbe,cliDrain:()=>Promise.allSettled([...cliProbes]) };
   });
   const targets = createTargetRouter(runtimes, { defaultTarget: settings.targets === null ? 'default' : settings.defaultTarget, legacy: settings.targets === null, store, audit });
