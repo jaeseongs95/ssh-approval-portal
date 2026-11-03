@@ -10,6 +10,31 @@ const fail = code => { throw Object.assign(Error(code), { code }); };
 const hash = value => createHash('sha256').update(value).digest('hex');
 const token = () => randomBytes(8).toString('hex');
 async function optionalStat(path) { try { return await lstat(path); } catch (error) { if (error.code === 'ENOENT') return null; throw error; } }
+async function publicDeploymentDirectory(path, { recursive = false, code = 'UNSAFE_DEPLOY_RELEASES' } = {}) {
+  let created;
+  try { created = await mkdir(path, { recursive, mode: 0o755 }); if (!recursive) created = path; }
+  catch (error) { if (error.code !== 'EEXIST') throw error; }
+  const st = await lstat(path);
+  if (!st.isDirectory() || st.isSymbolicLink()
+    || (process.platform !== 'win32' && (st.uid !== process.getuid() || (st.mode & 0o022)))) fail(code);
+  // Existing operator directories retain their permissions. New public code
+  // directories need explicit traversal permissions even under root umask077.
+  if (created && process.platform !== 'win32') await chmod(path, 0o755);
+}
+async function stagedCodeAccess(root, dependencies = false) {
+  for (const entry of await readdir(root, { withFileTypes: true })) {
+    const path = join(root, entry.name);
+    if (entry.isDirectory()) await stagedCodeAccess(path, dependencies || entry.name === 'node_modules');
+    else if (dependencies && entry.isFile() && process.platform !== 'win32') {
+      const st = await lstat(path);
+      if (st.nlink !== 1 || st.uid !== process.getuid()) fail('UNSAFE_DEPLOY_DEPENDENCY');
+      // npm inherits the deployer's umask. Dependencies are public package code;
+      // restore read bits only, retaining executable and other ordinary bits.
+      await chmod(path, (st.mode & 0o777) | 0o444);
+    }
+  }
+  if (process.platform !== 'win32') await chmod(root, 0o755);
+}
 async function syncDirectory(path) {
   if (process.platform === 'win32') return;
   const fd = await open(path, 'r'); try { await fd.sync(); } finally { await fd.close(); }
@@ -39,6 +64,14 @@ function command(argv, { cwd, expected = 0, timeout = 60000, uid, gid, input, fa
     fail(result.error?.code === 'ETIMEDOUT' ? 'DEPLOY_COMMAND_TIMEOUT' : failureCode);
   }
   return result.stdout;
+}
+async function serviceImports(plan, release) {
+  const owner = await lstat(plan.dataRoot);
+  if (!owner.isDirectory() || owner.isSymbolicLink()) fail('UNSAFE_DEPLOY_DATA');
+  command([process.execPath, join(release, 'scripts/check-package-imports.mjs')], {
+    cwd: release, uid: process.platform === 'win32' ? undefined : owner.uid,
+    gid: process.platform === 'win32' ? undefined : owner.gid, failureCode: 'DEPLOY_SERVICE_IMPORT_CHECK_FAILED',
+  });
 }
 function normalizePlan(input) {
   if (!input || !/^[a-f0-9]{64}$/.test(input.generation)) fail('INVALID_DEPLOY_GENERATION');
@@ -199,9 +232,7 @@ export async function runDeployment(stage, input, { fetchImpl = fetch } = {}) {
     return { ...receipt, version: manifest.version, files: manifest.files.length, previousRelease: existing, freeBytes: Number(disk.bavail) * Number(disk.bsize),
       impact: 'Only packaged code, deployment receipts and the new operations journal are written. Existing policy/history DBs, auth configuration, keys and service units are preserved.' };
   }
-  await mkdir(plan.appRoot, { recursive: true, mode: 0o755 });
-  const appStat = await lstat(plan.appRoot);
-  if (!appStat.isDirectory() || appStat.isSymbolicLink() || (process.platform !== 'win32' && (appStat.uid !== process.getuid() || (appStat.mode & 0o022)))) fail('UNSAFE_DEPLOY_ROOT');
+  await publicDeploymentDirectory(plan.appRoot, { recursive: true, code: 'UNSAFE_DEPLOY_ROOT' });
   await mkdir(control, { recursive: true, mode: 0o700 });
   const controlStat = await lstat(control);
   if (!controlStat.isDirectory() || controlStat.isSymbolicLink() || (process.platform !== 'win32' && (controlStat.uid !== process.getuid() || (controlStat.mode & 0o077)))) fail('UNSAFE_DEPLOY_CONTROL');
@@ -219,19 +250,21 @@ export async function runDeployment(stage, input, { fetchImpl = fetch } = {}) {
         const needed = manifest.files.reduce((sum, entry) => sum + entry.size, 0) * 3 + 256 * 1024 * 1024;
         const disk = await statfs(plan.appRoot);
         if (Number(disk.bavail) * Number(disk.bsize) < needed) fail('DEPLOY_DISK_CAPACITY');
-        await mkdir(join(plan.appRoot, 'releases'), { recursive: true, mode: 0o755 });
-        const temporary = join(plan.appRoot, '.deploy180-stage-' + token()); await mkdir(temporary, { mode: 0o755 });
+        await publicDeploymentDirectory(join(plan.appRoot, 'releases'));
+        const temporary = join(plan.appRoot, '.deploy180-stage-' + token()); await publicDeploymentDirectory(temporary);
         for (const entry of [...manifest.files, { path: 'release-manifest.json' }]) {
           const target = join(temporary, entry.path); await mkdir(dirname(target), { recursive: true, mode: 0o755 });
           await copyFile(join(plan.sourceDir, entry.path), target, constants.COPYFILE_EXCL);
         }
         await candidate(temporary, plan.generation);
         command([plan.npmExecutable ?? 'npm', 'ci', '--omit=dev', '--ignore-scripts'], { cwd: temporary, timeout: 600000, failureCode: 'DEPLOY_DEPENDENCY_INSTALL_FAILED' });
+        await stagedCodeAccess(temporary);
         command([process.execPath, join(temporary, 'scripts/check-package-imports.mjs')], { cwd: temporary, failureCode: 'DEPLOY_IMPORT_CHECK_FAILED' });
         await syncTree(temporary);
         await rename(temporary, release); await syncDirectory(dirname(release));
       }
       await candidate(release, plan.generation);
+      await serviceImports(plan, release);
       const previousRelease = await activeTarget(plan);
       if (previousRelease) await verifyRelease(previousRelease);
       const previousGeneration = previousRelease ? hash(await readFile(join(previousRelease, 'release-manifest.json'))) : null;
@@ -242,6 +275,8 @@ export async function runDeployment(stage, input, { fetchImpl = fetch } = {}) {
         if (state.phase !== 'staged') fail('DEPLOY_ACTIVATION_ALREADY_ATTEMPTED');
         if (await activeTarget(plan) !== state.previousRelease) fail('DEPLOY_ACTIVE_CHANGED');
         await candidate(release, plan.generation);
+        // Check with the same identity as migration before stopping the old service.
+        await serviceImports(plan, release);
         await save({ phase: 'stopping' });
         command(plan.service.stop, { failureCode: 'DEPLOY_SERVICE_STOP_FAILED' });
         command(plan.service.status, { expected: plan.service.stoppedExitCode ?? 3, failureCode: 'DEPLOY_SERVICE_STILL_ACTIVE' });
