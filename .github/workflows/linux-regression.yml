@@ -89,15 +89,15 @@ jobs:
           trap restore_testmode_transfer EXIT
           git show bef841dd94625983fa8ae5a27d6ed1e9af143e9f:"$path" > "$path"
           set +e
-          node --test test/test-mode-file-path-policy.test.mjs > "$RUNNER_TEMP/testmode-path-red.tap" 2>&1
+          node --test --test-reporter=tap test/test-mode-file-path-policy.test.mjs > "$RUNNER_TEMP/testmode-path-red.tap" 2>&1
           red=$?
           set -e
           cat "$RUNNER_TEMP/testmode-path-red.tap"
           test "$red" -ne 0
           grep -Eq '^# fail [1-9][0-9]*$' "$RUNNER_TEMP/testmode-path-red.tap"
           restore_testmode_transfer
-          node --test test/test-mode-file-path-policy.test.mjs
-          node --test test/test-mode-file-policy-application.test.mjs
+          node --test --test-reporter=tap test/test-mode-file-path-policy.test.mjs
+          node --test --test-reporter=tap test/test-mode-file-policy-application.test.mjs
       - name: Remote JSON upload detects missing provider-neutral transport
         shell: bash
         run: |
