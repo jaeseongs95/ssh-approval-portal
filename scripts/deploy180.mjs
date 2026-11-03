@@ -120,6 +120,7 @@ export async function prepareDeploymentMigration(plan, release, { previousGenera
   const control = join(plan.appRoot, 'deployments'), markerPath = join(control, 'legacy-migration.json');
   const owner = await lstat(plan.dataRoot);
   if (!owner.isDirectory() || owner.isSymbolicLink()) fail('UNSAFE_DEPLOY_DATA');
+  const previousVersion = previousRelease ? JSON.parse(await readFile(join(previousRelease, 'release-manifest.json'), 'utf8')).version : null;
   let completed = await migrationControl(markerPath);
   if (!completed && previousGeneration) {
     const prior = await migrationControl(join(control, previousGeneration + '.json'));
@@ -130,6 +131,17 @@ export async function prepareDeploymentMigration(plan, release, { previousGenera
   const childOptions = { uid: process.platform === 'win32' ? undefined : owner.uid, gid: process.platform === 'win32' ? undefined : owner.gid, typedReceipt: true };
   if (completed) {
     if (completed.type !== 'portal.deployment-migration.v1' || completed.dataRoot !== plan.dataRoot || !/^[a-f0-9]{64}$/.test(completed.generation) || !validMigration(completed.migration)) fail('INVALID_MIGRATION_RECEIPT');
+    if (typeof previousVersion === 'string' && /^(?:0\.\d+|1\.[0-7])\./.test(previousVersion)) {
+      // A restored legacy writer can add history outside the 1.8 authoritative journal.
+      for (const name of ['command-automation.sqlite', 'agent-cli.sqlite']) {
+        const original = completed.migration.sources.find(source => source.source === name), path = join(plan.dataRoot, name), st = await optionalStat(path);
+        if (Boolean(st) !== Boolean(original)) fail('LEGACY_MIGRATION_SOURCE_CHANGED');
+        if (!st) continue;
+        if (!st.isFile() || st.isSymbolicLink() || st.nlink !== 1) fail('UNSAFE_LEGACY_FILE');
+        for (const suffix of ['-wal', '-journal']) if (await optionalStat(path + suffix)) fail('LEGACY_NOT_QUIESCENT');
+        if (await fileDigest(path) !== original.sha256) fail('LEGACY_MIGRATION_SOURCE_CHANGED');
+      }
+    }
     const archiveRoot = join(plan.appRoot, 'legacy-archives', completed.generation);
     for (const path of [dirname(archiveRoot), archiveRoot]) { const st = await lstat(path); if (!st.isDirectory() || st.isSymbolicLink()) fail('UNSAFE_LEGACY_ARCHIVE'); }
     for (const source of completed.migration.sources) {
@@ -148,7 +160,7 @@ export async function prepareDeploymentMigration(plan, release, { previousGenera
     await atomicJson(markerPath, completed);
     return { ...completed.migration, reused: true, originalGeneration: completed.generation };
   }
-  if (previousRelease && /^1\.8\./.test(JSON.parse(await readFile(join(previousRelease, 'release-manifest.json'), 'utf8')).version)) fail('LEGACY_MIGRATION_RECEIPT_REQUIRED');
+  if (/^1\.8\./.test(previousVersion)) fail('LEGACY_MIGRATION_RECEIPT_REQUIRED');
   const archiveRoot = join(plan.appRoot, 'legacy-archives', plan.generation);
   await mkdir(dirname(archiveRoot), { recursive: true, mode: 0o755 });
   await mkdir(archiveRoot, { recursive: true, mode: 0o700 });

@@ -146,6 +146,26 @@ test('migration reuse rejects an archive symlink before opening its target', { s
   await assert.rejects(prepareDeploymentMigration({ ...plan, generation: 'b'.repeat(64) }, release), { code: 'UNSAFE_LEGACY_FILE' });
 });
 
+test('a restored 1.7 writer with additional history cannot silently reuse an earlier migration marker', async t => {
+  const { root, dataRoot } = await fixture(t), appRoot = join(root, 'app'), generation = 'a'.repeat(64);
+  const control = join(appRoot, 'deployments'), previousRelease = join(root, 'previous');
+  await mkdir(control, { recursive: true, mode: 0o700 }); await mkdir(previousRelease);
+  await writeFile(join(previousRelease, 'release-manifest.json'), JSON.stringify({ version: '1.7.6' }));
+  const source = join(dataRoot, 'command-automation.sqlite');
+  legacy(source, [{ id: 'a'.repeat(48), state: 'completed', createdAt: 10 }]);
+  const plan = { appRoot, dataRoot, generation }, release = fileURLToPath(new URL('../', import.meta.url));
+  await prepareDeploymentMigration(plan, release);
+  const next = { ...plan, generation: 'b'.repeat(64) };
+  assert.equal((await prepareDeploymentMigration(next, release, { previousRelease })).reused, true, 'Unchanged legacy evidence remains reusable');
+  const later = { id: 'b'.repeat(48), state: 'pending', createdAt: 20 }, db = new DatabaseSync(source);
+  try { db.prepare('INSERT INTO requests VALUES(?,?,?,?)').run(later.id, JSON.stringify(later), hash(JSON.stringify(later)), 'original:' + later.id); } finally { db.close(); }
+  const protectedPaths = [source, join(dataRoot, 'operations.sqlite'), join(control, 'legacy-migration.json'), join(appRoot, 'legacy-archives', generation, 'command-automation.sqlite')];
+  const before = await Promise.all(protectedPaths.map(path => readFile(path)));
+  await assert.rejects(prepareDeploymentMigration(next, release, { previousRelease }), { code: 'LEGACY_MIGRATION_SOURCE_CHANGED' });
+  for (let i = 0; i < protectedPaths.length; i++) assert.deepEqual(await readFile(protectedPaths[i]), before[i]);
+  await assert.rejects(lstat(join(appRoot, 'legacy-archives', next.generation)), { code: 'ENOENT' });
+});
+
 test('recovery checks payloads and new durable stores, not only operations rows', async t => {
   const { dataRoot } = await fixture(t);
   await writeFile(join(dataRoot, 'operations.sqlite'), 'baseline');
