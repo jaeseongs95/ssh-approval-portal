@@ -66,6 +66,7 @@ async function fixture(t, { maxBytes = CHUNK_BYTES * 2, uiEnabled = false } = {}
     bytes: id => readFile(join(root, id + '.part')) };
 }
 const transferKeys = ['id', 'received', 'sequence', 'size', 'sha256', 'expiresAt', 'targetId', 'targetRevision'].sort();
+const refusalCode = result => { assert.equal(result.isError, true); return JSON.parse(result.content[0].text).error_code; };
 
 test('REMOTE-JSON schemas expose strict model tools without Apps or private upload tickets', { timeout: 30000 }, async t => {
   for (const uiEnabled of [false, true]) {
@@ -109,13 +110,21 @@ test('REMOTE-JSON real binary and empty uploads bind bytes and target without ef
     assert.equal(f.jobs().length, 1); assert.equal(f.effects.length, 0);
     const completed = await f.app.queue.approve(pending.id); assert.equal(completed.state, 'completed');
     assert.deepEqual(f.published, [{ target, path: remotePath, bytes }]);
-    assert.equal((await f.ok('get-upload-status', { id })).request.id, pending.id);
-    assert.equal((await f.call('finish-upload', { id })).isError, true); assert.equal(f.jobs().length, 1); assert.equal(f.published.length, 1);
+    const completedStatus = await f.ok('get-upload-status', { id });
+    assert.equal(completedStatus.request.id, pending.id); assert.equal(completedStatus.request.state, 'completed');
+    const effectsAfterCompletion = structuredClone(f.effects);
+    await f.app.store.reap();
+    assert.equal(f.app.store.has(id), false); assert.equal(f.app.store.reserved, 0);
+    await assert.rejects(f.bytes(id), { code: 'ENOENT' });
+    assert.deepEqual(await f.ok('get-upload-status', { id }), completedStatus);
+    assert.equal(refusalCode(await f.call('finish-upload', { id })), 'REMOTE_UPLOAD_ALREADY_SUBMITTED');
+    assert.equal(f.jobs().length, 1); assert.equal(f.published.length, 1); assert.deepEqual(f.effects, effectsAfterCompletion);
   }
 });
 
 test('REMOTE-JSON missing binding invalid metadata and extra authority allocate nothing', { timeout: 30000 }, async t => {
   const f = await fixture(t, { maxBytes: 16 }), input = f.meta(Buffer.from([0, 255]));
+  assert.equal(refusalCode(await f.call('begin-upload', { ...input, expectedTargetRevision: 'f'.repeat(64) })), 'REMOTE_UPLOAD_STALE_TARGET');
   const { target, ...noTarget } = input, { expectedTargetRevision, ...noRevision } = input;
   for (const bad of [noTarget, noRevision, { ...input, expectedTargetRevision: 'f'.repeat(64) }, { ...input, target: 'offline' },
     { ...input, target: 'missing' }, { ...input, size: -1 }, { ...input, size: MAX_BYTES + 1 }, { ...input, size: 17 },
@@ -151,12 +160,13 @@ test('REMOTE-JSON incomplete and hash-mismatched finishes create no upload job',
   const f = await fixture(t), bytes = Buffer.from([0, 255, 128, 65]);
   const incomplete = await f.ok('begin-upload', f.meta(bytes));
   await f.ok('upload-chunk', { id: incomplete.transferId, sequence: 0, data: bytes.subarray(0, 2).toString('base64') });
-  assert.equal((await f.call('finish-upload', { id: incomplete.transferId })).isError, true);
+  assert.equal(refusalCode(await f.call('finish-upload', { id: incomplete.transferId })), 'REMOTE_UPLOAD_INCOMPLETE_OR_EXPIRED');
   const staging = await f.ok('get-upload-status', { id: incomplete.transferId }); assert.equal(staging.state, 'staging'); assert.equal(staging.transfer.received, 2);
   const corrupt = await f.ok('begin-upload', f.meta(bytes, { sha256: hash(Buffer.from('different')) }));
   await f.ok('upload-chunk', { id: corrupt.transferId, sequence: 0, data: bytes.toString('base64') });
-  assert.equal((await f.call('finish-upload', { id: corrupt.transferId })).isError, true);
-  assert.equal(f.app.store.has(corrupt.transferId), false); assert.equal((await f.call('get-upload-status', { id: corrupt.transferId })).isError, true);
+  assert.equal(refusalCode(await f.call('finish-upload', { id: corrupt.transferId })), 'REMOTE_UPLOAD_HASH_MISMATCH');
+  assert.equal(f.app.store.has(corrupt.transferId), false);
+  assert.equal(refusalCode(await f.call('get-upload-status', { id: corrupt.transferId })), 'REMOTE_UPLOAD_UNKNOWN');
   assert.equal(f.jobs().length, 0); assert.equal(f.effects.length, 0); assert.equal(f.app.store.reserved, bytes.length);
 });
 
@@ -173,17 +183,17 @@ test('REMOTE-JSON simultaneous finish and lost reply recover one immutable reque
 test('REMOTE-JSON status distinguishes ready while UI artifacts and stale targets cannot enter the JSON path', { timeout: 30000 }, async t => {
   const f = await fixture(t), bytes = Buffer.from([0, 255]), input = f.meta(bytes);
   const legacy = await f.app.targets.files.beginUpload(input);
-  for (const name of ['get-upload-status', 'finish-upload']) assert.equal((await f.call(name, { id: legacy.id })).isError, true);
-  assert.equal((await f.call('upload-chunk', { id: legacy.id, sequence: 0, data: bytes.toString('base64') })).isError, true);
+  for (const name of ['get-upload-status', 'finish-upload']) assert.equal(refusalCode(await f.call(name, { id: legacy.id })), 'REMOTE_UPLOAD_WRONG_PROTOCOL');
+  assert.equal(refusalCode(await f.call('upload-chunk', { id: legacy.id, sequence: 0, data: bytes.toString('base64') })), 'REMOTE_UPLOAD_WRONG_PROTOCOL');
   assert.equal(f.app.store.get(legacy.id).received, 0); assert.equal(f.jobs().length, 0);
   const ready = await f.ok('begin-upload', input); await f.ok('upload-chunk', { id: ready.transferId, sequence: 0, data: bytes.toString('base64') });
   await f.app.store.finish(ready.transferId);
   assert.equal((await f.ok('get-upload-status', { id: ready.transferId })).state, 'ready');
-  assert.equal((await f.call('finish-upload', { id: ready.transferId })).isError, true); assert.equal(f.jobs().length, 0);
+  assert.equal(refusalCode(await f.call('finish-upload', { id: ready.transferId })), 'REMOTE_UPLOAD_INCOMPLETE_OR_EXPIRED'); assert.equal(f.jobs().length, 0);
   const stale = await f.ok('begin-upload', input), runtime = f.app.targets.select('linux');
   f.profiles.get(runtime.writeProfile).host = 'changed.example.test';
-  for (const name of ['get-upload-status', 'finish-upload']) assert.equal((await f.call(name, { id: stale.transferId })).isError, true);
-  assert.equal((await f.call('upload-chunk', { id: stale.transferId, sequence: 0, data: bytes.toString('base64') })).isError, true);
+  for (const name of ['get-upload-status', 'finish-upload']) assert.equal(refusalCode(await f.call(name, { id: stale.transferId })), 'REMOTE_UPLOAD_STALE_TARGET');
+  assert.equal(refusalCode(await f.call('upload-chunk', { id: stale.transferId, sequence: 0, data: bytes.toString('base64') })), 'REMOTE_UPLOAD_STALE_TARGET');
   assert.equal(f.app.store.get(stale.transferId).received, 0); assert.equal(f.effects.length, 0); assert.equal(f.jobs().length, 0);
 });
 
@@ -192,9 +202,9 @@ test('REMOTE-JSON authentication and opaque public failures never echo bytes or 
   const response = await fetch(f.url, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'begin-upload', arguments: input } }) });
   assert.equal(response.status, 401); await response.body?.cancel();
-  for (const name of ['get-upload-status', 'finish-upload']) assert.equal((await f.call(name, { id: 'a'.repeat(48) })).isError, true);
+  for (const name of ['get-upload-status', 'finish-upload']) assert.equal(refusalCode(await f.call(name, { id: 'a'.repeat(48) })), 'REMOTE_UPLOAD_UNKNOWN');
   f.app.targets.files.beginAgentUpload = async () => { throw Object.assign(Error(privateMarker), { code: privateMarker, cause: Error('/PRIVATE-BACKING-PATH') }); };
-  const refused = await f.call('begin-upload', input); assert.equal(refused.isError, true); assert.doesNotMatch(JSON.stringify(refused), /PRIVATE-BACKING-PATH/);
+  const refused = await f.call('begin-upload', input); assert.equal(refusalCode(refused), 'REMOTE_UPLOAD_FAILED'); assert.doesNotMatch(JSON.stringify(refused), /PRIVATE-BACKING-PATH/);
   assert.equal(f.app.store.size, 0); assert.equal(f.jobs().length, 0); assert.equal(f.effects.length, 0);
 });
 

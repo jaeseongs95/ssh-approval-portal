@@ -47,7 +47,7 @@ Codex·Claude·agy 등 어떤 공급자의 에이전트든 기존 파일 도구�
 4. 응답 유실·중단 시 `get-upload-status`에 같은 `id`를 보내 `sequence`·`received`를 확인한 뒤 그 위치부터 명시적으로 재개합니다. 직전 청크의 동일 재전달은 중복 쓰기 없이 확인될 수 있지만 상태를 보지 않고 청크·begin을 자동 반복하지 않습니다.
 5. `finish-upload`에 같은 `id`를 한 번 보냅니다. 최종 크기와 전체 SHA-256 검증 후 기존 파일 정책에 따라 승인·실행 요청을 제출합니다. 성공 응답도 원격 파일 저장 완료는 아닙니다. 반환된 요청 ID로 실제 완료를 확인합니다.
 
-중복·동시 finish는 새 요청을 만들지 않고 거절합니다. finish 응답을 잃었거나 `REMOTE_UPLOAD_*`가 반환되면 같은 전송 ID의 `get-upload-status`에서 기존 `submitted` 요청을 회수합니다. 이 일반 거절만으로 미실행을 보장하지 않습니다. `submitted`의 요청이 `pending`·`queued`·`failed`일 수 있으므로 원 요청 ID로 `get-request-status`·`wait-for-request`를 사용합니다. 중계기 재시작은 아직 제출하지 않은 staging을 무효화하며, 만료·없음·불명 결과를 새 ID로 자동 대체하지 않습니다. 대상 revision·Windows fileRoot·덮어쓰기·권한 상승·소유자 승인 정책은 그대로 적용됩니다.
+중복·동시 finish는 새 요청을 만들지 않고 거절합니다. finish 응답을 잃었거나 `REMOTE_UPLOAD_*`가 반환되면 같은 전송 ID의 `get-upload-status`에서 기존 `submitted` 요청을 회수합니다. 이 일반 거절만으로 미실행을 보장하지 않습니다. `submitted`의 요청이 `pending`·`queued`·`failed`일 수 있으므로 원 요청 ID로 `get-request-status`·`wait-for-request`를 사용합니다. 같은 ID의 상태 회수는 동일 중계기 프로세스와 기존 queue 기록 보존 기간에 한정됩니다. 완료 기록은 통상 1시간 후 정리됩니다. 중계기 재시작은 staging을 무효화하고 제출된 파일 요청 기록도 잃을 수 있으며, 만료·없음·불명 결과를 새 ID로 자동 대체하지 않습니다. 대상 revision·Windows fileRoot·덮어쓰기·권한 상승·소유자 승인 정책은 그대로 적용됩니다.
 
 다음은 실제 바이트가 `abc`인 3바이트 파일의 형식 예시입니다. `expectedTargetRevision`의 0 값은 `list-targets`가 반환한 현재 값으로 교체하고 실제 허용 목적지를 사용합니다.
 

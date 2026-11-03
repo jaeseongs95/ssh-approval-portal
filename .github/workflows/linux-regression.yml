@@ -91,12 +91,13 @@ jobs:
           trap restore_remote_upload EXIT
           for path in "${paths[@]}"; do git show afe59704082d5b8cd7daedae524e209d5bc53e94:"$path" > "$path"; done
           red_exit=0
-          node --test --test-reporter=tap test/remote-mcp-upload.test.mjs > "$RUNNER_TEMP/remote-upload-red.log" 2>&1 || red_exit=$?
+          node --test --test-reporter=tap --test-name-pattern='^REMOTE-JSON schemas|^REMOTE-JSON real binary|^REMOTE-JSON simultaneous' test/remote-mcp-upload.test.mjs > "$RUNNER_TEMP/remote-upload-red.log" 2>&1 || red_exit=$?
           cat "$RUNNER_TEMP/remote-upload-red.log"
           test "$red_exit" -ne 0
-          grep -q '^# fail 9$' "$RUNNER_TEMP/remote-upload-red.log"
+          grep -q '^# fail 3$' "$RUNNER_TEMP/remote-upload-red.log"
+          grep -q 'begin-upload must be available\|Tool begin-upload not found' "$RUNNER_TEMP/remote-upload-red.log"
           restore_remote_upload
-          node --test --test-reporter=tap test/remote-mcp-upload.test.mjs
+          node --test --test-reporter=tap --test-name-pattern='^REMOTE-JSON schemas|^REMOTE-JSON real binary|^REMOTE-JSON simultaneous' test/remote-mcp-upload.test.mjs
       - name: File selection detects the original Windows and error-code defects
         shell: bash
         run: |

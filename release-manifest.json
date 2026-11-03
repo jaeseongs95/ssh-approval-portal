@@ -115,8 +115,8 @@
     },
     {
       "path": "docs/agent-clients.ko.md",
-      "size": 17678,
-      "sha256": "1c45fb4c406f84dcd5c708e587a057c8b4f3575eecd2e8b46f159a53a90f7a06"
+      "size": 17876,
+      "sha256": "740cbc9a5eac0f59f813469b0306f82400671a73f568c9d9937e972d2f566d2d"
     },
     {
       "path": "docs/agent-upload.en.md",
@@ -605,13 +605,13 @@
     },
     {
       "path": "src/adapters/mcp/client-setup.mjs",
-      "size": 11409,
-      "sha256": "7e698b68595d6caeac5ec13b8191451301fb93a861628585b3153647cdc56ef7"
+      "size": 11590,
+      "sha256": "fb249b6d58c48320f68af39faac45fe9440a0494289b991dd12f91ebc829545f"
     },
     {
       "path": "src/adapters/mcp/server.mjs",
-      "size": 40618,
-      "sha256": "45817b45f6034bb45edecb22577d1ee0daf0282c4a4483f1319a34567b71197a"
+      "size": 40893,
+      "sha256": "011754b9d04337ed0d6f2f2805d26d9f1c377f6856646c8e8c83321e5912efb9"
     },
     {
       "path": "src/adapters/presentation/capabilities.mjs",
@@ -1610,8 +1610,8 @@
     },
     {
       "path": "test/remote-mcp-upload.test.mjs",
-      "size": 18981,
-      "sha256": "f2ed9c125eb3b22275f97733c9aa1004af04e41fe453a2f1880bb2716ed11069"
+      "size": 20037,
+      "sha256": "4481327f64d2f84a2864ae299c3588702475a3af4fbfec869cc5a25cf3e2926f"
     },
     {
       "path": "test/request-admission.test.mjs",
