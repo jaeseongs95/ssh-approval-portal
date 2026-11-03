@@ -102,7 +102,7 @@ export function createDesktopPanel({ document, api, getTarget, isSignedOut = () 
       if (!target || !/^[a-f0-9]{64}$/.test(target.revision)) throw Error(t('서버 연결 정보를 확인할 수 없습니다.'));
       if (token !== generation || targetId !== getTarget() || isSignedOut()) return;
       submitted = true;
-      const value = await api('/api/desktop/open', 'POST', { targetId, targetRevision: target.revision, epoch: Date.now() });
+      const value = await api('/api/desktop/open', 'POST', { target: targetId, expectedTargetRevision: target.revision });
       if (token !== generation) return;
       session = value; error.textContent = ''; text.value = '';
     } catch (failure) { if (token === generation) { openingUncertain = submitted && !(failure.status >= 400 && failure.status < 500); error.textContent = failure.message + (openingUncertain ? ' ' + t('데스크톱 연결 결과를 확인하지 못했습니다. 자동으로 다시 열지 않습니다.') : ''); } }

@@ -41,8 +41,8 @@ async function fixture(run, { compiled = false, locale = 'en-US', width = 1280 }
       if (url.pathname.startsWith('/api/desktop/')) {
         const action = url.pathname.split('/').pop(), body = request.postDataJSON(); calls.push({ path: url.pathname, body }); order.push(action);
         if (action === 'open') {
-          assert.equal(body.targetId, 'alpha'); assert.equal(body.targetRevision, revision); assert.ok(Number.isSafeInteger(body.epoch));
-          session = { sessionId: 'desktop-' + calls.length, ...body, expiresAt: Date.now() + 600000, idleExpiresAt: Date.now() + 60000, kind: 'desktop' }; frameNumber = inputSequence = 0;
+          assert.deepEqual(body, { target: 'alpha', expectedTargetRevision: revision });
+          session = { sessionId: 'desktop-' + calls.length, targetId: body.target, targetRevision: body.expectedTargetRevision, epoch: 1, expiresAt: Date.now() + 600000, idleExpiresAt: Date.now() + 60000, kind: 'desktop' }; frameNumber = inputSequence = 0;
           return route.fulfill({ json: session });
         }
         assert.equal(body.sessionId, session.sessionId); assert.equal(body.epoch, session.epoch);
