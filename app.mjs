@@ -328,7 +328,7 @@ export async function createApplication({ registry, classify, executeCommand, ex
   for (const record of operationStore.list()) {
     const runtime = runtimes.find(target => target.id === record.targetId && target.revision === record.targetRevision);
     if (runtime && !runtime.queue.get(record.id) && record.metadata?.approval) runtime.queue.restore(record.metadata.approval);
-    if (runtime) runtime.queue.syncOperation(record);
+    if (runtime) runtime.queue.syncOperation(record, { restoring: true });
   }
   capacity = createRuntimeCapacity({ state: createRuntimeCapacityState(transferRoot), settings, targets: definitions,
     newRevision: () => randomBytes(16).toString('hex'),

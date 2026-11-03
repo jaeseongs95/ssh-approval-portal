@@ -224,20 +224,21 @@ export class ApprovalQueue {
     if (!job.terminalNotified) this.finishTerminal(job);
     return this.public(job);
   }
-  finishTerminal(job) {
-    try { this.persistIntent(job); job.persist?.(this.public(job)); this.audit({ action: job.state, id: job.id, failure: job.result?.failure }); }
+  finishTerminal(job, { persist = true } = {}) {
+    try { if (persist) { this.persistIntent(job); job.persist?.(this.public(job)); this.audit({ action: job.state, id: job.id, failure: job.result?.failure }); } }
     catch { job.auditError = 'Final audit write failed; operation must not be retried automatically'; }
     finally {
       try { if (!job.terminalNotified) { job.terminalNotified = true; this.onTerminal(job); } }
       finally { this.notifyRequest(job); job.resolveCompletion?.(this.public(job)); }
     }
   }
-  syncOperation(record) {
+  syncOperation(record, { restoring = false } = {}) {
     const job = this.jobs.get(record.id);
     if (!job) return null;
     if (TERMINAL.has(record.state) && !job.terminalNotified) {
       job.state = record.state; job.finishedAt = record.finishedAt ?? this.now(); job.result = record.result ?? job.result;
-      this.finishTerminal(job);
+      // Startup restores an already durable outcome; cleanup still runs once.
+      this.finishTerminal(job, { persist: !restoring });
     }
     return this.public(job);
   }
