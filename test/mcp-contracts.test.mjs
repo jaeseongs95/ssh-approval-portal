@@ -159,7 +159,7 @@ test('provider-neutral capabilities are exact, public and read-only; core tools 
         core: { transport: 'streamable-http', input: 'json-schema', output: ['text', 'structuredContent'], uiRequired: false },
         localFiles: { cli: 'scripts/portal-client.mjs', stdio: 'scripts/portal-file-mcp.mjs', requiresLocalAccess: true },
         remoteFiles: { contract: 'mcp-json-upload-v1', tools: ['begin-upload', 'upload-chunk', 'get-upload-status', 'finish-upload'],
-          encoding: 'base64', maxBytes: 67108864, maxChunkBytes: 262144, additionalInstallationRequired: false, requiresClientFileBytes: true },
+          encoding: 'base64', maxBytes: settings.maxBytes, maxChunkBytes: 262144, additionalInstallationRequired: false, requiresClientFileBytes: true },
         hostFileInput: { tool: 'request-upload', contract: 'openai/fileParams' },
         approvals: { ownerRequiredByPolicy: true, agentSelfApproval: false, adminUrl: adminOrigin },
         ui: { enabled, optional: true },
@@ -391,7 +391,7 @@ test('file transfer text points card-less clients to setup and local capabilitie
       const textOnly = JSON.parse(response.content[0].text);
       assert.deepEqual(textOnly, response.structuredContent);
       assert.equal(textOnly.setup.tool, 'get-client-setup');
-      assert.match(textOnly.setup.guidance, /First check.*local process access.*local CLI.*local stdio MCP/);
+      assert.match(textOnly.setup.guidance, /begin-upload\/upload-chunk\/get-upload-status\/finish-upload.*without another installation/);
       assert.match(textOnly.setup.guidance, /not evidence of actual client rendering/);
       assert.match(textOnly.setup.guidance, /Core requests, status, output and approval waiting need no card/);
       assert.equal(textOnly.uiEnabled, enabled);
