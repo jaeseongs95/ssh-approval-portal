@@ -66,7 +66,7 @@ jobs:
       - name: Windows 경로와 명령 회귀 시험
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         shell: pwsh
-        run: node --test test/windows-target.test.mjs test/windows-command-line.test.mjs test/windows-file-contracts.test.mjs test/windows-agent-cli.test.mjs test/windows-agent-cli-helper.test.mjs test/windows-dispatch-binding.test.mjs test/retained-history.test.mjs test/multiline-commands.test.mjs
+        run: node --test --test-concurrency=1 test/windows-target.test.mjs test/windows-command-line.test.mjs test/windows-file-contracts.test.mjs test/windows-agent-cli.test.mjs test/windows-agent-cli-helper.test.mjs test/windows-dispatch-binding.test.mjs test/retained-history.test.mjs test/multiline-commands.test.mjs
       - name: Windows PowerShell 파일 보조프로그램 시험
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         shell: pwsh

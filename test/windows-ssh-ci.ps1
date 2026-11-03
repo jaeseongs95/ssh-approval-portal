@@ -328,7 +328,7 @@ Subsystem sftp $sftpPath
         Assert-Exit '공식 CLI 설치 전용 시험'
     } else {
         Write-Output '기본 Windows SSH/Python 회귀 시험: 공식 CLI 설치 전용 시험은 선택하지 않았습니다.'
-        & node --test (Join-Path $PSScriptRoot 'windows-ssh-integration.test.mjs') (Join-Path $PSScriptRoot 'windows-python-source.test.mjs')
+        & node --test --test-concurrency=1 (Join-Path $PSScriptRoot 'windows-ssh-integration.test.mjs') (Join-Path $PSScriptRoot 'windows-python-source.test.mjs')
         Assert-Exit '실제 Windows SSH/Python 회귀 시험'
     }
     $testsPassed = $true

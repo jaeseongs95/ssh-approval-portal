@@ -1970,8 +1970,8 @@
     },
     {
       "path": "test/windows-ssh-ci.ps1",
-      "size": 21457,
-      "sha256": "5a7afa34693b7e0e1c4fcee4c25e86fcfc28d593e8dc03ae52ace3a313cf917c"
+      "size": 21478,
+      "sha256": "8ffba3203380fb7c933138e7878e1c3cbeb3ee9bb4204874bf2405026bc923f3"
     },
     {
       "path": "test/windows-ssh-integration.test.mjs",
