@@ -40,7 +40,7 @@ export const operationData = object({ id: identifier, operationKey: key.nullable
   targetId: target.nullable(), targetRevision: digest.nullable(), approvalMode: z.enum(['owner', 'automatic']).nullable(),
   createdAt: integer, expiresAt: integer.nullable(), finishedAt: integer.nullable(),
   failed: z.boolean().nullable(), auditFailure: z.boolean(), failureCode: z.string().nullable(), remoteOutcome: z.enum(['not_started', 'completed', 'unknown']).nullable(),
-  allowedRoot: z.string().nullable(), diagnostic: diagnostic.nullable(), remoteCleanup: z.literal('unconfirmed').nullable(),
+  allowedRoot: z.string().nullable(), diagnostic: diagnostic.nullable(), remoteCleanup: z.enum(['confirmed', 'unconfirmed']).nullable(),
   execution: executionData.nullable(), output: outputReference.nullable(), artifact: artifact.nullable(), outputPage: outputPage.nullable(), streamPage: z.null(), waitTimedOut: z.boolean() });
 const policy = object({ testServerConfigured: z.boolean(), testServerActive: z.boolean(), mode: z.enum(['configured-root', 'test-server-bypass', 'ssh-account-permissions']),
   allowedRoot: z.string().nullable(), allowedRootObservedAt: integer.nullable(), osPermissionsEnforced: z.literal(true),
