@@ -25,7 +25,8 @@ export function createCapabilities({ queue, store, signer, settings, targets, ad
     const item = store.get(job.result.data.artifactId), nonce = randomBytes(16).toString('hex');
     const binding = fileTargetBinding(job.operation);
     if (binding ? item.fileTargetBound !== true || item.targetId !== binding.targetId || item.targetRevision !== binding.targetRevision : item.fileTargetBound === true) throw Error('Download does not match bound operation');
-    if (job.targetId && (item.targetId !== job.targetId || item.targetRevision !== job.targetRevision)) throw Error('Download belongs to another target');
+    const owner = item.fileTargetBound !== true && item.targetId === undefined && targets ? targets.artifactOwner(item.id) : undefined;
+    if (job.targetId && ((owner?.id ?? item.targetId) !== job.targetId || (owner?.revision ?? item.targetRevision) !== job.targetRevision)) throw Error('Download belongs to another target');
     const cap = signer.issue('file', boundFile(`${item.id}:${item.sha256}:${nonce}`, item), Math.min(expiresAt, item.expiresAt));
     return `${settings.adminOrigin}/downloads/${item.id}/${nonce}?ticket=${encodeURIComponent(cap)}`;
   };

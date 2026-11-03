@@ -665,8 +665,8 @@
     },
     {
       "path": "src/adapters/presentation/capabilities.mjs",
-      "size": 3830,
-      "sha256": "4c60214304df29113d11e8130f185ac15c417820814a2917e800ec70fd4a7233"
+      "size": 4002,
+      "sha256": "5641710a8e5ebc70b25cd04225500786dec2780a785207a8832410e6bea9d989"
     },
     {
       "path": "src/adapters/presentation/results.mjs",
@@ -1725,8 +1725,8 @@
     },
     {
       "path": "test/portal-client.test.mjs",
-      "size": 37172,
-      "sha256": "adfb89a7bf81867f653516501635c1b957011c94384c22dcdfc157f18e3a6b11"
+      "size": 38121,
+      "sha256": "315d9a8009f576f7a828cdfe0a8f51573cfc7725574b1234869d5916a9942e00"
     },
     {
       "path": "test/portal-container-test.sh",

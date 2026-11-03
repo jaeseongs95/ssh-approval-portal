@@ -8,6 +8,7 @@ import { createHash } from 'node:crypto';
 import { generateKeyPair, SignJWT, createLocalJWKSet, exportJWK } from 'jose';
 import { createApplication } from '../app.mjs';
 import { createPortalClient } from '../src/adapters/cli/portal-client.mjs';
+import { createCapabilities } from '../src/adapters/presentation/capabilities.mjs';
 import { CHUNK_BYTES } from '../src/contracts/ports.mjs';
 import { main } from '../scripts/portal-client.mjs';
 
@@ -86,6 +87,16 @@ test('owner CLI moves exact multi-chunk and empty bytes only after explicit appr
   const local = join(f.root, 'saved.bin');
   await assert.rejects(c.save(down.id, local), { code: 'DOWNLOAD_NOT_READY' }); assert.equal(f.effects.length, 1);
   await c.decide(down.id, 'approve', true); assert.equal(f.effects.length, 2);
+  const completed = f.app.queue.get(down.id), artifact = f.app.store.get(completed.result.data.artifactId);
+  assert.equal(Object.hasOwn(artifact, 'targetId'), false, 'legacy unbound artifact retains its original metadata');
+  let ticketIssues = 0;
+  const caps = createCapabilities({ queue: f.app.queue, store: f.app.store, targets: f.app.targets,
+    signer: { issue() { ticketIssues++; return 'fixture-ticket'; } }, settings: { adminOrigin: f.origin } });
+  assert.ok(new URL(caps.downloadLink(completed)).pathname.startsWith('/downloads/' + artifact.id + '/'));
+  for (const mismatch of [{ targetId: 'another' }, { targetRevision: 'f'.repeat(64) }]) {
+    assert.throws(() => caps.downloadLink({ ...completed, ...mismatch }), /Download belongs to another target/);
+  }
+  assert.equal(ticketIssues, 1, 'mismatched target or revision must not issue any ticket');
   assert.equal((await c.save(down.id, local)).state, 'saved'); assert.deepEqual(await readFile(local), bytes);
   await assert.rejects(c.save(down.id, local), { code: 'EEXIST' }); assert.deepEqual(await readFile(local), bytes); assert.equal(f.effects.length, 2);
   await writeFile(source, Buffer.alloc(0));
