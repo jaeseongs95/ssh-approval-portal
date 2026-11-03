@@ -96,7 +96,8 @@ jobs:
           test "$red" -ne 0
           grep -Eq '^# fail [1-9][0-9]*$' "$RUNNER_TEMP/testmode-path-red.tap"
           restore_testmode_transfer
-          node --test test/test-mode-file-path-policy.test.mjs test/test-mode-file-policy-application.test.mjs
+          node --test test/test-mode-file-path-policy.test.mjs
+          node --test test/test-mode-file-policy-application.test.mjs
       - name: Remote JSON upload detects missing provider-neutral transport
         shell: bash
         run: |
