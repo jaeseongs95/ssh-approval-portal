@@ -79,7 +79,13 @@ test('history without a binding has a disabled import button',async()=>fixture(a
 },{history:true}));
 
 for(const state of ['pending','running'])test(state+' command does not offer history registration',async()=>fixture(async f=>{
-  f.job.state=state;delete f.job.finishedAt;await f.open('/');const card=f.page.locator('[data-request-id="'+f.job.id+'"]');await card.waitFor();assert.equal(await card.getByRole('button',{name:'이력의 명령 이름 등록',exact:true}).count(),0);assert.equal(f.posts.length,0);
+  const original={state:f.job.state,finishedAt:f.job.finishedAt};
+  try {
+    f.job.state=state;delete f.job.finishedAt;await f.open('/');const card=f.page.locator('[data-request-id="'+f.job.id+'"]');await card.waitFor();assert.equal(await card.getByRole('button',{name:'이력의 명령 이름 등록',exact:true}).count(),0);assert.equal(f.posts.length,0);
+  } finally {
+    // Display-only state must not make teardown drain a synthetic, undispatched operation.
+    Object.assign(f.job,original);
+  }
 },{history:true}));
 
 test('non-command history does not offer command registration',async()=>fixture(async f=>{

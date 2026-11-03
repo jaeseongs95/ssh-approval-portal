@@ -375,8 +375,8 @@
     },
     {
       "path": "scripts/deploy180.mjs",
-      "size": 16734,
-      "sha256": "ed4d086c83e57c7f044dc494a6f830fc1643db06425f8ca4b23cf0a18b5a21da"
+      "size": 16768,
+      "sha256": "27d4db2978821bcb502bb156d8d23e7c5e0bd92fb2d4c459c288febd65db6482"
     },
     {
       "path": "scripts/docker-secrets.py",
@@ -1200,8 +1200,8 @@
     },
     {
       "path": "test/browser/command-line-import.test.mjs",
-      "size": 19270,
-      "sha256": "44d195f062ed86502c792247f31cec6b9d2246b39374a125430842eb59ccf92e"
+      "size": 19491,
+      "sha256": "060a81a757b449c1280423a3067f6d0cf7bb0906eda1939ffbafc037cc43039e"
     },
     {
       "path": "test/browser/command-output.test.mjs",
@@ -1670,8 +1670,8 @@
     },
     {
       "path": "test/operation-migration-180.test.mjs",
-      "size": 7491,
-      "sha256": "03b10739f2b23caaadda8b334546e314b0d694561e3bac5e74800ca82c2dc055"
+      "size": 10695,
+      "sha256": "c0e66aa61a9162fcfd780f21bde3aa02de48b4c533f5d7a506f90b9b5c5aa05c"
     },
     {
       "path": "test/operation-scheduler.test.mjs",

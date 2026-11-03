@@ -87,6 +87,23 @@ test('recovery checks payloads and new durable stores, not only operations rows'
   await assert.rejects(durableFingerprint(dataRoot), { code: 'UNSUPPORTED_DURABLE_DATA' });
 });
 
+test('fingerprints cover capacity and known SQLite sidecars while unknown database names remain refused', async t => {
+  const { dataRoot } = await fixture(t);
+  const names = ['command-automation', 'agent-cli', 'maintenance', 'operations', 'capacity']
+    .flatMap(name => ['', '-journal', '-wal', '-shm'].map(suffix => name + '.sqlite' + suffix));
+  for (const name of names) await writeFile(join(dataRoot, name), 'baseline:' + name);
+  for (const name of names) {
+    const before = await durableFingerprint(dataRoot);
+    await writeFile(join(dataRoot, name), 'changed:' + name);
+    assert.notEqual(await durableFingerprint(dataRoot), before, name + ' must participate in the recovery barrier');
+  }
+  for (const name of ['unknown.sqlite', 'unknown.sqlite-wal', 'capacity.sqlite.backup', 'capacity.sqlite-journal-extra']) {
+    const path = join(dataRoot, name); await writeFile(path, 'unsupported');
+    await assert.rejects(durableFingerprint(dataRoot), { code: 'UNSUPPORTED_DURABLE_DATA' });
+    await rm(path);
+  }
+});
+
 test('recover refuses a downmigration after new writes and leaves candidate selected and data intact', { skip: process.platform === 'win32' }, async t => {
   const { root, dataRoot } = await fixture(t), appRoot = join(root, 'app'), generation = 'a'.repeat(64);
   const release = join(appRoot, 'releases', generation), previousRelease = join(appRoot, 'releases', 'previous');
@@ -104,4 +121,26 @@ test('recover refuses a downmigration after new writes and leaves candidate sele
   await assert.rejects(runDeployment('recover', plan), { code: 'DOWNMIGRATION_FORBIDDEN_AFTER_WRITES' });
   assert.equal(await readlink(activePath), release);
   assert.equal(await readFile(join(dataRoot, 'operations.sqlite'), 'utf8'), 'new-admission');
+});
+
+test('capacity database and sidecar writes each prevent automatic recovery without changing the active release or data', { skip: process.platform === 'win32' }, async t => {
+  for (const changedName of ['capacity.sqlite', 'capacity.sqlite-journal', 'capacity.sqlite-wal', 'capacity.sqlite-shm']) await t.test(changedName, async t => {
+    const { root, dataRoot } = await fixture(t), appRoot = join(root, 'app'), generation = 'a'.repeat(64);
+    const release = join(appRoot, 'releases', generation), previousRelease = join(appRoot, 'releases', 'previous');
+    await mkdir(appRoot, { mode: 0o700 }); await mkdir(release, { recursive: true }); await mkdir(previousRelease);
+    await mkdir(join(appRoot, 'deployments'), { mode: 0o700 });
+    const activePath = join(appRoot, 'approval-bridge'); await symlink(release, activePath);
+    const plan = { generation, sourceDir: join(root, 'unavailable-source'), appRoot, activePath, dataRoot,
+      healthUrl: 'http://127.0.0.1:39999/health', service: { stop: [process.execPath, '-e', 'process.exit(0)'], start: [process.execPath, '-e', 'process.exit(0)'], status: [process.execPath, '-e', 'process.exit(3)'] } };
+    const operationPath = join(dataRoot, 'operations.sqlite'), changedPath = join(dataRoot, changedName);
+    await writeFile(operationPath, 'unchanged-operations');
+    for (const name of ['capacity.sqlite', 'capacity.sqlite-journal', 'capacity.sqlite-wal', 'capacity.sqlite-shm']) await writeFile(join(dataRoot, name), 'capacity-baseline:' + name);
+    const baseline = await durableFingerprint(dataRoot);
+    await writeFile(join(appRoot, 'deployments', generation + '.json'), JSON.stringify({ planHash: hash(JSON.stringify(plan)), generation, phase: 'activated', previousRelease, baseline }));
+    await writeFile(changedPath, 'new-capacity-write:' + changedName);
+    await assert.rejects(runDeployment('recover', plan), { code: 'DOWNMIGRATION_FORBIDDEN_AFTER_WRITES' });
+    assert.equal(await readlink(activePath), release);
+    assert.equal(await readFile(operationPath, 'utf8'), 'unchanged-operations');
+    assert.equal(await readFile(changedPath, 'utf8'), 'new-capacity-write:' + changedName);
+  });
 });
