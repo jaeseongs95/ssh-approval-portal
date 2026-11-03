@@ -115,8 +115,8 @@
     },
     {
       "path": "docs/agent-clients.ko.md",
-      "size": 8399,
-      "sha256": "1413fc66a1d09810e24471e1e6c162be163383685623f69fbb38b7ad296aea31"
+      "size": 8709,
+      "sha256": "3013f16832719f0cb520b4da877d1e01f57f5bdfc244ee84af52549f91e07485"
     },
     {
       "path": "docs/agent-upload.en.md",
@@ -655,13 +655,13 @@
     },
     {
       "path": "src/adapters/mcp/public-contract.mjs",
-      "size": 25323,
-      "sha256": "962ccfc45148251426a1e9ad76cf0e0398550ec6b9d7962d7caa709972a88851"
+      "size": 25594,
+      "sha256": "2217074743f6493e5046bc795f0ebb04e9a842c047786542dffae5ff8c6e184e"
     },
     {
       "path": "src/adapters/mcp/server.mjs",
-      "size": 8425,
-      "sha256": "4131a60c0e36170dcae0a362d40c649d6a85b553f075c769e2ac28fa9b655ac6"
+      "size": 8649,
+      "sha256": "f4f08a3c8a02f9b919e9e64d40c63df24e87226b5194d79cf4ce9bf1aa87d300"
     },
     {
       "path": "src/adapters/presentation/capabilities.mjs",
