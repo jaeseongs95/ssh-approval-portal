@@ -170,8 +170,8 @@
     },
     {
       "path": "docs/deployment-180.ko.md",
-      "size": 11206,
-      "sha256": "fcd6767976aabf8445665c3117f745c77466ffccad3c82d489e313fb41f6a6e3"
+      "size": 15733,
+      "sha256": "3c8f05e43c1270cdc009819f297edaaa9fc875ef8f8fdaa3c747350a4077c0e7"
     },
     {
       "path": "docs/desktop.ko.md",
@@ -375,8 +375,8 @@
     },
     {
       "path": "scripts/deploy180.mjs",
-      "size": 22976,
-      "sha256": "cd55d085364ef901ba6ea967afa137df1a9bb6041fd774f07747cca2050fca69"
+      "size": 22977,
+      "sha256": "2108b14ea30ceb42a869917fda0bdeed924d10a74211c441a55421595a2a33be"
     },
     {
       "path": "scripts/docker-secrets.py",
@@ -810,13 +810,13 @@
     },
     {
       "path": "src/adapters/storage/operation-migration.mjs",
-      "size": 5457,
-      "sha256": "7ae8b46457a189b4cc909423b9a7fba837c8f38a8057e991e19a2423cbaf01c7"
+      "size": 5696,
+      "sha256": "a2c4239f6a6d79e98321015b231643de76a01ca2e9cc9f273a26fbf0b0ce36d2"
     },
     {
       "path": "src/adapters/storage/operation-store.mjs",
-      "size": 14404,
-      "sha256": "a458d85fcb4aba9482f9766bdfa673009759c2617f238e0a0e584f2385575e08"
+      "size": 22178,
+      "sha256": "58430ade4404f458eec6409d5b6077dd731c39ba0906f199de292a543bcbbb0c"
     },
     {
       "path": "src/adapters/storage/preservation-verification.mjs",
@@ -995,8 +995,8 @@
     },
     {
       "path": "src/domain/operation-scheduler.mjs",
-      "size": 11455,
-      "sha256": "c18615828d3399dfa54b90c11130fc46e2f9fcdff2ff868ac4fa314266fd7d17"
+      "size": 11481,
+      "sha256": "133435997f13d3e6b0c1ed57f1aef00a4bcc07dec860036c48d06f8fbe293ec2"
     },
     {
       "path": "src/domain/safety.mjs",
@@ -1700,13 +1700,23 @@
     },
     {
       "path": "test/operation-migration-180.test.mjs",
-      "size": 18819,
-      "sha256": "036c388a1246a11766793f39f3b77332d8e4e3c6546da4770b4bfbf1da41395a"
+      "size": 19427,
+      "sha256": "bf6c1d4c182033696638a26e6ceafbc2c07e4de6f5a29a32bd5454d52d553eb3"
+    },
+    {
+      "path": "test/operation-migration-batch.test.mjs",
+      "size": 11085,
+      "sha256": "c9430fca611218ab793f09e2d84c04d907a70a5606bd64262568a368c0b5c7d9"
+    },
+    {
+      "path": "test/operation-migration-retained-budget.test.mjs",
+      "size": 7403,
+      "sha256": "cb4d28b6fb5bd7a19c7e22b43597b1b24fe1e6d304cee746d94fb4475221a2d1"
     },
     {
       "path": "test/operation-scheduler.test.mjs",
-      "size": 10310,
-      "sha256": "d06338fe680992b4a03cd52a4f3b3b19144265fa927430b35e03361c729e08a9"
+      "size": 14796,
+      "sha256": "f2398d2417150486c1e21d3fa91105c163cd955a621e165972f203226753f3ab"
     },
     {
       "path": "test/operation-store.test.mjs",
