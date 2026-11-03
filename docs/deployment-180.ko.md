@@ -48,6 +48,8 @@ sudo /opt/ssh-approval/node/bin/node scripts/deploy180.mjs verify --plan /srv/po
 
 최초 이전이 완료되면 `appRoot/deployments/legacy-migration.json`에 원래 generation, `dataRoot`, 이전 영수증을 저장한다. 다음 generation 배포는 이후에도 바뀔 수 있는 `command-automation.sqlite`·`agent-cli.sqlite`를 다시 import하지 않는다. 원래 generation의 변경 금지 보관본을 영수증의 SHA-256·행 수와 대조하고, 현재 `operations.sqlite`에서 각 요청키의 `legacy.original`·`legacy.digest`가 보관본과 같은지 검사한 뒤 완료 증거를 재사용한다. 현재 operation의 상태나 결과를 옛 이력으로 덮어쓰지 않는다.
 
+단, 안전 복구로 1.7 등 구형 릴리스가 다시 writer가 된 뒤 1.8로 재배포하는 경우에는 live 원본 두 DB도 최초 이전 영수증과 대조한다. 파일의 추가·누락이나 SHA-256 변경은 `LEGACY_MIGRATION_SOURCE_CHANGED`로 거부한다. 구형 서비스가 추가한 이력을 완료 표식만 보고 누락시키거나 자동으로 재import하지 않는다. 원본과 보관본을 유지한 채 별도의 명시적 이전 방안을 정해야 한다.
+
 완료 표식이 없는 이전 배포 도구의 상태 파일도, 직전 generation이 `switching`, `start-attempted`, `activated`, `verified`, `recovered` 단계이고 유효한 이전 영수증을 갖고 있으면 같은 보관본·journal 검사를 거쳐 승계할 수 있다. `migrating` 같은 불완전 단계는 완료 증거가 아니다. 영수증 없는 기존 1.8 설치, 손상된 표식, 다른 `dataRoot`, 변경된 보관본, 누락된 canonical 행, 같은 요청키의 원문·digest 충돌은 거부한다. 보관 디렉터리의 symlink와 보관 파일의 symlink·복수 hardlink도 거부한다. 새 키로 바꾸거나 live 원본을 다시 import하여 불완전 증거를 숨기지 않는다. 원본 DB와 canonical journal을 자동 덮어쓰거나 삭제하지 않는다.
 
 기존 `requests.request_key` 컬럼이 있으면 그 값을 정확히 새 journal의 요청키로 사용한다. 컬럼이 없거나 NULL인 구형 행에만 `legacy:<source>:<id>`를 사용한다. 새 journal은 전역 요청키를 사용하므로 두 구형 DB의 같은 키가 서로 다른 이력을 가리키면 `OPERATION_KEY_CONFLICT`로 멈춘다. 이름을 임의로 바꾸거나 기존 결과를 덮어쓰지 않는다. 실패 전에 import된 행은 새 journal에 남을 수 있지만 서비스 전환은 하지 않으며 원본 두 DB와 SHA-256 보관본은 유지한다. 충돌은 별도 명시적 이력 매핑으로 해결해야 하고, 새로운 키로 실행을 재제출해 해결하지 않는다.
@@ -68,4 +70,4 @@ sudo /opt/ssh-approval/node/bin/node scripts/deploy180.mjs recover --plan /srv/p
 
 각 성공 단계는 `portal.deployment-receipt.v1` JSON과 `deployments/<generation>-<stage>-receipt.json`을 남긴다. 실패는 비밀이나 자식 출력 대신 구분 가능한 `code`와 실패 단계의 JSON을 출력하며 종료 코드 1을 반환한다. 상태 파일과 성공 영수증은 `0600`이다. 제품 시험용 검사는 `node --test test/operation-migration-180.test.mjs`이며 허용된 서버·CI에서 실행한다.
 
-이 문서는 현재 소스의 절차와 실패 경계를 설명하며 실제 설치·운영 전환 완료를 주장하지 않는다. 2026-11-03 재배포의 이전 증거 재사용 수정(`0e0e31190c6f94d8f010013797cabf524110ce0c`)과 보관 경로 검증 보강(`3a3c3f3728a12bd28105250cb7322bb5acceccd4`)은 문서 갱신 시점에 TEST 회귀 결과 확인 중이다. 회귀 시험, 실제 서비스 중지·기동, 운영 데이터 보존과 복구는 각 실행의 고정 commit·명령·종료 코드·영수증으로 별도 확인해야 한다.
+이 문서는 현재 소스의 절차와 실패 경계를 설명하며 실제 설치·운영 전환 완료를 주장하지 않는다. 2026-11-03 고정 commit `8ba925e4313934c29bcb6ec74816c148b85c89d6`에서 TEST Linux Node 24.22.1로 `node --test --test-reporter=tap --test-concurrency=2 --test-timeout=60000 test/operation-migration-180.test.mjs`를 실행하여 15개 통과, 실패·취소·skip 0, 종료 코드 0을 확인했다. 이는 격리 fixture의 이력 이전·재배포·복구 회귀 결과이며 최종 후보 전체 시험 또는 실제 배포 성공을 뜻하지 않는다. 실제 서비스 중지·기동, 운영 데이터 보존과 복구는 각 실행의 고정 commit·명령·종료 코드·영수증으로 별도 확인해야 한다.

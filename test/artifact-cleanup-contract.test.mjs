@@ -12,7 +12,7 @@ import { hash } from '../src/domain/validation.mjs';
 // public MCP projection; only the remote SSH I/O is synthetic.
 async function fixture(t, cleanupConfirmed) {
   const root = await mkdtemp(join(tmpdir(), 'artifact-cleanup-contract-'));
-  const entry = { id: 'windows', platform: 'windows', readProfile: 'win-read', writeProfile: 'win-write', credentialRevision: 'v1' };
+  const entry = { id: 'windows', displayName: 'Windows cleanup fixture', platform: 'windows', readProfile: 'win-read', writeProfile: 'win-write', credentialRevision: 'v1' };
   const app = await createApplication({ transferRoot: root, uiHtml: '<html></html>', audit() {},
     classify: () => ({ class: 'privileged' }), executeCommand: async () => assert.fail('No shell command operation'),
     registry: { getProfile: name => ({ host: 'windows.example.test', port: 22, user: 'fixture', readOnly: name === 'win-read', trustedHostKey: 'SHA256:fixture' }), closeAll: async () => {} },
