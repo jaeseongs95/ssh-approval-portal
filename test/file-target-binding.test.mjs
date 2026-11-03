@@ -27,7 +27,7 @@ async function fixture(t, explicit = false) {
       calls.push({ action: payload.action, payload });
       assert.equal(Object.hasOwn(payload, 'fileTargetId'), false);
       assert.equal(Object.hasOwn(payload, 'expectedTargetRevision'), false);
-      return { exitCode: 0, stdout: JSON.stringify(payload.action === 'snapshot' ? { size: bytes.length, sha256: hash(bytes) } : { ok: true }) };
+      return { exitCode: 0, stdout: JSON.stringify(payload.action === 'snapshot' ? { size: bytes.length, sha256: hash(bytes) } : payload.action === 'cleanup' ? { cleaned: true } : { ok: true }) };
     }, async upload(stream) { for await (const part of stream) uploaded.push(Buffer.from(part)); }, async download(path, destination) { destination.end(bytes); } };
   } };
   const http = (path, method = 'GET', body, authorized = true) => fetch(origin + path, { method, headers: {

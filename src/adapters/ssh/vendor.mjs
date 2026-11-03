@@ -236,12 +236,13 @@ export function createSshTransport(registry) {
         cleanupInput = JSON.stringify({ action: 'cleanup', id: cleanup.id });
       }
       const binding = await connectionBinding(registry, profile);
-      let originalClient, originalConnection, originalVerify, attempted = false;
+      let originalClient, originalConnection, originalVerify, unconfirmedOpens = 0;
       const clientView = (client, current) => new Proxy(client, { get(target, key) {
         if (key === 'exec' || key === 'sftp') return (...args) => {
           const callback = args.pop();
-          attempted = true;
+          unconfirmedOpens++;
           return target[key](...args, (error, channel) => {
+            if (!error || error.reason !== undefined) unconfirmedOpens--;
             if (!error && !originalClient) {
               originalClient = rawSshClient(target); originalConnection = current.connection; originalVerify = current.verify;
             }
@@ -267,7 +268,7 @@ export function createSshTransport(registry) {
         ...(cleanupCommand === undefined ? {} : { cleanup() {
           if (!originalClient) {
             // A request with no confirmed channel can still have reached the host.
-            if (attempted) throw Error('Remote staging outcome unconfirmed');
+            if (unconfirmedOpens) throw Error('Remote staging outcome unconfirmed');
             return Promise.resolve({ exitCode: 0, stdout: '{"cleaned":true}' });
           }
           verifyCleanup();

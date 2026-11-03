@@ -80,7 +80,7 @@ test('production stdio entry uses verified TLS and actual owner app for fixed bi
   call:async(_command,op)=>{
    if(op.action==='publish'){assert.equal(remote.has(op.remotePath)&&!op.overwrite,false);const b=staged.get(op.id);assert.equal(b.length,op.size);assert.equal(createHash('sha256').update(b).digest('hex'),op.sha256);remote.set(op.remotePath,b);effects.push('upload');return{exitCode:0,stdout:JSON.stringify({size:b.length,sha256:op.sha256})};}
    if(op.action==='snapshot'){const b=remote.get(op.remotePath);assert.ok(b);staged.set(op.id,Buffer.from(b));effects.push('download');return{exitCode:0,stdout:JSON.stringify({size:b.length,sha256:createHash('sha256').update(b).digest('hex')})};}
-   assert.equal(op.action,'cleanup');staged.delete(op.id);return{exitCode:0,stdout:'{}'};
+   assert.equal(op.action,'cleanup');staged.delete(op.id);return{exitCode:0,stdout:'{"cleaned":true}'};
   }
  })};
  await new Promise(resolve=>app.adminHttp.listen(0,'127.0.0.1',resolve));

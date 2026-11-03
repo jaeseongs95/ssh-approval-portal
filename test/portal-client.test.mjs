@@ -41,7 +41,7 @@ async function fixture(t) {
         staged.set(op.id, Buffer.from(bytes)); effects.push({ kind: 'download', path: op.remotePath });
         return { exitCode: 0, stdout: JSON.stringify({ size: bytes.length, sha256: hash(bytes) }) };
       }
-      assert.equal(op.action, 'cleanup'); staged.delete(op.id); return { exitCode: 0, stdout: '{}' };
+      assert.equal(op.action, 'cleanup'); staged.delete(op.id); return { exitCode: 0, stdout: '{"cleaned":true}' };
     },
   }) };
   await new Promise(resolve => app.adminHttp.listen(0, '127.0.0.1', resolve));
@@ -139,6 +139,9 @@ test('legacy finish refuses duplicate, missing, ambiguous and mismatched submiss
   internal.operation = Object.freeze({ ...operation, fileTargetId: 'another', fileTargetRevision: 'a'.repeat(64) });
   await assert.rejects(runtime.files.finishUpload(id), /does not match original/);
   internal.operation = operation;
+  const targetId = internal.targetId; internal.targetId = 'another';
+  await assert.rejects(runtime.files.finishUpload(id), /does not match original/);
+  internal.targetId = targetId;
   const duplicateId = 'f'.repeat(48); runtime.queue.jobs.set(duplicateId, { ...internal, id: duplicateId });
   await assert.rejects(runtime.files.finishUpload(id), /Ambiguous upload request/);
   runtime.queue.jobs.delete(duplicateId);

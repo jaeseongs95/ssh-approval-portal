@@ -135,6 +135,7 @@ export class Transfers {
     if (binding ? item.fileTargetBound !== true || item.targetId !== binding.targetId || item.targetRevision !== binding.targetRevision : item.fileTargetBound === true) throw Error('Upload target does not match frozen operation');
     if (item.sha256 !== op.sha256 || item.size !== op.size || item.remotePath !== op.remotePath || item.overwrite !== op.overwrite || item.elevate !== op.elevate) throw Error('Upload does not match frozen operation');
     const session = await this.transport.connect(this.writeProfile, { beforeDispatch, cleanup: { platform: this.platform, helper: this.helper, id: item.id } });
+    await beforeDispatch?.();
     const fd = await this.store.verified(item.id);
     const staged = { ...op, artifactId: item.id };
     let needsCleanup = false, stagedConfirmed = false, stagedRefusal = false;
@@ -180,6 +181,7 @@ export class Transfers {
     const staged = { ...op, artifactId: item.id };
     try {
       session = await this.transport.connect(op.elevate ? this.writeProfile : this.readProfile, { beforeDispatch, cleanup: { platform: this.platform, helper: this.helper, id: item.id } });
+      await beforeDispatch?.();
       await this.checkPathPolicy(session, staged);
       const metadata = await this.call(session, 'snapshot', staged);
       stagedConfirmed = true;

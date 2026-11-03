@@ -42,7 +42,9 @@ async function fixture(t, options = {}) {
   await listen();
   const api = async (path, body, token = 'fixture-owner') => {
     let response;
-    try { response = await fetch(origin + path, { method: body === undefined ? 'GET' : 'POST', headers: { ...(token ? { Authorization: 'Bearer ' + token } : {}), Origin: env.BRIDGE_ADMIN_ORIGIN, 'Content-Type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }); }
+    // Direct application calls can occupy the event loop past HTTP keep-alive expiry.
+    // Each fixture request owns its socket; no pooled stale connection or retry.
+    try { response = await fetch(origin + path, { method: body === undefined ? 'GET' : 'POST', headers: { Connection: 'close', ...(token ? { Authorization: 'Bearer ' + token } : {}), Origin: env.BRIDGE_ADMIN_ORIGIN, 'Content-Type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }); }
     catch (error) { throw Error(`Fixture HTTP ${body === undefined ? 'GET' : 'POST'} ${path} failed (${error.cause?.code ?? error.code ?? error.name})`, { cause: error }); }
     return { status: response.status, body: await response.json(), headers: response.headers };
   };

@@ -56,7 +56,7 @@ transferTimeoutMs=3000
     };
     connection.client = Object.assign(new EventEmitter(), {
       exec(command, options, callback) {
-        if (barrier?.phase === 'retry' && !refused) { refused = true; callback(Error('Synthetic channel refusal')); return; }
+        if (barrier?.phase === 'retry' && !refused) { refused = true; callback(Object.assign(Error('Synthetic channel refusal'), { reason: 1 })); return; }
         const input = [];
         const stream = new Duplex({ read() {}, write(chunk, encoding, done) { input.push(Buffer.from(chunk)); done(); } });
         stream.stderr = new PassThrough(); stream.signal = () => {}; stream.close = () => stream.destroy();
@@ -85,7 +85,7 @@ transferTimeoutMs=3000
         });
       },
       sftp(callback) {
-        if (barrier?.phase === 'retry' && !refused) { refused = true; callback(Error('Synthetic channel refusal')); return; }
+        if (barrier?.phase === 'retry' && !refused) { refused = true; callback(Object.assign(Error('Synthetic channel refusal'), { reason: 1 })); return; }
         effects.sftp++;
         callback(null, {
           stat(path, done) { const body = remote.get(path); done(body ? null : Object.assign(Error('Missing fixture'), { code: 2 }), body && { size: body.length, mode: 0o100600 }); },
@@ -180,7 +180,7 @@ test('DISPATCH-BIND 비TEST 연결 대기 중 변경은 실제 exec/SFTP/helper 
         if (change === 'maintenance') f.target.queue.maintenance = true;
         gate.release.resolve();
         const result = await f.app.queue.wait(id);
-        assert.equal(result.state, 'failed', change);
+        assert.equal(result.state, 'failed', change + ': ' + JSON.stringify(result.result));
         assert.deepEqual(f.effects, { command: 0, sftp: 0, publish: 0, snapshot: 0, cleanup: 0 }, change);
         assert.equal(f.remote.has('C:/approved/output.bin'), false);
         assert.throws(() => f.app.queue.start(id));

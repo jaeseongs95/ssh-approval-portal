@@ -17,10 +17,10 @@ export function createFileService({ store, queue, transfers, platform = 'linux',
     const job = matches[0];
     if (artifact.submissionId && (!job || job.id !== artifact.submissionId || !queue.get(artifact.submissionId))) throw Error('Original upload request unavailable; do not replay');
     if (!job) return;
-    const operation = job.operation, binding = fileTargetBinding(operation);
+    const operation = job.operation, binding = fileTargetBinding(operation), identity = artifact.targetId === undefined ? queue.identity : artifact;
     if (['fileName', 'remotePath', 'size', 'sha256', 'overwrite', 'elevate', 'uploadProtocol', 'operationKey'].some(key => operation[key] !== artifact[key]) ||
         (artifact.fileTargetBound === true ? !binding || binding.targetId !== artifact.targetId || binding.targetRevision !== artifact.targetRevision : binding !== undefined) ||
-        (job.targetId !== undefined && (job.targetId !== artifact.targetId || job.targetRevision !== artifact.targetRevision))) throw Error('Upload does not match original request');
+        (job.targetId !== undefined && (job.targetId !== identity?.targetId || job.targetRevision !== identity?.targetRevision))) throw Error('Upload does not match original request');
     return job;
   };
   const submitUpload = artifact => {

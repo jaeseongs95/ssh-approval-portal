@@ -4,6 +4,7 @@ import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Artifacts } from '../src/adapters/storage/artifacts.mjs';
+import { scopedArtifacts } from '../src/adapters/storage/scoped-artifacts.mjs';
 import { Transfers } from '../src/adapters/ssh/transfers.mjs';
 import { hash } from '../src/domain/validation.mjs';
 import { ApprovalQueue, settledOutcome } from './support/approval-runtime.mjs';
@@ -20,6 +21,28 @@ test('failed SSH connection releases reserved download quota and creates no loca
 });
 
 const bytes = Buffer.from([0, 255, 1, 128]);
+
+test('failed scoped download preserves its original refusal and grants only its owner one completed-cleanup acknowledgement', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'scoped-download-cleanup-'));
+  try {
+    const store = new Artifacts(root, { maxBytes: 16, budget: 32 }); await store.init();
+    const owner = scopedArtifacts(store, { targetId: 'owner', targetRevision: 'a'.repeat(64) });
+    const other = scopedArtifacts(store, { targetId: 'other', targetRevision: 'b'.repeat(64) });
+    const metadata = { fileName: 'x', remotePath: '/tmp/x', elevate: false };
+    const item = owner.reserveDownload(metadata), foreign = other.reserveDownload(metadata);
+    const refusal = Error('Original dispatch refusal'); let foreignWrites = 0;
+    await assert.rejects(owner.receiveDownload(item.id, { size: bytes.length, sha256: hash(bytes) }, async () => { throw refusal; }), error => error === refusal);
+    assert.equal(store.has(item.id), false); assert.equal(store.has(foreign.id), true);
+    assert.throws(() => other.remove(item.id), /Unknown transfer/);
+    await owner.remove(item.id);
+    assert.throws(() => owner.remove(item.id), /Unknown transfer/);
+    assert.throws(() => owner.remove(foreign.id), /another target/);
+    await assert.rejects(owner.receiveDownload(foreign.id, { size: bytes.length, sha256: hash(bytes) }, async () => { foreignWrites++; }), /another target/);
+    assert.equal(foreignWrites, 0); assert.equal(store.has(foreign.id), true);
+    assert.equal(store.reserved, store.get(foreign.id).size);
+  } finally { await rm(root, { recursive: true }); }
+});
+
 async function fixture({ uploadError = false, downloadError = false, wrongHash = false, cleanupError = false, helperResponse,
   platform = 'linux', pathPolicy } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'ssh-transport-contract-'));
@@ -89,7 +112,11 @@ test('upload failure makes one attempt, never publishes and still attempts clean
   try {
     const item = await f.store.begin({ fileName: 'x', remotePath: '/tmp/x', size: 4, sha256: hash(bytes) });
     await f.store.append(item.id, 0, bytes); await f.store.finish(item.id);
-    await assert.rejects(f.transfers.upload({ artifactId: item.id, remotePath: '/tmp/x', size: 4, sha256: hash(bytes), overwrite: false, elevate: false }), /upload disconnected/);
+    const outcome = await f.transfers.upload({ artifactId: item.id, remotePath: '/tmp/x', size: 4, sha256: hash(bytes), overwrite: false, elevate: false });
+    assert.equal(outcome.failed, true); assert.equal(outcome.execution.remoteState, 'unknown');
+    assert.equal(outcome.execution.cleanupComplete, false); assert.equal(outcome.execution.requiresReconciliation, true);
+    assert.equal(outcome.execution.automaticReplay, false); assert.equal(outcome.data.remoteCleanup, 'unconfirmed');
+    assert.deepEqual(Buffer.concat(f.uploaded), bytes); assert.deepEqual(f.handles.map(handle => handle.closed), [1]);
     assert.deepEqual(f.calls.map(x => x.payload.action), ['cleanup']); assert.deepEqual(f.profiles, ['writer']);
   } finally { await f.close(); }
 });

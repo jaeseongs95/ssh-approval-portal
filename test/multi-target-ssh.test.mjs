@@ -59,7 +59,8 @@ test('two independent pinned loopback SSH servers receive only their selected re
   assert.notEqual(app.queue.get(a.id).result.output.id,app.queue.get(b.id).result.output.id);
   // A changed expected key must fail before an SSH exec reaches that server.
   runtime.registry.getProfile('alpha-read').trustedHostKey=beta.hostKey;
-  await assert.rejects(app.targets.commands.read('id -un','alpha'));assert.equal(alpha.calls.length,1);
+  const refused=await app.targets.commands.read('id -un','alpha');
+  assert.equal(refused.failed,true);assert.equal(refused.execution.remoteState,'not_dispatched');assert.equal(refused.execution.cleanupComplete,true);assert.equal(alpha.calls.length,1);
   await assert.rejects(runtime.registry.getOrCreate('alpha-read'));assert.equal(alpha.calls.length,1);
   assert.equal((await app.targets.commands.read('id -un','beta')).output.state,'ready');
  }finally{await app?.close();await runtime?.registry.closeAll();await alpha?.close();await beta?.close();await rm(root,{recursive:true,force:true});}

@@ -750,13 +750,13 @@
     },
     {
       "path": "src/adapters/ssh/transfers.mjs",
-      "size": 16491,
-      "sha256": "15c56c9d0810927dc7d45742cd467f900a7423db7fed7958fe0da17f3988d6ef"
+      "size": 16553,
+      "sha256": "6c48ccc72270a3141551d250d84c76bcafa4533843b5a6a410c397aeef659f64"
     },
     {
       "path": "src/adapters/ssh/vendor.mjs",
-      "size": 19001,
-      "sha256": "008b9536da0430716d8fcd0f5997f723390f0e7d05b09352c82a2881d1f21a67"
+      "size": 19087,
+      "sha256": "2339ab20fe8127a478134528c5d68974f4f2af802b44b973b4f282d86ee46c1c"
     },
     {
       "path": "src/adapters/ssh/windows-command.mjs",
@@ -830,8 +830,8 @@
     },
     {
       "path": "src/adapters/storage/scoped-artifacts.mjs",
-      "size": 1325,
-      "sha256": "7fb68c035e97731636f982abc1975b2ba4397dac2125c25800ff69faef684445"
+      "size": 1626,
+      "sha256": "1ddf7f4b8f2707efb4300ef3a4a9126397c71b2851aa29b997c987e3981d05a0"
     },
     {
       "path": "src/application/admin-browser-sessions.mjs",
@@ -870,8 +870,8 @@
     },
     {
       "path": "src/application/files.mjs",
-      "size": 10642,
-      "sha256": "6021df6f13378969fde3b7e8eba6f55f80ab25439c1e199016ca217b4c68944a"
+      "size": 10716,
+      "sha256": "efd84ff2502a4213b307d6d9620b5ea5514c209319b82b6bef0dc2e75091879f"
     },
     {
       "path": "src/application/history.mjs",
@@ -1055,8 +1055,8 @@
     },
     {
       "path": "test/agent-cli-http.test.mjs",
-      "size": 35790,
-      "sha256": "a8b0254cf2979afd2807069c60d174a08d10b8b6682a2c06be6253666631bd3d"
+      "size": 36249,
+      "sha256": "3828dc7032cc0bbbca5ace0fb3cc6f1a69fa7559e3b3c399aa6238aa7e484f10"
     },
     {
       "path": "test/agent-cli-releases.test.mjs",
@@ -1495,8 +1495,8 @@
     },
     {
       "path": "test/file-target-binding.test.mjs",
-      "size": 16256,
-      "sha256": "caf31bb0121c2f3bb2d28ebece91f7f1daf7cf4c01d03bb3b711d757bfc55796"
+      "size": 16307,
+      "sha256": "421a21d7e77af5e326a7c6f25ede1865939500c3980143a99ee9a82c9299dd88"
     },
     {
       "path": "test/fixtures/jev-input-factor-corpus.json",
@@ -1525,8 +1525,8 @@
     },
     {
       "path": "test/http-races.test.mjs",
-      "size": 7336,
-      "sha256": "da657868e4284aa56032b3a2549b182e14ecd35b51537a5170c902b97cf6953e"
+      "size": 7772,
+      "sha256": "563c0e130abe218fbc3784f7a1898dc994ca5fd4f90909d0a38cb9d668223d30"
     },
     {
       "path": "test/http.test.mjs",
@@ -1635,8 +1635,8 @@
     },
     {
       "path": "test/multi-target-ssh.test.mjs",
-      "size": 5715,
-      "sha256": "b13f6b6b022c384b096a94500d40592fe913de986c25eb6ce668d96a83421da0"
+      "size": 5864,
+      "sha256": "4f0b054f3664cc44eb1232a05c0ebb03a59e77814d1760c54670d1ab02fe1b32"
     },
     {
       "path": "test/multi-target.test.mjs",
@@ -1715,8 +1715,8 @@
     },
     {
       "path": "test/portal-client-process.test.mjs",
-      "size": 22148,
-      "sha256": "fb73a6704d41d219ad4f62860fba8153c1a9596ea718cec7978ad4d753fada21"
+      "size": 22162,
+      "sha256": "ecd63afaa1bb427b0ca7cfa129346a267f8e5c98afe4949a231e3a133acd95a3"
     },
     {
       "path": "test/portal-client-source-binding.test.mjs",
@@ -1725,8 +1725,8 @@
     },
     {
       "path": "test/portal-client.test.mjs",
-      "size": 36974,
-      "sha256": "83a39085c0c51b92f191ad70c87d86e38b4c1a9befb3efcf64f7d348d79bce98"
+      "size": 37172,
+      "sha256": "adfb89a7bf81867f653516501635c1b957011c94384c22dcdfc157f18e3a6b11"
     },
     {
       "path": "test/portal-container-test.sh",
@@ -1740,8 +1740,8 @@
     },
     {
       "path": "test/portal-file-mcp-process.test.mjs",
-      "size": 13345,
-      "sha256": "f228a884db547b3866608793804cf40324b8bf5de2f79228032d586cf602aa66"
+      "size": 13359,
+      "sha256": "ea1d31ae49fd1220e9608afca7b895304f112bfc35d67c80131795199b8d2faa"
     },
     {
       "path": "test/portal-file-mcp.fixture.mjs",
@@ -1785,8 +1785,8 @@
     },
     {
       "path": "test/remote-mcp-upload.test.mjs",
-      "size": 20981,
-      "sha256": "8245875a055ba9e666b6413ce7edd9e87d59e5bab2ef5cf39f9d8ae62fded19f"
+      "size": 21010,
+      "sha256": "d812e2db7bf0c4b7f6914bc86669f4a6bdb7778916c2943c7a07f1e35843f9fd"
     },
     {
       "path": "test/request-admission.test.mjs",
@@ -1830,8 +1830,8 @@
     },
     {
       "path": "test/runtime-capacity.test.mjs",
-      "size": 3819,
-      "sha256": "d2e9fb5c9a9127fdd0d3d856a0238999f94ae352abd58e0bb5be8efcb2d631a6"
+      "size": 4046,
+      "sha256": "2f6bba9961c16c11202073316774f4e7419a8b07c3a88bbbc7af11d15d0c7a97"
     },
     {
       "path": "test/safety-http.test.mjs",
@@ -1890,8 +1890,8 @@
     },
     {
       "path": "test/solid-regression.fixture.mjs",
-      "size": 12005,
-      "sha256": "5726ec7fe27e075a5416124ba0da53c2f58b42de1f63a90e6f3531c643356776"
+      "size": 14743,
+      "sha256": "128a394b8e01a28bb99eae35fdc88cf696f1b05610eb8d04c2cd3d3b6be6c1b3"
     },
     {
       "path": "test/solid-regressions.test.mjs",
@@ -1900,8 +1900,8 @@
     },
     {
       "path": "test/source-automation.test.mjs",
-      "size": 32035,
-      "sha256": "6ee0b085f094f97d472d1649ad1d3ff8d3841b65a66a229473f3a8ba538a09cf"
+      "size": 32225,
+      "sha256": "5991846617d0563b6f0a9913c695b80969162793f097eb66339222c31b6ece4d"
     },
     {
       "path": "test/source-input-refusals.test.mjs",
@@ -2080,8 +2080,8 @@
     },
     {
       "path": "test/transfer-failure.test.mjs",
-      "size": 19575,
-      "sha256": "1be55d02bb8d9359fcf895015b160e707c2f139f0fa9fe47ba1817b9e6f88d89"
+      "size": 21688,
+      "sha256": "574975de6160f26db97750656e1c7989e33cb8f36b7f5dd7c9dad5601d637422"
     },
     {
       "path": "test/ui-bundle.test.mjs",
@@ -2150,13 +2150,13 @@
     },
     {
       "path": "test/windows-dispatch-binding.test.mjs",
-      "size": 22641,
-      "sha256": "93dca20858ae08b180be14010f15f5adce0ed75cb77b9ba24f54ee3b48ee1a6d"
+      "size": 22740,
+      "sha256": "87fd91ffa73fdd9129d1867516b4c2c49c5b3049e363909438e0171c19f92b68"
     },
     {
       "path": "test/windows-file-contracts.test.mjs",
-      "size": 13658,
-      "sha256": "84bc3aa10a8e7379b74af7369a8ad60a90a2ec9a5eecc6fe54c302861c719281"
+      "size": 13760,
+      "sha256": "c217c34677fa24ce65c76d4ddd7d13a52d6bab1247533a1aa5e02e502c68515a"
     },
     {
       "path": "test/windows-file-helper.tests.ps1",

@@ -115,7 +115,7 @@ test('Windows 전송은 고정 명령과 JSON으로 바이트를 왕복하고 �
     const session = {
       async call(command, payload) {
         calls.push({ command, payload });
-        return { exitCode: 0, stdout: JSON.stringify(payload.action === 'snapshot' ? { size: bytes.length, sha256: hash(bytes) } : { ok: true }) };
+        return { exitCode: 0, stdout: JSON.stringify(payload.action === 'snapshot' ? { size: bytes.length, sha256: hash(bytes) } : payload.action === 'cleanup' ? { cleaned: true } : { ok: true }) };
       },
       async upload(stream, path) { stagingPaths.push(path); for await (const chunk of stream) uploaded.push(chunk); },
       async download(path, destination) { stagingPaths.push(path); destination.end(bytes); },
@@ -176,7 +176,7 @@ test('Windows 관리자 토큰 확인을 업로드 전에 요구하고 승인된
         if (payload.action === 'authorize') return authorized
           ? { exitCode: 0, stdout: JSON.stringify({ authorized: true, elevated: true }) }
           : { exitCode: 1, stdout: JSON.stringify({ errorCode: 'PERMISSION_DENIED' }) };
-        return { exitCode: 0, stdout: JSON.stringify(payload.action === 'snapshot' ? { size: bytes.length, sha256: hash(bytes) } : { published: true }) };
+        return { exitCode: 0, stdout: JSON.stringify(payload.action === 'snapshot' ? { size: bytes.length, sha256: hash(bytes) } : payload.action === 'cleanup' ? { cleaned: true } : { published: true }) };
       },
       async upload(stream) { uploads++; for await (const chunk of stream) assert.deepEqual(chunk, bytes); },
       async download(path, destination) { destination.end(bytes); },

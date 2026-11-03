@@ -49,43 +49,68 @@ async function connect(app) {
 async function scenario(name, root, work) {
   if (name === 'AP-01') {
     const realNow = Date.now; let clock = realNow(); Date.now = () => clock;
-    let executions = 0;
-    const app = await application(root, work, { audit: event => { if (event.action === 'expired') throw Error('Synthetic expired audit failure'); }, executeCommand: async () => { executions++; return { content: [] }; } });
+    let executions = 0, expiryAuditAttempts = 0;
+    const app = await application(root, work, { audit: event => { if (event.action === 'expired') { expiryAuditAttempts++; throw Error('Synthetic expired audit failure'); } }, executeCommand: async () => { executions++; return { content: [] }; } });
     const client = await connect(app);
     try {
-      const job = (await client.callTool({ name: 'run-command', arguments: { command: 'printf fixture-never-execute' } })).structuredContent;
+      // 1.8 uses submit/observe. Terminal audit failures retain the expired state
+      // and a safe diagnostic while the health endpoint remains available.
+      const submitted = await client.callTool({ name: 'submit', arguments: { kind: 'command', operationKey: 'solid-expiry-key-0001', command: 'printf fixture-never-execute' } });
+      assert.equal(submitted.isError, undefined); const job = submitted.structuredContent.data;
       assert.equal(job.state, 'pending'); clock += 3_600_001;
       const response = await fetch(`http://127.0.0.1:${app.mcpHttp.address().port}/health`);
-      assert.equal(response.status, 503, 'Expired-audit exception must be a controlled HTTP failure');
-      await response.json();
+      assert.equal(response.status, 200, 'An expiry audit failure must not make the process unavailable');
+      assert.equal((await response.json()).pending, 0);
+      assert.equal(expiryAuditAttempts, 1, 'The expiry audit failure must actually be exercised once');
+      assert.match(app.queue.get(job.id).auditError, /must not be retried/);
       const next = await fetch(`http://127.0.0.1:${app.mcpHttp.address().port}/health`);
       assert.equal(next.status, 200, 'The child process must remain available');
-      const status = (await client.callTool({ name: 'get-request-status', arguments: { id: job.id } })).structuredContent;
-      assert.equal(status.state, 'expired');
+      const observed = await client.callTool({ name: 'observe', arguments: { id: job.id } });
+      assert.equal(observed.isError, undefined); const status = observed.structuredContent.data;
+      assert.equal(status.state, 'expired'); assert.equal(status.auditFailure, true); assert.equal(expiryAuditAttempts, 1);
+      assert.doesNotMatch(JSON.stringify([submitted, observed]), /Synthetic expired audit failure/);
       const deniedExecution = await fetch(`http://127.0.0.1:${app.adminHttp.address().port}/api/${job.id}/approve`, { method: 'POST', headers: { Authorization: 'Bearer ' + fixtureEnv.BRIDGE_ADMIN_TOKEN, Origin: fixtureEnv.BRIDGE_ADMIN_ORIGIN } });
       assert.equal(deniedExecution.status, 409); assert.equal(executions, 0);
-      return { controlledStatus: response.status, processSurvived: true, state: status.state, executions };
+      return { controlledStatus: response.status, processSurvived: true, state: status.state, executions, expiryAuditAttempts };
     } finally { Date.now = realNow; await client.close(); await app.close(); }
   }
   if (name === 'AP-02') {
-    const events = [];
-    const app = await application(root, work, { audit: event => events.push(event.action), executeCommand: async (_profile, command) => {
+    const events = []; let executions = 0;
+    const app = await application(root, work, { env: { ...fixtureEnv, BRIDGE_MAX_CONCURRENCY: '1' }, audit: event => events.push(event.action), executeCommand: async (_profile, command) => {
+      executions++;
       if (command === 'id fail-read') throw Error('PRIVATE_EXECUTOR_SENTINEL');
       return { content: [{ type: 'text', text: 'read-ok' }] };
     } });
     const client = await connect(app);
     try {
-      for (const tool of ['read-command', 'run-command']) {
-        const before = events.length;
-        const result = await client.callTool({ name: tool, arguments: { command: 'id fail-read' } });
-        assert.equal(result.isError, true); assert.ok(!JSON.stringify(result).includes('PRIVATE_EXECUTOR_SENTINEL'));
-        assert.deepEqual(events.slice(before), ['read-started', 'read-failed'], 'Executor rejection must still have a terminal audit event');
+      const observeTerminal = async (selector, includeOutput = false) => {
+        for (let attempt = 0; attempt < 16; attempt++) {
+          const result = await client.callTool({ name: 'observe', arguments: { ...selector, waitMs: 250, includeOutput } });
+          assert.equal(result.isError, undefined); assert.doesNotMatch(JSON.stringify(result), /PRIVATE_EXECUTOR_SENTINEL/);
+          if (['completed', 'failed', 'cancelled', 'denied', 'expired', 'unknown'].includes(result.structuredContent.data.state)) return result.structuredContent.data;
+        }
+        assert.fail('The native read operation did not settle within its observation budget');
+      };
+      // Removed read-command/run-command aliases now share native command admission.
+      // Exercise both public lookup selectors; executor exceptions settle as unknown.
+      for (const lookup of ['id', 'operationKey']) {
+        const before = events.length, args = { kind: 'command', operationKey: 'solid-read-failed-' + lookup, command: 'id fail-read' };
+        const submitted = await client.callTool({ name: 'submit', arguments: args });
+        assert.equal(submitted.isError, undefined); assert.doesNotMatch(JSON.stringify(submitted), /PRIVATE_EXECUTOR_SENTINEL/);
+        const job = submitted.structuredContent.data, result = await observeTerminal(lookup === 'id' ? { id: job.id } : { operationKey: args.operationKey });
+        assert.equal(result.state, 'unknown'); assert.equal(result.failed, true); assert.equal(result.failureCode, 'OPERATION_FAILED'); assert.equal(result.remoteOutcome, 'unknown');
+        assert.deepEqual(events.slice(before), ['submitted', 'execution-queued', 'policy-execution-started', 'unknown'], 'Executor rejection must still have a terminal audit event');
+        const replay = await client.callTool({ name: 'submit', arguments: args });
+        assert.equal(replay.structuredContent.data.id, job.id); assert.equal(replay.structuredContent.data.state, 'unknown');
+        assert.equal(executions, lookup === 'id' ? 1 : 2, 'The same operation key must not repeat an uncertain execution');
         const health = await (await fetch(`http://127.0.0.1:${app.mcpHttp.address().port}/health`)).json();
         assert.equal(health.busy, false);
       }
-      const result = await client.callTool({ name: 'read-command', arguments: { command: 'id recovered' } });
-      assert.equal(result.isError, undefined); assert.equal((await client.callTool({name:'read-command-output',arguments:{outputId:result.structuredContent.output.id}})).content[0].text, 'read-ok');
-      return { tools: 2, terminalFailureAudits: events.filter(action => action === 'read-failed').length, busyReleased: true, rawErrorHidden: true };
+      const submitted = await client.callTool({ name: 'submit', arguments: { kind: 'command', operationKey: 'solid-read-recovered-0001', command: 'id recovered' } });
+      assert.equal(submitted.isError, undefined);
+      const recovered = await observeTerminal({ id: submitted.structuredContent.data.id }, true);
+      assert.equal(recovered.state, 'completed'); assert.equal(recovered.failed, false); assert.equal(recovered.outputPage.text, 'read-ok'); assert.equal(executions, 3);
+      return { lookupSelectors: 2, terminalFailureAudits: events.filter(action => action === 'unknown').length, busyReleased: true, rawErrorHidden: true };
     } finally { await client.close(); await app.close(); }
   }
   if (name === 'AUTH-01') {

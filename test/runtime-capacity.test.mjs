@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { randomBytes } from 'node:crypto';
 import { createRuntimeCapacity } from '../src/application/runtime-capacity.mjs';
+import { createRuntimeCapacityState } from '../src/adapters/storage/runtime-capacity-state.mjs';
 
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'runtime-capacity-180-'));
@@ -13,7 +15,7 @@ function fixture(t) {
   const scheduler = { configure: value => calls.push(structuredClone(value)), snapshot: () => ({ queued: 1, active: 1 }), list: () => jobs };
   const settings = { availableCpus: 2, queueCapacity: 20, maxConcurrency: 2, targets: [{ id: 'linux' }, { id: 'windows', maxConcurrency: 1 }] };
   const open = (ids = ['linux', 'windows'], extra = {}) => {
-    const instance = createRuntimeCapacity({ root, settings, targets: ids.map(id => ({ id, displayName: id })), scheduler, ...extra });
+    const instance = createRuntimeCapacity({ state: createRuntimeCapacityState(root), newRevision: () => randomBytes(16).toString('hex'), settings, targets: ids.map(id => ({ id, displayName: id })), scheduler, ...extra });
     instances.push(instance);
     return instance;
   };

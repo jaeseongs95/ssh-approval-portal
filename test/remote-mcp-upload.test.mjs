@@ -41,7 +41,7 @@ async function fixture(t, { maxBytes = CHUNK_BYTES * 2, uiEnabled = false } = {}
             published.push({ target: runtime.id, path: payload.remotePath, bytes });
             return { exitCode: 0, stdout: JSON.stringify({ size: bytes.length, sha256: hash(bytes) }) };
           }
-          assert.equal(payload.action, 'cleanup'); return { exitCode: 0, stdout: '{}' };
+          assert.equal(payload.action, 'cleanup'); return { exitCode: 0, stdout: JSON.stringify({ cleaned: true }) };
         } };
     } };
   }

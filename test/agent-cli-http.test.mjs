@@ -19,7 +19,7 @@ function release(provider){const name=provider==='codex'?'@openai/codex':'@anthr
 async function fixture(t,options={}){
  const root=await mkdtemp(join(tmpdir(),'cli-app-')),events=[],calls=[],profiles=new Map(),flags={probe:null,install:null,status:null,login:null,auditFail:false};
  let app,origin;const cleanup=[];t.after(async()=>{for(const release of cleanup)release();await app?.close();assert.ok(root.startsWith(join(tmpdir(),'cli-app-')));await rm(root,{recursive:true,force:true});});
- const env={BRIDGE_MCP_TOKEN:'fixture-mcp',BRIDGE_ADMIN_TOKEN:'fixture-owner',BRIDGE_UI_TICKET_KEY:'a'.repeat(64),BRIDGE_ADMIN_ORIGIN:adminOrigin,BRIDGE_JEV_ENABLED:'false',BRIDGE_COMMAND_AUTOMATION:'false',BRIDGE_TEST_SERVER_SECRET_REF:'secret://fixture/test-server',...options.env};
+ const env={BRIDGE_MCP_TOKEN:'fixture-mcp',BRIDGE_ADMIN_TOKEN:'fixture-owner',BRIDGE_UI_TICKET_KEY:'a'.repeat(64),BRIDGE_ADMIN_ORIGIN:adminOrigin,BRIDGE_JEV_ENABLED:'false',BRIDGE_COMMAND_AUTOMATION:'false',BRIDGE_MAX_CONCURRENCY:'1',BRIDGE_TEST_SERVER_SECRET_REF:'secret://fixture/test-server',...options.env};
  const execute=async(plan,verify,beforeDispatch)=>{
   const checked=verify();assert.equal(checked.targetId,plan.manifest.targetId);assert.equal(checked.targetRevision,plan.manifest.targetRevision);assert.equal(checked.profile,plan.manifest.profile);calls.push(plan);
   if(plan.agentCli.action==='login-status'){
@@ -291,6 +291,9 @@ test('test server CLI dispatch hook rejects revoked secret after admission and r
  const review=await f.api('/api/command-policy/review',{method:'POST',body:proposal});assert.equal(review.status,200);
  assert.equal((await f.api('/api/command-policy',{method:'POST',body:{...proposal,reviewToken:review.body.reviewToken,acknowledged:true}})).status,200);
  const p=await f.preview();f.flags.install=async(_plan,_verify,beforeDispatch)=>{value=undefined;await beforeDispatch();effects++;};
- const job=await f.submit(p);await f.app.queue.wait(job.id);assert.equal(f.app.queue.get(job.id).state,'unknown');assert.equal(effects,0);
+ const job=await f.submit(p);await f.app.queue.wait(job.id);const settled=f.app.queue.get(job.id);assert.equal(settled.state,'failed');assert.equal(effects,0);
+ assert.equal(settled.result.execution.remoteState,'not_dispatched');assert.equal(settled.result.execution.requiresReconciliation,false);
+ assert.equal(settled.decision.dispatchFailureReason,'authority');assert.equal(settled.decision.dispatchFailureStage,'policy_guard');
+ assert.doesNotMatch(JSON.stringify([settled,f.events]),/2222222222222222|secret:\/\/fixture\/test-server|BRIDGE_TEST_SERVER_SECRET_REF/);
  const before=f.calls.length;assert.equal((await f.submit(p)).id,job.id);assert.equal(f.calls.length,before);assert.equal(effects,0);
 });
