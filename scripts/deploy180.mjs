@@ -162,7 +162,15 @@ export async function prepareDeploymentMigration(plan, release, { previousGenera
   }
   if (/^1\.8\./.test(previousVersion)) fail('LEGACY_MIGRATION_RECEIPT_REQUIRED');
   const archiveRoot = join(plan.appRoot, 'legacy-archives', plan.generation);
-  await mkdir(dirname(archiveRoot), { recursive: true, mode: 0o755 });
+  const archiveParent = dirname(archiveRoot);
+  try { await mkdir(archiveParent, { mode: 0o711 }); }
+  catch (error) { if (error.code !== 'EEXIST') throw error; }
+  const parentStat = await lstat(archiveParent);
+  if (!parentStat.isDirectory() || parentStat.isSymbolicLink()
+    || (process.platform !== 'win32' && (parentStat.uid !== process.getuid() || (parentStat.mode & 0o022)))) fail('UNSAFE_LEGACY_ARCHIVE');
+  // mkdir's mode is filtered by the caller's umask. Only this trusted parent
+  // needs service-uid traversal; generation archives stay private below it.
+  if (process.platform !== 'win32') await chmod(archiveParent, 0o711);
   await mkdir(archiveRoot, { recursive: true, mode: 0o700 });
   const archiveStat = await lstat(archiveRoot);
   if (!archiveStat.isDirectory() || archiveStat.isSymbolicLink()) fail('UNSAFE_LEGACY_ARCHIVE');
