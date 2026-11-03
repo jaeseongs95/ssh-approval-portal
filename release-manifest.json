@@ -215,8 +215,8 @@
     },
     {
       "path": "docs/mcp-tools.ko.md",
-      "size": 7138,
-      "sha256": "04a5dc69d129d18c29a15e119e246e29ff79e9d01e7184ac65f18b3b64ee960c"
+      "size": 7286,
+      "sha256": "b434ac6efd5040c519244065ae9fe1e80ab631b137b3db6e676761d19d27d646"
     },
     {
       "path": "docs/multi-targets.ko.md",

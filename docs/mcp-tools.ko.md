@@ -46,4 +46,4 @@
 
 입력 action은 `{type:"key",keysym,down}`, `{type:"pointer",x,y,buttons}`, `{type:"text",text}`입니다. 한 호출에 1~128개 action을 받으며 실제 이벤트 한도와 화면 범위는 서비스에서도 검증합니다. 최신 동일 입력 재호출은 기존 receipt만 반환하며 자동 재전송하지 않습니다. `desktop-close`의 `releaseSent`·`cleanupError`로 정리 결과를 구별합니다.
 
-소유자용 `show-*`·`ui-*` 도구는 `_meta.ui.visibility:["app"]`로 격리합니다. 이 선언만으로 모든 호스트의 실제 필터 동작이 검증됐다고 주장하지 않습니다. 공통 공개 도구에는 공급자별 파일 입력 계약·설치·인증·소유자 결정을 넣지 않습니다.
+카드를 여는 `show-*` 도구 3개는 `_meta.ui.visibility:["model","app"]`로 모델과 앱에 노출합니다. 카드에서 사용하는 소유자용 `ui-*` 도구 6개는 `_meta.ui.visibility:["app"]`로 격리합니다. 이 선언만으로 모든 호스트의 실제 필터·렌더링 동작이 검증됐다고 주장하지 않습니다. 공통 공개 도구에는 공급자별 파일 입력 계약·설치·인증·소유자 결정을 넣지 않습니다.
