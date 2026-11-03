@@ -86,7 +86,7 @@ export function prepareWindowsPythonSource({ source, argv = [], cwd, elevate = f
     + `if(-not [IO.File]::Exists($s.FileName)){[Console]::Error.Write('Python executable unavailable');exit 127};`
     + `$s.UseShellExecute=$false;$s.CreateNoWindow=$true;$s.RedirectStandardInput=$true;$p=[Diagnostics.Process]::Start($s);`
     + `$i=$p.StandardInput.BaseStream;$b=[byte[]]::new(8192);try{while(($n=[SshApproval.Stdin]::Read($b,0,$b.Length)) -gt 0){$i.Write($b,0,$n)}}finally{$i.Close()};$p.WaitForExit();exit $p.ExitCode`
-    + `}catch{[Console]::Error.Write('Python launcher failed');exit 125}`;
+    + `}catch{[Console]::Error.WriteLine($_.ToString());if($_.InvocationInfo -and $_.InvocationInfo.PositionMessage){[Console]::Error.WriteLine($_.InvocationInfo.PositionMessage)};exit 125}`;
   // 바깥 식에는 고정 문법과 Base64만 있어 cmd와 PowerShell의 추가 확장이 없다.
   const launcherBootstrap = `& ([scriptblock]::Create([IO.StreamReader]::new([IO.Compression.GZipStream]::new([IO.MemoryStream]::new([Convert]::FromBase64String('${gzipSync(launcher, { level: 9 }).toString('base64')}')),[IO.Compression.CompressionMode]0)).ReadToEnd()))`;
   if (/["$`%\r\n]/.test(launcherBootstrap)) throw Error('Invalid fixed launcher bootstrap');

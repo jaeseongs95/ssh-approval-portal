@@ -1,7 +1,5 @@
-export function createCardI18n(language = 'en') {
-const korean = language.toLowerCase().startsWith('ko');
-const locale = korean ? 'ko-KR' : 'en-US';
-const en = {
+import { resolveLocale, messageCatalog, translate, createFormatters } from '../../web/src/locale.js';
+export const cardCatalogs = messageCatalog({
   '위험 평가 중': 'Assessing risk', '실행 결과 불명': 'Execution outcome unknown',
   '대상 ID': 'Target ID', '설정 revision': 'Configuration revision', '호스트 키': 'Host key', '전체 대상': 'All targets',
   '대상 선택에 실패했습니다. 다시 열어 주세요.': 'Could not select the target. Reopen the file card.',
@@ -22,9 +20,12 @@ const en = {
   ' sudo로 전송': ' Transfer using sudo', ' 기존 파일 덮어쓰기': ' Overwrite existing file', '최대': 'Maximum', '서버 반영은 승인 후 진행합니다.': 'The remote file changes only after approval.',
   '파일 전송 후 승인 요청': 'Send file and request approval', '다운로드 요청': 'Request download', '파일을 선택하고 크기 한도를 확인하세요.': 'Choose a file within the size limit.',
   '중계기 전송': 'Uploading to bridge', 'UI 동작은 클라이언트 검증 후 활성화됩니다.': 'UI actions are enabled after client verification.',
-};
-const t = value => korean ? value : en[value] ?? value;
+});
+export function createCardI18n(language = 'en') {
+const { korean, locale, messageLanguage } = resolveLocale(language);
+
+const t = (value, values) => translate(cardCatalogs, locale, value, values);
 const states = Object.fromEntries(Object.entries({ pending: '승인 대기', queued: '실행 대기', evaluating: '위험 평가 중', unknown: '실행 결과 불명', running: '실행 중', completed: '완료', failed: '실패', denied: '거부됨', expired: '만료됨' }).map(([key,value]) => [key,t(value)]));
 
-return { t, korean, locale, states };
+return { t, korean, locale, messageLanguage, ...createFormatters(locale), states };
 }

@@ -107,11 +107,11 @@ export function createAgentCliService({queue,journal,resolveTarget,readInstallat
    }
    return queue.get(job.id);
   },
-  async execute(id,beforeDispatch){
+  async execute(id,beforeDispatch,options={}){
    const entry=beforeStart(queue.get(id));
    const reservation=outputs.reserve({executionId:id,targetId:entry.binding.targetId,targetRevision:entry.binding.targetRevision,profile:entry.binding.profile,operationDigest:entry.plan.planDigest});
    try{
-    const outcome=await executePlan(entry.plan,()=>{beforeStart(queue.get(id));return entry.binding;},beforeDispatch);
+    const outcome=await executePlan(entry.plan,()=>{beforeStart(queue.get(id));return entry.binding;},beforeDispatch,options);
     if(!record(outcome)||typeof outcome.failed!=='boolean'||!Array.isArray(outcome.texts)||outcome.texts.some(text=>typeof text!=='string'))throw Error('CLI execution result unavailable');
     return outputs.finish(reservation,outcome);
    }catch(error){outputs.abandon(reservation);throw error;}

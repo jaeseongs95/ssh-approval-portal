@@ -27,7 +27,7 @@ function observeClient(client, operation) {
   const usage = clientState(client);
   const view = new Proxy(client, { get(target, key) {
     const method = Reflect.get(target, key, target);
-    if (key !== 'exec' && key !== 'sftp') return typeof method === 'function' ? method.bind(target) : method;
+    if (key !== 'exec' && key !== 'sftp' && key !== 'forwardOut') return typeof method === 'function' ? method.bind(target) : method;
     return (...args) => {
       const callback = args.pop(), opening = {};
       usage.opening.add(opening);

@@ -1,6 +1,7 @@
 import metadata from '../../../package.json' with { type: 'json' };
 import { routeFileApi } from './file-api.mjs';
 import { createServer } from 'node:http';
+import { createHash } from 'node:crypto';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { authenticated } from '../security/tickets.mjs';
 import { createMcpAdapter } from '../mcp/server.mjs';
@@ -71,9 +72,9 @@ async function readMcpMessage(req, res) {
   return { message };
 }
 
-export function createProtocolAdapters({ queue, commands, files, store, lifecycle, settings, signer, adminAccess, browserSessions, authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal, targets, requestSafety, commandPolicy, commandOutputs, automationMetrics, environmentEditor,agentCli, preservation, retainedHistory, requestAdmission }) {
+export function createProtocolAdapters({ queue, commands, files, store, lifecycle, settings, signer, adminAccess, browserSessions, authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal, targets, requestSafety, commandPolicy, commandOutputs, automationMetrics, environmentEditor,agentCli, preservation, retainedHistory, requestAdmission, operations, capacity, desktop, deploymentGeneration = null }) {
   const capabilities = createCapabilities({ queue, store, signer, settings, targets, adminAuthMode: adminAccess.mode });
-  const mcpServer = createMcpAdapter({ queue, commands, files, settings, capabilities, uiHtml, bindFileSource, shutdownSignal, targets, requestSafety, commandOutputs });
+  const mcpServer = createMcpAdapter({ queue, commands, files, settings, capabilities, uiHtml, bindFileSource, shutdownSignal, targets, requestSafety, commandOutputs, operations, desktop });
   const admission = {
     mcp: createRequestAdmission(requestAdmission?.mcp),
     admin: createRequestAdmission({ maxActive: 4, maxQueued: 16, maxWaitMs: 5000, maxDetached: 8, ...requestAdmission?.admin }),
@@ -84,7 +85,7 @@ export function createProtocolAdapters({ queue, commands, files, store, lifecycl
   const mcpHttp = createServer(async (req, res) => {
     let server, scope, lease;
     try {
-      if (req.url === '/health' && req.method === 'GET') return json(res, 200, { healthy: true, version: metadata.version, uiEnabled: settings.uiEnabled, adminAuthMode: adminAccess.mode, ...lifecycle.snapshot(), requestAdmission: { mcp: admission.mcp.snapshot(), admin: admission.admin.snapshot() } });
+      if (req.url === '/health' && req.method === 'GET') return json(res, 200, { healthy: true, version: metadata.version, deploymentGeneration, uiEnabled: settings.uiEnabled, adminAuthMode: adminAccess.mode, ...lifecycle.snapshot(), requestAdmission: { mcp: admission.mcp.snapshot(), admin: admission.admin.snapshot() } });
       if (req.url !== '/mcp' || !authenticated(req, settings.mcpToken)) return json(res, 401, { error: 'Unauthorized' });
       if (req.method !== 'POST') return json(res, 405, { error: 'Method not allowed' });
       scope = requestScope(req, res);
@@ -134,7 +135,7 @@ export function createProtocolAdapters({ queue, commands, files, store, lifecycl
         const chunks=[];let bytes=0;for await(const part of req){const chunk=Buffer.from(part);bytes+=chunk.length;if(bytes>256)return json(res,413,{error:'Request too large'});chunks.push(chunk);}
         let body;try{body=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(Buffer.concat(chunks)));}catch{return json(res,400,{error:'Invalid request'});}
         if(!body||typeof body!=='object'||Array.isArray(body)||Object.keys(body).length)throw Error('Invalid session fields');
-        if(url.pathname.endsWith('/start'))browserSessions.start(req,res,authorization.principal);else browserSessions.end(req,res,authorization.principal);
+        if(url.pathname.endsWith('/start'))browserSessions.start(req,res,authorization.principal);else { await desktop?.closeOwner('admin:'+createHash('sha256').update(authorization.principal.subject).digest('hex')); browserSessions.end(req,res,authorization.principal); }
         return json(res,200,{connected:url.pathname.endsWith('/start')});
       }
       if (await routeFileApi(req, res, url, { files, store, queue, targets, json, authorize })) return;
@@ -143,6 +144,24 @@ export function createProtocolAdapters({ queue, commands, files, store, lifecycl
       if (filter.length) targets.select(filter[0]);
       const visible = jobs => filter.length ? jobs.filter(job => (job.targetId ?? 'default') === filter[0]) : jobs;
       if (req.method === 'GET' && url.pathname === '/api/targets') return json(res, 200, targets?.list() ?? { targets: [{ id: 'default', displayName: settings.targetDisplayName ?? 'SSH', enabled: true, isDefault: true }], defaultTarget: 'default' });
+      if (url.pathname === '/api/capacity' && capacity) {
+        if (req.method === 'GET') return json(res,200,capacity.get());
+        if (req.method !== 'POST') return json(res,405,{error:'METHOD_NOT_ALLOWED'});
+        if ((req.headers['content-type']??'').split(';')[0] !== 'application/json') return json(res,415,{error:'JSON_REQUIRED'});
+        const chunks=[];let bytes=0;for await(const part of req){bytes+=part.length;if(bytes>65536)return json(res,413,{error:'CAPACITY_BODY_TOO_LARGE'});chunks.push(part);}
+        const body=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(Buffer.concat(chunks)));
+        try { return json(res,200,capacity.set(body)); } catch(error) { return json(res,409,{error:error.code??error.message}); }
+      }
+      const desktopRoute=/^\/api\/desktop\/(open|observe|input|close)$/.exec(url.pathname);
+      if (desktopRoute && desktop) {
+        if(req.method!=='POST')return json(res,405,{error:'METHOD_NOT_ALLOWED'});
+        if((req.headers['content-type']??'').split(';')[0]!=='application/json')return json(res,415,{error:'JSON_REQUIRED'});
+        const chunks=[];let bytes=0;for await(const part of req){bytes+=part.length;if(bytes>65536)return json(res,413,{error:'DESKTOP_BODY_TOO_LARGE'});chunks.push(part);}
+        const body=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(Buffer.concat(chunks)));
+        if(!body||typeof body!=='object'||Array.isArray(body)||Object.hasOwn(body,'ownerId'))return json(res,400,{error:'INVALID_DESKTOP_INPUT'});
+        const owner='admin:'+createHash('sha256').update(authorization.principal?.subject??'token-principal').digest('hex');
+        try{return json(res,200,await desktop[desktopRoute[1]](body,owner));}catch(error){return json(res,409,{error:error.code??'DESKTOP_REQUEST_FAILED'});}
+      }
       if (req.method === 'GET' && url.pathname === '/api/session') return json(res, 200, { mode: adminAccess.mode });
       if(agentCli && req.method==='GET' && url.pathname==='/api/agent-cli')return json(res,200,agentCli.get());
       if(agentCli && req.method==='GET' && url.pathname==='/api/agent-cli/history'){
@@ -211,7 +230,7 @@ export function createProtocolAdapters({ queue, commands, files, store, lifecycl
         return;
       }
       if (req.method === 'GET' && ['/', '/settings', '/bridge', '/preferences', '/servers', '/history', '/app.js'].includes(url.pathname)) {
-        res.writeHead(200, { 'Content-Type': url.pathname !== '/app.js' ? 'text/html; charset=utf-8' : 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'", 'Referrer-Policy': 'no-referrer' });
+        res.writeHead(200, { 'Content-Type': url.pathname !== '/app.js' ? 'text/html; charset=utf-8' : 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'", 'Referrer-Policy': 'no-referrer' });
         return res.end(url.pathname !== '/app.js' ? webHtml.replace('data-auth-mode="token"', () => `data-auth-mode="${adminAccess.mode}" data-command-automation="${Boolean(commandPolicy)}" data-multi-target="${settings.targets ? 'true' : 'false'}" data-bridge-display-name="${escapeHtml(settings.bridgeDisplayName)}" data-target-display-name="${escapeHtml(settings.targetDisplayName)}"`)
           .replace('<title>SSH 승인 · Approval Portal</title>', () => `<title>${escapeHtml(settings.bridgeDisplayName)} · ${escapeHtml(settings.targetDisplayName)} · SSH Approval Portal</title>`) : webJs);
       }

@@ -1,5 +1,13 @@
 import { readFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { createHash } from 'node:crypto';
+import { createOperationStore } from './src/adapters/storage/operation-store.mjs';
+import { createOperationScheduler } from './src/domain/operation-scheduler.mjs';
+import { createOperations } from './src/application/operations.mjs';
+import { createRuntimeCapacity } from './src/application/runtime-capacity.mjs';
+import { createDesktopService } from './src/application/desktop.mjs';
+import { createRfbDesktopAdapter } from './src/adapters/desktop/rfb.mjs';
 import { dispatchStep, dispatchRefusal } from './src/domain/dispatch-failure.mjs';
 import { ApprovalQueue } from './src/domain/approval-queue.mjs';
 import { createCommandService } from './src/application/commands.mjs';
@@ -56,7 +64,7 @@ const commandExecutor = execute => async (profile, command, beforeDispatch, opti
 };
 
 /** Assemble concrete ports. Business policy belongs to application/domain modules. */
-export async function createApplication({ registry, classify, executeCommand, executePythonSource, executeAgentCli, agentReleaseCatalog, audit, transferRoot, env = process.env, uiHtml, accessKeySet, uploadSource, riskAssessor, policyRiskAssessor, secretResolver, riskEvaluators = {}, environmentTransport, requestAdmission }) {
+export async function createApplication({ registry, classify, executeCommand, executePythonSource, executeAgentCli, openDesktopChannel, agentReleaseCatalog, audit, transferRoot, env = process.env, uiHtml, accessKeySet, uploadSource, riskAssessor, policyRiskAssessor, secretResolver, riskEvaluators = {}, environmentTransport, requestAdmission }) {
   const settings = parseSettings(env);
   const adminAccess = createAdminAccess(env, accessKeySet);
   const browserSessions=['access','oidc'].includes(adminAccess.mode)?createBrowserSessionAdapter():undefined;
@@ -64,7 +72,9 @@ export async function createApplication({ registry, classify, executeCommand, ex
   const definitions = resolveTargets(settings, registry);
   const store = new Artifacts(transferRoot, { maxBytes: settings.maxBytes, budget: settings.budget });
   await store.init();
-  let outputs, commandState, dormantCommandState, cliState, maintenanceState;
+  let outputs, commandState, dormantCommandState, cliState, maintenanceState, operationStore, scheduler, capacity, desktopService;
+  const submissions = new AsyncLocalStorage();
+  const probeExecutors = new Map();
   try {
   // Open the durable fence before output construction can expire baseline data.
   maintenanceState = createMaintenanceState(transferRoot);
@@ -103,8 +113,21 @@ export async function createApplication({ registry, classify, executeCommand, ex
     inspect() { const policy = source.inspect(url); return { allowed: policy.allowed, sourceHost: policy.sourceHost ?? policy.hostname }; },
     open: options => source.open(url, options),
   };
-  const execute = commandExecutor(executeCommand), claimExecution = createClaims(2, { onSubscriberError: () => audit({ action: 'execution-wakeup-failed' }) }), claimImport = createClaims(2);
-  const runtimes = definitions.map(definition => {
+  const execute = commandExecutor(executeCommand), claimImport = createClaims(settings.maxConcurrency);
+  operationStore = createOperationStore(transferRoot);
+  let runtimes = [];
+  scheduler = createOperationScheduler({ store: operationStore, paused: true,
+    globalConcurrency: settings.maxConcurrency, queueCapacity: settings.queueCapacity,
+    targetConcurrency: Object.fromEntries(definitions.map(target => [target.id,target.maxConcurrency])),
+    targetQueueCapacity: Object.fromEntries(definitions.map(target => [target.id,target.queueCapacity])),
+    beforeDispatch: record => { const target = runtimes.find(target => target.id === record.targetId); if (!target || target.revision !== record.targetRevision) throw Error('TARGET_REVISION_CONFLICT'); target.verify(); if (maintenanceState.occupied()) throw Error('MAINTENANCE_ACTIVE'); },
+    execute: (record, options) => {
+      if (record.kind === 'cli-probe') { const execute = probeExecutors.get(record.id); if (!execute) throw Error('CLI_PROBE_NOT_REPLAYABLE'); return execute(options); }
+      const target = runtimes.find(target => target.id === record.targetId); return target.queue.executeScheduled(record.id, options);
+    },
+    onChange: record => runtimes.find(target => target.id === record.targetId)?.queue.syncOperation(record),
+  });
+  runtimes = definitions.map(definition => {
     const { target, readProfile, writeProfile, identity } = definition;
     const platform = platformOf(definition), targetClassify = classifyForTarget(definition, classify);
     const targetStore = identity ? scopedArtifacts(store, identity) : store;
@@ -133,8 +156,8 @@ export async function createApplication({ registry, classify, executeCommand, ex
         const job = queue.get(id);
         if (!job || job.state !== 'running' || queue.subject(id) !== subject) dispatchRefusal('request_state', 'request_state', 'Dispatch request changed');
         if (queue.now() >= job.expiresAt) dispatchRefusal('plan_expired', 'request_state', 'Dispatch approval expired');
-        if (job.approvalMode === 'automatic' && job.decision?.policyRevision !== before?.revision) dispatchRefusal('policy_changed', 'policy_guard', 'Dispatch approval policy changed');
-        if (job.operation.kind === 'command') queue.beforeCommandStart?.(job);
+        if (!job.operation.readOnly && job.approvalMode === 'automatic' && job.decision?.policyRevision !== before?.revision) dispatchRefusal('policy_changed', 'policy_guard', 'Dispatch approval policy changed');
+        if (job.operation.kind === 'command' && !job.operation.readOnly) queue.beforeCommandStart?.(job);
         // File policy hooks grant automatic authority; manual owner approval stays manual.
         else if (job.approvalMode === 'automatic' && job.operation.kind === 'upload') queue.beforeUploadStart(job);
         else if (job.approvalMode === 'automatic' && job.operation.kind === 'download') queue.beforeDownloadStart(job);
@@ -151,35 +174,41 @@ export async function createApplication({ registry, classify, executeCommand, ex
       beforeDispatch.cleanup = () => definition.verify();
       return beforeDispatch;
     };
-    const checkedExecute = async (profile, command, id = randomBytes(24).toString('hex'), beforeDispatch = dispatchGuard(id)) => {
+    const checkedExecute = async (profile, command, id = randomBytes(24).toString('hex'), beforeDispatch = dispatchGuard(id), options = {}) => {
       definition.verify();
       const dispatch = platform === 'windows' ? prepareWindowsCommand(command, { workdir: definition.workdir }) : { command };
       const reservation = outputs.reserve(binding(profile, command, id));
-      try { return outputs.finish(reservation, await execute(profile, dispatch.command, beforeDispatch, dispatch.stdin === undefined ? undefined : { stdin: dispatch.stdin })); }
-      catch (error) { outputs.abandon(reservation); throw error; }
+      const stream = outputs.beginStream(reservation);
+      if (operationStore.get(id)) operationStore.update(id, { outputRef: { outputId: reservation.id, stream: true } });
+      try { return outputs.finish(reservation, await execute(profile, dispatch.command, beforeDispatch, { ...options, onOutput: event => stream.append(event), ...(dispatch.stdin === undefined ? {} : { stdin: dispatch.stdin }) })); }
+      catch (error) { return outputs.finish(reservation, { failed: true, texts: [], execution: { phase: 'settled', reason: 'transport_lost', remoteState: 'unknown', cleanupComplete: false, requiresReconciliation: true } }); }
     };
     const targetAudit = event => audit({ ...event, ...identity });
     let commands, files, automation, cli;
     const cliProbes = new Set();
-    const checkedSourceExecute = async (operation, id, beforeDispatch) => {
+    const checkedSourceExecute = async (operation, id, beforeDispatch, options = {}) => {
       definition.verify();
       requireTargetCapability(definition, 'pythonSource');
       const plan = automation.sourcePlan(id);
       const reservation = outputs.reserve({ executionId: id, targetId: definition.id, targetRevision: definition.revision, profile: writeProfile, operationDigest: plan.planDigest });
+      const stream = outputs.beginStream(reservation);
+      operationStore.update(id, { outputRef: { outputId: reservation.id, stream: true } });
       try { return outputs.finish(reservation, await executePythonSource(plan, () => {
         definition.verify(); automation.sourcePlan(id); queue.beforeCommandStart(queue.get(id));
         return { targetId: definition.id, targetRevision: definition.revision, profile: writeProfile };
-      }, beforeDispatch)); } catch (error) { outputs.abandon(reservation); throw error; }
+      }, beforeDispatch, { ...options, onOutput: event => stream.append(event) })); } catch (error) { outputs.abandon(reservation); throw error; }
     };
-    const queue = new ApprovalQueue({ classify: targetClassify, target, profile: writeProfile, requestCapacity: settings.requestCapacity, audit: targetAudit, identity, claimExecution,
-      externalBusy: () => (commands?.reading() ?? false) || cliProbes.size > 0 || claimExecution.busy(),
-      executeOperation: async (operation, id) => {
+    const queueIdentity = identity ?? { targetId: definition.id, targetRevision: definition.revision, targetDisplayName: definition.displayName };
+    const queue = new ApprovalQueue({ classify: targetClassify, target, profile: writeProfile, readProfile, requestCapacity: settings.requestCapacity, audit: targetAudit, identity: queueIdentity, scheduler, operationStore, submissionIdentity: () => submissions.getStore(),
+      executeOperation: async (operation, id, options = {}) => {
         if (operation.agentCliContract) requireTargetCapability(definition, 'agentCli');
         if (operation.sourceContract && !operation.agentCliContract) requireTargetCapability(definition, 'pythonSource');
         const beforeDispatch = dispatchGuard(id);
         await beforeDispatch();
-        return operation.agentCliContract === AGENT_CLI_CONTRACT ? cli.execute(id, beforeDispatch) : operation.kind === 'command' ? operation.sourceContract ? checkedSourceExecute(operation, id, beforeDispatch) : checkedExecute(writeProfile, operation.command, id, beforeDispatch)
-          : operation.kind === 'upload' ? transfers.upload(operation, beforeDispatch) : transfers.download(operation, beforeDispatch);
+        const outcome = await (operation.agentCliContract === AGENT_CLI_CONTRACT ? cli.execute(id, beforeDispatch, options) : operation.kind === 'command' ? operation.sourceContract ? checkedSourceExecute(operation, id, beforeDispatch, options) : checkedExecute(operation.readOnly ? readProfile : writeProfile, operation.command, id, beforeDispatch, options)
+          : operation.kind === 'upload' ? transfers.upload(operation, beforeDispatch) : transfers.download(operation, beforeDispatch));
+        // SFTP returns only after its own verified channel/file cleanup. Uncertain transfer errors remain unknown.
+        return outcome.execution ? outcome : { ...outcome, execution: { phase: 'settled', reason: 'exit', remoteState: 'exited', cleanupComplete: true, requiresReconciliation: false, exitCode: outcome.failed ? 1 : 0 } };
       },
       onTerminal: job => { try { cli?.onTerminal(job); automation?.onTerminal(job); } finally { files?.onTerminal(job); } },
     });
@@ -192,17 +221,24 @@ export async function createApplication({ registry, classify, executeCommand, ex
       const rule = commandState?.policy().targets.find(rule => rule.targetId === definition.id && rule.targetRevision === definition.revision && rule.profile === writeProfile);
       if (!rule?.testServer && deniedCommand(plan.command+'\n'+plan.stdin+'\n'+plan.manifest.argvJson,rule)) dispatchRefusal('policy_denied', 'policy_guard', 'CLI operation denied by current policy');
     };
-    const checkedCliProbe = plan => {
+    const checkedCliProbe = async plan => {
       definition.verify();checkCliPolicy(plan);
-      if(queue.maintenance || queue.busy())throw Error('CLI target busy');
+      if(queue.maintenance)throw Error('CLI maintenance in progress');
       const beforeDispatch=dispatchGuard();
-      const release=claimExecution(),id=randomBytes(24).toString('hex');
-      try{targetAudit({action:'cli-probe-started',id,profile:writeProfile,targetId:definition.id});}catch(error){release();throw error;}
-      const task=Promise.resolve().then(async()=>{
+      const id=randomBytes(24).toString('hex');
+      operationStore.accept({ id, requestKey: id, owner: 'cli-probe', targetId: definition.id, targetRevision: definition.revision, kind: 'cli-probe', input: { action: plan.action ?? 'probe', planDigest: hash(JSON.stringify(plan)) } });
+      targetAudit({action:'cli-probe-started',id,profile:writeProfile,targetId:definition.id});
+      probeExecutors.set(id, async options => {
         await beforeDispatch();
-        return executeAgentCli(plan,()=>{definition.verify();checkCliPolicy(plan);if(queue.maintenance)throw Error('CLI maintenance in progress');return cliBinding();}, beforeDispatch);}).finally(()=>{
-        cliProbes.delete(task);try{targetAudit({action:'cli-probe-finished',id,profile:writeProfile,targetId:definition.id});}finally{release();}
+        return executeAgentCli(plan,()=>{definition.verify();checkCliPolicy(plan);if(queue.maintenance)throw Error('CLI maintenance in progress');return cliBinding();}, beforeDispatch, options);
       });
+      const task=(async()=>{
+        scheduler.enqueue(id);
+        let record=operationStore.get(id);
+        while(!['completed','failed','cancelled','expired','denied','unknown'].includes(record.state)) record=await scheduler.observe(id,{timeoutMs:60000});
+        if(!record.result)throw Error('CLI_PROBE_OUTCOME_UNAVAILABLE');
+        return record.result;
+      })().finally(()=>{cliProbes.delete(task);probeExecutors.delete(id);targetAudit({action:'cli-probe-finished',id,profile:writeProfile,targetId:definition.id});});
       cliProbes.add(task);return task;
     };
     if(cliState){
@@ -229,7 +265,7 @@ export async function createApplication({ registry, classify, executeCommand, ex
       if (rule?.testServer !== true && (rule?.automaticDownloads !== true || (job.operation.elevate && rule.automaticSudo !== true))) dispatchRefusal('policy_denied', 'policy_guard', 'Automatic download not enabled by the user');
       return { decision: 'execute', reasonCode: rule?.testServer === true ? 'test_server_bypass' : 'download_policy', policyRevision: policy.revision, targetRevision: definition.revision };
     };
-    commands = createCommandService({ queue, classify: targetClassify, executeCommand: checkedExecute, audit: targetAudit, target, readProfile, claimExecution, automation });
+    commands = createCommandService({ queue, classify: targetClassify, executeCommand: checkedExecute, audit: targetAudit, target, readProfile, automation });
     files = createFileService({ store: targetStore, queue, transfers, claimImport, platform });
     return { ...definition, queue, commands, files, transfers, store: targetStore,cli,
       async filePolicy() {
@@ -248,6 +284,11 @@ export async function createApplication({ registry, classify, executeCommand, ex
   });
   const targets = createTargetRouter(runtimes, { defaultTarget: settings.targets === null ? 'default' : settings.defaultTarget, legacy: settings.targets === null, store, audit });
   const { queue, commands, files } = targets;
+  const maintenanceProperty = Object.getOwnPropertyDescriptor(queue, 'maintenance');
+  Object.defineProperty(queue, 'maintenance', { enumerable: true, configurable: true,
+    get: () => maintenanceProperty.get.call(queue),
+    set: value => { maintenanceProperty.set.call(queue, value); scheduler.configure({ paused: Boolean(value) }); },
+  });
   for (const job of commandState?.list() ?? []) {
     const runtime = runtimes.find(runtime => runtime.id === (job.targetId ?? 'default'));
     if (runtime && job.kind === 'command' && job.result && !job.result.output) {
@@ -268,6 +309,53 @@ export async function createApplication({ registry, classify, executeCommand, ex
   for(const job of cliState?.list() ?? []){
     const runtime=runtimes.find(runtime=>runtime.id===job.operation.agentCliTargetId);
     if(runtime){if(runtime.queue.jobs.has(job.id))throw Error('Duplicate persisted CLI request ID');runtime.queue.restore(job,value=>cliState.save(value));}
+  }
+  // Reconstruct approved views from immutable operation intents. Never reconstruct private source closures.
+  for (const record of operationStore.list()) {
+    const runtime = runtimes.find(target => target.id === record.targetId && target.revision === record.targetRevision);
+    if (runtime && !runtime.queue.get(record.id) && record.metadata?.approval) runtime.queue.restore(record.metadata.approval);
+    if (runtime) runtime.queue.syncOperation(record);
+  }
+  capacity = createRuntimeCapacity({ root: transferRoot, settings, targets: definitions,
+    scheduler: { ...scheduler, list: () => operationStore.list() }, audit, maintenance: () => targets.queue.maintenance });
+  const operations = createOperations({ targets, queue, commands, files, journal: operationStore, scheduler, submissions, outputs });
+  files.readDownload = args => {
+    const record = operationStore.get(args.id); if (!record) throw Object.assign(Error('OPERATION_NOT_FOUND'),{code:'OPERATION_NOT_FOUND'});
+    const runtime = targets.select(record.targetId); runtime.verify();
+    if (runtime.revision !== record.targetRevision) throw Object.assign(Error('TARGET_REVISION_CONFLICT'),{code:'TARGET_REVISION_CONFLICT'});
+    return runtime.files.readAgentDownload(args, runtime.verify);
+  };
+  let desktop;
+  if (openDesktopChannel) {
+    const adapter = createRfbDesktopAdapter({ allowNoneSecurity: true,
+      openChannel: ({ binding, host, port, signal }) => { const runtime = targets.select(binding.targetId); runtime.verify();
+        if (runtime.revision !== binding.targetRevision) throw Object.assign(Error('DESKTOP_STALE_TARGET'),{code:'DESKTOP_STALE_TARGET'});
+        if (runtime.desktop?.enabled !== true) throw Object.assign(Error('DESKTOP_UNAVAILABLE'),{code:'DESKTOP_UNAVAILABLE'});
+        return openDesktopChannel(runtime.writeProfile, { host, port: runtime.desktop.port, signal, beforeDispatch: async () => { runtime.verify(); if (queue.maintenance) throw Error('MAINTENANCE_ACTIVE'); } });
+      } });
+    const permittedDesktop = new Set();
+    desktopService = createDesktopService({ adapter,
+      maxSessions: settings.maxConcurrency, maxPerOwner: settings.maxConcurrency,
+      authorize: binding => permittedDesktop.has(JSON.stringify(binding)),
+      verifyTarget: binding => { try { const runtime = targets.select(binding.targetId); runtime.verify(); return runtime.revision === binding.targetRevision && !queue.maintenance; } catch { return false; } },
+    });
+    let epoch = 0;
+    desktop = {
+      async open({ target, expectedTargetRevision }, ownerId = 'mcp-shared-principal') {
+        const runtime = targets.select(target); runtime.verify();
+        if (expectedTargetRevision !== runtime.revision || queue.maintenance) throw Object.assign(Error('DESKTOP_STALE_TARGET'),{code:'DESKTOP_STALE_TARGET'});
+        if (runtime.desktop?.enabled !== true) throw Object.assign(Error('DESKTOP_UNAVAILABLE'),{code:'DESKTOP_UNAVAILABLE'});
+        // Administrative desktop access is explicit. Agent access follows this target's TEST bypass authority.
+        if (ownerId === 'mcp-shared-principal' && !(await runtime.filePolicy()).testServerActive) throw Object.assign(Error('DESKTOP_OWNER_APPROVAL_REQUIRED'), { code: 'DESKTOP_OWNER_APPROVAL_REQUIRED' });
+        const binding = { ownerId, targetId: runtime.id, targetRevision: runtime.revision, epoch: ++epoch };
+        const key = JSON.stringify(binding); permittedDesktop.add(key);
+        try { return await desktopService.open(binding); } finally { permittedDesktop.delete(key); }
+      },
+      observe: (args, ownerId = 'mcp-shared-principal') => desktopService.observe({ ...args, ownerId }),
+      input: (args, ownerId = 'mcp-shared-principal') => desktopService.input({ ...args, ownerId }),
+      close: (args, ownerId = 'mcp-shared-principal') => desktopService.close({ ...args, ownerId }),
+      closeOwner: ownerId => desktopService.closeOwner(ownerId),
+    };
   }
   const cliRequest=id=>{
     const saved=cliState?.get(id);if(!saved)throw Error('Unknown CLI request');
@@ -340,7 +428,7 @@ export async function createApplication({ registry, classify, executeCommand, ex
     },
     assessor: settings.jevEnabled ? risk : undefined });
   let protocols;
-  const lifecycle = createLifecycleService({ queue, store, commands, files, maintenanceState, closeConnections: async () => { await targets.drain(); await registry.closeAll(); },
+  const lifecycle = createLifecycleService({ queue, store, commands, files, maintenanceState, closeConnections: async () => { await desktopService?.closeAll(); await targets.drain(); await registry.closeAll(); },
     onReap: () => { protocols?.reapCapabilities(); void modelCatalog.refreshDue(); } });
   const preservationInstance = randomBytes(32).toString('hex');
   const preservation = {
@@ -380,19 +468,22 @@ export async function createApplication({ registry, classify, executeCommand, ex
     readQueue: () => runtimes.flatMap(runtime => [...runtime.queue.jobs.values()]),
     readTargets: () => runtimes.map(runtime => ({ id: runtime.id, revision: runtime.revision, enabled: runtime.enabled, writeProfile: runtime.writeProfile })),
     verifyCliTarget: id => { targets.select(id).verify(); }, present: presentJob });
-  protocols = createProtocolAdapters({ queue, commands, files, store, lifecycle, settings, signer, adminAccess, browserSessions, targets, requestSafety, retainedHistory,
+  let deploymentGeneration = null;
+  try { deploymentGeneration = createHash('sha256').update(await readFile(new URL('./release-manifest.json', import.meta.url))).digest('hex'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  protocols = createProtocolAdapters({ queue, commands, files, store, lifecycle, settings, signer, adminAccess, browserSessions, targets, requestSafety, retainedHistory, operations, capacity, desktop, deploymentGeneration,
     authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal: shutdown.signal, commandPolicy, commandOutputs, environmentEditor,agentCli, preservation, requestAdmission, automationMetrics: createAutomationMetrics({state:commandState}) });
   const timer = setInterval(() => { lifecycle.reap().catch(() => {}); try { outputs.reap(); } catch { /* Failed deletions stay charged. */ } }, 30_000); timer.unref();
   let closing;
+  scheduler.configure({ paused: queue.maintenance });
   return { ...protocols, queue, store, targets, transfers: runtimes[0].transfers, enabled: settings.uiEnabled,
     close() {
-      clearInterval(timer); shutdown.abort();
+      clearInterval(timer); shutdown.abort(); scheduler.configure({ paused: true });
       return closing ??= lifecycle.close(() => Promise.all([protocols.mcpHttp, protocols.adminHttp].map(server => new Promise(resolve => {
         // Drain normal responses, then close unfinished HTTP bodies before systemd times out.
         const deadline = setTimeout(() => server.closeAllConnections(), 5000); deadline.unref();
         server.close(() => { clearTimeout(deadline); resolve(); });
-      })))).finally(() => { browserSessions?.close(); for (const runtime of runtimes) {runtime.commands.close();runtime.cli?.close();} commandState?.close();dormantCommandState?.close();cliState?.close(); maintenanceState?.close(); outputs.close(); });
+      })))).finally(() => { scheduler.close(); capacity?.close(); operationStore.close(); browserSessions?.close(); for (const runtime of runtimes) {runtime.commands.close();runtime.cli?.close();} commandState?.close();dormantCommandState?.close();cliState?.close(); maintenanceState?.close(); outputs.close(); });
     },
   };
-  } catch (error) { browserSessions?.close(); commandState?.close();dormantCommandState?.close();cliState?.close(); maintenanceState?.close(); outputs?.close(); throw error; }
+  } catch (error) { scheduler?.close(); capacity?.close(); operationStore?.close(); browserSessions?.close(); commandState?.close();dormantCommandState?.close();cliState?.close(); maintenanceState?.close(); outputs?.close(); throw error; }
 }

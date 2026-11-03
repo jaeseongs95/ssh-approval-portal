@@ -9,6 +9,7 @@ import { validateAgentCliPlan, projectAgentCliResult } from './agent-cli.mjs';
 import { windowsRemotePath } from '../../domain/validation.mjs';
 import { executionFailure } from '../../domain/execution-failure.mjs';
 import { acquireSshConnection, withConnectionLifecycle, rawSshClient } from './connection-lifecycle.mjs';
+import { superviseExecution, presentStderr, DEFAULT_RUN_TIMEOUT_MS, DEFAULT_OUTPUT_BYTES } from './execution-supervisor.mjs';
 
 /** Per-operation view: dispatch authorization follows every connect/retry wait. */
 export function withDispatchGuard(connection, beforeDispatch = async () => {}, verifyConnection = () => {}, { connectedOnly = false, clientView = client => client } = {}) {
@@ -42,17 +43,40 @@ async function connectionBinding(registry, profile) {
 }
 
 const defaultRedact = text => redactText(text, { entropyScan: true });
+function validateExecutionOptions(options, allowStdin = false) {
+  if (!options || typeof options !== 'object' || Array.isArray(options)
+    || Object.keys(options).some(key => !['timeoutMs', 'stopGraceMs', 'signal', 'onOutput', 'maxOutputBytes', ...(allowStdin ? ['stdin'] : [])].includes(key))) throw Error('Invalid command transport options');
+}
 function commandOutcome(result, auditRedact = defaultRedact) {
-  const failed = result.exitCode !== 0 || Boolean(result.signal);
-  const stdout = auditRedact(result.stdout), stderr = auditRedact(result.stderr), parts = [];
+  const failed = result.exitCode !== 0 || Boolean(result.signal) || result.execution.reason !== 'exit' || result.execution.captureFailed || !result.execution.cleanupComplete;
+  const stdout = auditRedact(result.stdout), rawStderr = auditRedact(result.stderr), stderr = presentStderr(rawStderr), parts = [];
   if (stdout) parts.push(stdout);
   if (stderr) parts.push(`[stderr]\n${stderr}`);
-  if (failed) parts.push(result.signal ? `[killed by SIG${result.signal}]` : `[exit ${result.exitCode}]`);
-  return { failed, texts: [parts.join('\n\n')] };
+  if (failed) parts.push(result.execution.captureFailed ? '[output capture failed]' : !result.execution.cleanupComplete && result.execution.reason === 'exit' ? '[channel cleanup unconfirmed]'
+    : result.execution.reason !== 'exit' ? `[execution ${result.execution.reason}; remote ${result.execution.remoteState}; automatic replay disabled]`
+    : result.signal ? `[killed by SIG${result.signal}]` : `[exit ${result.exitCode}]`);
+  if (result.execution.stdout.truncated || result.execution.stderr.truncated) parts.push('[output truncated; inspect byte cursors]');
+  return { failed: Boolean(failed), texts: [parts.join('\n\n')], data: { stdout, stderr: rawStderr }, execution: result.execution };
+}
+
+/** Registry owns authentication, host keys, ProxyJump and profile binding.
+ * Only this narrow port knows ssh-mcp/ssh2; the supervisor owns execution. */
+async function executeOnChannel(connection, command, options = {}) {
+  await connection.ensureConnected();
+  const client = connection.getClient();
+  const exactCommand = connection.applyWorkdir(command), channelOptions = connection.channelEnv();
+  if (connection.profile.tty) channelOptions.pty = { term: 'xterm-256color', cols: 200, rows: 50 };
+  return superviseExecution({
+    open: (value, callback) => client.exec(value, channelOptions, callback),
+    onTransportLost(callback) {
+      client.once('close', callback); client.once('error', callback);
+      return () => { client.removeListener('close', callback); client.removeListener('error', callback); };
+    },
+  }, exactCommand, { maxOutputBytes: connection.profile.maxOutputBytes ?? DEFAULT_OUTPUT_BYTES, ...options });
 }
 
 /** Separate execution port, never approval authority. Reuse the pinned registry
- * and vendor's channel lifecycle. After dispatch, errors/exit codes do not prove
+ * and its authenticated connection. After dispatch, errors/exit codes do not prove
  * that no effect occurred and must never trigger a source replay.
  */
 async function executeSourcePlan(registry, plan, verify, options = {}, prepare = preparePythonSource, beforeDispatch = async () => {}) {
@@ -75,9 +99,6 @@ async function executeSourcePlan(registry, plan, verify, options = {}, prepare =
   if (connection.profile.workdir) throw Error('Source execution requires an explicit cwd without profile workdir');
   if (JSON.stringify(connection.profile) !== JSON.stringify(registry.getProfile(m.profile))) throw Error('Source SSH profile changed');
   const profileSnapshot = JSON.stringify(connection.profile);
-  // The pinned exec() awaits/reconnects/retries before each getClient(). Use a
-  // per-call view, never patch the shared connection or duplicate its lifecycle.
-  // Its getClient() and client.exec() have no await between them in 2.18.0.
   const execute = observed => {
     const guarded = new Proxy(withDispatchGuard(observed, beforeDispatch), { get(target, key) {
       if (key === 'getClient') return () => {
@@ -88,7 +109,7 @@ async function executeSourcePlan(registry, plan, verify, options = {}, prepare =
       const value = Reflect.get(target, key, target);
       return typeof value === 'function' ? value.bind(target) : value;
     } });
-    return connection.exec.call(guarded, exact.command, { stdin: exact.transportStdin ?? exact.stdin, ...options });
+    return executeOnChannel(guarded, exact.command, { stdin: exact.transportStdin ?? exact.stdin, ...options });
   };
   try { return await withConnectionLifecycle(connection, execute); }
   catch (error) {
@@ -97,22 +118,25 @@ async function executeSourcePlan(registry, plan, verify, options = {}, prepare =
   }
 }
 
-export async function executePythonSource(registry, plan, verify, beforeDispatch = async () => {}) {
-  return commandOutcome(await executeSourcePlan(registry, plan, verify, {}, preparePythonSource, beforeDispatch));
+export async function executePythonSource(registry, plan, verify, beforeDispatch = async () => {}, options = {}) {
+  validateExecutionOptions(options);
+  return commandOutcome(await executeSourcePlan(registry, plan, verify, options, preparePythonSource, beforeDispatch));
 }
 
 /** Fixed CLI helper only; not a generic raw-output or arbitrary-timeout escape hatch. */
-export async function executeAgentCli(registry, plan, verify, beforeDispatch = async () => {}) {
+export async function executeAgentCli(registry, plan, verify, beforeDispatch = async () => {}, options = {}) {
+  validateExecutionOptions(options);
   const exact = validateAgentCliPlan(plan);
   const timeoutMs = ['install','update'].includes(exact.agentCli.action) ? 930000 : 30000;
   let result;
   const prepare = exact.manifest.contract === 'agent-cli-powershell-v1' ? () => validateAgentCliPlan(exact) : preparePythonHelper;
-  try { result = await executeSourcePlan(registry, exact, verify, { timeoutMs }, prepare, beforeDispatch); }
+  try { result = await executeSourcePlan(registry, exact, verify, { ...options, timeoutMs }, prepare, beforeDispatch); }
   catch (error) {
     const failure = executionFailure(error, { stage: 'ssh_execution', code: 'SSH_EXECUTION_FAILED' });
     failure.message = 'CLI result unknown; inspect saved status, never retry automatically'; throw failure;
   }
-  return projectAgentCliResult(result, exact);
+  if (result.execution.reason !== 'exit' || result.execution.remoteState !== 'exited') return { failed: true, texts: ['CLI result unknown; inspect saved status, never retry automatically'], execution: result.execution };
+  return { ...projectAgentCliResult(result, exact), execution: result.execution };
 }
 
 /** The only adapter coupled to ssh-mcp's versioned internal modules. */
@@ -122,17 +146,58 @@ export async function createSshRuntime(settings) {
   const config = await loadConfig(settings.BRIDGE_CONFIG_PATH);
   const registry = new ConnectionRegistry(config, settings.BRIDGE_HOST_KEY_MODE ?? 'tofu');
   const auditRedact = defaultRedact;
+  const timeoutMs = Number(settings.BRIDGE_COMMAND_TIMEOUT_MS ?? DEFAULT_RUN_TIMEOUT_MS);
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 2_147_483_647) throw Error('Invalid BRIDGE_COMMAND_TIMEOUT_MS');
   return {
     registry, classify: classifyCommand, auditRedact,
     async executeCommand(profile, command, beforeDispatch = async () => {}, options = {}) {
-      if (Object.keys(options).some(key => key !== 'stdin') || options.stdin !== undefined && typeof options.stdin !== 'string') throw Error('Invalid command transport options');
+      validateExecutionOptions(options, true);
       const binding = await connectionBinding(registry, profile);
-      const result = await withConnectionLifecycle(binding.connection, observed => withDispatchGuard(observed, beforeDispatch, binding.verify).exec(command, options));
+      const result = await withConnectionLifecycle(binding.connection, observed => executeOnChannel(withDispatchGuard(observed, beforeDispatch, binding.verify), command, { timeoutMs, ...options }));
       return commandOutcome(result, auditRedact);
     },
-    executePythonSource: (plan, verify, beforeDispatch) => executePythonSource(registry, plan, verify, beforeDispatch),
-    executeAgentCli: (plan, verify, beforeDispatch) => executeAgentCli(registry, plan, verify, beforeDispatch),
+    executePythonSource: (plan, verify, beforeDispatch, options = {}) => executePythonSource(registry, plan, verify, beforeDispatch, { timeoutMs, ...options }),
+    executeAgentCli: (plan, verify, beforeDispatch, options) => executeAgentCli(registry, plan, verify, beforeDispatch, options),
+    openDesktopChannel: (profile, options) => openSshForward(registry, profile, options),
   };
+}
+
+/** Open only the configured host's loopback service. Closing the returned lease
+ * never ends the shared authenticated SSH transport or another channel. */
+export async function openSshForward(registry, profile, { host, port, beforeDispatch = async () => {}, signal, timeoutMs = 30_000 } = {}) {
+  if (!['127.0.0.1', '::1'].includes(host) || !Number.isInteger(port) || port < 1 || port > 65535
+    || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 2_147_483_647) throw Error('Invalid desktop channel endpoint');
+  if (signal?.aborted) throw Error('Desktop channel cancelled before dispatch');
+  const binding = await connectionBinding(registry, profile);
+  return withConnectionLifecycle(binding.connection, async observed => {
+    const guarded = withDispatchGuard(observed, beforeDispatch, binding.verify);
+    await guarded.ensureConnected();
+    if (signal?.aborted) throw Error('Desktop channel cancelled before dispatch');
+    const client = guarded.getClient();
+    return new Promise((resolve, reject) => {
+      let done = false, stream;
+      const close = () => { if (stream && !stream.destroyed) stream.destroy(); };
+      const cleanOpening = () => { clearTimeout(timer); client.removeListener('close', onLost); client.removeListener('error', onLost); };
+      const fail = error => {
+        if (done) { close(); return; }
+        done = true; cleanOpening(); signal?.removeEventListener('abort', onAbort); close(); reject(error);
+      };
+      const onLost = () => fail(Error('Desktop SSH transport lost'));
+      const onAbort = () => fail(Error('Desktop channel cancelled'));
+      const timer = setTimeout(() => fail(Error('Desktop channel opening timed out')), timeoutMs);
+      client.once('close', onLost); client.once('error', onLost); signal?.addEventListener('abort', onAbort, { once: true });
+      try {
+        client.forwardOut('127.0.0.1', 0, host, port, (error, opened) => {
+          if (error) { fail(error); return; }
+          stream = opened;
+          if (done || signal?.aborted) { close(); if (!done) fail(Error('Desktop channel cancelled')); return; }
+          done = true; cleanOpening();
+          stream.once('close', () => signal?.removeEventListener('abort', onAbort));
+          resolve({ stream, close });
+        });
+      } catch (error) { fail(error); }
+    });
+  });
 }
 
 /** Connections expose a narrow transport contract, never vendor profile objects. */
@@ -187,9 +252,9 @@ export function createSshTransport(registry) {
             return Promise.resolve({ exitCode: 0, stdout: '{"cleaned":true}' });
           }
           verifyCleanup();
-          return withConnectionLifecycle(originalConnection, observed => withDispatchGuard(observed, cleanupGuard, originalVerify, { connectedOnly: true }).exec(cleanupCommand, { stdin: cleanupInput, timeoutMs: idleTimeoutMs }));
+          return withConnectionLifecycle(originalConnection, observed => executeOnChannel(withDispatchGuard(observed, cleanupGuard, originalVerify, { connectedOnly: true }), cleanupCommand, { stdin: cleanupInput, timeoutMs: idleTimeoutMs }));
         } }),
-        call(command, payload) { return perform(connection => connection.exec(command, { stdin: JSON.stringify(payload), timeoutMs: idleTimeoutMs })); },
+        call(command, payload) { return perform(connection => executeOnChannel(connection, command, { stdin: JSON.stringify(payload), ...(idleTimeoutMs === undefined ? {} : { timeoutMs: idleTimeoutMs }) })); },
         upload(source, remotePath, { maxBytes }) {
           return perform(connection => new SftpClient(connection).uploadFile(source, remotePath, { maxBytes, idleTimeoutMs, overwrite: false, mode: 0o600 }));
         },

@@ -19,20 +19,21 @@ export function baselinePreservationAccepted(report) {
     && report.status === (report.outputsUnavailable ? 'PARTIAL' : 'PASS');
 }
 
-function payloadHash(root, id, expectedSize) {
+function payloadHash(root, id, expectedSize, suffix = '.out', allowTail = false) {
   if (!idPattern.test(id) || !Number.isSafeInteger(expectedSize) || expectedSize < 0 || expectedSize > maxPayload) throw Error('Invalid output payload');
-  const name = join(root, id + '.out');
+  const name = join(root, id + suffix);
   const before = lstatSync(name, {bigint: true});
   const safe = stat => stat.isFile() && stat.nlink === 1n && (process.platform === 'win32' || (!(stat.mode & 0o077n) && stat.uid === BigInt(process.getuid())));
-  if (!safe(before) || before.isSymbolicLink() || before.size !== BigInt(expectedSize)) throw Error('Unsafe output payload');
+  if (!safe(before) || before.isSymbolicLink() || (allowTail ? before.size < BigInt(expectedSize) || before.size > BigInt(maxPayload) : before.size !== BigInt(expectedSize))) throw Error('Unsafe output payload');
+  const retainedSize = Number(before.size);
   const fd = openSync(name, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
   try {
     const first = fstatSync(fd, {bigint: true}), identity = stat => [stat.dev, stat.ino, stat.size, stat.mtimeNs, stat.ctimeNs, stat.mode, stat.uid, stat.gid, stat.nlink].join(':');
     if (!safe(first) || identity(before) !== identity(first)) throw Error('Output payload changed');
     const digest = createHash('sha256'), buffer = Buffer.alloc(65536);
     let position = 0;
-    while (position < expectedSize) {
-      const count = readSync(fd, buffer, 0, Math.min(buffer.length, expectedSize - position), position);
+    while (position < retainedSize) {
+      const count = readSync(fd, buffer, 0, Math.min(buffer.length, retainedSize - position), position);
       if (!count) throw Error('Incomplete output payload');
       digest.update(buffer.subarray(0, count)); position += count;
     }
@@ -62,7 +63,8 @@ export function capturePreservationSnapshot({commandState, cliState, outputs, no
     const body = JSON.parse(row.body);
     if (body.id !== row.id || !Number.isSafeInteger(body.expiresAt) || body.expiresAt <= 0 || !['ready', 'unavailable'].includes(body.state)) throw Error('Pending or invalid output');
     savedOutputs[row.id] = {row: rowHash(row), expiresAt: body.expiresAt,
-      payload: body.state === 'ready' ? payloadHash(outputs.root, row.id, body.size) : null};
+      payload: body.state === 'ready' ? payloadHash(outputs.root, row.id, body.size) : null,
+      ...(body.stream ? {streamPayload: payloadHash(outputs.root, row.id, body.stream.size, '.stream', true)} : {})};
   }
   return {version: 1, observedAt: now,
     command: command && {schema: rowHash(command.schema), policy: rowHash(command.policy), requests: requests(command.requests)},
@@ -91,7 +93,7 @@ export function comparePreservationSnapshots(before, after) {
     if (!current) {
       if (old.expiresAt > after.observedAt) throw Error('Unexpired output missing');
       report.expiredOutputsRemoved++;
-    } else if (old.row !== current.row || old.payload !== current.payload || old.expiresAt !== current.expiresAt) throw Error('Existing output changed');
+    } else if (old.row !== current.row || old.payload !== current.payload || old.streamPayload !== current.streamPayload || old.expiresAt !== current.expiresAt) throw Error('Existing output changed');
     else if (old.payload === null) report.outputsUnavailable++;
     else report.outputPayloadsVerified++;
     report.outputsChecked++;

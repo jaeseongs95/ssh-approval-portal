@@ -121,7 +121,7 @@ export function createTargetRouter(runtimes, { defaultTarget, legacy, store, aud
   return {
     legacy, select, jobOwner, artifactOwner, queue,
     list: () => ({ targets: runtimes.map(runtime => ({ id: runtime.id, displayName: runtime.displayName, enabled: runtime.enabled, revision: runtime.revision, isDefault: runtime.id === defaultTarget,
-      platform: platformOf(runtime), capabilities: targetCapabilities(runtime) })), defaultTarget: defaultTarget ?? null }),
+      platform: platformOf(runtime), capabilities: { ...targetCapabilities(runtime), desktop: runtime.desktop?.enabled === true } })), defaultTarget: defaultTarget ?? null }),
     async listFilePolicies() {
       const listed = this.list();
       return { ...listed, targets: await Promise.all(listed.targets.map(async item => {
@@ -151,6 +151,6 @@ export function createTargetRouter(runtimes, { defaultTarget, legacy, store, aud
       reap: () => store.reap(),
       close: () => Promise.all(runtimes.map(runtime => runtime.files.close())),
     },
-    async drain() { await Promise.all(runtimes.flatMap(runtime => [runtime.queue.active?.completion, ...runtime.queue.waiting.map(entry => entry.job.completion), runtime.commands.drain(),runtime.cliDrain?.()])); },
+    async drain() { await Promise.all(runtimes.flatMap(runtime => [runtime.queue.drain(), runtime.commands.drain(), runtime.cliDrain?.()])); },
   };
 }

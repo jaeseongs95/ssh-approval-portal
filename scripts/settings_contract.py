@@ -13,6 +13,25 @@ contract = json.loads((Path(__file__).resolve().parents[1] / 'config/settings-co
 defaults = contract['defaults']
 
 
+def capacity_defaults():
+    """Use the Relay runtime's availableParallelism, including host CPU restrictions."""
+    managed = Path('/opt/ssh-approval/node/bin/node')
+    node = str(managed) if managed.is_file() else shutil.which('node')
+    if not node:
+        raise ValueError('A supported Node runtime is required for capacity defaults')
+    child_env = {key: item for key, item in os.environ.items() if key not in ('NODE_OPTIONS', 'NODE_PATH')}
+    result = subprocess.run([node, str(Path(__file__).with_name('capacity-defaults.mjs'))],
+                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=5, shell=False, env=child_env)
+    if result.returncode or len(result.stdout) > 256:
+        raise ValueError('Unable to detect Relay CPU capacity')
+    values = json.loads(result.stdout)
+    if (not isinstance(values, dict) or set(values) != {'BRIDGE_QUEUE_CAPACITY', 'BRIDGE_MAX_CONCURRENCY'}
+            or any(not isinstance(value, str) or not re.fullmatch(r'[1-9][0-9]*', value)
+                   or int(value) > 9007199254740991 for value in values.values())):
+        raise ValueError('Invalid Relay CPU capacity')
+    return values
+
+
 def validate_origin(value):
     try:
         if not isinstance(value, str):

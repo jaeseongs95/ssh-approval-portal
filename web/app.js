@@ -9,6 +9,8 @@ import { createAutomationMetricsPanel } from './src/metrics.js';
 import { createEnvironmentPanel } from './src/environment.js';
 import { displayLanguage, createAppearancePanel } from './src/appearance.js';
 import { createAgentCliPanel } from './src/agent-cli.js';
+import { createCapacityPanel } from './src/capacity.js';
+import { createDesktopPanel } from './src/desktop.js';
 
 let storage;
 try { storage = globalThis.localStorage; } catch { /* disabled browser storage */ }
@@ -19,7 +21,7 @@ const view = createWebView({ document, i18n });
 const api = createWebApi({ fetch: globalThis.fetch.bind(globalThis), accessMode: state.accessMode, getToken: view.token,
   isSignedOut: () => state.signedOut, unauthorized: view.unauthorized, t: i18n.t });
 api.beginAdminSession();
-const controller = createWebController({ state, view, api, document, location });
+const controller = createWebController({ state, view, api, document, location, beforeLogout: () => desktop.close() });
 controller.start();
 const pages = createAdminPages({ document, location, history });
 let agentCli, workspaceReady = false, changingServer = false, syncingServer = false, serverTab = 'policy';
@@ -29,6 +31,8 @@ view.importCommandNames = input => policyEditor?.importCommandNames(input);
 document.querySelector('#logout')?.addEventListener('click', () => policyEditor?.clearCommandImport());
 createAutomationMetricsPanel({ document, api });
 const environment = createEnvironmentPanel({ document, api });
+const capacity = createCapacityPanel({ document, api, getTarget: currentServer, isSignedOut: () => state.signedOut });
+const desktop = createDesktopPanel({ document, api, getTarget: currentServer, isSignedOut: () => state.signedOut, onStateChange: refreshServerContext });
 let sessionStorage;
 try { sessionStorage=globalThis.sessionStorage; } catch { /* storage can be disabled */ }
 agentCli=createAgentCliPanel({document,api,isSignedOut:()=>state.signedOut,canLoad:()=>state.accessMode||Boolean(view.token()),storage:sessionStorage,
@@ -75,10 +79,12 @@ function refreshServerContext() {
     const policy = policyEditor?.scopeState(), cli = agentCli.scopeState(), id = currentServer();
     if (!changingServer && policy?.ready && cli.ready && !cli.blocked && cli.targetId !== id) agentCli.selectTarget(id);
     serverTarget.value = id;
-    serverTarget.disabled = changingServer || !!policy?.blocked || agentCli.scopeState().blocked;
+    serverTarget.disabled = changingServer || !!policy?.blocked || agentCli.scopeState().blocked || desktop.reloadState().blocked;
     const label = [...serverTarget.options].find(option => option.value === id)?.textContent ?? id;
     contextText.textContent = [document.body.dataset.bridgeDisplayName || location.host, id ? label : policy?.ready || cli.ready ? say('편집할 서버를 선택해 주세요.', 'Choose a server to edit.') : say('서버 정보를 아직 확인하지 못했습니다.', 'Server context has not been loaded.'),
       policy?.uncertain || cli.uncertain ? say('결과 미확인 · 현재 서버 유지', 'Outcome unconfirmed · current server preserved') : policy?.conflict ? say('초안 충돌 · 현재 서버 유지', 'Draft conflict · current server preserved') : ''].filter(Boolean).join(' / ');
+    capacity.syncTarget();
+    desktop.syncTarget();
   } finally { syncingServer = false; }
 }
 async function selectServer(id, tab) {
@@ -91,7 +97,7 @@ async function selectServer(id, tab) {
   };
   if (id === currentServer()) { switchMessage.textContent = ''; refreshServerContext(); return true; }
   const cliScope = agentCli.scopeState();
-  if (changingServer || policyEditor?.scopeState().blocked || cliScope.blocked && !cliScope.readingCapabilities) return refused();
+  if (changingServer || desktop.reloadState().blocked || policyEditor?.scopeState().blocked || cliScope.blocked && !cliScope.readingCapabilities) return refused();
   changingServer = true; refreshServerContext();
   try {
     if (policyEditor && !await policyEditor.ensureLoaded()) return refused();
@@ -104,7 +110,7 @@ async function selectServer(id, tab) {
   } finally { changingServer = false; refreshServerContext(); }
 }
 createAppearancePanel({ document, storage, location, choice: preference.choice, korean: i18n.korean, reloadState: () => {
-  const states = [policyEditor?.reloadState(), environment.reloadState(), agentCli.reloadState()];
+  const states = [policyEditor?.reloadState(), environment.reloadState(), agentCli.reloadState(), capacity.reloadState(), desktop.reloadState()];
   return { blocked: controller.reloadState().blocked || states.some(value => value?.blocked), dirty: states.flatMap(value => value?.dirty ?? []) };
 } });
 pages.sync();

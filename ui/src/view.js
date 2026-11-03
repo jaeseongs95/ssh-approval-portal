@@ -1,6 +1,6 @@
 import { renderDecision, recordedApprovalMode, requestContext } from './decision.js';
 export function createCardView({ document, i18n }) {
-  const { t, korean, locale, states } = i18n;
+  const { t, korean, locale, states, formatNumber, formatDate } = i18n;
   const el = id => document.getElementById(id);
   let buttons = [];
   function text(parent, tag, value, className = '') {
@@ -34,7 +34,7 @@ export function createCardView({ document, i18n }) {
       text(info, 'p', `${t('설정 revision')} · ${job.targetRevision}`);
       text(info, 'p', `${t('호스트 키')} · ${job.hostKey}`);
     }
-    text(info, 'p', `${t('승인 만료')} ${new Date(job.expiresAt).toLocaleString(locale)}`);
+    text(info, 'p', `${t('승인 만료')} ${formatDate(job.expiresAt)}`);
     text(el('details'), 'p', t(job.kind === 'command' ? '실행할 명령' : '파일 전송 내용'), 'section-label');
     if (job.kind === 'command') text(el('details'), 'pre', job.command);
     else {
@@ -49,7 +49,7 @@ export function createCardView({ document, i18n }) {
       ]) {
         if (value === undefined) continue;
         text(list, 'dt', t(label));
-        text(list, 'dd', label === '크기' ? `${value.toLocaleString(locale)} ${t('바이트')}` : value, label === 'SHA-256' ? 'hash' : '');
+        text(list, 'dd', label === '크기' ? `${formatNumber(value)} ${t('바이트')}` : value, label === 'SHA-256' ? 'hash' : '');
       }
     }
     if (job.kind === 'command' && requestContext(job, korean)) { const context = text(el('details'), 'details', ''); text(context, 'summary', korean ? '요청자가 제공한 작업 설명' : 'Caller-provided context'); text(context, 'p', requestContext(job, korean)); }

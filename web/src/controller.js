@@ -1,7 +1,7 @@
-export function createWebController({ state, view, api, document, location, timers = globalThis }) {
+export function createWebController({ state, view, api, document, location, timers = globalThis, beforeLogout }) {
   const capture = () => ({ target: view.target?.(), revision: view.selectionRevision?.() });
   const current = context => context.target === view.target?.() && context.revision === view.selectionRevision?.();
-  let generation = 0, activeRead, uncertainDecision, activeDownloads = 0, latestJobs = [];
+  let generation = 0, activeRead, uncertainDecision, activeDownloads = 0, latestJobs = [], loggingOut = false;
   let historyGeneration = 0, historyRead;
   let page = document.body?.dataset.page, pageRevision = 0;
   document.addEventListener?.('admin-scope-change', () => {
@@ -103,6 +103,10 @@ export function createWebController({ state, view, api, document, location, time
     return result;
   }
   async function logout() {
+    if (loggingOut || state.signedOut) return;
+    loggingOut = true;
+    try { if (beforeLogout) await beforeLogout(); }
+    catch (error) { loggingOut = false; throw error; }
     state.signedOut = true; generation++; historyGeneration++; historyRead?.abort(); activeRead?.abort(); stopPolling(); view.signedOut();
     if(!state.accessMode){location.replace('/');return;}
     try{await api.endAdminSession();location.replace('/signed-out');}

@@ -14,6 +14,7 @@ export function scopedArtifacts(store, identity) {
     reserveDownload: meta => store.reserveDownload({ ...meta, ...identity }),
     append(id, sequence, bytes) { owned(id); return store.append(id, sequence, bytes); },
     finish(id) { owned(id); return store.finish(id); },
+    recordSubmission(id, submissionId) { owned(id); return store.recordSubmission(id, submissionId); },
     receiveDownload(id, metadata, writeTo) { owned(id); return store.receiveDownload(id, metadata, writeTo); },
     verified(id) { owned(id); return store.verified(id); },
     remove(id) { owned(id); return store.remove(id); },

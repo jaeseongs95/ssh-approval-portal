@@ -3,7 +3,7 @@ import { fileTargetBinding } from '../../domain/file-target-binding.mjs';
 import { executionFailureDetails, safeExecutionFailure } from '../../domain/execution-failure.mjs';
 
 const identifier = z.string().regex(/^[a-f0-9]{48}$/);
-const state = z.enum(['pending', 'evaluating', 'queued', 'running', 'completed', 'failed', 'denied', 'expired', 'unknown']);
+const state = z.enum(['accepted', 'pending', 'evaluating', 'queued', 'starting', 'running', 'terminating', 'completed', 'failed', 'cancelled', 'denied', 'expired', 'unknown']);
 const content = z.array(z.object({ type: z.literal('text'), text: z.string() }));
 const outcome = z.object({ failed: z.boolean(), texts: z.array(z.string()), data: z.object({}).passthrough().optional() });
 const legacyOutcome = z.object({ content, isError: z.boolean().optional(), structuredContent: z.object({}).passthrough().optional() }).passthrough();

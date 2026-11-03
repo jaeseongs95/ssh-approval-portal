@@ -1,5 +1,6 @@
+import { messageCatalog, translate } from './locale.js';
 /** UI-owned strings only. Never apply this catalog to commands, output or user input. */
-const english = {
+export const uiCatalogs = messageCatalog({
   '이 대상에서는 지원하지 않습니다.':'Unsupported on this target.',
   'Windows PowerShell 5.1 대상입니다. 일반 명령·파일 전송·명령 이름 정책·서버 CLI를 지원합니다. Python 코드 실행에는 관리자가 등록한 실행 파일이 필요합니다. 권한 상승은 기존 관리자 연결 토큰만 사용합니다.':'Windows PowerShell 5.1 target. General commands, file transfers, name policies and server CLI are supported. Python source execution requires an administrator-configured executable. Elevated operations use only the existing administrator connection token.',
   'Windows는 명시 실행 파일·모듈 한정 명령·절대 실행 경로를 등록합니다. 이름은 대소문자를 구분하지 않으며 변수·동적 구문은 전체 명령 평가로 보냅니다.':'Register explicit executables, module-qualified commands or absolute executable paths on Windows. Names are case-insensitive; variables and dynamic syntax require whole-command assessment.',
@@ -255,10 +256,10 @@ const english = {
   '연결과 서버':'Connections and servers',
   '실행과 기타 설정':'Execution and other settings',
   '등록된 모든 서버의 연결과 요청에 영향을 주는 설정입니다. 서버별 정책과 별개이며, 저장한 환경은 서비스 재시작 후 적용됩니다.':'These settings affect connections and requests for all registered servers. They are separate from per-server policy, and saved environment settings apply after the service restarts.',
-};
+});
 
 export function uiText(value, document = globalThis.document) {
-  return document?.documentElement.lang.startsWith('ko') ? value : english[value] ?? value;
+  return translate(uiCatalogs, document?.documentElement?.lang ?? 'en', value);
 }
 
 // Only server-generated registration warnings use this composition; never caller context.

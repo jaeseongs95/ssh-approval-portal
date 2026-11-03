@@ -10,6 +10,20 @@ const TTL = 3_600_000, MAX = 16 * 1024 * 1024, BUDGET = 128 * 1024 * 1024;
 const validId = value => typeof value === 'string' && /^[a-f0-9]{48}$/.test(value);
 const digest = value => createHash('sha256').update(value).digest('hex');
 const capture = { version: 1, captureSource: 'redacted-adapter-outcome', sshCompleteness: 'unknown' };
+const streamCapture = { version: 1, captureSource: 'ssh-channel-bytes', bytesEncoding: 'base64' };
+const safeExecution = value => {
+  if (!value || typeof value !== 'object') return undefined;
+  const result = {};
+  for (const [key, values] of Object.entries({ phase: ['settled'], reason: ['exit', 'deadline', 'cancel', 'transport_lost', 'channel_open_failed', 'input_failed'], remoteState: ['not_dispatched', 'exited', 'unknown'], outputState: ['partial', 'complete'] })) {
+    if (values.includes(value[key])) result[key] = value[key];
+  }
+  for (const key of ['automaticReplay', 'cleanupComplete', 'requiresReconciliation', 'captureFailed']) if (typeof value[key] === 'boolean') result[key] = value[key];
+  if (Number.isSafeInteger(value.timeoutMs) && value.timeoutMs > 0) result.timeoutMs = value.timeoutMs;
+  for (const key of ['stdout', 'stderr']) if (value[key] && ['receivedBytes', 'retainedBytes', 'cursor'].every(name => Number.isSafeInteger(value[key][name]) && value[key][name] >= 0) && typeof value[key].truncated === 'boolean') {
+    result[key] = Object.fromEntries(['receivedBytes', 'retainedBytes', 'cursor', 'truncated'].map(name => [name, value[key][name]]));
+  }
+  return Object.keys(result).length ? result : undefined;
+};
 const safe = st => st.isFile() && !st.isSymbolicLink() && st.nlink === 1 && (process.platform === 'win32' || (!(st.mode & 0o077) && st.uid === process.getuid()));
 const readExactly = (fd, size, position) => {
   const buffer = Buffer.alloc(size); let n = 0;
@@ -37,7 +51,7 @@ export class CommandOutputs {
       this.db.prepare('SELECT id FROM outputs').all();
       const ids = new Set(this.db.prepare('SELECT id FROM outputs').all().map(row => row.id));
       for (const name of readdirSync(this.root)) {
-        const match = /^([a-f0-9]{48})\.(out|part)$/.exec(name);
+        const match = /^([a-f0-9]{48})\.(out|part|stream)$/.exec(name);
         if (match && !ids.has(match[1])) {
           const st = lstatSync(join(this.root, name));
           if (!safe(st) || st.size > this.maxBytes) throw Error('Unsafe orphan output');
@@ -50,7 +64,11 @@ export class CommandOutputs {
       // Interrupted publication never proves execution success and never causes replay.
       for (const row of this.db.prepare('SELECT id,body FROM outputs').all()) {
         const item = this.get(row.id);
-        if (item.state === 'pending') { item.state = 'unavailable'; this.persist(item, this.maxBytes); }
+        if (item.state === 'pending') {
+          item.state = 'unavailable';
+          if (item.stream) item.stream.complete = true;
+          this.persist(item, this.db.prepare('SELECT charge FROM outputs WHERE id=?').get(item.id).charge);
+        }
       }
       this.reconcileAccounting = true;
       this.reap();
@@ -84,7 +102,7 @@ export class CommandOutputs {
     let bytes = 0, files = 0;
     try {
       this.checkRoot();
-      for (const suffix of ['.part', '.out']) {
+      for (const suffix of ['.part', '.out', '.stream']) {
         const path = join(this.root, id + suffix);
         let expected;
         try { expected = lstatSync(path); } catch (error) { if (error.code === 'ENOENT') continue; throw error; }
@@ -99,7 +117,8 @@ export class CommandOutputs {
       }
       // Missing/unsafe evidence never proves an empty reservation. Oversize evidence
       // is retained and charged without releasing any prior reservation.
-      if (files) return bytes > this.maxBytes ? Math.max(bytes, conservative) : bytes;
+      const expectedLimit = this.get(id).stream ? 2 * this.maxBytes : this.maxBytes;
+      if (files) return bytes > expectedLimit ? Math.max(bytes, conservative) : bytes;
     } catch { /* Keep the reservation when retained bytes cannot be safely measured. */ }
     return conservative;
   }
@@ -114,7 +133,8 @@ export class CommandOutputs {
     return { ...capture, id: item.id, executionId: item.binding.executionId,
       state: this.now() >= item.expiresAt ? 'expired' : item.state === 'ready' ? 'ready' : 'unavailable',
       expiresAt: item.expiresAt,
-      ...(item.formats ? { bytes: item.formats.text.bytes, snapshotBytes: item.formats.json.bytes, sha256: item.formats.json.sha256 } : {}) };
+      ...(item.formats ? { bytes: item.formats.text.bytes, snapshotBytes: item.formats.json.bytes, sha256: item.formats.json.sha256 } : {}),
+      ...(item.stream ? { stream: { bytes: item.stream.bytes, cursor: item.stream.bytes, complete: item.stream.complete, truncated: item.stream.truncated } } : {}) };
   }
   reserve(binding) {
     this.checkRoot(); this.reap();
@@ -132,10 +152,102 @@ export class CommandOutputs {
     catch (error) { closeSync(fd); unlinkSync(path); throw error; }
     closeSync(fd); return item;
   }
+  beginStream(item) {
+    this.checkRoot();
+    const current = this.get(item.id);
+    if (current.state !== 'pending' || current.stream) throw Error('Output stream already started or unavailable');
+    const usage = this.db.prepare('SELECT coalesce(sum(charge),0) AS bytes FROM outputs').get();
+    const disk = statfsSync(this.root);
+    if (usage.bytes + this.maxBytes > this.budget || disk.bavail * disk.bsize < this.maxBytes + 1024 * 1024) {
+      const error = executionFailure(undefined, { stage: 'output_reservation', code: 'OUTPUT_CAPACITY', remoteOutcome: 'not_started' });
+      error.message = 'Output storage capacity unavailable before dispatch'; throw error;
+    }
+    const path = join(this.root, item.id + '.stream'), fd = openSync(path, 'wx', 0o600);
+    try { fsyncSync(fd); } finally { closeSync(fd); }
+    this.syncDirectory();
+    const stream = { bytes: 0, size: 0, sha256: digest(Buffer.alloc(0)), stdoutCursor: 0, stderrCursor: 0, truncated: false, complete: false };
+    this.persist({ ...current, stream }, 2 * this.maxBytes); item.stream = stream;
+    let hash = createHash('sha256');
+    return { append: event => {
+      if (!event || !['stdout', 'stderr'].includes(event.stream) || !Buffer.isBuffer(event.bytes)) throw Error('Invalid output stream event');
+      const latest = this.get(item.id), prior = latest.stream;
+      if (latest.state !== 'pending' || !prior || prior.complete) throw Error('Output stream closed');
+      const sourceCursor = event.stream + 'Cursor';
+      if (event.cursor !== undefined && event.cursor !== prior[sourceCursor] || event.nextCursor !== undefined && event.nextCursor !== prior[sourceCursor] + event.bytes.length) throw Error('Invalid output stream cursor');
+      if (!Number.isSafeInteger(prior[sourceCursor] + event.bytes.length)) throw Error('Invalid output stream cursor');
+      const retained = event.bytes.subarray(0, Math.max(0, this.maxBytes - prior.size - 5));
+      const next = { ...prior, [sourceCursor]: prior[sourceCursor] + event.bytes.length, truncated: prior.truncated || retained.length < event.bytes.length };
+      let nextHash = hash;
+      if (retained.length) {
+        const header = Buffer.alloc(5); header[0] = event.stream === 'stdout' ? 0 : 1; header.writeUInt32BE(retained.length, 1);
+        const frame = Buffer.concat([header, retained]), expected = lstatSync(path);
+        if (!safe(expected)) throw Error('Unsafe output stream path');
+        const output = openSync(path, constants.O_WRONLY | (constants.O_NOFOLLOW ?? 0));
+        try {
+          const st = fstatSync(output);
+          if (!safe(st) || st.size !== prior.size || st.ino !== expected.ino || st.dev !== expected.dev) throw Error('Unsafe output stream file');
+          let n = 0; while (n < frame.length) { const written = writeSync(output, frame, n, frame.length - n, prior.size + n); if (!written) throw Error('Incomplete output write'); n += written; }
+          fsyncSync(output);
+        } finally { closeSync(output); }
+        nextHash = hash.copy().update(frame);
+        Object.assign(next, { bytes: prior.bytes + retained.length, size: prior.size + frame.length, sha256: nextHash.copy().digest('hex') });
+      }
+      this.persist({ ...latest, stream: next }, 2 * this.maxBytes); item.stream = next; hash = nextHash;
+      return { cursor: next.bytes, truncated: next.truncated };
+    } };
+  }
+  syncDirectory() {
+    if (process.platform !== 'win32') { const directory = openSync(this.root, constants.O_RDONLY); try { fsyncSync(directory); } finally { closeSync(directory); } }
+  }
+  // Internal recovery only. Public observers must use the redacted legacy read()
+  // after settlement; chunk-local redaction cannot protect split secret records.
+  readStream({ outputId, cursor = 0, maxBytes = 4096 }, authorize) {
+    this.checkRoot();
+    if (!Number.isSafeInteger(cursor) || cursor < 0 || !Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > OUTPUT_PAGE_BYTES) throw Error('Invalid output stream range');
+    const item = this.get(outputId); authorize(item.binding);
+    if (!item.stream || this.now() >= item.expiresAt) throw Error('Output stream expired or unavailable; do not reexecute');
+    const stream = item.stream;
+    if (cursor > stream.bytes || !Number.isSafeInteger(stream.size) || stream.size < 0 || stream.size > this.maxBytes) throw Error('Invalid output stream range');
+    const path = join(this.root, item.id + '.stream'), expected = lstatSync(path);
+    if (!safe(expected)) throw Error('Unsafe output stream path');
+    const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    let payload;
+    try {
+      const st = fstatSync(fd);
+      // A crash may leave an uncommitted tail. Only manifest-committed bytes are readable.
+      if (!safe(st) || st.size < stream.size || st.size > this.maxBytes || st.ino !== expected.ino || st.dev !== expected.dev) throw Error('Unsafe output stream payload');
+      // ponytail: each page verifies at most maxBytes of spool; add indexed hashes only if measured.
+      payload = readExactly(fd, stream.size, 0);
+      if (digest(payload) !== stream.sha256) throw Error('Output stream integrity failed');
+    } finally { closeSync(fd); }
+    const events = []; let position = 0, offset = 0, remaining = maxBytes;
+    const streamOffsets = { stdout: 0, stderr: 0 };
+    while (position < payload.length) {
+      if (payload.length - position < 5 || payload[position] > 1) throw Error('Invalid output stream frame');
+      const name = payload[position] === 0 ? 'stdout' : 'stderr', length = payload.readUInt32BE(position + 1); position += 5;
+      if (!length || length > payload.length - position) throw Error('Invalid output stream frame');
+      const skip = Math.max(0, cursor - offset), count = Math.min(remaining, Math.max(0, length - skip));
+      if (count) {
+        const start = offset + skip;
+        events.push({ stream: name, bytes: payload.subarray(position + skip, position + skip + count).toString('base64'), cursor: start, nextCursor: start + count, streamCursor: streamOffsets[name] + skip });
+        remaining -= count;
+      }
+      offset += length; streamOffsets[name] += length; position += length;
+    }
+    if (offset !== stream.bytes) throw Error('Invalid output stream size');
+    authorize(item.binding);
+    if (this.now() >= item.expiresAt) throw Error('Output stream expired');
+    const nextCursor = cursor + maxBytes - remaining;
+    return { ...streamCapture, outputId, executionId: item.binding.executionId, events, cursor, nextCursor, totalBytes: stream.bytes,
+      eof: stream.complete && nextCursor === stream.bytes, complete: stream.complete, truncated: stream.truncated,
+      state: item.state === 'pending' ? 'running' : item.state, expiresAt: item.expiresAt };
+  }
   finish(item, outcome) {
     // Never throw a capture error across an already executed SSH effect.
     let failure = safeExecutionFailure(outcome.failure);
     try {
+      const current = this.get(item.id);
+      if (current.stream) item.stream = { ...current.stream, complete: true };
       const json = Buffer.from(JSON.stringify(outcome), 'utf8');
       const text = Buffer.from(outcome.texts.join('\n') + (outcome.data === undefined ? '' : '\n' + JSON.stringify(outcome.data, null, 2)), 'utf8');
       const bytes = json.length + text.length;
@@ -156,18 +268,23 @@ export class CommandOutputs {
         fsyncSync(fd);
       } finally { closeSync(fd); }
       renameSync(join(this.root, item.id + '.part'), join(this.root, item.id + '.out'));
-      if (process.platform !== 'win32') { const directory = openSync(this.root, constants.O_RDONLY); try { fsyncSync(directory); } finally { closeSync(directory); } }
-      Object.assign(item, { state: 'ready', formats, size: bytes, expiresAt: this.now() + this.ttl }); this.persist(item, bytes);
+      this.syncDirectory();
+      Object.assign(item, { state: 'ready', formats, size: bytes, expiresAt: this.now() + this.ttl }); this.persist(item, bytes + (item.stream?.size ?? 0));
     } catch (error) {
       failure = executionFailureDetails(executionFailure(error, { stage: 'output_capture', code: 'OUTPUT_CAPTURE_FAILED', remoteOutcome: 'completed' }));
       item.state = 'unavailable'; delete item.formats; delete item.size; item.expiresAt = this.now() + this.ttl;
       try { this.persistUnavailable(item); } catch { /* The durable pending row remains charged and unavailable after restart. */ }
     }
-    return { failed: outcome.failed, texts: [], output: this.describe(item), ...(failure ? { failure } : {}) };
+    const execution = safeExecution(outcome.execution);
+    return { failed: outcome.failed, texts: [], output: this.describe(item), ...(failure ? { failure } : {}), ...(execution ? { execution } : {}) };
   }
   abandon(item) {
-    item.state = 'unavailable'; item.expiresAt = this.now() + this.ttl;
-    try { this.persistUnavailable(item); } catch { /* Interrupted admission stays charged. */ }
+    try {
+      const current = this.get(item.id);
+      if (current.stream) item.stream = { ...current.stream, complete: true };
+      item.state = 'unavailable'; item.expiresAt = this.now() + this.ttl;
+      this.persistUnavailable(item);
+    } catch { /* Interrupted admission stays charged. */ }
   }
   read({ outputId, offsetBytes = 0, maxBytes = 4096, format = 'text' }, authorize) {
     this.checkRoot();
@@ -216,7 +333,7 @@ export class CommandOutputs {
     }
     for (const { id } of this.db.prepare('SELECT id FROM outputs').all()) {
       const item = this.get(id); if (item.state === 'pending' || this.now() < item.expiresAt) continue;
-      for (const suffix of ['.part', '.out']) {
+      for (const suffix of ['.part', '.out', '.stream']) {
         const path = join(this.root, id + suffix);
         try { if (!safe(lstatSync(path))) throw Error('Unsafe expired output'); unlinkSync(path); } catch (error) { if (error.code !== 'ENOENT') throw error; }
       }
