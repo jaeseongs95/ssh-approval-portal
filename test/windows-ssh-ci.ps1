@@ -196,7 +196,9 @@ try {
     $env:SOLID_PYTHON = $pythonExecutable
     $outsideRoot = Join-Path $fixtureRoot 'outside'
     New-Item -ItemType Directory -Path $outsideRoot | Out-Null
-    Set-FixtureAcl $outsideRoot $accountSid 'Modify'
+    # The destination writer allowlist is the SSH account, SYSTEM and Administrators.
+    # The elevated runner keeps access through Administrators, not a separate writer ACE.
+    Set-FixtureAcl $outsideRoot $accountSid 'Modify' -MachineOnly
     $outsideFile = Join-Path $outsideRoot 'outside.bin'
     Write-Utf8 $outsideFile '영역 밖 원본'
     New-Item -ItemType Junction -Path (Join-Path $fileRoot 'junction') -Target $outsideRoot | Out-Null
