@@ -92,6 +92,7 @@ jobs:
           node --test --test-reporter=tap test/test-mode-file-path-policy.test.mjs > "$RUNNER_TEMP/testmode-path-red.tap" 2>&1
           red=$?
           set -e
+          printf 'testmode_red_exit=%s\n' "$red"
           cat "$RUNNER_TEMP/testmode-path-red.tap"
           test "$red" -ne 0
           grep -Eq '^# fail [1-9][0-9]*$' "$RUNNER_TEMP/testmode-path-red.tap"
