@@ -179,6 +179,49 @@ test('actual MCP/HTTP defaults omit sentinel and arbitrary command data; explici
   } finally { await client.close(); await app.close(); }
 });
 
+test('signal delivery survives actual command output capture, durable storage and MCP observe without proving remote exit', async t => {
+  for (const [signalDelivery, expected] of [['requested', 'requested'], ['unsupported', 'unsupported'], [null, null], ['claimed-terminated', null], [undefined, null]]) {
+    const root = directory(t); let executions = 0, app, client;
+    const make = () => createApplication({
+      registry: { getProfile: name => ({ host: '127.0.0.1', port: 22, user: 'fixture', readOnly: name === 'aws-readonly' }), closeAll: async () => {} },
+      classify: () => ({ class: 'read-only' }), executeCommand: async () => {
+        executions++;
+        return { failed: true, texts: ['partial output'], execution: { phase: 'settled', reason: 'cancel', remoteState: 'unknown',
+          exitCode: null, signal: null, signalDelivery, cleanupComplete: false, requiresReconciliation: true, automaticReplay: false } };
+      }, audit: () => {}, transferRoot: root,
+      env: { BRIDGE_MCP_TOKEN: 'synthetic-mcp', BRIDGE_ADMIN_TOKEN: 'synthetic-owner', BRIDGE_UI_TICKET_KEY: 'a'.repeat(64), BRIDGE_ADMIN_ORIGIN: 'https://owner.test' },
+      uiHtml: '<html>fixture</html>' });
+    const connect = async () => {
+      await new Promise(resolve => app.mcpHttp.listen(0, '127.0.0.1', resolve));
+      client = new Client({ name: 'signal-output-fixture', version: '1' });
+      await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${app.mcpHttp.address().port}/mcp`),
+        { requestInit: { headers: { Authorization: 'Bearer synthetic-mcp', Connection: 'close' } } }));
+    };
+    try {
+      app = await make(); await connect();
+      const submitted = await client.callTool({ name: 'submit', arguments: { kind: 'command', command: 'id', operationKey: 'signal-output-boundary-0001' } });
+      assert.equal(submitted.isError, undefined);
+      const id = submitted.structuredContent.data.id; await app.queue.wait(id);
+      const check = async () => {
+        const stored = app.queue.get(id).result.execution;
+        if (signalDelivery === null || ['requested', 'unsupported'].includes(signalDelivery)) assert.equal(stored.signalDelivery, expected);
+        else assert.equal(Object.hasOwn(stored, 'signalDelivery'), false, 'unknown enum values never enter public execution metadata');
+        const observed = await client.callTool({ name: 'observe', arguments: { id } });
+        assert.equal(observed.isError, undefined);
+        const value = observed.structuredContent.data;
+        assert.equal(value.execution.signalDelivery, expected); assert.equal(value.state, 'unknown');
+        assert.equal(value.execution.remoteState, 'unknown'); assert.equal(value.execution.exitCode, null);
+        assert.equal(value.execution.cleanupComplete, false); assert.equal(value.execution.requiresReconciliation, true);
+        assert.equal(value.execution.automaticReplay, false); assert.equal(value.output.state, 'ready');
+      };
+      await check();
+      await client.close(); client = null; await app.close(); app = null;
+      app = await make(); await connect(); await check();
+      assert.equal(executions, 1, 'observation and restart must never replay the command');
+    } finally { await client?.close(); await app?.close(); }
+  }
+});
+
 test('AIK output observation requires original binding and revalidates after delayed reads', async () => {
   const { publicReply, presentOperation, publicOutputSchemas } = await import('../src/adapters/mcp/public-contract.mjs');
   const id = 'a'.repeat(48), outputId = 'b'.repeat(48), events = []; let revoked = false;

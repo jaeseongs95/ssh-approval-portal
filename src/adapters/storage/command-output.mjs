@@ -19,6 +19,7 @@ const safeExecution = value => {
   }
   if (value.exitCode === null || Number.isSafeInteger(value.exitCode)) result.exitCode = value.exitCode;
   if (value.signal === null || typeof value.signal === 'string' && /^[A-Z0-9_-]{1,32}$/.test(value.signal)) result.signal = value.signal;
+  if (value.signalDelivery === null || ['requested', 'unsupported'].includes(value.signalDelivery)) result.signalDelivery = value.signalDelivery;
   for (const key of ['automaticReplay', 'cleanupComplete', 'requiresReconciliation', 'captureFailed']) if (typeof value[key] === 'boolean') result[key] = value[key];
   if (Number.isSafeInteger(value.timeoutMs) && value.timeoutMs > 0) result.timeoutMs = value.timeoutMs;
   for (const key of ['stdout', 'stderr']) if (value[key] && ['receivedBytes', 'retainedBytes', 'cursor'].every(name => Number.isSafeInteger(value[key][name]) && value[key][name] >= 0) && typeof value[key].truncated === 'boolean') {
