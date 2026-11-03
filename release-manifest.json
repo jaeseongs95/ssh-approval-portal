@@ -1,6 +1,6 @@
 {
   "version": "1.8.0",
-  "status": "candidate-pending-live-host-verification",
+  "status": "release",
   "runtime": "Node.js 24",
   "files": [
     {
@@ -140,13 +140,13 @@
     },
     {
       "path": "docs/architecture.en.md",
-      "size": 4690,
-      "sha256": "82dd2195518248898096bb86f1d101efaa6c9b6c632afe82f898f94e7bc4e462"
+      "size": 11398,
+      "sha256": "881ce12ea43359880311d652aa9e21b14aef961345517ff610d47b9a850ead1d"
     },
     {
       "path": "docs/architecture.ko.md",
-      "size": 5220,
-      "sha256": "976b3474cbecc0ecc0a42813f1cb98e0655720cd5482f8c26b71c3239b8f8518"
+      "size": 12324,
+      "sha256": "38053134fe41d1ce8489b641d5675ef0b0277a0c8e7fb89938a69976fe46223d"
     },
     {
       "path": "docs/browser-testing.ko.md",
@@ -170,8 +170,8 @@
     },
     {
       "path": "docs/deployment-180.ko.md",
-      "size": 8419,
-      "sha256": "0883eb7d7720dadd5408ee68937757157990c5c9e50a4ecfe4cef74da8cbd99d"
+      "size": 10509,
+      "sha256": "6769c62df3669fb8059a5eb6c65981275193c2809aaf105d34d5dbed2b0bbe48"
     },
     {
       "path": "docs/desktop.ko.md",
@@ -375,8 +375,8 @@
     },
     {
       "path": "scripts/deploy180.mjs",
-      "size": 16768,
-      "sha256": "27d4db2978821bcb502bb156d8d23e7c5e0bd92fb2d4c459c288febd65db6482"
+      "size": 22381,
+      "sha256": "acf204248fd8320d38f8aadb11c5c9260036ba2fd8df06e197b770ce4c818abe"
     },
     {
       "path": "scripts/docker-secrets.py",
@@ -655,8 +655,8 @@
     },
     {
       "path": "src/adapters/mcp/public-contract.mjs",
-      "size": 25143,
-      "sha256": "1b456ba9030615a34ed722350eb3c8aaae2dff03b41132df91032e24b7309d6e"
+      "size": 25311,
+      "sha256": "0590d00ffffb05c642a576805cb5f15ac741a2fcf5dfaf7e8e462f2872648687"
     },
     {
       "path": "src/adapters/mcp/server.mjs",
@@ -740,8 +740,8 @@
     },
     {
       "path": "src/adapters/ssh/execution-supervisor.mjs",
-      "size": 8452,
-      "sha256": "14f5acd39d8a1891883693a989b506e2a402b987f78329d4b9038155779ca49d"
+      "size": 8615,
+      "sha256": "4f28891dd903a46c28130a0f4ddbcdc1685ca83a471466f8f554b83f458efce1"
     },
     {
       "path": "src/adapters/ssh/python-source.mjs",
@@ -755,8 +755,8 @@
     },
     {
       "path": "src/adapters/ssh/vendor.mjs",
-      "size": 19087,
-      "sha256": "2339ab20fe8127a478134528c5d68974f4f2af802b44b973b4f282d86ee46c1c"
+      "size": 20029,
+      "sha256": "90e2bf007f56fe213a7a6d0e2e0cc5367da58a1c414e4721fd13cea1fdd9ff15"
     },
     {
       "path": "src/adapters/ssh/windows-command.mjs",
@@ -1610,8 +1610,8 @@
     },
     {
       "path": "test/mcp-contracts.test.mjs",
-      "size": 20566,
-      "sha256": "5feeea3ab7630aa33e222c4e0f569ca432d8d79987940ad13191607d139a6e9a"
+      "size": 21913,
+      "sha256": "6064bdcd60ac4240e446a5e1ab1dd029a2c9fbcc54f94317bce1f0e392b1c944"
     },
     {
       "path": "test/mcp-input-limits.test.mjs",
@@ -1675,8 +1675,8 @@
     },
     {
       "path": "test/operation-migration-180.test.mjs",
-      "size": 10695,
-      "sha256": "c0e66aa61a9162fcfd780f21bde3aa02de48b4c533f5d7a506f90b9b5c5aa05c"
+      "size": 18819,
+      "sha256": "036c388a1246a11766793f39f3b77332d8e4e3c6546da4770b4bfbf1da41395a"
     },
     {
       "path": "test/operation-scheduler.test.mjs",
@@ -1945,8 +1945,8 @@
     },
     {
       "path": "test/ssh-supervisor.test.mjs",
-      "size": 10814,
-      "sha256": "650f64ad3be053f449d6e5bde9979e78c61a453d6fc537330f354d3ceb80cfb6"
+      "size": 14598,
+      "sha256": "9838ac36ad0a38fabfc7598b62b15ee6825e2f8b44b9f7d435814abcc08637da"
     },
     {
       "path": "test/support/approval-runtime.mjs",
