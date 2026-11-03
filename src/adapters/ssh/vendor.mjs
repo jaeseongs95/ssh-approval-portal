@@ -68,11 +68,22 @@ function commandOutcome(result, auditRedact = defaultRedact) {
     : result.execution.reason !== 'exit' ? `[execution ${result.execution.reason}; remote ${result.execution.remoteState}; automatic replay disabled]`
     : result.signal ? `[killed by SIG${result.signal}]` : `[exit ${result.exitCode}]`);
   if (result.execution.stdout.truncated || result.execution.stderr.truncated) parts.push('[output truncated; inspect byte cursors]');
+  if (result.execution.signalDelivery === 'unsupported') parts.push('[SSH channel signal unavailable; remote termination is unconfirmed]');
   return { failed: Boolean(failed), texts: [parts.join('\n\n')], data: { stdout, stderr: rawStderr }, execution: result.execution };
 }
 
 /** Registry owns authentication, host keys, ProxyJump and profile binding.
  * Only this narrow port knows ssh-mcp/ssh2; the supervisor owns execution. */
+export function signalSshChannel(client, channel, name) {
+  const exactClient = rawSshClient(client), outgoing = channel?.outgoing;
+  // ssh2 Channel.signal() refuses after stdin EOF (writable=false/state=eof).
+  // Channel requests remain valid until CLOSE. Keep this pinned private API here.
+  if (!['INT', 'TERM', 'KILL'].includes(name) || channel?._client !== exactClient || channel.type !== 'session' || channel.server
+    || !outgoing || !['open', 'eof'].includes(outgoing.state) || !Number.isInteger(outgoing.id) || outgoing.id < 0 || outgoing.id > 0xffff_ffff
+    || typeof exactClient?._protocol?.signal !== 'function') throw Error('SSH channel signal unsupported');
+  exactClient._protocol.signal(outgoing.id, name);
+}
+
 async function executeOnChannel(connection, command, options = {}) {
   let client, exactCommand, channelOptions;
   try {
@@ -83,6 +94,7 @@ async function executeOnChannel(connection, command, options = {}) {
   } catch (error) { throw notDispatched(error); }
   return superviseExecution({
     open: (value, callback) => client.exec(value, channelOptions, callback),
+    signal: (channel, name) => signalSshChannel(client, channel, name),
     onTransportLost(callback) {
       client.once('close', callback); client.once('error', callback);
       return () => { client.removeListener('close', callback); client.removeListener('error', callback); };

@@ -14,7 +14,7 @@ export function superviseExecution(port, command, { stdin, timeoutMs = DEFAULT_R
   const startedAt = Date.now();
   return new Promise(resolve => {
     let channel, done = false, dispatched = false, closed = false, exitObserved = false, stopping = false, openDelivered = false;
-    let reason = 'exit', exitCode = null, exitSignal = null, captureFailed = false, transportLost = false;
+    let reason = 'exit', exitCode = null, exitSignal = null, captureFailed = false, transportLost = false, signalDelivery = null;
     let pendingOutput = Promise.resolve(), pendingChunks = 0, unsubscribe = () => {};
     const timers = new Set(), streams = { stdout: { chunks: [], receivedBytes: 0, retainedBytes: 0 }, stderr: { chunks: [], receivedBytes: 0, retainedBytes: 0 } };
     const later = (fn, ms) => { const timer = setTimeout(fn, ms); timers.add(timer); return timer; };
@@ -34,12 +34,16 @@ export function superviseExecution(port, command, { stdin, timeoutMs = DEFAULT_R
           execution: { phase: 'settled', reason, remoteState, exitCode, signal: exitSignal, automaticReplay: false, timeoutMs,
             cleanupComplete, requiresReconciliation: remoteState === 'unknown' || !cleanupComplete,
             outputState: captureFailed || truncated || remoteState === 'unknown' || !cleanupComplete || reason === 'transport_lost' ? 'partial' : 'complete',
-            captureFailed, stdout: metadata(streams.stdout), stderr: metadata(streams.stderr) } });
+            captureFailed, signalDelivery, stdout: metadata(streams.stdout), stderr: metadata(streams.stderr) } });
       });
     };
     const sendSignal = name => {
       if (!channel || closed) return;
-      try { channel.signal(name); } catch { /* A signal attempt is never termination evidence. */ }
+      try {
+        if (port.signal) port.signal(channel, name);
+        else channel.signal(name);
+        if (signalDelivery !== 'unsupported') signalDelivery = 'requested';
+      } catch { signalDelivery = 'unsupported'; } // A sent request still is not termination evidence.
     };
     const stop = why => {
       if (done || stopping) return;
@@ -108,7 +112,7 @@ export function superviseExecution(port, command, { stdin, timeoutMs = DEFAULT_R
         channel = opened;
         if (done) {
           channel.on('error', () => {});
-          try { channel.signal('KILL'); } catch { /* late signal is unconfirmed */ }
+          sendSignal('KILL');
           try { channel.close(); } catch { /* late unknown channel */ }
           return;
         }

@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import ssh2Channels from 'ssh2/lib/Channel.js';
 import { superviseExecution, DEFAULT_RUN_TIMEOUT_MS } from '../src/adapters/ssh/execution-supervisor.mjs';
-import { executePythonSource, openSshForward } from '../src/adapters/ssh/vendor.mjs';
+import { executePythonSource, openSshForward, signalSshChannel } from '../src/adapters/ssh/vendor.mjs';
 import { preparePythonSource } from '../src/adapters/ssh/python-source.mjs';
 
 function wire({ deferred = false, closeCode } = {}) {
@@ -58,6 +59,57 @@ test('already cancelled work never dispatches', async () => {
   const f = wire(), controller = new AbortController(); controller.abort();
   const result = await superviseExecution(f.port, 'command', { signal: controller.signal });
   assert.equal(f.opens, 0); assert.equal(result.execution.remoteState, 'not_dispatched'); assert.equal(result.execution.reason, 'cancel');
+});
+
+test('pinned ssh2 channel signal crosses stdin EOF on the exact channel and waits for remote exit and cleanup', async () => {
+  const controller = new AbortController(), client = new EventEmitter(), requests = [], input = [];
+  const otherChannel = 92;
+  let eof = false, channel;
+  client._protocol = {
+    channelData(id, bytes) { assert.equal(id, 91); input.push(Buffer.from(bytes)); },
+    channelEOF(id) { assert.equal(id, 91); eof = true; },
+    signal(id, name) {
+      requests.push({ id, name }); assert.equal(eof, true); assert.equal(id, 91); assert.notEqual(id, otherChannel);
+      queueMicrotask(() => { channel.emit('exit', null, 'SIGTERM'); channel.emit('close', null, 'SIGTERM'); });
+    },
+  };
+  channel = new ssh2Channels.Channel(client, { type: 'session', incoming: { id: 1, state: 'open', window: 65536, packetSize: 32768 },
+    outgoing: { id: 91, state: 'open', window: 65536, packetSize: 32768 } });
+  const binding = { targetId: 'fixture', targetRevision: 'a'.repeat(64), profile: 'fixture-write' };
+  const profile = { readOnly: false, tty: false };
+  client.exec = (_command, _options, callback) => callback(null, channel);
+  const connection = { profile, ensureConnected: async () => {}, getClient: () => client, applyWorkdir: value => value, channelEnv: () => ({}) };
+  const registry = { getProfile: () => profile, getOrCreate: async () => connection };
+  const plan = preparePythonSource({ ...binding, source: "print('source stdin stays exact')\n", cwd: '/' });
+  const pending = executePythonSource(registry, plan, () => binding, undefined, { signal: controller.signal });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(channel.writable, false); assert.equal(channel.outgoing.state, 'eof');
+  channel.signal('TERM'); assert.deepEqual(requests, [], 'ssh2 public method silently drops a post-EOF signal');
+  controller.abort(); const result = await pending;
+  assert.deepEqual(Buffer.concat(input), Buffer.from(plan.transportStdin ?? plan.stdin));
+  assert.deepEqual(requests, [{ id: 91, name: 'INT' }]);
+  assert.equal(result.execution.reason, 'cancel'); assert.equal(result.execution.signalDelivery, 'requested');
+  assert.equal(result.execution.remoteState, 'exited'); assert.equal(result.execution.cleanupComplete, true);
+  assert.equal(result.execution.requiresReconciliation, false);
+});
+
+test('signal port refuses foreign channels or unsupported internals instead of touching another transport', async () => {
+  const calls = [], client = { _protocol: { signal: (...args) => calls.push(args) } };
+  const channel = { type: 'session', server: false, _client: client, outgoing: { id: 3, state: 'eof' } };
+  signalSshChannel(client, channel, 'TERM'); assert.deepEqual(calls, [[3, 'TERM']]);
+  for (const changed of [{ ...channel, _client: {} }, { ...channel, outgoing: { id: 4, state: 'closed' } }, { ...channel, type: 'direct-tcpip' }]) {
+    assert.throws(() => signalSshChannel(client, changed, 'KILL'), /unsupported/);
+  }
+  assert.throws(() => signalSshChannel({}, channel, 'KILL'), /unsupported/); assert.deepEqual(calls, [[3, 'TERM']]);
+});
+
+test('unsupported signal delivery remains explicit and never claims termination', async () => {
+  const f = wire(), controller = new AbortController();
+  f.port.signal = () => { throw Error('Unsupported transport'); };
+  const pending = superviseExecution(f.port, 'command', { signal: controller.signal, stopGraceMs: 15 });
+  controller.abort(); const result = await pending;
+  assert.equal(result.execution.signalDelivery, 'unsupported'); assert.equal(result.execution.remoteState, 'unknown');
+  assert.equal(result.execution.cleanupComplete, false); assert.equal(result.execution.automaticReplay, false);
 });
 
 test('transport loss preserves bytes and remains unknown even after local cleanup', async () => {
