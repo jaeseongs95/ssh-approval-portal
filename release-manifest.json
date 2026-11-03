@@ -1,6 +1,6 @@
 {
   "version": "1.8.0",
-  "status": "release",
+  "status": "candidate-pending-live-host-verification",
   "runtime": "Node.js 24",
   "files": [
     {
@@ -375,8 +375,8 @@
     },
     {
       "path": "scripts/deploy180.mjs",
-      "size": 22977,
-      "sha256": "2108b14ea30ceb42a869917fda0bdeed924d10a74211c441a55421595a2a33be"
+      "size": 24918,
+      "sha256": "390584a4a9f4742fbcb61d2d5abc192f94d5745964bc75afb66c7402a0d8cfa3"
     },
     {
       "path": "scripts/docker-secrets.py",
@@ -1442,6 +1442,11 @@
       "path": "test/deploy180-output-sidecars.test.mjs",
       "size": 5311,
       "sha256": "3a2e5c8feecf74d97850f19e231758e819e49e3dd2a1772db759a4bfcacd009f"
+    },
+    {
+      "path": "test/deploy180-release-permissions.test.mjs",
+      "size": 9238,
+      "sha256": "c15b192d705efd88e170267294c4801ec152822b8bc4088e93a44433608f4360"
     },
     {
       "path": "test/desktop-http.test.mjs",
