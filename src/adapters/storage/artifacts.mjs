@@ -13,8 +13,11 @@ const validateUpload = meta => {
   anyRemotePath(meta.remotePath);
   if (typeof meta.fileName !== 'string' || !meta.fileName || meta.fileName.length > 255 || /[\x00-\x1f\x7f/\\]/.test(meta.fileName)) throw Error('Invalid filename');
 };
-const ownership = meta => meta.targetId === undefined ? {} : { targetId: meta.targetId, targetRevision: meta.targetRevision,
-  ...(meta.fileTargetBound === true ? { fileTargetBound: true } : {}) };
+const ownership = meta => ({
+  ...(meta.targetId === undefined ? {} : { targetId: meta.targetId, targetRevision: meta.targetRevision,
+    ...(meta.fileTargetBound === true ? { fileTargetBound: true } : {}) }),
+  ...(meta.uploadProtocol === 'mcp-json-v1' ? { uploadProtocol: meta.uploadProtocol } : {}),
+});
 const snapshot = item => {
   const { path, last, ...metadata } = item;
   return Object.freeze(metadata);

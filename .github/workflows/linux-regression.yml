@@ -79,6 +79,24 @@ jobs:
       - run: npm ci --ignore-scripts
       - name: Node regression
         run: node --test --test-skip-pattern='^CLI-LOOPBACK exact helper executes inspection/status over pinned SSH and preserves authentication bytes$' test/*.test.mjs
+      - name: Remote JSON upload detects missing provider-neutral transport
+        shell: bash
+        run: |
+          set -euo pipefail
+          paths=(src/adapters/mcp/server.mjs src/adapters/storage/artifacts.mjs src/application/files.mjs src/application/target-router.mjs)
+          for i in "${!paths[@]}"; do cp "${paths[$i]}" "$RUNNER_TEMP/remote-upload-$i.mjs"; done
+          restore_remote_upload() {
+            for i in "${!paths[@]}"; do cp "$RUNNER_TEMP/remote-upload-$i.mjs" "${paths[$i]}"; done
+          }
+          trap restore_remote_upload EXIT
+          for path in "${paths[@]}"; do git show afe59704082d5b8cd7daedae524e209d5bc53e94:"$path" > "$path"; done
+          red_exit=0
+          node --test --test-reporter=tap test/remote-mcp-upload.test.mjs > "$RUNNER_TEMP/remote-upload-red.log" 2>&1 || red_exit=$?
+          cat "$RUNNER_TEMP/remote-upload-red.log"
+          test "$red_exit" -ne 0
+          grep -q '^# fail 9$' "$RUNNER_TEMP/remote-upload-red.log"
+          restore_remote_upload
+          node --test --test-reporter=tap test/remote-mcp-upload.test.mjs
       - name: File selection detects the original Windows and error-code defects
         shell: bash
         run: |

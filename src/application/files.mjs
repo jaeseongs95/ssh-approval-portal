@@ -13,11 +13,23 @@ export function createFileService({ store, queue, transfers, platform = 'linux',
     validate(artifact.remotePath, artifact.elevate);
     const job = queue.submitOperation({ kind: 'upload', artifactId: artifact.id, remotePath: artifact.remotePath,
       fileName: artifact.fileName, size: artifact.size, sha256: artifact.sha256, overwrite: artifact.overwrite, elevate: artifact.elevate,
-      ...(artifact.fileTargetBound === true ? fileTargetFields(artifact) : {}) }, artifact.elevate ? 'privileged' : 'safe');
+      ...(artifact.fileTargetBound === true ? fileTargetFields(artifact) : {}),
+      ...(artifact.uploadProtocol === 'mcp-json-v1' ? { uploadProtocol: artifact.uploadProtocol } : {}) }, artifact.elevate ? 'privileged' : 'safe');
     try { queue.startUpload(job.id); } catch (error) { if (!queue.rejectAutomaticDispatch(job.id, error)) { /* Normal policy keeps the owner request. */ } }
     return queue.get(job.id);
   };
-  return {
+  const agentUploadJob = id => {
+    const matches = queue.listAll().filter(job => job.kind === 'upload' && job.operation.artifactId === id && job.operation.uploadProtocol === 'mcp-json-v1');
+    if (matches.length > 1) throw Error('Ambiguous MCP upload request');
+    return matches[0];
+  };
+  const agentArtifact = id => {
+    const item = store.get(id);
+    if (item.uploadProtocol !== 'mcp-json-v1' || item.fileTargetBound !== true) throw Error('Not a bound MCP JSON upload');
+    fileTargetFields(item);
+    return item;
+  };
+  const service = {
     async requestUpload({ source, fileName, remotePath: path, overwrite = false, elevate = false }, { signal, binding, verifyTarget } = {}) {
       validate(path, elevate); guard(); signal?.throwIfAborted();
       if (binding) {
@@ -63,9 +75,28 @@ export function createFileService({ store, queue, transfers, platform = 'linux',
         return submitUpload(artifact);
       } catch (err) { await store.remove(id); throw err; }
     },
+    beginAgentUpload(meta, binding) {
+      if (!binding) throw Error('MCP upload requires a bound target');
+      fileTargetFields(binding);
+      return service.beginUpload({ ...meta, uploadProtocol: 'mcp-json-v1' }, binding);
+    },
+    agentUploadStatus(id) {
+      const job = agentUploadJob(id);
+      if (job) return { state: 'submitted', job };
+      const item = agentArtifact(id);
+      const state = now() >= item.expiresAt ? 'expired' : item.state;
+      return { state, transfer: Object.fromEntries(['id', 'received', 'sequence', 'size', 'sha256', 'expiresAt', 'targetId', 'targetRevision'].map(key => [key, item[key]])) };
+    },
+    appendAgentUpload(args) { agentArtifact(args.id); return service.appendUpload(args); },
+    finishAgentUpload(id, verifyTarget) {
+      if (agentUploadJob(id)) throw Error('MCP upload already submitted; read its status');
+      agentArtifact(id);
+      return service.finishUpload(id, verifyTarget);
+    },
     onTerminal(job) { if (job.operation.kind === 'upload') store.releaseUpload(job.operation.artifactId, { expiresAt: now() }); },
     busy() { return imports.size > 0; },
     reap() { return store.reap(); },
     async close() { shutdown.abort(); await Promise.allSettled([...imports]); },
   };
+  return service;
 }

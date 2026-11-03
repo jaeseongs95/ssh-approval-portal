@@ -1,4 +1,4 @@
-import { fileTargetFields } from '../domain/file-target-binding.mjs';
+import { fileTargetBinding, fileTargetFields } from '../domain/file-target-binding.mjs';
 import { platformOf, targetCapabilities } from '../domain/target-platform.mjs';
 
 /** Single-process synchronous claims; callers release in finally, with bounded waiting reservations and release notifications. */
@@ -69,6 +69,19 @@ export function createTargetRouter(runtimes, { defaultTarget, legacy, store, aud
     if (item.fileTargetBound === true) runtime.verify();
     return runtime;
   };
+  const agentUploadOwner = id => {
+    const owners = runtimes.filter(runtime => runtime.queue.listAll().some(job => job.kind === 'upload' && job.operation.artifactId === id && job.operation.uploadProtocol === 'mcp-json-v1'));
+    if (!owners.length) return artifactOwner(id);
+    if (owners.length !== 1) throw Error('Ambiguous MCP upload owner');
+    const runtime = select(owners[0].id);
+    const jobs = runtime.queue.listAll().filter(job => job.kind === 'upload' && job.operation.artifactId === id && job.operation.uploadProtocol === 'mcp-json-v1');
+    if (jobs.length !== 1) throw Error('Ambiguous MCP upload request');
+    const job = jobs[0], binding = fileTargetBinding(job.operation);
+    if (!binding || binding.targetId !== runtime.id || binding.targetRevision !== runtime.revision ||
+        (job.targetId !== undefined && (job.targetId !== runtime.id || job.targetRevision !== runtime.revision))) throw Error('Stale MCP upload target');
+    runtime.verify();
+    return runtime;
+  };
   const fileAdmission = args => {
     const { expectedTargetRevision, ...payload } = args, runtime = select(payload.target);
     if (expectedTargetRevision === undefined) return { runtime, payload };
@@ -117,6 +130,14 @@ export function createTargetRouter(runtimes, { defaultTarget, legacy, store, aud
       requestUpload: (args, options) => { const { runtime, payload, binding } = fileAdmission(args); return runtime.files.requestUpload(payload, { ...options, binding, verifyTarget: binding ? runtime.verify : undefined }); },
       requestDownload: args => { const { runtime, payload, binding } = fileAdmission(args); return runtime.files.requestDownload(payload, binding); },
       beginUpload: meta => { const { runtime, payload, binding } = fileAdmission(meta); return runtime.files.beginUpload(payload, binding); },
+      beginAgentUpload: meta => {
+        const { runtime, payload, binding } = fileAdmission(meta);
+        if (!binding) throw Error('MCP upload requires an explicit target revision');
+        return runtime.files.beginAgentUpload(payload, binding);
+      },
+      agentUploadStatus: id => agentUploadOwner(id).files.agentUploadStatus(id),
+      appendAgentUpload: args => artifactOwner(args.id).files.appendAgentUpload(args),
+      finishAgentUpload: id => { const runtime = agentUploadOwner(id); return runtime.files.finishAgentUpload(id, runtime.verify); },
       appendUpload: args => artifactOwner(args.id).files.appendUpload(args),
       finishUpload: id => { const runtime = artifactOwner(id); return runtime.files.finishUpload(id, store.get(id).fileTargetBound === true ? runtime.verify : undefined); },
       busy: () => runtimes.some(runtime => runtime.files.busy()),

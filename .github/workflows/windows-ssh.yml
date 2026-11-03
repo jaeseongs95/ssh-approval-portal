@@ -34,7 +34,7 @@ jobs:
       - run: npm ci --ignore-scripts
         id: dependencies
       - name: Provider-neutral MCP and CLI path contracts
-        run: node --test test/cli-platform-paths.test.mjs test/mcp-contracts.test.mjs test/portal-client-discovery.test.mjs test/portal-client-cloudflared.test.mjs
+        run: node --test test/cli-platform-paths.test.mjs test/mcp-contracts.test.mjs test/portal-client-discovery.test.mjs test/portal-client-cloudflared.test.mjs test/remote-mcp-upload.test.mjs
       - name: Local agent-selected file transport on Windows
         run: node --test test/agent-file-forwarder.test.mjs test/agent-file-mcp-process.test.mjs test/portal-file-forwarder.test.mjs
       - name: Windows 조상 경로 권한 읽기 진단
