@@ -7,6 +7,11 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+if ($WriterInheritOnlyOnly) {
+    $parentInputEncoding = [Console]::InputEncoding
+    [Console]::Out.WriteLine((@{ parentPSMajor = [int]$PSVersionTable.PSVersion.Major;
+        codePage = [int]$parentInputEncoding.CodePage; preambleBytes = [int]$parentInputEncoding.GetPreamble().Length } | ConvertTo-Json -Compress))
+}
 $passed = 0
 $fixtureCreated = $false
 $fixturePath = [IO.Path]::GetFullPath($WorkRoot).TrimEnd('\')
@@ -29,7 +34,13 @@ function Start-Script([string]$scriptPath, [string]$arguments, [string]$inputTex
     $process = [Diagnostics.Process]::new()
     $process.StartInfo = $start
     try {
-        $null = $process.Start()
+        # Framework initializes the redirected stdin StreamWriter during Start;
+        # its AutoFlush can emit a preamble before our BaseStream byte write.
+        $savedInputEncoding = [Console]::InputEncoding
+        try {
+            [Console]::InputEncoding = [Text.UTF8Encoding]::new($false)
+            $null = $process.Start()
+        } finally { [Console]::InputEncoding = $savedInputEncoding }
         $stdout = $process.StandardOutput.ReadToEndAsync()
         $stderr = $process.StandardError.ReadToEndAsync()
         if ($null -eq $inputBytes) { $inputBytes = [Text.UTF8Encoding]::new($false, $true).GetBytes($inputText) }

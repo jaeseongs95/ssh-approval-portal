@@ -1965,8 +1965,8 @@
     },
     {
       "path": "test/windows-file-helper.tests.ps1",
-      "size": 38683,
-      "sha256": "5bf8cf9029875f40c6220f249118ce7f1db0acd68a4eaabb9193956f75094474"
+      "size": 39411,
+      "sha256": "9369024c67e7ce47caf99866e9e4612c7daad20762a27aa570c4ce3a6679f0d9"
     },
     {
       "path": "test/windows-full-application.test.mjs",
