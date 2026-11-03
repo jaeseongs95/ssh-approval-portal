@@ -525,13 +525,13 @@
     },
     {
       "path": "scripts/windows-file-helper.ps1",
-      "size": 6002,
-      "sha256": "b22071e75fa75cbeb051ecf9b90b78d0143b179d72aeccc4af044c0e66c476ee"
+      "size": 7041,
+      "sha256": "ecc515d57bdaeb59b3351eb11ebe5089d426c24882be929fdbd389ca9a78e8ae"
     },
     {
       "path": "scripts/windows-file-native.cs",
-      "size": 35161,
-      "sha256": "6046b0fa79fda35ac0b96b576564aab9ae47e01b0ea7203fd6218dc6e3b979f2"
+      "size": 36678,
+      "sha256": "d8fd4c176e0256fb0def8edbcade5b088acef9aa825a727a4b67074b4f669e6b"
     },
     {
       "path": "src/adapters/aik/ssh-tool.mjs",
@@ -615,8 +615,8 @@
     },
     {
       "path": "src/adapters/mcp/server.mjs",
-      "size": 42604,
-      "sha256": "2b44f542b7b308d252fdc4acf1f3be2e6c509bca86f79d2ef91a2d59fd335812"
+      "size": 42925,
+      "sha256": "9a3944e4b32c788d96846b44a3a7c91648c28a2742c1292cc6e72fddaa98b16f"
     },
     {
       "path": "src/adapters/presentation/capabilities.mjs",
@@ -700,8 +700,8 @@
     },
     {
       "path": "src/adapters/ssh/transfers.mjs",
-      "size": 11684,
-      "sha256": "e93b8af28aa7aa26305a57b6ef7edf21a399a95257031f38c5e5c0781fcd1497"
+      "size": 14040,
+      "sha256": "4e7dfc808277fca6c9f4f30393e1d84ed2566b870a0199153b8abd0a6cae0210"
     },
     {
       "path": "src/adapters/ssh/vendor.mjs",
@@ -1890,8 +1890,8 @@
     },
     {
       "path": "test/transfer-failure.test.mjs",
-      "size": 11751,
-      "sha256": "f0ed298dab3d479d519cadee636c4f29f48690bd82f3cfe17ed2c5d274caaab5"
+      "size": 18483,
+      "sha256": "2c3b4acb0397bca8637b7eacd736c17026210960e256513f5ab7ce4b1b5b919c"
     },
     {
       "path": "test/ui-bundle.test.mjs",
@@ -1965,8 +1965,8 @@
     },
     {
       "path": "test/windows-file-helper.tests.ps1",
-      "size": 30934,
-      "sha256": "541af1dd242889eeca722ba381008a36712e54722f8c415101e6fe8dd64e4e68"
+      "size": 38683,
+      "sha256": "5bf8cf9029875f40c6220f249118ce7f1db0acd68a4eaabb9193956f75094474"
     },
     {
       "path": "test/windows-full-application.test.mjs",
@@ -1985,13 +1985,13 @@
     },
     {
       "path": "test/windows-ssh-ci.ps1",
-      "size": 21667,
-      "sha256": "2dc4b5122b3a44806d2c91a5b57bcad299938519b6b3babb2bc7e414f89de246"
+      "size": 25614,
+      "sha256": "32e76edfb17f75b042d99bded91ceab1f214877c37bdce18c1b8c5c9443e37ec"
     },
     {
       "path": "test/windows-ssh-integration.test.mjs",
-      "size": 43629,
-      "sha256": "8272c6cf78fe2c6b74bbb951c79f5c5418c4f01b284f10d301830d52f8c06f67"
+      "size": 47862,
+      "sha256": "dc5e328ac85f98ea78674f2c48586ea328834767314483d8a7f2b932b98aee60"
     },
     {
       "path": "test/windows-ssh-log-read.ps1",
