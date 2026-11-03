@@ -43,7 +43,8 @@ export function createOperations({ targets, queue, commands, files, journal, sch
           if (normalized.kind === 'command') return commands.run(normalized.command, normalized.target, normalized.operationKey, normalized.context ?? '', normalized.displayContext ?? '');
           if (normalized.kind === 'source') return commands.runSource({ source: normalized.source, argv: normalized.argv ?? [], cwd: normalized.cwd,
             elevate: normalized.elevate === true, requestKey: normalized.operationKey, context: normalized.context ?? '', displayContext: normalized.displayContext ?? '' }, normalized.target);
-          return files.requestDownload({ target: normalized.target, expectedTargetRevision: normalized.expectedTargetRevision, remotePath: normalized.remotePath, elevate: normalized.elevate === true });
+          return files.requestDownload({ target: normalized.target, expectedTargetRevision: normalized.expectedTargetRevision, remotePath: normalized.remotePath, elevate: normalized.elevate === true,
+            context: normalized.context ?? '', displayContext: normalized.displayContext ?? '' });
         });
         const job = submitted?.job ?? submitted;
         const record = journal.get(job?.id ?? identity.id);

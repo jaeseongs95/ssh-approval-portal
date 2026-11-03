@@ -175,8 +175,14 @@ export class Transfers {
   async download(op, beforeDispatch) {
     this.validate(op);
     const binding = fileTargetBinding(op);
-    const item = this.store.reserveDownload({ fileName: remoteBasename(op.remotePath, this.platform), remotePath: op.remotePath, elevate: op.elevate,
-      ...(binding ? { ...binding, fileTargetBound: true } : {}) });
+    let item;
+    try {
+      item = this.store.reserveDownload({ fileName: remoteBasename(op.remotePath, this.platform), remotePath: op.remotePath, elevate: op.elevate,
+        ...(binding ? { ...binding, fileTargetBound: true } : {}) });
+    } catch (error) {
+      // No SSH channel or remote stage exists before this local reservation.
+      throw executionFailure(error, { stage: 'operation', code: error?.code === 'ARTIFACT_QUOTA' ? 'ARTIFACT_QUOTA' : 'OPERATION_FAILED', remoteOutcome: 'not_started' });
+    }
     let session, stagedConfirmed = false, stagedRefusal = false;
     const staged = { ...op, artifactId: item.id };
     try {

@@ -9,6 +9,23 @@ import { Transfers } from '../src/adapters/ssh/transfers.mjs';
 import { hash } from '../src/domain/validation.mjs';
 import { ApprovalQueue, settledOutcome } from './support/approval-runtime.mjs';
 import { presentJob } from '../src/adapters/presentation/results.mjs';
+import { executionFailureDetails } from '../src/domain/execution-failure.mjs';
+
+test('download reservation quota is a typed not-started failure before any SSH effect', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'download-reservation-quota-'));
+  t.after(() => rm(root, { recursive: true }));
+  const store = new Artifacts(root, { maxBytes: 16, budget: 16 }); await store.init();
+  const live = await store.begin({ fileName: 'reserved.bin', remotePath: '/tmp/reserved.bin', size: 16, sha256: hash(Buffer.alloc(16)) });
+  const baseline = store.list(), names = await readdir(root);
+  let connections = 0;
+  const transfers = new Transfers({}, store, { transport: { connect() { connections++; assert.fail('Local quota refusal must not connect'); } } });
+  await assert.rejects(transfers.download({ kind: 'download', remotePath: '/tmp/input.bin', elevate: false }), error => {
+    assert.deepEqual(executionFailureDetails(error), { stage: 'operation', code: 'ARTIFACT_QUOTA', remoteOutcome: 'not_started', automaticReplay: false });
+    return true;
+  });
+  assert.equal(connections, 0); assert.equal(store.has(live.id), true); assert.equal(store.reserved, 16);
+  assert.deepEqual(store.list(), baseline); assert.deepEqual(await readdir(root), names);
+});
 
 test('failed SSH connection releases reserved download quota and creates no local payload', async () => {
   const root = await mkdtemp(join(tmpdir(), 'ssh-disconnect-'));

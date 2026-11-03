@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, appendFile, readFile, writeFile, symlink, readdir, stat } from 'node:fs/promises';
+import { mkdtemp, rm, appendFile, readFile, writeFile, symlink, readdir, stat, mkdir, link } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Artifacts } from '../src/adapters/storage/artifacts.mjs';
@@ -143,12 +143,12 @@ test('recovery completes a committed removal and quarantines legacy bytes withou
   const legacy = join(f.root, 'f'.repeat(48) + '.part');
   await writeFile(legacy, payload, { mode: 0o600 });
   const quarantined = await f.openStore();
-  assert.equal(quarantined.size, 0); assert.equal(quarantined.reserved, 16);
+  assert.equal(quarantined.size, 0); assert.equal(quarantined.reserved, payload.length);
   assert.deepEqual(await readFile(join(f.root, 'orphans', 'f'.repeat(48) + '.part')), payload);
   assert.equal(quarantined.recoveryStatus().state, 'recovery-required');
   assert.equal(quarantined.recoveryStatus().entries[0].resumable, false);
   assert.throws(() => quarantined.get('f'.repeat(48)), /Unknown transfer/);
-  assert.equal((await f.openStore()).reserved, 16);
+  assert.equal((await f.openStore()).reserved, payload.length);
   await quarantined.reap();
   assert.deepEqual(await readFile(join(f.root, 'orphans', 'f'.repeat(48) + '.part')), payload);
 });
@@ -167,6 +167,58 @@ test('partial upload expiration and explicit release remain effective after rest
   store = await f.openStore();
   assert.equal(store.get(complete.id).pinned, false);
   f.advance(10); await store.reap(); assert.equal(store.reserved, 0);
+});
+
+test('legacy recovery charges exact retained bytes alongside live reservations without rewriting evidence', async t => {
+  const f = await fixture(t), directory = join(f.root, 'orphans');
+  await mkdir(directory, { mode: 0o700 });
+  const paths = [];
+  for (let index = 1; index <= 8; index++) {
+    const id = index.toString(16).padStart(48, '0'), part = join(directory, id + '.part'), metadata = join(directory, id + '.json');
+    await writeFile(part, Buffer.from([index]), { mode: 0o600 });
+    await writeFile(metadata, JSON.stringify({ version: 1, id, size: 1, reservedBytes: 16, reason: 'legacy_metadata_missing', resumable: false }), { mode: 0o600 });
+    paths.push(part, metadata);
+  }
+  const capture = () => Promise.all(paths.map(async path => {
+    const bytes = await readFile(path), info = await stat(path);
+    return { path, bytes, size: info.size, ino: info.ino, mtimeMs: info.mtimeMs, ctimeMs: info.ctimeMs };
+  }));
+  const baseline = await capture();
+  let store = await f.openStore();
+  assert.equal(store.reserved, 8); assert.equal(store.recoveryStatus().reservedBytes, 8);
+  assert.equal(store.recoveryStatus().liveReservedBytes, 0); assert.equal(store.recoveryStatus().unsafeEntries, 0);
+  for (const item of store.recoveryStatus().entries) { assert.equal(item.reservedBytes, 1); assert.equal(item.resumable, false); assert.throws(() => store.get(item.id), /Unknown transfer/); }
+  const live = await store.begin({ ...meta, size: 16, sha256: hash(Buffer.alloc(16)) });
+  assert.equal(store.reserved, 24); assert.equal(store.recoveryStatus().liveReservedBytes, 16);
+  assert.equal(store.recoveryStatus().totalReservedBytes, 24); assert.equal(store.recoveryStatus().budgetBytes, 32);
+  await assert.rejects(store.begin({ ...meta, operationKey: 'legacy-budget-excess', size: 16, sha256: hash(Buffer.alloc(16)) }), { code: 'ARTIFACT_QUOTA' });
+  store = await f.openStore(); assert.equal(store.reserved, 24);
+  assert.equal((await store.begin({ ...meta, size: 16, sha256: hash(Buffer.alloc(16)) })).id, live.id);
+  await store.remove(live.id); assert.equal(store.reserved, 8); assert.equal(store.recoveryStatus().liveReservedBytes, 0);
+  f.advance(3_600_000); await store.reap(); assert.equal(store.reserved, 8);
+  assert.deepEqual(await capture(), baseline);
+});
+
+test('actual retained legacy bytes still enforce the shared staging budget', async t => {
+  const f = await fixture(t), id = 'd'.repeat(48), bytes = Buffer.alloc(33, 7);
+  await writeFile(join(f.root, id + '.part'), bytes, { mode: 0o600 });
+  const store = await f.openStore();
+  assert.equal(store.reserved, bytes.length); assert.equal(store.recoveryStatus().liveReservedBytes, 0);
+  await assert.rejects(store.begin({ ...meta, size: 1, sha256: hash(Buffer.from([1])) }), { code: 'ARTIFACT_QUOTA' });
+  await store.reap(); assert.deepEqual(await readFile(join(f.root, 'orphans', id + '.part')), bytes);
+  assert.equal((await f.openStore()).reserved, bytes.length);
+});
+
+test('unsafe legacy ownership remains preserved and conservatively charged without following or unlinking it', async t => {
+  const f = await fixture(t), id = 'c'.repeat(48), source = join(f.root, 'legacy-evidence.bin'), part = join(f.root, id + '.part');
+  await writeFile(source, payload, { mode: 0o600 }); await link(source, part);
+  const before = await stat(part), store = await f.openStore(), recovery = store.recoveryStatus();
+  assert.equal(recovery.unsafeEntries, 1); assert.equal(recovery.entries[0].reason, 'unsafe_legacy_entry');
+  assert.equal(recovery.reservedBytes, 32); assert.equal(recovery.liveReservedBytes, 0); assert.equal(store.reserved, 32);
+  await assert.rejects(store.begin(meta), { code: 'ARTIFACT_QUOTA' });
+  await store.reap(); assert.deepEqual(await readFile(part), payload); assert.deepEqual(await readFile(source), payload);
+  const after = await stat(part); assert.equal(after.ino, before.ino); assert.equal(after.nlink, before.nlink); assert.equal(after.mtimeMs, before.mtimeMs);
+  assert.equal((await f.openStore()).recoveryStatus().unsafeEntries, 1);
 });
 
 test('artifact allocation is governed by byte budget rather than a fixed item count', async t => {

@@ -63,7 +63,7 @@ async function fixture(t, cleanupConfirmed) {
     assert.doesNotMatch(JSON.stringify(response), /cleanup-contract-fixture|cleanup-owner-fixture|ticket=|approvalTicket/);
     return response.structuredContent.data;
   };
-  return { app, runtime, stages, foreign, effects, ok };
+  return { app, runtime, stages, foreign, effects, ok, client };
 }
 
 for (const cleanupConfirmed of [true, false]) test('MCP observes Windows staged refusal with ' + (cleanupConfirmed ? 'confirmed' : 'unconfirmed') + ' cleanup without replay', { timeout: 30000 }, async t => {
@@ -100,4 +100,28 @@ for (const cleanupConfirmed of [true, false]) test('MCP observes Windows staged 
   await f.app.store.reap(); assert.equal(f.app.store.has(transfer.id), false);
   assert.deepEqual(await f.ok('observe', { id: pending.id }), observed);
   assert.deepEqual(f.effects, { upload: 1, publish: 0, cleanup: 1 });
+});
+
+test('MCP records local download quota as failed and not dispatched while preserving the exact quota cause', { timeout: 30000 }, async t => {
+  const f = await fixture(t, true);
+  for (let index = 0; index < 4; index++) await f.app.store.begin({ fileName: 'reserved.bin', remotePath: 'C:/approved/reserved-' + index + '.bin',
+    size: 64, sha256: hash(Buffer.alloc(64)), operationKey: 'quota-pressure-blocker-' + index });
+  const baseline = f.app.store.list(); assert.equal(f.app.store.reserved, 256);
+  const refused = await f.client.callTool({ name: 'artifact-begin', arguments: { operationKey: 'quota-small-upload-contract', target: 'windows',
+    expectedTargetRevision: f.runtime.revision, fileName: 'small.bin', remotePath: 'C:/approved/small.bin', size: 1, sha256: hash(Buffer.from([1])) } });
+  assert.equal(refused.isError, true); assert.equal(refused.structuredContent.error.code, 'ARTIFACT_QUOTA');
+  assert.equal(f.app.queue.listAll().length, 0); assert.deepEqual(f.app.store.list(), baseline);
+  const input = { kind: 'download', operationKey: 'quota-before-ssh-contract', target: 'windows', expectedTargetRevision: f.runtime.revision,
+    remotePath: 'C:/approved/input.bin' };
+  const pending = await f.ok('submit', input); assert.equal(pending.state, 'pending');
+  const terminal = await f.app.queue.approve(pending.id); assert.equal(terminal.state, 'failed');
+  const observed = await f.ok('observe', { id: pending.id });
+  assert.equal(observed.state, 'failed'); assert.equal(observed.failed, true); assert.equal(observed.failureCode, 'ARTIFACT_QUOTA');
+  assert.equal(observed.remoteOutcome, 'not_started'); assert.equal(observed.execution.remoteState, 'not_dispatched');
+  assert.equal(observed.execution.reason, 'input_failed'); assert.equal(observed.execution.cleanupComplete, true);
+  assert.equal(observed.execution.requiresReconciliation, false); assert.equal(terminal.result.failure.automaticReplay, false);
+  assert.deepEqual(await f.ok('observe', { operationKey: input.operationKey }), observed);
+  assert.deepEqual(await f.ok('submit', input), observed);
+  assert.deepEqual(f.app.store.list(), baseline); assert.equal(f.app.store.reserved, 256);
+  assert.deepEqual(f.effects, { upload: 0, publish: 0, cleanup: 0 }); assert.equal(f.app.queue.listAll().length, 1);
 });

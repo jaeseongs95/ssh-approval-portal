@@ -17,14 +17,14 @@ export function createMcpAdapter({ queue, files, settings, capabilities, uiHtml,
     const server = new McpServer({ name: 'SSH Approval Portal', version: metadata.version }, {
       // Seven desktop-input members plus 128 pointer actions (one array slot + four members each).
       maxToolInputElements: 7 + 128 * 5,
-      instructions: 'Contract 1.8. Start with targets. Submit native JSON operations using a stable operationKey, then observe the same ID or key. Owner approval and server policy remain authoritative. Observe includes output only when includeOutput=true; its wait timeout does not stop execution. Remote file bytes use artifact-begin/chunk/status/finish and submit(kind=download)/artifact-read. No local CLI, stdio server, client setup or UI is required. Upload requires authorized bytes already accessible to the caller. Prefer dedicated artifact tools for file transfer. Shell-based transfer is not categorically prohibited; the caller remains responsible for exact encoding and escaping, required approval and preventing unauthorized exposure, and server policy still applies. Never expose credentials, self-approve, or replay an unknown outcome. ui-* and show-* tools are private owner UI actions. Desktop support is available only when explicitly reported and connected.',
+      instructions: 'Contract 1.8. Start with targets. Submit native JSON operations using a stable operationKey, then observe the same ID or key. Owner approval and server policy remain authoritative. Observe includes output only when includeOutput=true; its wait timeout does not stop execution. Remote file bytes use artifact-begin/chunk/status/finish and submit(kind=download)/artifact-read. No local CLI, stdio server, client setup or UI is required. Upload requires authorized bytes already accessible to the caller. Prefer dedicated artifact tools for file transfer. Shell-based transfer is not categorically prohibited; the caller remains responsible for exact encoding and escaping, required approval and preventing unauthorized exposure, and server policy still applies. Never expose credentials, self-approve, or replay an unknown outcome. show-* tools display optional owner UI cards. Only ui-* tools are private owner UI actions. Desktop support is available only when explicitly reported and connected.',
     });
     registerPublicTools(server, { operations, files, settings, targets, shutdownSignal, requestSignal, admission, desktop });
     server.registerResource('SSH approval card', URI, { mimeType: 'text/html;profile=mcp-app' }, async () => ({ contents: [{ uri: URI, mimeType: 'text/html;profile=mcp-app', text: uiHtml, _meta: { ui: { csp: { connectDomains: [], resourceDomains: [] }, prefersBorder: true } } }] }));
-    const tool = (name, schema, outputSchema, handler, { description = name, readOnly = false } = {}) => server.registerTool(name, {
+    const tool = (name, schema, outputSchema, handler, { description = name, readOnly = false, appOnly = false } = {}) => server.registerTool(name, {
       description, inputSchema: z.object(schema).strict(), outputSchema,
       annotations: { readOnlyHint: readOnly, destructiveHint: !readOnly },
-      _meta: { ui: { resourceUri: URI, visibility: ['app'] } },
+      _meta: { ui: { resourceUri: URI, visibility: appOnly ? ['app'] : ['model', 'app'] } },
     }, async (args, extra) => {
       try { return await handler(args, { ...extra, signal: AbortSignal.any([shutdownSignal, requestSignal, extra?.signal].filter(Boolean)) }); }
       catch (error) { return refused(error); }

@@ -35,6 +35,7 @@ export class Artifacts {
   #items = new Map();
   #removing = new Map();
   #reserved = 0;
+  #legacyReserved = 0;
   #orphans = [];
   #root;
   #now;
@@ -45,12 +46,14 @@ export class Artifacts {
     this.#root = resolve(root); this.#now = now; this.#canReap = canReap;
     Object.defineProperties(this, { maxBytes: { value: maxBytes, enumerable: true }, budget: { value: budget, enumerable: true } });
   }
-  get reserved() { return this.#reserved; }
+  get reserved() { return this.#reserved + this.#legacyReserved; }
   get size() { return this.#items.size; }
   has(id) { return this.#items.has(id); }
   list() { return Object.freeze([...this.#items.values()].map(snapshot)); }
   recoveryStatus() { return Object.freeze({ state: this.#orphans.length ? 'recovery-required' : 'clear',
-    reservedBytes: this.#orphans.reduce((n, x) => n + x.reservedBytes, 0), entries: Object.freeze(this.#orphans.map(x => Object.freeze({ ...x }))) }); }
+    reservedBytes: this.#legacyReserved, liveReservedBytes: this.#reserved, totalReservedBytes: this.reserved, budgetBytes: this.budget,
+    unsafeEntries: this.#orphans.filter(x => x.reason === 'unsafe_legacy_entry').length,
+    entries: Object.freeze(this.#orphans.map(x => Object.freeze({ ...x }))) }); }
   hasActiveWork() { return this.#removing.size > 0 || [...this.#items.values()].some(x => x.busy || x.pinned || x.state === 'staging'); }
   async prepareRoot() {
     await mkdir(this.#root, { recursive: true, mode: 0o700 });
@@ -147,7 +150,7 @@ export class Artifacts {
     // budget and expose recovery diagnostics while allowing non-file work.
     if (!privateFile(st)) {
       const entry = { id: name.slice(0, -5), size: st.size, reservedBytes: this.budget, reason: 'unsafe_legacy_entry', resumable: false };
-      this.#orphans.push(entry); this.#reserved += entry.reservedBytes; return;
+      this.#orphans.push(entry); this.#legacyReserved += entry.reservedBytes; return;
     }
     const directory = join(this.#root, 'orphans');
     await mkdir(directory, { mode: 0o700 }).catch(error => { if (error.code !== 'EEXIST') throw error; });
@@ -156,7 +159,7 @@ export class Artifacts {
     const occupied = new Set(await readdir(directory));
     while (occupied.has(id + '.part') || occupied.has(id + '.json')) id = randomBytes(24).toString('hex');
     const recovery = { version: 1, id, originalId: name.slice(0, -5), size: st.size,
-      reservedBytes: Math.max(this.maxBytes, st.size), reason: 'legacy_metadata_missing', resumable: false };
+      reservedBytes: st.size, reason: 'legacy_metadata_missing', resumable: false };
     this.#writeManifest(join(directory, id + '.json'), recovery);
     await rename(source, join(directory, id + '.part'));
     this.#syncRoot(directory); this.#syncRoot();
@@ -168,12 +171,12 @@ export class Artifacts {
     if (!privateDirectory(st)) throw Error('Unsafe artifact recovery directory');
     for (const name of await readdir(directory)) if (/^[a-f0-9]{48}\.part$/.test(name)) {
       const info = await lstat(join(directory, name));
-      const entry = { version: 1, id: name.slice(0, -5), size: info.size, reservedBytes: privateFile(info) ? Math.max(this.maxBytes, info.size) : this.budget,
+      const entry = { version: 1, id: name.slice(0, -5), size: info.size, reservedBytes: privateFile(info) ? info.size : this.budget,
         reason: privateFile(info) ? 'legacy_metadata_missing' : 'unsafe_legacy_entry', resumable: false };
       const metadata = join(directory, entry.id + '.json');
       try { if (!privateFile(await lstat(metadata))) entry.metadataUnsafe = true; }
       catch (error) { if (error.code !== 'ENOENT') throw error; this.#writeManifest(metadata, entry); }
-      this.#orphans.push(entry); this.#reserved += entry.reservedBytes;
+      this.#orphans.push(entry); this.#legacyReserved += entry.reservedBytes;
     }
   }
   async #unlinkOwned(path) {
@@ -192,7 +195,7 @@ export class Artifacts {
   }
   #allocate(meta, pinned = false) {
     if (!Number.isSafeInteger(meta.size) || meta.size < 0 || meta.size > this.maxBytes) throw Error('File exceeds transfer limit');
-    if (this.#reserved + charge(meta) > this.budget) throw Error('Staging budget exhausted');
+    if (this.reserved + charge(meta) > this.budget) throw Object.assign(Error('Staging budget exhausted'), { code: 'ARTIFACT_QUOTA' });
     const id = randomBytes(24).toString('hex');
     const item = { ...meta, id, path: join(this.#root, id + '.part'), received: 0, sequence: 0, last: null, chunks: [],
       state: 'staging', expiresAt: this.#now() + EXPIRES_MS, busy: false, pinned };

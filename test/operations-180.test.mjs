@@ -96,6 +96,24 @@ test('source/download admission uses the same key guard and snapshots mutable so
   assert.equal(downloadOne.id, downloadTwo.id); assert.equal(f.admissions.filter(item => item.kind === 'download').length, 1);
 });
 
+test('download context is validated, retained and bound to the same durable key with optional revision', async t => {
+  const f = fixture(t);
+  for (const revision of [undefined, f.target.revision]) {
+    const download = { kind: 'download', operationKey: revision ? 'download-context-fixed-revision' : 'download-context-current-revision', target: 'alpha',
+      remotePath: '/tmp/report.txt', context: 'Read the authorized test fixture.', displayContext: '승인된 시험 파일을 내려받습니다.',
+      ...(revision ? { expectedTargetRevision: revision } : {}) };
+    const job = await f.operations.submit(download);
+    assert.equal(f.journal.get(job.id).input.operation.context, download.context);
+    assert.equal(f.journal.get(job.id).input.operation.displayContext, download.displayContext);
+    assert.equal(f.journal.get(job.id).targetRevision, f.target.revision);
+    assert.equal((await f.operations.submit(download)).id, job.id);
+    await assert.rejects(f.operations.submit({ ...download, context: 'A changed claim.' }), { code: 'OPERATION_KEY_CONFLICT' });
+  }
+  const count = f.journal.usage().count;
+  await assert.rejects(f.operations.submit({ kind: 'download', operationKey: 'download-context-private-rejected', target: 'alpha', remotePath: '/tmp/file', context: 'password=synthetic-private-marker' }), { code: 'COMMAND_CONTEXT_CONTAINS_SECRET' });
+  assert.equal(f.journal.usage().count, count);
+});
+
 test('a failed admission releases its key without inventing acceptance or replaying accepted work', { timeout: 5000 }, async t => {
   let attempts = 0;
   const f = fixture(t, { beforeAdmission: () => { if (++attempts === 1) throw Object.assign(Error('refused'), { code: 'PRE_ADMISSION_REFUSAL' }); } });

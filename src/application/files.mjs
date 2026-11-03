@@ -1,6 +1,7 @@
 import { remotePath, windowsRemotePath } from '../domain/validation.mjs';
 import { fileTargetFields, fileTargetBinding } from '../domain/file-target-binding.mjs';
 import { CHUNK_BYTES } from '../contracts/ports.mjs';
+import { callerContext } from '../domain/execution-context.mjs';
 
 /** File use cases know metadata and ports; bytes never become host protocol objects. */
 export function createFileService({ store, queue, transfers, platform = 'linux', maxConcurrent = 2, now = () => Date.now(), claimImport = () => () => {} }) {
@@ -71,9 +72,11 @@ export function createFileService({ store, queue, transfers, platform = 'linux',
       imports.add(work);
       try { return await work; } finally { imports.delete(work); release(); }
     },
-    requestDownload({ remotePath: path, elevate = false }, binding) {
+    requestDownload({ remotePath: path, elevate = false, context = '', displayContext = '' }, binding) {
       validate(path, elevate); guard();
-      const job = queue.submitOperation({ kind: 'download', remotePath: path, elevate, ...fileTargetFields(binding) }, elevate ? 'privileged' : 'read-only');
+      context = callerContext(context); displayContext = callerContext(displayContext);
+      const job = queue.submitOperation({ kind: 'download', remotePath: path, elevate,
+        ...(context ? { context } : {}), ...(displayContext ? { displayContext } : {}), ...fileTargetFields(binding) }, elevate ? 'privileged' : 'read-only');
       try { queue.startDownload(job.id); } catch (error) { if (!queue.rejectAutomaticDispatch(job.id, error)) { /* Normal policy keeps the owner request; never auto-retry. */ } }
       return queue.get(job.id);
     },

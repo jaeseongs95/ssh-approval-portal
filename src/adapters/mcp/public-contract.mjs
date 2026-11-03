@@ -87,7 +87,7 @@ export const publicOutputSchemas = {
 
 function failure(code) { throw Object.assign(Error(code), { code, executionAttempted: false }); }
 export function validateSubmit(input) {
-  const fields = { command: ['command', 'context', 'displayContext'], source: ['source', 'argv', 'cwd', 'elevate', 'context', 'displayContext'], download: ['remotePath', 'elevate'] };
+  const fields = { command: ['command', 'context', 'displayContext'], source: ['source', 'argv', 'cwd', 'elevate', 'context', 'displayContext'], download: ['remotePath', 'elevate', 'context', 'displayContext'] };
   const common = ['kind', 'operationKey', 'target', 'expectedTargetRevision'];
   if (Object.keys(input).some(field => ![...common, ...fields[input.kind]].includes(field))) failure('OPERATION_INPUT_CONFLICT');
   if (input.kind === 'command' && !input.command || input.kind === 'source' && (!input.source || !input.cwd)

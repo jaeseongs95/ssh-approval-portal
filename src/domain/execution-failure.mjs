@@ -1,7 +1,7 @@
 // Error text and caller-controlled properties never become diagnostic metadata.
 const failures = new WeakMap();
 const stages = new Set(['ssh_connect', 'ssh_channel', 'ssh_execution', 'output_reservation', 'output_capture', 'operation']);
-const codes = new Set(['SSH_CONNECT_FAILED', 'SSH_CHANNEL_OPEN_FAILED', 'SSH_EXECUTION_FAILED', 'OUTPUT_CAPACITY', 'OUTPUT_CAPTURE_FAILED', 'OPERATION_FAILED']);
+const codes = new Set(['SSH_CONNECT_FAILED', 'SSH_CHANNEL_OPEN_FAILED', 'SSH_EXECUTION_FAILED', 'OUTPUT_CAPACITY', 'OUTPUT_CAPTURE_FAILED', 'OPERATION_FAILED', 'ARTIFACT_QUOTA']);
 const outcomes = new Set(['not_started', 'unknown', 'completed']);
 const unknown = Object.freeze({ stage: 'operation', code: 'OPERATION_FAILED', remoteOutcome: 'unknown', automaticReplay: false });
 const object = value => value !== null && ['object', 'function'].includes(typeof value);

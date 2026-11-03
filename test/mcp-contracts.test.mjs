@@ -78,13 +78,29 @@ test('actual MCP HTTP refuses invalid or secret descriptions without dispatch or
   } finally { await f.close(); }
 });
 
-test('public MCP surface has nine operation tools plus desktop tools while private UI is app-only', async () => {
+// UI contract oracle: OpenAI Plugins reference _meta.ui.visibility defaults to ['model', 'app'];
+// show-* launches cards from the model, while privileged ui-* actions remain app-only.
+// TEST red/green: run this unchanged test against the baseline and fixed server.mjs in isolated copies.
+test('public MCP surface exposes operation and card tools while owner UI actions stay app-only', async () => {
   const f = await fixture(); try {
-    const tools = (await f.client.listTools()).tools, publicTools = tools.filter(tool => !tool._meta?.ui?.visibility?.includes('app'));
-    assert.deepEqual(publicTools.filter(tool => !tool.name.startsWith('desktop-')).map(tool => tool.name), publicNames);
-    const desktopNames = publicTools.filter(tool => tool.name.startsWith('desktop-')).map(tool => tool.name);
+    const tools = (await f.client.listTools()).tools, modelTools = tools.filter(tool => !tool._meta?.ui?.visibility || tool._meta.ui.visibility.includes('model'));
+    const showNames = ['show-ui-probe', 'show-approval', 'show-file-transfer'];
+    assert.deepEqual(modelTools.filter(tool => !tool.name.startsWith('desktop-')).map(tool => tool.name), [...publicNames, ...showNames]);
+    const desktopNames = modelTools.filter(tool => tool.name.startsWith('desktop-')).map(tool => tool.name);
     if (desktopNames.length) assert.deepEqual(desktopNames, ['desktop-open', 'desktop-observe', 'desktop-input', 'desktop-close']);
-    for (const tool of tools.filter(tool => /^(?:ui-|show-)/.test(tool.name))) assert.deepEqual(tool._meta.ui.visibility, ['app']);
+    const privateTools = tools.filter(tool => tool.name.startsWith('ui-'));
+    assert.deepEqual(privateTools.map(tool => tool.name), ['ui-decide-request', 'ui-upload-begin', 'ui-upload-chunk', 'ui-upload-finish', 'ui-download-link', 'ui-read-command-output']);
+    for (const tool of privateTools) assert.deepEqual(tool._meta.ui.visibility, ['app']);
+    const resources = (await f.client.listResources()).resources;
+    assert.equal(resources.length, 1); assert.equal(resources[0].mimeType, 'text/html;profile=mcp-app');
+    for (const name of showNames) {
+      const tool = tools.find(tool => tool.name === name);
+      assert.deepEqual(tool._meta.ui.visibility, ['model', 'app']);
+      assert.equal(tool._meta.ui.resourceUri, resources[0].uri);
+    }
+    const resource = await f.client.readResource({ uri: resources[0].uri });
+    assert.equal(resource.contents[0].mimeType, 'text/html;profile=mcp-app');
+    assert.equal(resource.contents[0].text, '<html>fixture</html>');
     for (const old of ['get-client-capabilities', 'get-client-setup', 'run-command', 'read-command', 'run-python-source', 'request-upload', 'read-command-output']) assert.equal(tools.some(tool => tool.name === old), false, old);
     const result = await f.call('submit', { kind: 'command', operationKey, command: 'sudo id' });
     assert.deepEqual(JSON.parse(result.content[0].text), result.structuredContent);
@@ -128,6 +144,12 @@ test('native submit rejects unknown fields, wrong kinds, missing payload and inv
     assert.equal(f.calls.submit.length, 0);
     const source = 'print("한글")\r\n'; assert.equal((await f.call('submit', { kind: 'source', operationKey, source, cwd: '/tmp', argv: ['one'] })).structuredContent.ok, true); assert.equal(f.calls.submit[0].source, source);
     assert.equal((await f.call('submit', { kind: 'download', operationKey, remotePath: '/tmp/file' })).structuredContent.ok, true);
+    for (const revision of [undefined, 'a'.repeat(64)]) {
+      const download = { kind: 'download', operationKey, remotePath: '/tmp/file', context: 'Download the authorized fixture.', displayContext: '승인된 시험 파일을 내려받습니다.',
+        ...(revision ? { expectedTargetRevision: revision } : {}) };
+      assert.equal((await f.call('submit', download)).structuredContent.ok, true);
+      assert.deepEqual(f.calls.submit.at(-1), download);
+    }
   } finally { await f.close(); }
 });
 
