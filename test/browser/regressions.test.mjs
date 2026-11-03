@@ -185,7 +185,9 @@ test('server names distinguish installations, remain text, and accompany pending
     const text = await page.locator('#request-detail-target').textContent();
     assert.ok(text.includes(malicious)); assert.ok(text.includes('Target server · 운영 대상 & SSH')); assert.ok(text.includes('(fixture)'));
   }
-  assert.equal(await page.locator('img').count(), 0); assert.equal(await page.evaluate(() => window.nameInjected), undefined);
+  assert.equal(await page.locator('img').count(), 1);
+  assert.equal(await page.locator('#desktop-viewer > img:not([src])').count(), 1, 'only the inert desktop viewer image may exist');
+  assert.equal(await page.evaluate(() => window.nameInjected), undefined);
   server.state.bridgeDisplayName = '운영 중계기'; await page.reload();
   assert.equal(await page.title(), '운영 중계기 · 운영 대상 & SSH · SSH approvals');
 }));

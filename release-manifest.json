@@ -1194,6 +1194,11 @@
       "sha256": "f9ddfc1e5a4be36596906d018cd540065cda0174327361d30212cd65176ab542"
     },
     {
+      "path": "test/browser/capacity-desktop.test.mjs",
+      "size": 14419,
+      "sha256": "0925386a72a7685009e9166fc7b0aed6fe195d7c89258c2d7ae7a1f28e7d9395"
+    },
+    {
       "path": "test/browser/card-bootstrap.js",
       "size": 4096,
       "sha256": "649983c6e797ee9ba2c6be2245d194e072d455a9190c365394a5f2ec1a3a58fa"
@@ -1240,8 +1245,8 @@
     },
     {
       "path": "test/browser/regressions.test.mjs",
-      "size": 44559,
-      "sha256": "fae3ba906038d578a6b23055bbf317d62a303c51445ab721377864d6c63d3996"
+      "size": 44693,
+      "sha256": "97c885e0a543dfd48bcc3d9f60acdf82ef292a720802f916feb0412218cc67bf"
     },
     {
       "path": "test/browser/run.mjs",
@@ -2275,8 +2280,8 @@
     },
     {
       "path": "web/index.html",
-      "size": 40007,
-      "sha256": "36bfea78949063b64e29c7dfd100b999419a79e358af2b2b8e5c3e0b8a73fa72"
+      "size": 40114,
+      "sha256": "b72827c63203fd2df819a39c15774c8bda17aa5fb1439f3bf1aca3af1d786e70"
     },
     {
       "path": "web/src/agent-cli.js",
