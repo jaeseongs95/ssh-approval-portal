@@ -204,7 +204,7 @@ public static class RestrictedAdministratorTest {
     $authorization = Request 'authorize'
     $authorization.elevate = $true
     $authorized = Call $authorization
-    Assert-True ($authorized.exitCode -eq 0 -and $authorized.data.authorized -and $authorized.data.elevated) 'connected administrator token is authorized'
+    Assert-True ($authorized.exitCode -eq 0 -and $authorized.data.authorized -and $authorized.data.elevated) ('connected administrator token is authorized; ' + (Describe-Result $authorized))
     Assert-True (!(Test-Path -LiteralPath (Join-Path $script:stage ($authorization.id + '.part')))) 'authorization does not create a staged file'
     $reinstall = Invoke-Script $installer $arguments
     Assert-True ($reinstall.exitCode -eq 1 -and $reinstall.data.errorCode -eq 'DESTINATION_EXISTS') 'existing installation must be preserved'
