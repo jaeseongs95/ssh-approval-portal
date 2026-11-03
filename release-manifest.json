@@ -269,6 +269,11 @@
       "sha256": "01fbe5b366fa353fc5191f7e3ca0e4da301bac44d0b31965a9e48f239ab6bdd0"
     },
     {
+      "path": "scripts/capture-testmode-evidence.mjs",
+      "size": 4732,
+      "sha256": "50c22c89be40faa0e347d9c15a9c722c66603602bb748338ef751c2ed0db9744"
+    },
+    {
       "path": "scripts/check-agent-cli-login.py",
       "size": 7258,
       "sha256": "b996fde34f63a927fae7c6714d9c65f7bb3b673b639d07199de466b1b0220ea5"

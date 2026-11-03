@@ -88,17 +88,27 @@ jobs:
           restore_testmode_transfer() { cp "$RUNNER_TEMP/testmode-transfers-final.mjs" "$path"; }
           trap restore_testmode_transfer EXIT
           git show bef841dd94625983fa8ae5a27d6ed1e9af143e9f:"$path" > "$path"
-          set +e
-          node --test --test-reporter=tap test/test-mode-file-path-policy.test.mjs > "$RUNNER_TEMP/testmode-path-red.tap" 2>&1
-          red=$?
-          set -e
-          printf 'testmode_red_exit=%s\n' "$red"
-          cat "$RUNNER_TEMP/testmode-path-red.tap"
-          test "$red" -ne 0
-          grep -Eq '^# fail [1-9][0-9]*$' "$RUNNER_TEMP/testmode-path-red.tap"
+          red=0
+          node scripts/capture-testmode-evidence.mjs "$RUNNER_TEMP/testmode-evidence/path-red.receipt.json" path > "$RUNNER_TEMP/testmode-evidence-red.tap" 2>&1 || red=$?
+          cat "$RUNNER_TEMP/testmode-evidence-red.tap"
+          printf 'TESTMODE_RED_EXIT=%s\n' "$red"
+          test "$red" -eq 1
+          grep -Eq '^# fail [1-9][0-9]*$' "$RUNNER_TEMP/testmode-evidence-red.tap"
           restore_testmode_transfer
-          node --test --test-reporter=tap test/test-mode-file-path-policy.test.mjs
-          node --test --test-reporter=tap test/test-mode-file-policy-application.test.mjs
+          node scripts/capture-testmode-evidence.mjs "$RUNNER_TEMP/testmode-evidence/path-green.receipt.json" path
+          node scripts/capture-testmode-evidence.mjs "$RUNNER_TEMP/testmode-evidence/app-green.receipt.json" app
+          git rev-parse HEAD > "$RUNNER_TEMP/testmode-evidence/candidate.sha"
+          sha256sum test/test-mode-file-path-policy.test.mjs test/test-mode-file-policy-application.test.mjs > "$RUNNER_TEMP/testmode-evidence/test-files.sha256"
+      - name: Preserve test-mode file policy evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: testmode-file-policy-evidence
+          path: |
+            ${{ runner.temp }}/testmode-evidence/
+            ${{ runner.temp }}/testmode-evidence-red.tap
+          if-no-files-found: warn
+          retention-days: 7
       - name: Remote JSON upload detects missing provider-neutral transport
         shell: bash
         run: |
