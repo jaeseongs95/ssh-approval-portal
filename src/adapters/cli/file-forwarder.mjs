@@ -32,7 +32,7 @@ export function validateFileManifest(value) {
     return Object.freeze({ version: 1, origin: parsed.origin, capabilities: Object.freeze(capabilities) });
   } catch { throw fail('INVALID_FILE_MANIFEST'); }
 }
-async function readPrivateJson(path, maxBytes) {
+export async function readPrivateJson(path, maxBytes) {
   const before = await lstat(path);
   if (!before.isFile() || before.isSymbolicLink() || before.size > maxBytes ||
       (process.platform !== 'win32' && (before.mode & 0o077))) throw fail('PRIVATE_FILE_UNAVAILABLE');
