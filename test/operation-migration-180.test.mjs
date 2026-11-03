@@ -135,6 +135,17 @@ test('an existing 1.8 deployment requires authoritative completed migration evid
   }
 });
 
+test('migration reuse rejects an archive symlink before opening its target', { skip: process.platform === 'win32' }, async t => {
+  const { root, dataRoot } = await fixture(t), appRoot = join(root, 'app'), generation = 'a'.repeat(64);
+  await mkdir(join(appRoot, 'deployments'), { recursive: true, mode: 0o700 });
+  legacy(join(dataRoot, 'command-automation.sqlite'), [{ id: 'a'.repeat(48), state: 'completed', createdAt: 10 }]);
+  const plan = { appRoot, dataRoot, generation }, release = fileURLToPath(new URL('../', import.meta.url));
+  await prepareDeploymentMigration(plan, release);
+  const archived = join(appRoot, 'legacy-archives', generation, 'command-automation.sqlite');
+  await rm(archived); await symlink(join(root, 'absent-target.sqlite'), archived);
+  await assert.rejects(prepareDeploymentMigration({ ...plan, generation: 'b'.repeat(64) }, release), { code: 'UNSAFE_LEGACY_FILE' });
+});
+
 test('recovery checks payloads and new durable stores, not only operations rows', async t => {
   const { dataRoot } = await fixture(t);
   await writeFile(join(dataRoot, 'operations.sqlite'), 'baseline');

@@ -75,7 +75,7 @@ async function swapActive(plan, target) {
 }
 async function fileDigest(path) {
   const digest = createHash('sha256');
-  for await (const chunk of createReadStream(path)) digest.update(chunk);
+  for await (const chunk of createReadStream(path, { flags: constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) })) digest.update(chunk);
   return digest.digest('hex');
 }
 /** Hash every supported durable store and artifact; an unfamiliar entry blocks recovery. */
@@ -131,7 +131,12 @@ export async function prepareDeploymentMigration(plan, release, { previousGenera
   if (completed) {
     if (completed.type !== 'portal.deployment-migration.v1' || completed.dataRoot !== plan.dataRoot || !/^[a-f0-9]{64}$/.test(completed.generation) || !validMigration(completed.migration)) fail('INVALID_MIGRATION_RECEIPT');
     const archiveRoot = join(plan.appRoot, 'legacy-archives', completed.generation);
-    for (const source of completed.migration.sources) if (await fileDigest(join(archiveRoot, source.source)) !== source.sha256) fail('LEGACY_ARCHIVE_MISMATCH');
+    for (const path of [dirname(archiveRoot), archiveRoot]) { const st = await lstat(path); if (!st.isDirectory() || st.isSymbolicLink()) fail('UNSAFE_LEGACY_ARCHIVE'); }
+    for (const source of completed.migration.sources) {
+      const path = join(archiveRoot, source.source), st = await lstat(path);
+      if (!st.isFile() || st.isSymbolicLink() || st.nlink !== 1) fail('UNSAFE_LEGACY_FILE');
+      if (await fileDigest(path) !== source.sha256) fail('LEGACY_ARCHIVE_MISMATCH');
+    }
     const { readLegacyOperationHistory } = await import('../src/adapters/storage/operation-migration.mjs');
     const inventory = readLegacyOperationHistory(archiveRoot);
     if (inventory.length !== completed.migration.sources.length || completed.migration.sources.some(source => !inventory.some(item => item.source === source.source && item.sha256 === source.sha256 && item.rows.length === source.imported))) fail('LEGACY_ARCHIVE_MISMATCH');
