@@ -780,8 +780,8 @@
     },
     {
       "path": "src/adapters/storage/artifacts.mjs",
-      "size": 21504,
-      "sha256": "b66fac94a41ba608bbe4d6b6c5646bff1eef0d44681fe74a952e66f26e4d8cb3"
+      "size": 21917,
+      "sha256": "665c23f820d0df91a0605deb4acabf7128c560104b165d28fc5e1914c70ea8e5"
     },
     {
       "path": "src/adapters/storage/command-output.mjs",
@@ -830,8 +830,8 @@
     },
     {
       "path": "src/adapters/storage/scoped-artifacts.mjs",
-      "size": 1626,
-      "sha256": "1ddf7f4b8f2707efb4300ef3a4a9126397c71b2851aa29b997c987e3981d05a0"
+      "size": 1654,
+      "sha256": "767da3f25bd07feea97aa08eb7173aeeca62d74c618a78814ca327d71224ec0e"
     },
     {
       "path": "src/application/admin-browser-sessions.mjs",
@@ -930,8 +930,8 @@
     },
     {
       "path": "src/contracts/ports.mjs",
-      "size": 3889,
-      "sha256": "2b1bfa67ca89bee4c49d4081643ca60fc7f1f39503de38dc13c246694781a928"
+      "size": 3950,
+      "sha256": "35f06706dff2c57e1d3d41be8d1e8654f3c3e162fffa0f4f27bc4213cc46f284"
     },
     {
       "path": "src/domain/agent-cli.mjs",
@@ -1127,6 +1127,11 @@
       "path": "test/artifact-durability.test.mjs",
       "size": 13910,
       "sha256": "73ee91c957e5ec454920a90496984ef9548cf22e9baeaa4de8064d603d5120f1"
+    },
+    {
+      "path": "test/artifact-restart-unavailable.test.mjs",
+      "size": 12802,
+      "sha256": "1e3eabd0a45557b037549dfdacbff9fdbeac0e59823666397738f6bea98c42ce"
     },
     {
       "path": "test/artifacts.test.mjs",
