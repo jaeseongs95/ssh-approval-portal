@@ -20,6 +20,23 @@
 
 관리 backend의 포트·실행 명령은 제품이 정한다. `configured`는 실제 로그온 성공을 뜻하지 않고 `backend_unavailable`은 필요한 네이티브 기능이 없다는 뜻이다. Windows 세션 결속을 확인하기 전에는 `desktop_ready`로 광고하지 않는다. 같은 Windows 계정의 재접속은 기존 사람 세션에 영향을 줄 수 있으므로 전용 시험 계정·서버를 사용한다.
 
+### Windows 전용 계정 준비
+
+`scripts/provision-gui-account.mjs`는 등록된 Windows 대상의 SSH 관리자 권한으로 새 GUI 전용 계정을 준비한다. 기본 실행은 읽기 전용 점검이며, `--apply`를 명시한 경우에만 계정과 자격을 생성한다. 현재 `targets`에서 얻은 revision과 같은 대상을 지정해야 한다.
+
+```sh
+node scripts/provision-gui-account.mjs --target windows --expected-revision <현재64자리revision> --username ssh-gui-agent --secret-ref secret://local-file/windows-gui-agent
+# 점검 결과와 대상 확인 후, 같은 명령에 --apply를 추가한다.
+```
+
+실행 주체는 중계기 서비스 계정이며 기존 서비스의 환경 설정을 사용한다. `BRIDGE_SECRET_STORE_DIR`가 설정되어 있어야 한다. 실행 계정이 읽을 수 없는 환경 파일의 권한을 넓히지 말고, 기존 서비스 관리자가 사용하는 EnvironmentFile 주입 경로를 사용한다.
+
+새 계정은 Remote Desktop Users 그룹에만 추가한다. 기존 계정·같은 비밀 참조가 있으면 중단하며, 관리자 그룹·SAS·NLA·GPO·자동 로그온·기존 세션은 변경하지 않는다. 비밀번호는 무작위로 만들고 메모리와 비공개 stdin으로 전달한다. 모델·argv·환경 변수·일반 로그로 출력하지 않는다.
+
+`local-file`은 서비스 계정 소유의 디렉터리 `0700`, JSON 파일 `0600`으로 접근을 제한하는 로컬 저장소다. 암호화 금고나 Windows 자격 증명 관리자를 뜻하지 않는다. 같은 UID 또는 root가 탈취된 상황까지 격리하지 않는다. 공개 응답은 `secret://local-file/<이름>` 참조와 operation ID·진행 상태만 제공한다.
+
+원격 생성 결과가 불명확하거나 그룹·게시 단계에서 실패하면 비공개 자격과 상태를 남기고 멈춘다. 자동 재시도·기존 계정 삭제·비밀번호 초기화는 하지 않는다. 같은 인자에 `--status <operation ID>`를 추가해 보존된 상태를 조회하고 실제 계정·저장소 상태와 대조한다.
+
 TigerVNC의 [공식 Xvnc 문서](https://tigervnc.org/doc/Xvnc.html)는 `-localhost`, `-rfbport`, `-SecurityTypes`, `-geometry`를 설명한다. 예를 들어 승인된 격리 시험에서 `Xtigervnc :99 -localhost yes -rfbport 5900 -SecurityTypes None -geometry 1280x720 -depth 24 -AcceptCutText=0 -SendCutText=0`로 새 X11 framebuffer를 만들 수 있다. 설치된 실행 파일·desktop 프로그램·실행 계정·DISPLAY·X 인증은 시험 담당자가 확인해야 한다. 이 명령은 서버에서 실행 완료된 증거가 아니다.
 
 ## 서비스 계약
