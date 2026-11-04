@@ -95,6 +95,25 @@ test('completed without a publication acknowledgement never consumes the move so
   assert.equal((await f.service.move(destination(uuid))).requestId, first.requestId); assert.equal(f.requests, 1);
 });
 
+test('publication checks bind source bytes, audit status and optional execution metadata', async t => {
+  for (const scenario of ['no-execution', 'wrong-size', 'wrong-hash', 'audit-failed', 'uncertain-execution']) await t.test(scenario, async child => {
+    const f = await fixture(child), uuid = await f.stage(), first = await f.service.move(destination(uuid));
+    const result = structuredClone(success);
+    if (scenario === 'no-execution') delete result.execution;
+    if (scenario === 'wrong-size') result.data.size++;
+    if (scenario === 'wrong-hash') result.data.sha256 = '0'.repeat(64);
+    if (scenario === 'audit-failed') f.queue.get(first.requestId).auditError = 'Final audit write failed';
+    if (scenario === 'uncertain-execution') result.execution.cleanupComplete = false;
+    f.journal.update(first.requestId, { state: 'queued' }); f.journal.update(first.requestId, { state: 'starting' });
+    // A durable completed record from the existing file publication contract may
+    // predate execution-envelope normalization. Optional metadata cannot waive
+    // byte identity, audit certainty, or an explicit contrary execution result.
+    f.journal.update(first.requestId, { state: 'completed', result });
+    assert.equal((await f.service.stat({ uuid })).state, scenario === 'no-execution' ? 'moved' : 'ready');
+    assert.equal(f.requests, 1);
+  });
+});
+
 test('recovery removes only proven unaccepted clone provenance; missing-journal queue identity is preserved', async t => {
   const f = await fixture(t), uuid = await f.stage(), original = f.store.staged(uuid, f.ownerId);
   const action = { action: 'copy', operationKey: 'crash-before-accept-01', requestKey: 'opaque:crash-before-accept-01', inputDigest: 'd'.repeat(64),
