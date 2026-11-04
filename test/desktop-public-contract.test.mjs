@@ -4,6 +4,7 @@ import { registerPublicTools, publicInputSchemas, publicOutputSchemas } from '..
 import { transportDesktopState } from '../src/domain/desktop-state.mjs';
 
 const sessionId = '20000000-0000-4000-8000-000000000001', revision = 'a'.repeat(64);
+const issuedKey = 'a'.repeat(32) + '_1100_' + 'b'.repeat(32) + '_' + 'c'.repeat(43);
 const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==';
 const session = { sessionId, epoch: 1, targetId: 'linux', targetRevision: revision, expiresAt: 200, idleExpiresAt: 150,
   kind: 'desktop', readiness: { ...transportDesktopState(100), sessionRef: 'linux:display-17', resourceGeneration: 'b'.repeat(64) },
@@ -37,7 +38,7 @@ test('GUI-CONTRACT agents receive actual image content without an owner UI card'
 test('GUI-CONTRACT discovery advertises server configuration without opening a desktop', async () => {
   let opens = 0, capabilityInput;
   const descriptor = { configured: true, backend: 'xvnc', lifecycle: 'managed', status: 'configured',
-    reason: null, actions: ['observe', 'pointer', 'key', 'text'], requiresUserClient: false };
+    reason: null, actions: ['observe', 'pointer', 'key', 'text'], requiresUserClient: false, openRequest: { requestKey: issuedKey, expiresAt: 1100 } };
   const tools = fixture({ open: async () => { opens++; }, capabilities: async args => { capabilityInput = args; return descriptor; } });
   const reply = await tools.get('targets').handler({});
   assert.equal(reply.structuredContent.ok, true);
@@ -45,11 +46,11 @@ test('GUI-CONTRACT discovery advertises server configuration without opening a d
   assert.deepEqual(capabilityInput, { target: 'linux', expectedTargetRevision: revision });
   assert.equal(opens, 0);
   const description = tools.get('desktop-open').options.description;
-  assert.match(description, /stable requestKey/); assert.doesNotMatch(description, /one-time authentication|RDP window|portal/);
+  assert.match(description, /server-issued requestKey/); assert.doesNotMatch(description, /one-time authentication|RDP window|portal/);
 });
 
 test('GUI-CONTRACT open request key and status recovery metadata use the common schema', async () => {
-  assert.equal(publicInputSchemas['desktop-open'].safeParse({ target: 'linux', expectedTargetRevision: revision, requestKey: 'open-recovery' }).success, true);
+  assert.equal(publicInputSchemas['desktop-open'].safeParse({ target: 'linux', expectedTargetRevision: revision, requestKey: issuedKey }).success, true);
   assert.equal(publicInputSchemas['desktop-open'].safeParse({ target: 'linux', expectedTargetRevision: revision, requestKey: 'bad key' }).success, false);
   assert.equal(publicInputSchemas['desktop-open'].safeParse({ target: 'linux', expectedTargetRevision: revision }).success, true);
   const reply = await fixture({ status: async () => session }).get('desktop-status').handler({ sessionId, epoch: 1 });
@@ -67,7 +68,7 @@ test('GUI-CONTRACT cleanup receipts preserve each provider outcome and typed ref
     assert.equal(publicOutputSchemas['desktop-close'].safeParse(reply.structuredContent).success, true);
   }
   const failure = await fixture({ open: async () => { throw Object.assign(Error('private detail'), { code: 'DESKTOP_OPEN_CONFLICT' }); } })
-    .get('desktop-open').handler({ target: 'linux', expectedTargetRevision: revision, requestKey: 'recovery' });
+    .get('desktop-open').handler({ target: 'linux', expectedTargetRevision: revision, requestKey: issuedKey });
   assert.equal(failure.isError, true); assert.equal(failure.structuredContent.error.code, 'DESKTOP_OPEN_CONFLICT');
   assert.doesNotMatch(JSON.stringify(failure), /private detail/);
 });

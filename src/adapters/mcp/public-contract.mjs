@@ -47,9 +47,10 @@ export const operationData = object({ id: identifier, operationKey: key.nullable
 const policy = object({ testServerConfigured: z.boolean(), testServerActive: z.boolean(), mode: z.enum(['configured-root', 'test-server-bypass', 'ssh-account-permissions']),
   allowedRoot: z.string().nullable(), allowedRootObservedAt: integer.nullable(), osPermissionsEnforced: z.literal(true),
   pathSafetyEnforced: z.literal(true), elevationRequiresExplicitRequest: z.literal(true) });
+const openRequestKey = z.string().regex(/^[a-f0-9]{32}_[0-9]{1,16}_[a-f0-9]{32}_[A-Za-z0-9_-]{43}(?![\s\S])/);
 const guiDescriptor = object({ configured: z.boolean(), backend: z.enum(['rfb', 'xvnc', 'rdp']).nullable(),
   lifecycle: z.enum(['attached', 'managed']).nullable(), status: z.enum(['disabled', 'configured', 'backend_unavailable']),
-  reason: z.string().max(256).nullable(), actions: z.array(z.enum(['observe', 'pointer', 'key', 'text'])).max(4), requiresUserClient: z.literal(false) });
+  reason: z.string().max(256).nullable(), actions: z.array(z.enum(['observe', 'pointer', 'key', 'text'])).max(4), requiresUserClient: z.literal(false), openRequest: object({ requestKey: openRequestKey, expiresAt: integer }).optional() });
 const targetData = object({ targets: z.array(object({ id: target, displayName: z.string(), enabled: z.boolean(), isDefault: z.boolean(),
   revision: digest.nullable(), platform: z.enum(['linux', 'windows']), capabilities: object({
     commandShell: z.enum(['posix', 'windows-powershell-5.1']), fileTransfer: z.boolean(), elevatedFileTransfer: z.boolean(),
@@ -262,7 +263,7 @@ const actions = z.discriminatedUnion('type', [
   object({ type: z.literal('text'), text: z.string().min(1).max(2048).refine(value => value.isWellFormed(), 'Well-formed text required') }),
 ]);
 Object.assign(publicInputSchemas, {
-  'desktop-open': object({ target, expectedTargetRevision: digest, requestKey: z.string().regex(/^[A-Za-z0-9_-]{1,128}(?![\s\S])/).optional() }),
+  'desktop-open': object({ target, expectedTargetRevision: digest, requestKey: openRequestKey.optional() }),
   'desktop-status': object(sessionIdentity),
   'desktop-observe': object(sessionIdentity),
   'desktop-input': object({ ...sessionIdentity, frameId: z.string().min(1).max(96), geometryRevision: z.number().int().positive(),
@@ -281,7 +282,7 @@ function presentSession(value) {
 }
 function registerDesktopTools(register, desktop) {
   register('desktop-open', async args => presentSession(await desktop.open(args)),
-    'Open an agent GUI lease within the target advertised server capabilities and existing authority. Use a stable requestKey to recover the same pending or opened lease after a lost reply; never reuse it for another target/revision or after closing. Retain sessionId and epoch. Observe actual image content, send explicit pointer/key/text actions, and observe the result. Inspect readiness and provider capabilities; transport_ready alone is not verified desktop_ready. Unsupported or unavailable server capabilities are typed failures; do not assume another display or client installation is required.');
+    'Open an agent GUI lease within the target advertised server capabilities and existing authority. Use the server-issued requestKey returned in targets.gui.openRequest to recover the same pending or opened lease after a lost reply; retain it until its expiresAt and never replace it after uncertainty. Keys are not authority. Expired keys or keys from another server generation are refused, and a closed key cannot reopen a lease. Legacy keyless callers have no open-recovery guarantee. Retain sessionId and epoch. Observe actual image content, send explicit pointer/key/text actions, and observe the result. Inspect readiness and provider capabilities; transport_ready alone is not verified desktop_ready. Unsupported or unavailable server capabilities are typed failures; do not assume another display or client installation is required.');
   register('desktop-status', async args => presentSession(await desktop.status(args)),
     'Read GUI readiness, provider capabilities, nextInputSequence and the latest non-private input receipt without screen pixels. Reconnect using the same sessionId and epoch, inspect status, then observe a fresh frame. Distinguish transport_ready, auth_required and verified desktop_ready. OS-specific diagnostics do not prove capture/input binding. Unknown input outcomes never authorize replay as a new request.');
   register('desktop-observe', async args => {
