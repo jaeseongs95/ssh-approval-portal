@@ -30,8 +30,8 @@
     },
     {
       "path": "app.mjs",
-      "size": 45932,
-      "sha256": "e151f00466635e47de197672457fec2da219c691ca24419372b7598cbfc3dbaf"
+      "size": 46034,
+      "sha256": "d025281b6daefc81b82686284ada2450d711effe8d9d2334d42a092b21fbd514"
     },
     {
       "path": "bridge.mjs",
@@ -545,8 +545,8 @@
     },
     {
       "path": "scripts/maintenance.mjs",
-      "size": 4043,
-      "sha256": "aaa0fdc52bd5fce07895326861c19767ceb317fc84e4a5d7c62aaea43a5597f8"
+      "size": 4617,
+      "sha256": "2b4675224187103324fc444cb36c58acbbbf98eaea9e10a1b848ee34fd1836da"
     },
     {
       "path": "scripts/manage-agent-cli-windows.ps1",
@@ -985,8 +985,8 @@
     },
     {
       "path": "src/adapters/storage/offline-preservation.mjs",
-      "size": 4903,
-      "sha256": "a1efccb356a5f1c27c7ac5a4cd88f3d23b0094fa094f55ef3052d06b623be64e"
+      "size": 4921,
+      "sha256": "1640eb74882f7476806db9a1f642e1a6594f1793875a7bbcbab5432682b531d2"
     },
     {
       "path": "src/adapters/storage/operation-migration.mjs",
@@ -995,13 +995,13 @@
     },
     {
       "path": "src/adapters/storage/operation-store.mjs",
-      "size": 22178,
-      "sha256": "58430ade4404f458eec6409d5b6077dd731c39ba0906f199de292a543bcbbb0c"
+      "size": 23214,
+      "sha256": "b39cc06c3873657ac461fec648044190deb428101b5d437b07e3d9f5d891d346"
     },
     {
       "path": "src/adapters/storage/preservation-verification.mjs",
-      "size": 7183,
-      "sha256": "e3e8d9273de103d8099d92fbbd9eabb6cac776dccbbca698a95d0ebb866921fa"
+      "size": 11389,
+      "sha256": "cd7f97d611c1c8d7048a5dbd8232793024251bed1fc698c414ba8d72cbbd7e95"
     },
     {
       "path": "src/adapters/storage/runtime-capacity-state.mjs",
@@ -1535,8 +1535,8 @@
     },
     {
       "path": "test/command-output-stream180.test.mjs",
-      "size": 13414,
-      "sha256": "80e2563923c5ea925c64743c96a10edc52592a4bdd00adcb23082e7f4ba289c5"
+      "size": 13565,
+      "sha256": "27c1ce6d5886cedf61b18f3cea21404db6e9872012101b4f751cdeb8437ec048"
     },
     {
       "path": "test/command-output.test.mjs",
@@ -2100,18 +2100,18 @@
     },
     {
       "path": "test/preservation-baseline.test.mjs",
-      "size": 13386,
-      "sha256": "02269c6a98a933b3a46f100a2ccbac105f26d5d5a7d594b10717542b6d19e9ac"
+      "size": 14920,
+      "sha256": "89a4b5334ab2c92b09319a291e467163d3f35278a32bebb1f4e9cfc5fb0087d8"
     },
     {
       "path": "test/preservation-integration.test.mjs",
-      "size": 7877,
-      "sha256": "c9203b2f5c3244abfed02194059a5a56b1fbd61cd5e6e52a38e418545dcfc4be"
+      "size": 12760,
+      "sha256": "c9c7939d63d8fa29e6d2b1ea6a3d88f5d0f98f10a4bd4e47e113febe788fb331"
     },
     {
       "path": "test/preservation-verification.test.mjs",
-      "size": 7483,
-      "sha256": "e92eb44f8bc5ce7b06f8b097e6710f63bfcc87604ea95dc80a2fcd2e7b642ddd"
+      "size": 12163,
+      "sha256": "fc079f44d7c3423ed4e76748186d2b3ffde1bf81a7e2744054dabfd2a55ba4e2"
     },
     {
       "path": "test/python-source-ssh.test.mjs",
