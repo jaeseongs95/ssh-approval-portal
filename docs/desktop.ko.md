@@ -78,6 +78,12 @@ close·TTL은 보유 key/button 해제를 전송한다. RFB는 기존 세션을 
 
 서버의 앱 logout 경로에서는 인증된 principal의 `closeOwner(ownerId)`를 호출해 open 응답 유실로 클라이언트가 ID를 모르는 lease도 정리한다. 이 메서드는 해당 owner만 닫고 다른 owner의 GUI를 유지한다. 앱 전체 종료용 `closeAll()`과 구분한다. 브라우저 비정상 종료·네트워크 단절로 logout이 도착하지 않으면 idle TTL이 정리한다.
 
+## 설치와 native 중계 ABI
+
+bridge의 native 설치 지원 범위인 Ubuntu22.04/24.04와 optional Windows GUI 중계 runtime의 ABI 범위는 다르다. 동봉 FreeRDP private bundle은 Ubuntu24.04 x86_64에서 빌드·검증했으며 glibc/OpenSSL3/ICU74와 X11 공유 라이브러리를 요구한다. Ubuntu22.04에서는 이 bundle의 실행 호환성을 보장하지 않는다. Linux ARM64에서는 bundle 준비를 건너뛰며 해당 native GUI capability는 unavailable로 남는다. 일반 bridge·CLI 기능은 이 optional capability 때문에 중단하지 않는다.
+
+fresh install과 Docker build는 기존 strict `prepare-freerdp-input.py`로 bundle을 검증·준비한다. native installer는 파일 권한 정리 뒤에 준비해 실행파일0755를 보존한다. Ubuntu24.04 x64에서 공유 라이브러리가 부족하면 필요한 runtime 패키지 설치를 시도하고 실패는 경고로 남긴다. bundle 자체의 무결성 실패는 설치를 중단한다. Docker 이미지의 private bundle 준비는 Xvnc·WM·Python 등 provider의 다른 필수 실행기가 준비됐다는 뜻이 아니다. 실행기·ABI·서버 지원이 부족하면 해당 GUI provider가 typed unavailable을 반환하며, 준비만으로 GUI 기능을 켜지 않는다.
+
 ## 자원 상한과 검증
 
 기본·최대 framebuffer는 4,194,304픽셀이다. 수신 wire buffer는 `maxPixels * 8 + 65536`바이트·8,192 chunk 이내이며 한 observe의 raw rectangle 합은 `maxPixels * 2`픽셀 이내다. rectangle 좌표, desktop 이름 4KiB, clipboard 64KiB, 메시지 256개, rectangle 4,096개를 검사한다. handshake와 observe는 각각 기본 10초 기한을 갖는다. PNG 생성 시 framebuffer·수신 buffer 외에 scanline·압축·base64 사본이 생기므로 GUI quota를 메모리에 맞게 정한다.
