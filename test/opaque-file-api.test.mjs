@@ -119,6 +119,19 @@ test('public API distinguishes quota, absent UUID, full-file hash and unavailabl
     assert.deepEqual(await request(undefined, absent, { method: 'GET' }), { routed: true, status: 503, value: { error: 'OPAQUE_FILES_UNAVAILABLE' } });
     assert.equal((await request(undefined, absent, { method: 'GET', permission: null })).status, 403);
   });
+  for (const [name, nativeCodes, status, code] of [
+    ['storage permission', ['EACCES', 'EPERM'], 403, 'ARTIFACT_PERMISSION_DENIED'],
+    ['physical storage full', ['ENOSPC', 'EDQUOT'], 507, 'ARTIFACT_STORAGE_FULL'],
+    ['storage IO failure', ['EIO'], 500, 'ARTIFACT_STORAGE_IO_ERROR'],
+  ]) await t.test(name, async () => {
+    for (const nativeCode of nativeCodes) for (const asynchronous of [false, true]) {
+      const error = Object.assign(Error('private backing path /srv/private/data.part'), { code: nativeCode, path: '/srv/private/data.part', provenance: { ownerId: 'private-owner' } });
+      const store = { beginStaged() { if (asynchronous) return Promise.reject(error); throw error; } };
+      const service = createOpaqueFileService({ store, ownerId: 'verified-owner-realm', queue: { maintenance: false },
+        journal: { find: () => null, get: () => null }, submissions: { run() { throw Error('No execution admission'); } } });
+      assert.deepEqual(await request(service, '/api/artifacts', { body: metadata(Buffer.from('x')) }), { routed: true, status, value: { error: code } });
+    }
+  });
 });
 
 test('only allowlisted typed codes and exact legacy literals cross the public error boundary', async () => {
@@ -128,6 +141,7 @@ test('only allowlisted typed codes and exact legacy literals cross the public er
     { error: Error('Staged file unavailable'), status: 404, code: 'ARTIFACT_NOT_FOUND' },
     { error: Error('Staged file unavailable /srv/private/data.part'), status: 500, code: 'ARTIFACT_INTERNAL_ERROR' },
     { error: Object.assign(Error('ENOENT /srv/private/data.part'), { code: 'ENOENT', path: '/srv/private/data.part', provenance: { ownerId: 'private-owner' } }), status: 500, code: 'ARTIFACT_INTERNAL_ERROR' },
+    { error: Object.assign(Error('An unrelated service denied its operation'), { code: 'EACCES' }), status: 500, code: 'ARTIFACT_INTERNAL_ERROR' },
     { error: Object.assign(Error('private stack and credentials'), { code: 'ARBITRARY_PRIVATE_ERROR' }), status: 500, code: 'ARTIFACT_INTERNAL_ERROR' },
   ]) {
     const service = { stat: () => { throw scenario.error; } };
