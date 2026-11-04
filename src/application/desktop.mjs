@@ -1,22 +1,43 @@
-import { randomUUID, createHash } from 'node:crypto';
-import { desktopBinding, desktopActions, desktopFail } from '../domain/desktop-lease.mjs';
+import { randomUUID, randomBytes, createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import { desktopBinding, desktopActions, desktopFail, DesktopError } from '../domain/desktop-lease.mjs';
 import { desktopState, transportDesktopState } from '../domain/desktop-state.mjs';
 
 /** authorize enforces existing owner approval. GUI leases are never reassigned or pooled. */
-export function createDesktopService({ adapter, authorize, verifyTarget, maxSessions = 2, maxPerOwner = 1,
+export function createDesktopService({ adapter, authorize, verifyTarget, maxSessions = 2, maxPerOwner = 1, requestCapacity = maxSessions,
   ttlMs = 900_000, idleTtlMs = 120_000, now = Date.now, id = randomUUID, onClose = () => {}, leaseKey = binding => binding.targetId,
   readState, canViewProtected = () => false } = {}) {
   if (typeof adapter?.open !== 'function' || typeof authorize !== 'function' || typeof verifyTarget !== 'function'
     || typeof leaseKey !== 'function' || typeof canViewProtected !== 'function' || readState !== undefined && typeof readState !== 'function'
-    || ![maxSessions, maxPerOwner, ttlMs, idleTtlMs].every(value => Number.isSafeInteger(value) && value > 0)) desktopFail('DESKTOP_INVALID_CONFIG');
+    || ![maxSessions, maxPerOwner, requestCapacity, ttlMs, idleTtlMs].every(value => Number.isSafeInteger(value) && value > 0)) desktopFail('DESKTOP_INVALID_CONFIG');
   const sessions = new Map(), resources = new Map(), openRequests = new Map(); let shuttingDown = false;
+  let observedNow = 0;
+  const clock = () => (observedNow = Math.max(observedNow, now()));
+  const openGeneration = randomBytes(16).toString('hex'), openSigningKey = randomBytes(32);
+  const openSignature = body => createHmac('sha256', openSigningKey).update(body).digest('base64url');
+  const refuseOpen = code => { throw Object.assign(new DesktopError(code), { executionAttempted: false, retryable: code === 'DESKTOP_OPEN_REQUEST_CAPACITY' }); };
+  const openExpiry = requestKey => {
+    if (typeof requestKey !== 'string' || !/^[a-f0-9]{32}_[0-9]{1,16}_[a-f0-9]{32}_[A-Za-z0-9_-]{43}(?![\s\S])/.test(requestKey)) refuseOpen('DESKTOP_INVALID_INPUT');
+    const [generation, expiry, nonce] = requestKey.split('_');
+    // Base64url signatures themselves can contain underscores.
+    const body = generation + '_' + expiry + '_' + nonce, supplied = requestKey.slice(body.length + 1);
+    if (generation !== openGeneration) refuseOpen('DESKTOP_OPEN_REQUEST_GENERATION');
+    const expected = openSignature(body);
+    if (supplied.length !== expected.length || !timingSafeEqual(Buffer.from(supplied), Buffer.from(expected))) refuseOpen('DESKTOP_INVALID_INPUT');
+    const expiresAt = Number(expiry), at = clock();
+    if (!Number.isSafeInteger(expiresAt) || expiresAt <= at) refuseOpen('DESKTOP_OPEN_REQUEST_EXPIRED');
+    if (expiresAt > at + ttlMs) refuseOpen('DESKTOP_INVALID_INPUT');
+    return expiresAt;
+  };
+  const pruneOpenRequests = at => {
+    for (const [key, record] of openRequests) if (!record.item && record.expiresAt <= at) openRequests.delete(key);
+  };
   const stateGeneration = state => JSON.stringify([state?.resourceGeneration ?? null, state?.generation ?? null, state?.sessionRef ?? null]);
   const view = item => ({ sessionId: item.id, ...item.binding, expiresAt: item.expiresAt, idleExpiresAt: item.idleExpiresAt, kind: 'desktop', readiness: item.readiness,
     ...(item.capabilities ? { capabilities: { ...item.capabilities } } : {}), lifecycle: item.lifecycle ?? 'attached',
     nextInputSequence: item.inputSequence + 1, lastInputReceipt: item.lastInput?.digest === null ? null : item.lastInput?.receipt ? { ...item.lastInput.receipt } : null });
   const live = item => {
     if (item.closed) desktopFail('DESKTOP_CLOSED');
-    if (now() >= item.expiresAt || now() >= item.idleExpiresAt) desktopFail('DESKTOP_EXPIRED');
+    if (clock() >= item.expiresAt || clock() >= item.idleExpiresAt) desktopFail('DESKTOP_EXPIRED');
     if (item.desktop?.closed) desktopFail('DESKTOP_TRANSPORT_CLOSED');
   };
   const active = async item => {
@@ -28,7 +49,7 @@ export function createDesktopService({ adapter, authorize, verifyTarget, maxSess
   };
   const refreshState = async item => {
     const state = desktopState(item.desktop?.readState ? await item.desktop.readState()
-      : readState ? await readState(item.binding, item.controller.signal) : transportDesktopState(now()));
+      : readState ? await readState(item.binding, item.controller.signal) : transportDesktopState(clock()));
     await active(item);
     if (item.readiness && stateGeneration(item.readiness) !== stateGeneration(state)) item.frame = undefined;
     item.readiness = state;
@@ -74,7 +95,7 @@ export function createDesktopService({ adapter, authorize, verifyTarget, maxSess
   };
   const arm = item => {
     clearTimeout(item.timer);
-    item.timer = setTimeout(() => { void dispose(item).catch(error => { item.cleanupError = error; }); }, Math.max(1, Math.min(item.expiresAt, item.idleExpiresAt) - now()));
+    item.timer = setTimeout(() => { void dispose(item).catch(error => { item.cleanupError = error; }); }, Math.max(1, Math.min(item.expiresAt, item.idleExpiresAt) - clock()));
     item.timer.unref?.();
   };
   const lookup = ({ sessionId, ownerId, epoch }) => {
@@ -90,7 +111,7 @@ export function createDesktopService({ adapter, authorize, verifyTarget, maxSess
     const result = item.tail.then(async () => {
       try {
         await active(item); const value = await work(item); await active(item);
-        item.idleExpiresAt = Math.min(item.expiresAt, now() + idleTtlMs); arm(item); return value;
+        item.idleExpiresAt = Math.min(item.expiresAt, clock() + idleTtlMs); arm(item); return value;
       } catch (error) {
         if (!['DESKTOP_STALE_FRAME', 'DESKTOP_INVALID_INPUT', 'DESKTOP_INPUT_SEQUENCE', 'DESKTOP_INPUT_CONFLICT',
           'DESKTOP_AUTH_REQUIRED', 'DESKTOP_SESSION_BINDING_UNVERIFIED', 'DESKTOP_SESSION_QUERY_FAILED',
@@ -106,13 +127,20 @@ export function createDesktopService({ adapter, authorize, verifyTarget, maxSess
     item.tail = result.catch(() => {}); return result;
   };
   return {
+    issueOpenRequest() {
+      if (shuttingDown) desktopFail('DESKTOP_CLOSED');
+      const expiresAt = clock() + ttlMs;
+      const body = openGeneration + '_' + expiresAt + '_' + randomBytes(16).toString('hex');
+      return { requestKey: body + '_' + openSignature(body), expiresAt };
+    },
     async open(args) {
       if (shuttingDown) desktopFail('DESKTOP_CLOSED');
       const binding = desktopBinding(args);
-      if (args.requestKey !== undefined && (typeof args.requestKey !== 'string' || !/^[A-Za-z0-9_-]{1,128}(?![\s\S])/.test(args.requestKey))) desktopFail('DESKTOP_INVALID_INPUT');
       if (await authorize(binding) !== true) desktopFail('DESKTOP_NOT_AUTHORIZED');
       if (shuttingDown) desktopFail('DESKTOP_CLOSED');
       if (verifyTarget(binding) !== true) desktopFail('DESKTOP_STALE_TARGET');
+      const requestExpiresAt = args.requestKey === undefined ? null : openExpiry(args.requestKey);
+      pruneOpenRequests(clock());
       const requestId = args.requestKey === undefined ? null : JSON.stringify([binding.ownerId, args.requestKey]);
       const previous = requestId === null ? null : openRequests.get(requestId);
       if (previous) {
@@ -124,13 +152,13 @@ export function createDesktopService({ adapter, authorize, verifyTarget, maxSess
           await refreshState(item); return view(item);
         });
       }
-      // Retain closed/failed request keys for this service lifetime; never evict into a duplicate open.
-      if (requestId !== null && openRequests.size >= 4096) desktopFail('DESKTOP_OPEN_REQUEST_CAPACITY');
+      // Only unexpired recovery records count; closed keys remain non-replayable after pruning.
+      if (requestId !== null && openRequests.size >= requestCapacity) refuseOpen('DESKTOP_OPEN_REQUEST_CAPACITY');
       const resourceKey = leaseKey(binding);
       if (typeof resourceKey !== 'string' || !resourceKey || resourceKey.length > 512) desktopFail('DESKTOP_INVALID_CONFIG');
       if (resources.has(resourceKey)) desktopFail('DESKTOP_RESOURCE_BUSY');
       if (sessions.size >= maxSessions || [...sessions.values()].filter(item => item.binding.ownerId === binding.ownerId).length >= maxPerOwner) desktopFail('DESKTOP_CAPACITY');
-      const item = { id: id(), binding, resourceKey, requestId, expiresAt: now() + ttlMs, idleExpiresAt: now() + idleTtlMs,
+      const item = { id: id(), binding, resourceKey, requestId, expiresAt: requestExpiresAt ?? clock() + ttlMs, idleExpiresAt: clock() + idleTtlMs,
         controller: new AbortController(), tail: Promise.resolve(), pending: 0, frameSequence: 0, inputSequence: 0, closed: false };
       // Reserve synchronously before opening the transport; no quota oversubscription.
       sessions.set(item.id, item); resources.set(resourceKey, item.id); arm(item);
@@ -155,7 +183,7 @@ export function createDesktopService({ adapter, authorize, verifyTarget, maxSess
           throw error;
         }
       });
-      if (requestId !== null) openRequests.set(requestId, { binding, item, promise: item.openResult });
+      if (requestId !== null) openRequests.set(requestId, { binding, item, promise: item.openResult, expiresAt: requestExpiresAt });
       return item.openResult;
     },
     status(args) {

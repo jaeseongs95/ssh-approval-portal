@@ -195,28 +195,30 @@ test('GUI-AGENT an open request recovers one pending lease and keeps its origina
   const { desktop } = fixture();
   const { service } = fixture({ adapter: { open: () => { opens++; return gate.promise; } } });
   t.after(() => service.closeAll());
-  const first = service.open({ ...binding, requestKey: 'recover-open' });
-  const recovered = service.open({ ...binding, epoch: 2, requestKey: 'recover-open' });
+  const requestKey = service.issueOpenRequest().requestKey;
+  const first = service.open({ ...binding, requestKey });
+  const recovered = service.open({ ...binding, epoch: 2, requestKey });
   while (!opens) await new Promise(resolve => setImmediate(resolve));
   assert.equal(opens, 1);
-  await assert.rejects(service.open({ ...binding, targetId: 'other', requestKey: 'recover-open' }), error('DESKTOP_OPEN_CONFLICT'));
-  await assert.rejects(service.open({ ...binding, targetRevision: 'b'.repeat(64), requestKey: 'recover-open' }), error('DESKTOP_OPEN_CONFLICT'));
+  await assert.rejects(service.open({ ...binding, targetId: 'other', requestKey }), error('DESKTOP_OPEN_CONFLICT'));
+  await assert.rejects(service.open({ ...binding, targetRevision: 'b'.repeat(64), requestKey }), error('DESKTOP_OPEN_CONFLICT'));
   gate.resolve(desktop);
   const a = await first, b = await recovered;
   assert.equal(a.sessionId, b.sessionId); assert.equal(b.epoch, 1); assert.equal(opens, 1);
   const identity = { ownerId: binding.ownerId, sessionId: a.sessionId, epoch: 1 };
   await service.close(identity);
-  await assert.rejects(service.open({ ...binding, requestKey: 'recover-open' }), error('DESKTOP_CLOSED'));
+  await assert.rejects(service.open({ ...binding, requestKey }), error('DESKTOP_CLOSED'));
   assert.equal(opens, 1);
 });
 
 test('GUI-AGENT open recovery rechecks authority and isolates request keys by authority', async t => {
   const { service, state } = fixture(); t.after(() => service.closeAll());
-  const first = await service.open({ ...binding, requestKey: 'authority-key' });
+  const requestKey = service.issueOpenRequest().requestKey;
+  const first = await service.open({ ...binding, requestKey });
   state.authorized = false;
-  await assert.rejects(service.open({ ...binding, requestKey: 'authority-key' }), error('DESKTOP_NOT_AUTHORIZED'));
+  await assert.rejects(service.open({ ...binding, requestKey }), error('DESKTOP_NOT_AUTHORIZED'));
   state.authorized = true;
-  const other = await service.open({ ...binding, ownerId: 'owner-b', targetId: 'other', requestKey: 'authority-key' });
+  const other = await service.open({ ...binding, ownerId: 'owner-b', targetId: 'other', requestKey });
   assert.notEqual(other.sessionId, first.sessionId);
   await assert.rejects(service.open({ ...binding, requestKey: 'bad key' }), error('DESKTOP_INVALID_INPUT'));
   await assert.rejects(service.open({ ...binding, requestKey: 'bad-final-newline\n' }), error('DESKTOP_INVALID_INPUT'));
@@ -225,8 +227,9 @@ test('GUI-AGENT open recovery rechecks authority and isolates request keys by au
 test('GUI-AGENT failed opens keep their request key and never open another transport', async () => {
   let opens = 0;
   const { service } = fixture({ adapter: { open: async () => { opens++; throw Object.assign(Error('open failed'), { code: 'DESKTOP_TRANSPORT_CLOSED' }); } } });
-  await assert.rejects(service.open({ ...binding, requestKey: 'failed-open' }), error('DESKTOP_TRANSPORT_CLOSED'));
-  await assert.rejects(service.open({ ...binding, requestKey: 'failed-open' }), error('DESKTOP_CLOSED'));
+  const requestKey = service.issueOpenRequest().requestKey;
+  await assert.rejects(service.open({ ...binding, requestKey }), error('DESKTOP_TRANSPORT_CLOSED'));
+  await assert.rejects(service.open({ ...binding, requestKey }), error('DESKTOP_CLOSED'));
   assert.equal(opens, 1); assert.equal(service.size(), 0);
 });
 
@@ -295,4 +298,52 @@ test('GUI-AGENT cleanup distinguishes attached preservation, managed termination
     assert.equal(receipt.releaseSent, true); assert.equal(service.size(), 0);
     assert.equal(receipt.cleanupError, scenario.failure);
   }
+});
+
+
+test('GUI-AGENT issuance is stateless and signed keys bind expiry and server generation', async t => {
+  let opens = 0;
+  const make = () => fixture({ ttlMs: 100, requestCapacity: 1, adapter: { open: async () => {
+    opens++; return { release: () => ({ sent: true }), close() {} };
+  } } });
+  const first = make(), restarted = make(); t.after(() => first.service.closeAll()); t.after(() => restarted.service.closeAll());
+  const issued = first.service.issueOpenRequest();
+  assert.equal(issued.expiresAt, 1100); assert.equal(opens, 0);
+  assert.notEqual(first.service.issueOpenRequest().requestKey, issued.requestKey);
+  assert.equal(opens, 0);
+  const tampered = issued.requestKey.replace('_1100_', '_1101_');
+  await assert.rejects(first.service.open({ ...binding, requestKey: tampered }), error('DESKTOP_INVALID_INPUT'));
+  await assert.rejects(restarted.service.open({ ...binding, requestKey: issued.requestKey }), value =>
+    value.code === 'DESKTOP_OPEN_REQUEST_GENERATION' && value.executionAttempted === false);
+  const lease = await first.service.open({ ...binding, requestKey: issued.requestKey });
+  assert.equal(lease.expiresAt, issued.expiresAt); assert.equal(opens, 1);
+});
+
+test('GUI-AGENT expired recovery records release admission without replay across a backward clock', async t => {
+  let opens = 0;
+  const { service, state } = fixture({ ttlMs: 100, requestCapacity: 2, adapter: { open: async () => {
+    opens++; return { release: () => ({ sent: true }), close() {} };
+  } } });
+  t.after(() => service.closeAll());
+  const old = [];
+  for (let n = 0; n < 2; n++) {
+    const issued = service.issueOpenRequest(); old.push(issued);
+    const lease = await service.open({ ...binding, requestKey: issued.requestKey });
+    await service.close({ ownerId: binding.ownerId, sessionId: lease.sessionId, epoch: binding.epoch });
+    await assert.rejects(service.open({ ...binding, requestKey: issued.requestKey }), error('DESKTOP_CLOSED'));
+  }
+  const waiting = service.issueOpenRequest();
+  await assert.rejects(service.open({ ...binding, requestKey: waiting.requestKey }), value =>
+    value.code === 'DESKTOP_OPEN_REQUEST_CAPACITY' && value.retryable === true && value.executionAttempted === false);
+  assert.equal(opens, 2);
+  state.time = 1100;
+  for (const issued of [...old, waiting]) await assert.rejects(service.open({ ...binding, requestKey: issued.requestKey }), error('DESKTOP_OPEN_REQUEST_EXPIRED'));
+  const fresh = service.issueOpenRequest();
+  const lease = await service.open({ ...binding, requestKey: fresh.requestKey });
+  assert.equal(opens, 3); assert.equal(lease.expiresAt, 1200);
+  await service.close({ ownerId: binding.ownerId, sessionId: lease.sessionId, epoch: binding.epoch });
+  // Both old tombstones were pruned by the fresh admission. A clock reversal must not revive them.
+  state.time = 1000;
+  for (const issued of old) await assert.rejects(service.open({ ...binding, requestKey: issued.requestKey }), error('DESKTOP_OPEN_REQUEST_EXPIRED'));
+  assert.equal(service.issueOpenRequest().expiresAt, 1200); assert.equal(opens, 3);
 });
