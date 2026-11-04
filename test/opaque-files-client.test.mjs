@@ -6,7 +6,7 @@ import { promisify } from 'node:util';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createOpaqueFilesClient, opaqueOperationKeyValid } from '../src/adapters/cli/opaque-files-client.mjs';
+import { createOpaqueFilesClient, opaqueOperationKeyValid, opaqueUuidValid } from '../src/adapters/cli/opaque-files-client.mjs';
 import { createOwnerHttpSession } from '../src/adapters/cli/owner-http-session.mjs';
 import { main } from '../scripts/portal-files.mjs';
 
@@ -108,6 +108,10 @@ test('server cause: malformed JSON or non-JSON error responses retain the origin
 });
 
 test('server cause: only a3..64 uppercase ASCII code is retained, never arbitrary error values', async t => {
+  for (const suffix of ['\n', '\r', '\r\n']) {
+    assert.equal(opaqueUuidValid(uuid + suffix), false);
+    assert.equal(opaqueOperationKeyValid('a'.repeat(16) + suffix), false);
+  }
   for (const error of ['ab', 'A'.repeat(65), 'ERR\n', 'ERR\r', 'ERR\r\n', '/home/private/token', 'PASSWORD=private-marker', 'LOWER_case', { code: 'ARTIFACT_QUOTA' }, ['ARTIFACT_QUOTA'], null]) {
     const f = await causeFixture(t, () => new Response(JSON.stringify({ error }), { status: 409, headers: { 'Content-Type': 'application/json' } }));
     await assert.rejects(f.session.json('/api/refused', {}), value => value.code === 'PORTAL_REQUEST_REFUSED' && !Object.hasOwn(value, 'serverCode'));
