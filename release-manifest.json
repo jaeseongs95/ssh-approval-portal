@@ -535,8 +535,8 @@
     },
     {
       "path": "scripts/linux-desktop-session.py",
-      "size": 20643,
-      "sha256": "bbf903006db8849eef8110590fe5de5b616f671d17e6dd4a5bb06bc0f45267d3"
+      "size": 20662,
+      "sha256": "3f739f6f57ab8f3af6fa67632d370142371db857288a255b77d555b2cdb4b063"
     },
     {
       "path": "scripts/maintenance-owner.sh",
@@ -790,8 +790,8 @@
     },
     {
       "path": "src/adapters/desktop/rdp-session.mjs",
-      "size": 10082,
-      "sha256": "0101adab0d0ba2294d0b6a58d62b3dc420297367a2304b4a770648dfbf1f27c6"
+      "size": 10241,
+      "sha256": "557353b0a48d0d06200b1bb9152d468d40db2929dc0a885c27188353464a83a0"
     },
     {
       "path": "src/adapters/desktop/rfb.mjs",
@@ -800,8 +800,8 @@
     },
     {
       "path": "src/adapters/desktop/ssh-tunnel.mjs",
-      "size": 3545,
-      "sha256": "02ea5b100185a3c56782dfaa03ca0c67e3110ab8320787e1a6008bff25eec106"
+      "size": 4293,
+      "sha256": "6031eb4f4e028dd4cf56559ed0b483d461a84ac0b7cdd2b83d89890b81a895bc"
     },
     {
       "path": "src/adapters/desktop/target-desktops.mjs",
@@ -935,8 +935,8 @@
     },
     {
       "path": "src/adapters/ssh/vendor.mjs",
-      "size": 26641,
-      "sha256": "e19e7414b62a4bc3a83b97e4fb4fbd41158f54f8cbf448cce981cb0cf5db3d8d"
+      "size": 28093,
+      "sha256": "1c24e59e4153e1bb056a89d95483e373e7c6bc77dd0d10da6af68daf8ce1d3ab"
     },
     {
       "path": "src/adapters/ssh/windows-command.mjs",
@@ -1680,8 +1680,8 @@
     },
     {
       "path": "test/desktop-rdp-session.test.mjs",
-      "size": 11022,
-      "sha256": "1e12a677009d89fcc3a80abba37933ebb0274e7b0d980db56df54af40fdc6e04"
+      "size": 11767,
+      "sha256": "fc9088ce36f469cf3843cfa214932177228111cbec7babfec2599cc796abb792"
     },
     {
       "path": "test/desktop-rfb-input-endian.test.mjs",
@@ -1699,9 +1699,14 @@
       "sha256": "125ebe81052a401d00de5c74521d5ecf00ae3342c001c43ae597d14d3d766e8d"
     },
     {
+      "path": "test/desktop-ssh-forward-close.test.mjs",
+      "size": 6106,
+      "sha256": "802fae02b551697a0bd70edba3c72e0f505f49c87ee692b84db9bd05502e60d7"
+    },
+    {
       "path": "test/desktop-ssh-tunnel.test.mjs",
-      "size": 3123,
-      "sha256": "e07c5335bef100458c9fc6e0cb8be3a61620fd0dc3ea48402d59ed785cb46e14"
+      "size": 5827,
+      "sha256": "b07d9fae553e0ef15f737f9f71db26d8a3d3e5ed107ed8be373569ec70c9952f"
     },
     {
       "path": "test/desktop-state.test.mjs",
@@ -2380,8 +2385,8 @@
     },
     {
       "path": "test/test_linux_desktop_session.py",
-      "size": 7868,
-      "sha256": "0a2f91169142679bf2824fdaf14b946a9e3037ff98f22411daf17158a97b2a63"
+      "size": 8056,
+      "sha256": "44de31e604d225e457f03897cd125268c0aa762ec6caf95e959db755e7ec3c49"
     },
     {
       "path": "test/test_node_runtime.py",
