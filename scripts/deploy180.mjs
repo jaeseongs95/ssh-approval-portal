@@ -59,11 +59,23 @@ function command(argv, { cwd, expected = 0, timeout = 60000, uid, gid, input, fa
   if (result.error || result.signal || result.status !== expected) {
     if (typedReceipt) {
       let receipt; try { receipt = JSON.parse(result.stdout); } catch { /* An interrupted child has no authoritative receipt. */ }
-      if (receipt?.type === 'portal.deployment-receipt.v1' && receipt.status === 'failed' && /^[A-Z][A-Z0-9_]+$/.test(receipt.code)) fail(receipt.code);
+      if (['portal.deployment-receipt.v1', 'portal.freerdp-preparation.v1'].includes(receipt?.type)
+        && receipt.status === 'failed' && /^[A-Z][A-Z0-9_]+$/.test(receipt.code)) fail(receipt.code);
     }
     fail(result.error?.code === 'ETIMEDOUT' ? 'DEPLOY_COMMAND_TIMEOUT' : failureCode);
   }
   return result.stdout;
+}
+function prepareNativeRuntime(release, manifest) {
+  const script = 'scripts/prepare-freerdp-input.py';
+  if (!manifest.files.some(entry => entry.path === script)) return { status: 'skipped', reason: 'NATIVE_RUNTIME_NOT_PACKAGED' };
+  if (process.platform !== 'linux') return { type: 'portal.freerdp-preparation.v1', status: 'skipped', reason: 'UNSUPPORTED_NATIVE_PLATFORM', platform: process.platform };
+  const receipt = JSON.parse(command(['/usr/bin/python3', '-I', '-B', join(release, script)], {
+    cwd: release, timeout: 120000, failureCode: 'DEPLOY_NATIVE_RUNTIME_PREPARE_FAILED', typedReceipt: true,
+  }));
+  if (receipt?.type !== 'portal.freerdp-preparation.v1' || !['prepared', 'reused', 'skipped'].includes(receipt.status)
+    || receipt.status === 'skipped' && receipt.reason !== 'UNSUPPORTED_NATIVE_PLATFORM') fail('DEPLOY_NATIVE_RUNTIME_PREPARE_FAILED');
+  return receipt;
 }
 async function serviceImports(plan, release) {
   const owner = await lstat(plan.dataRoot);
@@ -246,6 +258,7 @@ export async function runDeployment(stage, input, { fetchImpl = fetch } = {}) {
     const save = async patch => { state = { ...state, ...patch, planHash, generation: plan.generation }; await atomicJson(statePath, state); };
     if (stage === 'stage') {
       if (state && state.phase !== 'staged') fail('DEPLOY_ALREADY_ACTIVATED');
+      let nativeRuntime;
       if (!await optionalStat(release)) {
         const needed = manifest.files.reduce((sum, entry) => sum + entry.size, 0) * 3 + 256 * 1024 * 1024;
         const disk = await statfs(plan.appRoot);
@@ -258,17 +271,19 @@ export async function runDeployment(stage, input, { fetchImpl = fetch } = {}) {
         }
         await candidate(temporary, plan.generation);
         command([plan.npmExecutable ?? 'npm', 'ci', '--omit=dev', '--ignore-scripts'], { cwd: temporary, timeout: 600000, failureCode: 'DEPLOY_DEPENDENCY_INSTALL_FAILED' });
+        nativeRuntime = prepareNativeRuntime(temporary, manifest);
         await stagedCodeAccess(temporary);
         command([process.execPath, join(temporary, 'scripts/check-package-imports.mjs')], { cwd: temporary, failureCode: 'DEPLOY_IMPORT_CHECK_FAILED' });
         await syncTree(temporary);
         await rename(temporary, release); await syncDirectory(dirname(release));
       }
       await candidate(release, plan.generation);
+      nativeRuntime ??= prepareNativeRuntime(release, manifest);
       await serviceImports(plan, release);
       const previousRelease = await activeTarget(plan);
       if (previousRelease) await verifyRelease(previousRelease);
       const previousGeneration = previousRelease ? hash(await readFile(join(previousRelease, 'release-manifest.json'))) : null;
-      await save({ phase: 'staged', previousRelease, previousGeneration, version: manifest.version });
+      await save({ phase: 'staged', previousRelease, previousGeneration, version: manifest.version, nativeRuntime });
     } else {
       if (!state) fail('DEPLOY_STAGE_REQUIRED');
       if (stage === 'activate') {

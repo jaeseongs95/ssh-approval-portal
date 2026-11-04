@@ -26,6 +26,8 @@ SOURCE_TYPES = {
 UI_FILES = ['ui/dist/card.html', 'web/dist/app.js', 'ui/package.json', 'ui/package-lock.json',
             'ui/build.mjs', 'ui/card.html', 'ui/card.js']
 DEPLOY_FILES = ['deploy/oidc/Caddyfile', 'deploy/oidc/oauth2-proxy.cfg']
+NATIVE_SOURCE = 'native/freerdp-input'
+NATIVE_TYPES = {'.c', '.h', '.patch', '.md', '.json', '.py', '.sh', '.txt', '.lock'}
 
 
 def unsafe_link(path):
@@ -36,6 +38,20 @@ def collect_files(root):
     root = Path(root)
     files = [root / name for name in ROOT_FILES + UI_FILES + DEPLOY_FILES]
     files.extend(root / 'config' / name for name in CONFIG_FILES)
+    native = root / NATIVE_SOURCE
+    # Older source fixtures have no native project. Generated/private runtime
+    # files are prepared from the pinned vendor archive, never packaged here.
+    if native.exists() or native.is_symlink():
+        if unsafe_link(native) or not native.is_dir() or unsafe_link(native.parent):
+            raise ValueError('Unsafe native package directory')
+        for path in native.rglob('*'):
+            parts = path.relative_to(native).parts
+            if any(part in ('runtime', 'build', 'dist', '__pycache__', '.git') or part.startswith('.') for part in parts):
+                continue
+            if unsafe_link(path):
+                raise ValueError('Unsafe package symlink: ' + path.relative_to(root).as_posix())
+            if path.is_file() and (path.suffix in NATIVE_TYPES or path.name in ('LICENSE', 'NOTICE', 'Dockerfile')):
+                files.append(path)
     for folder, suffixes in SOURCE_TYPES.items():
         directory = root / folder
         if not directory.is_dir():
