@@ -12,7 +12,7 @@ import { createFileService } from '../src/application/files.mjs';
 
 const root = dirname(fileURLToPath(new URL('../package.json', import.meta.url)));
 // Lease identities and idempotent operation digests use native cryptographic primitives.
-const applicationCrypto = new Set(['desktop.mjs', 'operations.mjs'].map(name => resolve(root, 'src', 'application', name)));
+const applicationCrypto = new Set(['desktop.mjs', 'operations.mjs', 'opaque-files.mjs'].map(name => resolve(root, 'src', 'application', name)));
 function importSpecifiers(text) {
   // 문자열·주석을 먼저 소비하고 import 구문에 속한 모듈 이름만 추출한다.
   const syntax = /\/\/[^\r\n]*|\/\*[\s\S]*?\*\/|"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|`(?:\\[\s\S]|[^`\\$]|\$(?!\{))*`|(?<![\w$.])import\b\s*(?:\(\s*|(?:[^"'`;]*?\bfrom\s*)?)(?<quote>['"])(?<specifier>[^'"\r\n]+)\k<quote>/g;
