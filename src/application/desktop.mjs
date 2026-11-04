@@ -4,14 +4,18 @@ import { desktopState, transportDesktopState } from '../domain/desktop-state.mjs
 
 /** authorize enforces existing owner approval. GUI leases are never reassigned or pooled. */
 export function createDesktopService({ adapter, authorize, verifyTarget, maxSessions = 2, maxPerOwner = 1, requestCapacity = maxSessions,
-  ttlMs = 900_000, idleTtlMs = 120_000, now = Date.now, id = randomUUID, onClose = () => {}, leaseKey = binding => binding.targetId,
+  ttlMs = 900_000, idleTtlMs = 120_000, now = Date.now, monotonicNow = () => performance.now(), id = randomUUID, onClose = () => {}, leaseKey = binding => binding.targetId,
   readState, canViewProtected = () => false } = {}) {
   if (typeof adapter?.open !== 'function' || typeof authorize !== 'function' || typeof verifyTarget !== 'function'
     || typeof leaseKey !== 'function' || typeof canViewProtected !== 'function' || readState !== undefined && typeof readState !== 'function'
     || ![maxSessions, maxPerOwner, requestCapacity, ttlMs, idleTtlMs].every(value => Number.isSafeInteger(value) && value > 0)) desktopFail('DESKTOP_INVALID_CONFIG');
   const sessions = new Map(), resources = new Map(), openRequests = new Map(); let shuttingDown = false;
-  let observedNow = 0;
-  const clock = () => (observedNow = Math.max(observedNow, now()));
+  let clockOffset = now() - monotonicNow();
+  const clock = () => {
+    const elapsed = monotonicNow();
+    clockOffset = Math.max(clockOffset, now() - elapsed);
+    return Math.floor(elapsed + clockOffset);
+  };
   const openGeneration = randomBytes(16).toString('hex'), openSigningKey = randomBytes(32);
   const openSignature = body => createHmac('sha256', openSigningKey).update(body).digest('base64url');
   const refuseOpen = code => { throw Object.assign(new DesktopError(code), { executionAttempted: false, retryable: code === 'DESKTOP_OPEN_REQUEST_CAPACITY' }); };
