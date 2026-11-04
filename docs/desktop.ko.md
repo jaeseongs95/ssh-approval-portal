@@ -7,6 +7,7 @@
 - 관리자 소유 대상 설정의 `desktop.enabled:true`와 backend를 선택한다. 기본값은 비활성이다. 현재 agent 실행은 해당 대상의 TEST 우회 정책과 비밀 설정으로 권한을 확인하며, 관리자 호출은 인증된 owner 권한을 사용한다.
 - Linux `xvnc`: 대상 SSH 계정으로 전용 Xvnc·Openbox·xterm과 수명 관리 helper를 시작한다. Python3, TigerVNC, Openbox, xterm과 X11 도구가 필요하다. 별도 X11 세션이며 기존 Wayland 화면 공유 기능은 아니다.
 - Windows `rdp`: Linux 중계기에서 전용 Xvnc와 네이티브 FreeRDP 클라이언트를 실행하고 기존 pinned SSH를 통해 같은 Windows 호스트의 `127.0.0.1:3389`에 접속한다. Windows의 RDP 지원과 정상 GUI 로그온 자격이 필요하다. SSH 공개키가 GUI 로그온을 대체하지 않는다.
+- Windows 입력은 배포본의 전용 FreeRDP 런타임을 사용한다. 실행 파일·라이브러리의 manifest와 해시, 고정 upstream·패치와 입력 프로토콜을 확인하며 시스템에 설치된 다른 FreeRDP로 대체하지 않는다. 런타임이 없거나 맞지 않으면 원인을 구분한 `DESKTOP_RDP_NATIVE_*` 오류를 반환한다.
 - RDP 자격은 기존 비밀 저장소의 `credentialRef`로 읽는다. 저장값은 `{"username":"...","domain":"","password":"..."}` JSON이다. 모델·일반 로그·argv·환경변수에 넣지 않고 비공개 stdin으로 전달한다. RDP TLS는 유지하며 서버 식별은 실제 검증한 같은 호스트의 pinned SSH에 위임한다. 일반 네트워크 RDP로 전환하지 않는다.
 - `rfb`는 기존 세션 공유다. 대상 loopback의 RFB3.8/None security가 필요하다. 같은 OS의 다른 로컬 사용자를 인증하지 않으므로 신뢰된 대상에서만 사용한다. OS 로그인·SAS·UAC를 자동 우회하거나 기존 세션을 생성·로그아웃하지 않는다.
 
@@ -19,6 +20,12 @@
 ```
 
 관리 backend의 포트·실행 명령은 제품이 정한다. `configured`는 실제 로그온 성공을 뜻하지 않고 `backend_unavailable`은 필요한 네이티브 기능이 없다는 뜻이다. Windows 세션 결속을 확인하기 전에는 `desktop_ready`로 광고하지 않는다. 같은 Windows 계정의 재접속은 기존 사람 세션에 영향을 줄 수 있으므로 전용 시험 계정·서버를 사용한다.
+
+### Windows 입력과 결과 확인
+
+화면은 RFB로 관측하고 텍스트·키·포인터·release·close는 인증 stdin과 분리된 단일 네이티브 입력 채널로 보낸다. 숫자 필드는 BE로 직렬화하고 UTF-8을 UTF-16으로 엄격히 변환한다. ASCII·한글·surrogate pair를 보존하며 LF와 Tab은 각각 Return·Tab 입력으로 보낸다. NUL·CR·나머지 제어 문자와 modifier를 누른 상태의 텍스트는 전송 전에 거부한다. 클립보드는 사용하지 않는다.
+
+네이티브 ACK의 `nativeSend`는 호출 순서와 전송 결과를 확인한 것이며 Windows 앱의 문자 소비나 파일 저장 성공을 뜻하지 않는다. 입력 후 화면이나 앱 결과를 다시 관측한다. 부분 실패·ACK 유실은 결과 불명으로 보존하고 자동 재전송하지 않는다. 정상 close는 native release·detach 확인 뒤 소유한 중계기 프로세스를 정리한다. 입력 detach와 프로세스 정리 결과는 구분하며 Windows 계정에서 로그아웃하지 않는다.
 
 ### Windows 전용 계정 준비
 

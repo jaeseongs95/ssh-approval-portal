@@ -1,5 +1,7 @@
 # RDP 상시 연결 없는 Windows GUI 인증 경로
 
+> 이 문서는 기존 RFB 공유 화면의 owner 보조 인증 경로와 당시 미검증 사항을 보존한 기록이다. 2.0.0의 에이전트용 Windows 기본 경로는 [전용 RDP backend](desktop.ko.md)다. 사용자가 RDP 창을 열어 두거나 SAS 정책을 바꾸는 절차를 에이전트 GUI의 필수 조건으로 적용하지 않는다.
+
 기존 SSH→loopback RFB 전송에 owner 전용 일회성 입력과 Ctrl+Alt+Delete 요청을 연결했다. 실제 로그인·SAS·agent fixture 입력은 아직 실행하지 않았다. SSH 공개키 인증이 Windows 로그인을 대신한다고 주장하지 않으며, 자율 GUI 완료 판정도 아니다.
 
 ## 제품 경로
