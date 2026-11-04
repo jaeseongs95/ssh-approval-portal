@@ -1,4 +1,5 @@
 import { createRequire } from 'node:module';
+import { PassThrough } from 'node:stream';
 import { loadConfig } from 'ssh-mcp/build/config/loader.js';
 import { ConnectionRegistry } from 'ssh-mcp/build/ssh/connection-registry.js';
 import { classifyCommand } from 'ssh-mcp/build/policy/classifier.js';
@@ -190,6 +191,7 @@ export async function createSshRuntime(settings) {
     executePythonSource: (plan, verify, beforeDispatch, options = {}) => executePythonSource(registry, plan, verify, beforeDispatch, { timeoutMs, ...options }),
     executeAgentCli: (plan, verify, beforeDispatch, options) => executeAgentCli(registry, plan, verify, beforeDispatch, options),
     openDesktopChannel: (profile, options) => openSshForward(registry, profile, options),
+    openDesktopProcessChannel: (profile, options) => openSshDesktopProcess(registry, profile, options),
   };
 }
 
@@ -227,6 +229,118 @@ export async function openSshForward(registry, profile, { host, port, beforeDisp
           resolve({ stream, close });
         });
       } catch (error) { fail(error); }
+    });
+  });
+}
+
+/** Private fixed-helper port. The application owns helper selection and target
+ * authorization; this adapter owns one binary, non-PTY channel, never the client. */
+export async function openSshDesktopProcess(registry, profile, { command, beforeDispatch = async () => {}, signal } = {}) {
+  if (typeof command !== 'string' || !command || command.includes('\0') || typeof beforeDispatch !== 'function') throw Error('Invalid desktop helper command');
+  const failure = (reason, notStarted = false) => {
+    const error = executionFailure(Error(), { stage: 'ssh_execution', code: 'SSH_EXECUTION_FAILED', remoteOutcome: notStarted ? 'not_started' : 'unknown' });
+    error.message = `Desktop helper ${reason}`;
+    return error;
+  };
+  if (signal?.aborted) throw failure('cancelled before dispatch', true);
+  const binding = await connectionBinding(registry, profile);
+  return withConnectionLifecycle(binding.connection, async observed => {
+    const guarded = withDispatchGuard(observed, beforeDispatch, binding.verify);
+    if (observed.profile.tty || observed.profile.readOnly !== false || observed.profile.workdir) throw failure('requires a writable non-PTY profile without workdir', true);
+    await guarded.ensureConnected();
+    if (signal?.aborted) throw failure('cancelled before dispatch', true);
+    const client = guarded.getClient(), options = { ...guarded.channelEnv(), pty: false };
+    return new Promise((resolve, reject) => {
+      let stream, opening = true, settled = false, exitCode = null, exitSignal = null, exitSeen = false, stopReason;
+      let stderrBytes = 0, retainedBytes = 0, openingTimer, cleanupTimer;
+      const stderr = [], limit = 16 * 1024;
+      // Keep early ready metadata until the caller attaches after await open().
+      const stderrOutput = new PassThrough({ highWaterMark: limit });
+      let resolveExit;
+      const exitPromise = new Promise(done => { resolveExit = done; });
+      const diagnostics = () => ({ text: defaultRedact(Buffer.concat(stderr).toString('utf8')), receivedBytes: stderrBytes, retainedBytes, truncated: stderrBytes > retainedBytes });
+      const destroy = channel => {
+        // Late callbacks can deliver a channel after the opening promise failed.
+        channel?.on?.('error', () => {}); channel?.stderr?.on?.('error', () => {});
+        try { if (channel && !channel.destroyed) channel.destroy(); } catch {}
+      };
+      const detach = () => {
+        clearTimeout(openingTimer); clearTimeout(cleanupTimer);
+        client.removeListener('close', onLost); client.removeListener('error', onLost);
+        signal?.removeEventListener('abort', onAbort);
+      };
+      const finish = (reason, cleanupComplete) => {
+        if (settled) return;
+        settled = true; detach(); stderrOutput.end();
+        const error = reason === 'exit' && exitCode === 0 && !exitSignal ? undefined : failure(reason);
+        resolveExit({ exitCode, signal: exitSignal, reason, remoteState: exitSeen ? 'exited' : 'unknown', cleanupComplete, ...(error ? { error } : {}), stderr: diagnostics() });
+      };
+      const failOpening = error => {
+        if (!opening) return;
+        opening = false; settled = true; detach(); stderrOutput.destroy(); destroy(stream); reject(error);
+      };
+      const waitForClose = () => {
+        if (cleanupTimer || settled) return;
+        cleanupTimer = setTimeout(() => { finish(stopReason ?? 'cleanup_timeout', false); destroy(stream); }, 1000);
+      };
+      const stop = reason => {
+        if (settled || stopReason) return exitPromise;
+        stopReason = reason;
+        if (opening) { failOpening(failure(reason)); return exitPromise; }
+        waitForClose();
+        try { signalSshChannel(client, stream, 'TERM'); } catch {}
+        // EOF lets the fixed relay clean up its child and report exit before the
+        // bounded forced channel closure. Never close the shared SSH client.
+        try { stream.end(); } catch { destroy(stream); }
+        return exitPromise;
+      };
+      const onAbort = () => stop('cancel');
+      const onLost = () => {
+        if (opening) failOpening(failure('transport_lost'));
+        else { finish('transport_lost', false); destroy(stream); }
+      };
+      const onError = () => {
+        if (settled) return;
+        stop('channel_error');
+      };
+      const onStderr = chunk => {
+        if (settled) return;
+        const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        stderrBytes += bytes.length;
+        const keep = bytes.subarray(0, Math.max(0, limit - retainedBytes));
+        if (keep.length) { stderr.push(Buffer.from(keep)); retainedBytes += keep.length; stderrOutput.write(keep); }
+        if (stderrBytes > limit) stop('stderr_limit');
+      };
+      openingTimer = setTimeout(() => failOpening(failure('opening timed out')), 30_000);
+      client.once('close', onLost); client.once('error', onLost);
+      signal?.addEventListener('abort', onAbort, { once: true });
+      if (signal?.aborted) { onAbort(); return; }
+      try {
+        client.exec(command, options, (error, opened) => {
+          if (!opening) { destroy(opened); return; }
+          if (error) { failOpening(failure('channel open failed')); return; }
+          stream = opened;
+          if (!stream?.on || !stream?.stderr?.on) { failOpening(failure('invalid channel')); return; }
+          try { beforeDispatch.verify?.(); binding.verify(); }
+          catch (error) { failOpening(error); return; }
+          if (signal?.aborted) { onAbort(); return; }
+          opening = false; clearTimeout(openingTimer);
+          stream.on('error', onError);
+          stream.stderr.on('error', onError); stream.stderr.on('data', onStderr);
+          stream.once('exit', (code, value) => {
+            if (settled) return;
+            exitSeen = true; exitCode = Number.isInteger(code) ? code : null; exitSignal = typeof value === 'string' ? value : null;
+            waitForClose();
+          });
+          stream.once('close', (code, value) => {
+            if (!exitSeen && (Number.isInteger(code) || typeof value === 'string')) {
+              exitSeen = true; exitCode = Number.isInteger(code) ? code : null; exitSignal = typeof value === 'string' ? value : null;
+            }
+            finish(stopReason ?? (exitSeen ? 'exit' : 'close'), true);
+          });
+          resolve({ stream, stderr: stderrOutput, close: () => stop('close'), exitPromise, diagnostics });
+        });
+      } catch { failOpening(failure('channel open failed')); }
     });
   });
 }
