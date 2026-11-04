@@ -56,7 +56,10 @@ function fixture(options = {}) {
 }
 const ready = channel => channel.events.find(event => event.event === 'ready');
 async function assertGone(channel) {
-  await eventually(async () => (await Promise.all(ready(channel).pids.map(pid => exists('/proc/' + pid)))).every(value => !value));
+  const pids = ready(channel)?.pids ?? channel.events.find(event => event.event === 'closed')?.pids;
+  assert.ok(Array.isArray(pids));
+  assert.ok(pids.every(pid => Number.isSafeInteger(pid) && pid > 1));
+  await eventually(async () => (await Promise.all(pids.map(pid => exists('/proc/' + pid)))).every(value => !value));
 }
 
 test('Linux 관리형 세션의 경계값을 실행 전에 거절한다', () => {
@@ -257,7 +260,22 @@ test('TEST Linux GUI: 동시 세션은 display·generation·PID를 공유하지 
 
 test('TEST Linux GUI: RFB 입력 EOF와 TTL이 소유 자식을 회수한다', integration, async () => {
   for (const ttlMs of [30000, 1500]) {
-    const f = fixture({ ttlMs }), desktop = await f.adapter.open({ binding });
+    const f = fixture({ ttlMs });
+    let desktop, openingError;
+    try { desktop = await f.adapter.open({ binding }); } catch (error) { openingError = error; }
+    if (openingError) {
+      // TTL은 startup을 포함한다. ready 전 만료도 원인과 실제 자식 정리를 확인한다.
+      assert.equal(ttlMs, 1500);
+      assert.equal(openingError.code, 'DESKTOP_EXPIRED');
+      assert.equal(ready(f.channels[0]), undefined);
+      const exit = await f.channels[0].exitPromise; assert.equal(exit.exitCode, 1);
+      assert.equal(f.channels[0].events.find(event => event.event === 'error')?.code, 'DESKTOP_EXPIRED');
+      const closed = f.channels[0].events.find(event => event.event === 'closed');
+      assert.equal(closed?.sessionState, 'terminated'); assert.equal(closed.reason, 'startup_failed');
+      assert.equal(closed.cleanupScope, 'owned-descendants');
+      await assertGone(f.channels[0]);
+      continue;
+    }
     if (ttlMs === 30000) f.channels[0].stream.end();
     const exit = await f.channels[0].exitPromise; assert.equal(exit.exitCode, 0);
     await assertGone(f.channels[0]);

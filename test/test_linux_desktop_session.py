@@ -166,5 +166,104 @@ class NativeRdpValidationTest(unittest.TestCase):
         self.assertEqual(credential_writes, [b"test-user\n\ntest-only\n"])
 
 
+class StartupDeadlineTest(unittest.TestCase):
+    """운영 clock/기한은 바꾸지 않고 기존 run 경계에서 경과 시간만 제어한다."""
+
+    def scenario(self, mode, ttl_ms, expected):
+        clock, launches = [100.0], []
+        options = SimpleNamespace(application="terminal", ttl_ms=ttl_ms, width=800, height=600,
+                                  session_ref="a" * 48)
+
+        def popen(args, **kwargs):
+            if args[0] == "/usr/bin/Xvnc" and not mode.startswith("display_"):
+                os.write(kwargs["pass_fds"][0], b"44\n")
+            child = SimpleNamespace(pid=100 + len(launches), poll=lambda: None)
+            launches.append(child)
+            return child
+
+        def command(args, **kwargs):
+            name = Path(args[0]).name
+            if name == "xprop":
+                if mode == "wm_phase":
+                    clock[0] += 0.4
+                    output = b""
+                else:
+                    output = b"window id # 0x123"
+            elif name == "xwininfo":
+                if mode in ("global_window", "late_viewable", "global_probe_timeout"):
+                    clock[0] += ttl_ms / 1000 + 0.1
+                if mode == "global_probe_timeout":
+                    raise helper.subprocess.TimeoutExpired(args, kwargs["timeout"])
+                if mode == "window_phase":
+                    clock[0] += 0.4
+                output = (b"" if mode in ("global_window", "window_phase") else
+                          b"Window id: 0x123\nMap State: IsViewable")
+            else:
+                output = b""
+            return SimpleNamespace(returncode=0, stdout=output)
+
+        def focus(*_):
+            if mode == "late_focus":
+                clock[0] += ttl_ms / 1000 + 0.1
+
+        class EmptyDisplaySelector:
+            def __enter__(inner):
+                return inner
+
+            def __exit__(inner, *_):
+                pass
+
+            def register(inner, *_):
+                pass
+
+            def select(inner, timeout):
+                clock[0] += (ttl_ms / 1000 if mode == "display_global" else 10) + 0.01
+                return []
+
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch.object(helper.shutil, "which", side_effect=lambda name, **_: "/usr/bin/" + name))
+            stack.enter_context(patch.object(helper.subprocess, "Popen", side_effect=popen))
+            stack.enter_context(patch.object(helper.subprocess, "run", side_effect=command))
+            stack.enter_context(patch.object(helper.time, "monotonic", side_effect=lambda: clock[0]))
+            stack.enter_context(patch.object(helper.time, "sleep", side_effect=lambda seconds: clock.__setitem__(0, clock[0] + seconds)))
+            stack.enter_context(patch.object(helper, "focus_window", side_effect=focus))
+            stack.enter_context(patch.object(helper, "relay", return_value="test_complete"))
+            stopped = stack.enter_context(patch.object(helper, "stop"))
+            reported = stack.enter_context(patch.object(helper, "report"))
+            if mode.startswith("display_"):
+                stack.enter_context(patch.object(helper.selectors, "DefaultSelector", EmptyDisplaySelector))
+            with self.assertRaisesRegex(helper.SessionError, "^" + expected + "$"):
+                helper.run(options)
+        self.assertFalse(any(call.args[0] == "ready" for call in reported.call_args_list))
+        closed = [call.kwargs for call in reported.call_args_list if call.args[0] == "closed"]
+        self.assertEqual(len(closed), 1)
+        self.assertEqual(closed[0]["reason"], "startup_failed")
+        self.assertEqual(closed[0]["sessionState"], "terminated")
+        self.assertEqual(closed[0]["cleanupScope"], "owned-descendants")
+        if expected == "DESKTOP_EXPIRED" or "pids" in closed[0]:
+            self.assertEqual(closed[0]["pids"], [child.pid for child in launches])
+        stopped.assert_called_once_with(launches)
+
+    def test_global_expiry_during_failed_window_probe_is_not_window_timeout(self):
+        self.scenario("global_window", 1500, "DESKTOP_EXPIRED")
+
+    def test_late_viewable_or_focus_never_emits_ready(self):
+        for mode in ("late_viewable", "late_focus"):
+            with self.subTest(mode=mode):
+                self.scenario(mode, 1500, "DESKTOP_EXPIRED")
+
+    def test_global_probe_timeout_or_display_wait_is_expired(self):
+        for mode in ("global_probe_timeout", "display_global"):
+            with self.subTest(mode=mode):
+                self.scenario(mode, 1500, "DESKTOP_EXPIRED")
+
+    def test_phase_deadlines_keep_their_original_error_codes(self):
+        for mode, expected in (("window_phase", "DESKTOP_WINDOW_NOT_READY"),
+                               ("wm_phase", "DESKTOP_WINDOW_MANAGER_NOT_READY"),
+                               ("display_phase", "DESKTOP_START_TIMEOUT")):
+            with self.subTest(mode=mode):
+                self.scenario(mode, 30000, expected)
+
+
 if __name__ == "__main__":
     unittest.main()
