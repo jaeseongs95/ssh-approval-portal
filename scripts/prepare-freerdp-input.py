@@ -217,6 +217,7 @@ def existing_runtime(root, manifest, files):
                     fail('FREERDP_EXISTING_RUNTIME_MISMATCH')
             elif (item is None or path.lstat().st_uid != os.geteuid()
                     or stat.S_IMODE(path.lstat().st_mode) != item['mode']
+                    or path.lstat().st_size != item['size']
                     or hashlib.sha256(regular_bytes(path, item['size'])).hexdigest() != item['sha256']):
                 fail('FREERDP_EXISTING_RUNTIME_MISMATCH')
     if found != set(files) | {'manifest.json'}:
