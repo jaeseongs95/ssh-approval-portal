@@ -14,6 +14,8 @@
     "evaluate:safety": "node scripts/evaluate-safety.mjs",
     "build:ui": "npm --prefix ui ci && npm --prefix ui run build",
     "package": "python3 scripts/package.py",
+    "package:client": "python3 scripts/package-client.py",
+    "package:release": "python3 scripts/package-release.py",
     "verify": "node scripts/verify.mjs"
   },
   "dependencies": {
