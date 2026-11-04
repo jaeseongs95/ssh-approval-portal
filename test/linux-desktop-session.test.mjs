@@ -39,6 +39,9 @@ function fixture(options = {}) {
         }
       });
       child.stderr.once('end', () => stderr.end());
+      child.once('close', (exitCode, signal) => {
+        if (exitCode !== 0) console.log(JSON.stringify({ case: 'helper-failure', exitCode, signal, events }));
+      });
       const exitPromise = new Promise(resolve => child.once('close', (exitCode, signal) =>
         resolve({ exitCode, signal, remoteState: 'exited', cleanupComplete: true })));
       const channel = { stream, stderr, exitPromise, events, child, command,
@@ -58,6 +61,35 @@ test('Linux 관리형 세션의 경계값을 실행 전에 거절한다', () => 
     { openSession() {}, ttlMs: 999 }, { openSession() {}, ttlMs: 900001 }]) {
     assert.throws(() => createLinuxSessionDesktopAdapter(config), error => error.code === 'DESKTOP_INVALID_CONFIG');
   }
+});
+
+test('RDP application은 고정 loopback·클라이언트·인증 모드만 허용한다', () => {
+  const application = { kind: 'rdp', host: '127.0.0.1', port: 3389, executable: '/usr/bin/xfreerdp',
+    width: 800, height: 600, certificateMode: 'ssh-tunnel' };
+  const config = { openSession() {}, width: 800, height: 600, application, writeBootstrap() {} };
+  assert.doesNotThrow(() => createLinuxSessionDesktopAdapter(config));
+  for (const change of [{ host: 'example.com' }, { executable: '/tmp/client' }, { port: 0 },
+    { certificateMode: 'ignore' }, { width: 900 }, { command: '/bin/sh' }, { password: 'forbidden' }]) {
+    assert.throws(() => createLinuxSessionDesktopAdapter({ ...config, application: { ...application, ...change } }),
+      error => error.code === 'DESKTOP_INVALID_CONFIG');
+  }
+  assert.throws(() => createLinuxSessionDesktopAdapter({ ...config, writeBootstrap: undefined }),
+    error => error.code === 'DESKTOP_INVALID_CONFIG');
+});
+
+test('RDP bootstrap 실패는 RFB 전에 원 오류를 보존하고 채널을 닫는다', async () => {
+  const stream = new PassThrough(), failure = Error('credential-provider-failed');
+  let calls = 0, closes = 0, command;
+  const adapter = createLinuxSessionDesktopAdapter({ width: 800, height: 600,
+    application: { kind: 'rdp', host: '127.0.0.1', port: 3389, executable: '/usr/bin/xfreerdp3',
+      width: 800, height: 600, certificateMode: 'ssh-tunnel' },
+    async openSession(options) { command = options.command; return { stream, stderr: new PassThrough(),
+      exitPromise: Promise.resolve({ exitCode: 1, remoteState: 'exited' }), async close() { closes++; } }; },
+    async writeBootstrap(writable) { assert.equal(writable, stream); calls++; throw failure; },
+  });
+  await assert.rejects(adapter.open({ binding }), error => error === failure);
+  assert.equal(calls, 1); assert.equal(closes, 1);
+  assert.ok(Buffer.byteLength(command) <= 32768); assert.ok(!command.includes(failure.message));
 });
 
 test('TEST Linux GUI: 실제 화면·텍스트·포인터 입력과 소유 세션 종료', integration, async t => {
@@ -113,4 +145,31 @@ test('TEST Linux GUI: helper 종료 영수증이 없으면 성공한 exit도 unk
   const f = fixture({ dropClosedReceipt: true }), desktop = await f.adapter.open({ binding });
   assert.deepEqual(await desktop.close(), { sessionState: 'unknown' });
   await assertGone(f.channels[0]);
+});
+
+test('TEST Linux GUI: 터미널이 만든 별도 프로세스 세션도 함께 회수한다', integration, async t => {
+  const folder = await mkdtemp(join(tmpdir(), 'ags-gui-descendant-proof-'));
+  t.after(() => rm(folder, { recursive: true, force: true }));
+  const f = fixture(), desktop = await f.adapter.open({ binding });
+  let descendant;
+  t.after(async () => {
+    await desktop.close();
+    if (descendant && await exists('/proc/' + descendant)) {
+      // 이 시험에서 직접 만든 sleep만 정리한다. 회귀 실패도 서버에 남기지 않는다.
+      const command = await readFile(`/proc/${descendant}/cmdline`, 'utf8');
+      if (command === '/bin/sleep\u000060\u0000') process.kill(descendant, 'SIGKILL');
+    }
+  });
+  const path = join(folder, 'pid');
+  // setsid 자체가 fork할 수 있으므로 $! 대신 새 session 안의 실제 exec PID를 기록한다.
+  await desktop.input([{ type: 'text', text: `/usr/bin/setsid /bin/sh -c 'printf "%s" $$ > ${path}; exec /bin/sleep 60' </dev/null >/dev/null 2>&1 &` },
+    { type: 'key', keysym: 0xff0d, down: true }, { type: 'key', keysym: 0xff0d, down: false }]);
+  await eventually(() => exists(path));
+  descendant = Number(await readFile(path, 'utf8'));
+  assert.ok(Number.isSafeInteger(descendant) && descendant > 1);
+  await eventually(async () => await exists('/proc/' + descendant)
+    && await readFile(`/proc/${descendant}/cmdline`, 'utf8') === '/bin/sleep\u000060\u0000');
+  await desktop.close();
+  await eventually(async () => !await exists('/proc/' + descendant), 2000);
+  console.log(JSON.stringify({ case: 'descendant-cleanup', descendant, gone: true }));
 });
