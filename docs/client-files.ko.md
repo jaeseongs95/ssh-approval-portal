@@ -36,6 +36,8 @@ upload는 파일의 불변 스냅샷·전체 크기·SHA-256을 먼저 확정하
 
 중간 응답이 끊기거나 청크 확인에 실패하면 성공 UUID를 stdout에 쓰지 않습니다. stderr에는 에러 코드·알고 있는 같은 UUID·단계와 확인 가능한 수신 상태만 남습니다. 클라이언트는 새 업로드를 만들거나 청크·complete 요청을 자동 반복하지 않습니다.
 
+서버가 명시적인 안전 코드를 반환하면 기존 오류 코드와 별도로 serverCode를 표시합니다. 예를 들어 PORTAL_REQUEST_REFUSED의 원인이 ARTIFACT_QUOTA인지 CHUNK_HASH_MISMATCH인지 구분할 수 있습니다. 응답 원문·스택·경로는 전달하지 않으며, 잘못된 JSON이나 네트워크 결과 불명에서 원인을 만들어 넣지 않습니다. 401은 기존 OWNER_REAUTH_REQUIRED로 처리합니다.
+
 ```powershell
 node @portalFiles status '12345678-1234-4234-8234-123456789abc'
 ```

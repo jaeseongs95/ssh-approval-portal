@@ -7,6 +7,7 @@ import { resolveCloudflared, cachedAccessToken } from '../src/adapters/cli/cloud
 import { diagnoseClient } from '../src/adapters/cli/doctor.mjs';
 import { validateLocalPath } from '../src/adapters/cli/local-files.mjs';
 import { validateOrigin } from '../src/adapters/config/settings.mjs';
+import { safePortalErrorCode } from '../src/adapters/cli/owner-http-session.mjs';
 
 const usage = 'SSH Approval Portal file client2.0.0 (Node.js24.2+ within major24)\n' +
   'node scripts/portal-files.mjs --origin HTTPS_ORIGIN [--cloudflared EXISTING_ABSOLUTE_PATH] doctor\n' +
@@ -51,6 +52,7 @@ export async function main(argv = process.argv.slice(2), output = process.stdout
   } catch (error) {
     failed = true;
     const record = { error: /^[A-Z_]{3,64}$/.test(error.code ?? '') ? error.code : 'CLI_REQUEST_FAILED' };
+    if (safePortalErrorCode(error.serverCode)) record.serverCode = error.serverCode;
     if (opaqueUuidValid(error.uuid)) record.uuid = error.uuid;
     if (['snapshot', 'begin', 'chunks', 'complete'].includes(error.phase)) record.phase = error.phase;
     if (error.progress) for (const field of ['state', 'received', 'sequence']) record[field] = error.progress[field];

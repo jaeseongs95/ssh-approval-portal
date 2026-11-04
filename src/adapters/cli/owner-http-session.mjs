@@ -1,6 +1,7 @@
 import { validateOrigin } from '../config/settings.mjs';
 
 const fail = (code, details = {}) => Object.assign(new Error(code), { code, ...details });
+export const safePortalErrorCode = value => typeof value === 'string' && /^[A-Z][A-Z0-9_]{2,63}$/.test(value);
 
 export async function readPortalJson(response) {
   if (!/^application\/json(?:;|$)/i.test(response.headers.get('content-type') ?? '')) throw fail('INVALID_PORTAL_RESPONSE');
@@ -30,7 +31,20 @@ export function createOwnerHttpSession({ origin, accessToken, signal, timeoutMs 
       const response = await send(url.href, { method, redirect: 'error', signal: deadline,
         headers: { ...headers, 'cf-access-token': accessToken, Origin: origin, ...(cookie ? { Cookie: cookie } : {}) },
         ...(body === undefined ? {} : { body }) });
-      if (!response.ok) { await response.body?.cancel().catch(() => {}); throw fail(response.status === 401 ? 'OWNER_REAUTH_REQUIRED' : 'PORTAL_REQUEST_REFUSED', { status: response.status }); }
+      if (!response.ok) {
+        let serverCode;
+        try {
+          // A refusal remains a refusal even when its optional cause is
+          // malformed, oversized or unavailable. Never reflect the raw body.
+          if (response.status !== 401) {
+            const detail = await readPortalJson(response);
+            if (safePortalErrorCode(detail?.error)) serverCode = detail.error;
+          }
+        } catch { /* Preserve the legacy status/code, without an unverified cause. */ }
+        finally { await response.body?.cancel().catch(() => {}); }
+        throw fail(response.status === 401 ? 'OWNER_REAUTH_REQUIRED' : 'PORTAL_REQUEST_REFUSED',
+          { status: response.status, ...(serverCode ? { serverCode } : {}) });
+      }
       return response;
     } catch (error) {
       if (['OWNER_REAUTH_REQUIRED', 'PORTAL_REQUEST_REFUSED'].includes(error.code)) throw error;
