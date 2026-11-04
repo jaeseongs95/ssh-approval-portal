@@ -62,7 +62,7 @@ export function prepareOfflinePreservationBaseline({root, owner, commandEnabled,
       if (usage.count > 1000 || usage.bytes > 64 * 1024 * 1024) throw Error('Offline output budget exceeded');
       return {schema: schema(outputDb), outputs: outputDb.prepare('SELECT id,body,digest,charge FROM outputs ORDER BY id').all()};
     }};
-    const snapshot = capturePreservationSnapshot({commandState: command, cliState: cli, outputs, now});
+    const snapshot = capturePreservationSnapshot({commandState: command, cliState: cli, outputs, now, legacyOnly: true});
     const maintenance = createMaintenanceState(absolute);
     try {
       maintenance.reserve(owner);

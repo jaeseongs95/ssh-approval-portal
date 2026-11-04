@@ -1,7 +1,7 @@
 import { loadSecrets } from '../src/adapters/config/secrets.mjs';
 import { parseSettings } from '../src/adapters/config/settings.mjs';
 import { readFileSync } from 'node:fs';
-import { BASELINE_PRESERVATION_CONTRACT, PRESERVATION_COUNTERS, baselinePreservationAccepted } from '../src/adapters/storage/preservation-verification.mjs';
+import { BASELINE_PRESERVATION_CONTRACT, PRESERVATION_COUNTERS, CANONICAL_PRESERVATION_COUNTERS, canonicalPreservationSummaryValid, baselinePreservationAccepted } from '../src/adapters/storage/preservation-verification.mjs';
 const action = process.argv[2];
 if (!['reserve', 'release', 'release-verified', 'release-baseline-verified', 'capture', 'compare', 'compare-baseline', 'status'].includes(action)) throw Error('Invalid maintenance action');
 const baselineMode = ['compare-baseline', 'release-baseline-verified'].includes(action);
@@ -31,6 +31,8 @@ try {
   if (comparing) {
     const keys = PRESERVATION_COUNTERS;
     if (keys.some(key => !Number.isSafeInteger(body[key]) || body[key] < 0)) throw Error('Invalid preservation summary');
+    if (!canonicalPreservationSummaryValid(body)) throw Error('Invalid canonical preservation summary');
+    if (body.canonicalCoverage !== 'verified') console.error('Canonical preservation was not verified: the original baseline covers legacy journals and outputs only.');
     if (body.outputsUnavailable || body.expiredOutputsRemoved) console.error('Some output payloads were unavailable or expired; complete payload preservation was not verified.');
   }
   const valid = comparing ? baselineMode ? baselinePreservationAccepted(body) : body.status === 'PASS' && body.outputsUnavailable === 0 && body.expiredOutputsRemoved === 0
@@ -39,6 +41,7 @@ try {
   if (!valid) throw Error('Maintenance request did not pass');
   if (comparing) {
     const summary = Object.fromEntries(PRESERVATION_COUNTERS.map(key => [key, body[key]]));
+    if (body.canonicalCoverage !== undefined) Object.assign(summary, {baselineScope: body.baselineScope, canonicalCoverage: body.canonicalCoverage}, Object.fromEntries(CANONICAL_PRESERVATION_COUNTERS.map(key => [key, body[key]])));
     if (baselineMode) Object.assign(summary, {status:body.status, comparisonContract:BASELINE_PRESERVATION_CONTRACT, baselinePreserved:true, outputsAdded:0});
     console.log(JSON.stringify(summary));
   }

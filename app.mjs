@@ -498,7 +498,7 @@ export async function createApplication({ registry, classify, executeCommand, ex
       if (!maintenanceState.owns(owner) || !queue.maintenance || queue.busy() || queue.listAll().some(job => ['pending', 'evaluating', 'running'].includes(job.state)) || commands.busy() || files.busy() || store.hasActiveWork()) throw Error('Preservation boundary unavailable');
       const prior = maintenanceState.baseline(owner);
       if (prior) { if (prior.instance !== preservationInstance) throw Error('Preservation baseline already belongs to an earlier instance'); return; }
-      maintenanceState.saveBaseline(owner, { instance: preservationInstance, snapshot: capturePreservationSnapshot({ commandState: commandState ?? dormantCommandState, cliState, outputs }) });
+      maintenanceState.saveBaseline(owner, { instance: preservationInstance, snapshot: capturePreservationSnapshot({ commandState: commandState ?? dormantCommandState, cliState, outputs, operationStore }) });
     },
     compare(owner, contract) {
       // A failed new comparison must never leave an earlier release authorization alive.
@@ -507,7 +507,7 @@ export async function createApplication({ registry, classify, executeCommand, ex
       if (!maintenanceState.owns(owner) || !queue.maintenance || queue.busy() || queue.listAll().some(job => ['pending', 'evaluating', 'running'].includes(job.state)) || commands.busy() || files.busy() || store.hasActiveWork()) throw Error('Preservation boundary unavailable');
       const baseline = maintenanceState.baseline(owner);
       if (!baseline || baseline.instance === preservationInstance) throw Error('A new service instance is required');
-      const result = comparePreservationSnapshots(baseline.snapshot, capturePreservationSnapshot({ commandState: commandState ?? dormantCommandState, cliState, outputs }));
+      const result = comparePreservationSnapshots(baseline.snapshot, capturePreservationSnapshot({ commandState: commandState ?? dormantCommandState, cliState, outputs, operationStore, canonicalEventPrefixCount: baseline.snapshot.canonical?.events.count }));
       if (contract === BASELINE_PRESERVATION_CONTRACT ? baselinePreservationAccepted(result) : result.status === 'PASS') lifecycle.markCompared(owner, contract ? 'baseline' : 'strict');
       return result;
     },

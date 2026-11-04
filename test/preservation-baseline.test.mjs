@@ -189,6 +189,19 @@ test('baseline client requires explicit server capability, exact contract and un
     const accepted=await run('compare-baseline');assert.equal(accepted.code,0);assert.match(accepted.output,/complete payload preservation was not verified/);assert.ok(!accepted.output.includes(owner));
     const summary=JSON.parse(accepted.output.split('\n').find(line=>line.startsWith('{')));
     assert.deepEqual(summary,valid);
+    assert.match(accepted.output,/Canonical preservation was not verified/);
+    const canonical={baselineScope:'legacy-and-canonical',canonicalCoverage:'verified',canonicalOperationsChecked:7,canonicalOperationsAdded:1,canonicalEventsChecked:20,canonicalEventsAdded:2,canonicalLegacyBudgetChecked:3,canonicalLegacyBudgetAdded:0};
+    comparison={...valid,...canonical};
+    const canonicalAccepted=await run('compare-baseline'); assert.equal(canonicalAccepted.code,0);
+    assert.deepEqual(JSON.parse(canonicalAccepted.output.split('\n').find(line=>line.startsWith('{'))),comparison);
+    assert.doesNotMatch(canonicalAccepted.output,/Canonical preservation was not verified/);
+    for (const override of [{canonicalOperationsChecked:undefined},{canonicalEventsAdded:-1},{canonicalCoverage:'invented'},{baselineScope:'legacy-only'}]) {
+      comparison={...valid,...canonical,...override}; assert.notEqual((await run('compare-baseline')).code,0);
+    }
+    comparison={...valid,...canonical,baselineScope:'legacy-only',canonicalCoverage:'not-in-baseline',canonicalOperationsChecked:0,canonicalOperationsAdded:0,canonicalEventsChecked:0,canonicalEventsAdded:0,canonicalLegacyBudgetChecked:0,canonicalLegacyBudgetAdded:0};
+    const legacyAccepted=await run('compare-baseline'); assert.equal(legacyAccepted.code,0); assert.match(legacyAccepted.output,/Canonical preservation was not verified/);
+    assert.deepEqual(JSON.parse(legacyAccepted.output.split('\n').find(line=>line.startsWith('{'))),comparison);
+    comparison={...valid};
     assert.equal(calls.at(-1).contract,contract);
     for (const override of [{comparisonContract:'other'},{baselinePreserved:undefined},{baselinePreserved:'true'},
       {expiredOutputsRemoved:1},{outputsAdded:1},{outputsChecked:2},{status:'unknown'},{outputPayloadsVerified:-1}]) {

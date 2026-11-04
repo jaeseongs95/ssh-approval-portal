@@ -201,6 +201,18 @@ export function createOperationStore(rootOrOptions) {
   };
   const api = {
     filePath, accept, get, update,
+    // Private evidence port: SELECT only on the already exclusive service connection.
+    // Consume synchronously while admission/dispatch are fenced; never expose these rows.
+    preservationRows() {
+      if (poisoned) throw operationStoreError('OPERATION_TRANSACTION_UNCERTAIN');
+      if (db.prepare("SELECT 1 FROM operations WHERE state NOT IN ('completed','failed','cancelled','expired','denied','unknown') LIMIT 1").get()) throw operationStoreError('OPERATION_PRESERVATION_NOT_IDLE');
+      return {
+        schema: { definitions: db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name").all(), versions: db.prepare('SELECT * FROM operation_schema ORDER BY version').all() },
+        operations: db.prepare('SELECT * FROM operations ORDER BY id').iterate(),
+        events: db.prepare('SELECT * FROM operation_events ORDER BY sequence').iterate(),
+        legacyBudget: db.prepare('SELECT * FROM operation_legacy_budget ORDER BY operation_id').iterate(),
+      };
+    },
     find(requestKey) { const row = db.prepare('SELECT digest,body FROM operations WHERE request_key=?').get(requestKey); return row ? { digest: row.digest, job: JSON.parse(row.body) } : null; },
     countStates({ includeLegacy = true } = {}) {
       if (typeof includeLegacy !== 'boolean') throw operationStoreError('INVALID_OPERATION_FILTER');

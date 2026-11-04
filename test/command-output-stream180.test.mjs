@@ -158,16 +158,19 @@ test('abandon closes the stream without dropping bytes, while finish strips unkn
 
 test('preservation baseline hashes stream bytes including interrupted tails and detects their mutation', t => {
   const f = fixture(t), item = f.store.reserve(binding), sink = f.store.beginStream(item);
+  const operationStore = createOperationStore(f.root);
+  try {
   sink.append({ stream: 'stdout', bytes: Buffer.from('preserve') });
   f.store.finish(item, { failed: false, texts: ['preserve'] });
   appendFileSync(f.path(item), 'uncommitted tail');
-  const before = capturePreservationSnapshot({ outputs: f.store, now: 100 });
+  const before = capturePreservationSnapshot({ outputs: f.store, operationStore, now: 100 });
   assert.ok(before.output.rows[item.id].streamPayload);
-  const same = capturePreservationSnapshot({ outputs: f.store, now: 101 });
+  const same = capturePreservationSnapshot({ outputs: f.store, operationStore, now: 101 });
   assert.equal(comparePreservationSnapshots(before, same).status, 'PASS');
   const changed = readFileSync(f.path(item)); changed[changed.length - 1] ^= 1; writeFileSync(f.path(item), changed);
-  const after = capturePreservationSnapshot({ outputs: f.store, now: 102 });
+  const after = capturePreservationSnapshot({ outputs: f.store, operationStore, now: 102 });
   assert.throws(() => comparePreservationSnapshots(before, after), /Existing output changed/);
+  } finally { operationStore.close(); }
 });
 
 test('maintenance retains expired stream bytes and exact accounting without extending read authority', t => {

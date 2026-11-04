@@ -7,6 +7,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {createApplication} from '../app.mjs';
 import {createCommandState} from '../src/adapters/storage/command-state.mjs';
 import {CommandOutputs} from '../src/adapters/storage/command-output.mjs';
+import {createOperationStore} from '../src/adapters/storage/operation-store.mjs';
 
 const owner='a'.repeat(64), origin='https://example.test';
 const env={BRIDGE_MCP_TOKEN:'test-mcp',BRIDGE_ADMIN_TOKEN:'test-admin',BRIDGE_ADMIN_ORIGIN:origin,BRIDGE_UI_TICKET_KEY:'b'.repeat(64),BRIDGE_UI_ENABLED:'true',BRIDGE_COMMAND_AUTOMATION:'true'};
@@ -104,4 +105,68 @@ test('reserved startup defers legacy output conversion and preserves strict base
     assert.deepEqual(JSON.parse(after.find(row=>row.id===id).body).operation,legacy.operation);
     assert.deepEqual(await readFile(payload),payloadBefore);
   } finally {await app?.close();await rm(root,{recursive:true,force:true});}
+});
+
+const canonicalId = 'c'.repeat(48), legacyId = 'd'.repeat(48);
+function seedCanonical(root, id = canonicalId) {
+  const store = createOperationStore(root);
+  try {
+    store.accept({id, requestKey:'fixture-key-'+id, owner:'fixture-owner', targetId:'fixture-only-target', targetRevision:'fixture-revision', kind:'source', input:{source:'CANONICAL_PRIVATE_SENTINEL'}});
+    store.update(id, {state:'cancelled'});
+    if (id === canonicalId) store.importLegacy({id:legacyId, state:'completed', createdAt:1000, finishedAt:1100, operation:{kind:'command',command:'LEGACY_PRIVATE_SENTINEL'}}, {source:'fixture-history'});
+  } finally {store.close();}
+}
+
+for (const [name, sql] of [
+  ['missing operation', 'DELETE FROM operations WHERE id=?'],
+  ['body', "UPDATE operations SET body=json_set(body,'$.input.source','CHANGED_PRIVATE_SENTINEL') WHERE id=?"],
+  ['request key', "UPDATE operations SET request_key='changed-key' WHERE id=?"],
+  ['contract', "UPDATE operations SET contract=contract||' ' WHERE id=?"],
+  ['digest', "UPDATE operations SET digest='changed-digest' WHERE id=?"],
+  ['target', "UPDATE operations SET target_id='changed-target' WHERE id=?"],
+  ['target revision', "UPDATE operations SET target_revision='changed-revision' WHERE id=?"],
+  ['state', "UPDATE operations SET state='failed',body=json_set(body,'$.state','failed') WHERE id=?"],
+  ['missing event', 'DELETE FROM operation_events WHERE operation_id=? AND version=1'],
+  ['changed event', 'UPDATE operation_events SET at=at+1 WHERE operation_id=? AND version=1'],
+  ['legacy budget', 'UPDATE operation_legacy_budget SET reserved_bytes=reserved_bytes+1 WHERE operation_id=?'],
+  ['schema', 'CREATE INDEX fixture_changed_schema ON operations(digest)'],
+]) test(`canonical preservation rejects ${name} across real service replacement`, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'ssh-preservation-canonical-change-')); let app;
+  try {
+    seedCanonical(root); app=await open(root); await listen(app);
+    assert.equal((await post(app,'reserve')).status,200);
+    assert.equal((await post(app,'preservation/capture')).status,200);
+    await app.close(); app=undefined;
+    const db=new DatabaseSync(join(root,'operations.sqlite'));
+    try {const statement=db.prepare(sql); name === 'schema' ? statement.run() : statement.run(name === 'legacy budget' ? legacyId : canonicalId);} finally {db.close();}
+    app=await open(root); await listen(app);
+    const response=await post(app,'preservation/compare'), body=await response.text();
+    assert.equal(response.status,409,`${name} must not receive a preservation PASS`);
+    assert.doesNotMatch(body, /PRIVATE_SENTINEL|changed-key|changed-target|operations.sqlite|fixture-owner/);
+    assert.equal(app.queue.maintenance,true);
+    const release=await fetch(`http://127.0.0.1:${app.adminHttp.address().port}/api/maintenance/release`, {method:'POST',headers:{Authorization:'Bearer test-admin',Origin:origin,'X-Maintenance-Owner':owner,'X-Maintenance-Compare-Required':'1'}});
+    assert.equal(release.status,409);
+  } finally {await app?.close(); await rm(root,{recursive:true,force:true});}
+});
+
+test('canonical preservation counts retained rows and event prefix separately from legitimate new history', async () => {
+  const root=await mkdtemp(join(tmpdir(),'ssh-preservation-canonical-add-')); let app;
+  try {
+    seedCanonical(root); app=await open(root); await listen(app);
+    assert.equal((await post(app,'reserve')).status,200);
+    assert.equal((await post(app,'preservation/capture')).status,200);
+    // Baseline is private, durable, and contains hashes rather than source/key/owner bodies.
+    await app.close(); app=undefined;
+    const db=new DatabaseSync(join(root,'maintenance.sqlite'), {readOnly:true});
+    try {assert.doesNotMatch(db.prepare('SELECT baseline FROM reservation').get().baseline, /PRIVATE_SENTINEL|fixture-key|fixture-owner|fixture-only-target/);} finally {db.close();}
+    seedCanonical(root,'e'.repeat(48));
+    app=await open(root); await listen(app);
+    const response=await post(app,'preservation/compare'), report=await response.json();
+    assert.equal(response.status,200); assert.equal(report.status,'PASS');
+    assert.equal(report.baselineScope,'legacy-and-canonical'); assert.equal(report.canonicalCoverage,'verified');
+    assert.equal(report.canonicalOperationsChecked,2); assert.equal(report.canonicalOperationsAdded,1);
+    assert.equal(report.canonicalEventsChecked,4); assert.equal(report.canonicalEventsAdded,2);
+    assert.equal(report.canonicalLegacyBudgetChecked,1); assert.equal(report.canonicalLegacyBudgetAdded,0);
+    assert.doesNotMatch(JSON.stringify(report),/PRIVATE_SENTINEL|fixture-key|fixture-owner|operations.sqlite/);
+  } finally {await app?.close(); await rm(root,{recursive:true,force:true});}
 });

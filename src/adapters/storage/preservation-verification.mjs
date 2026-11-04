@@ -10,9 +10,20 @@ const idPattern = /^[a-f0-9]{48}$/;
 const maxPayload = 16 * 1024 * 1024;
 export const BASELINE_PRESERVATION_CONTRACT = 'baseline-preservation-v1';
 export const PRESERVATION_COUNTERS = ['commandRequestsChecked', 'cliRequestsChecked', 'outputsChecked', 'outputPayloadsVerified', 'outputsUnavailable', 'expiredOutputsRemoved'];
+// The original counters remain compatible with older maintenance API consumers.
+export const CANONICAL_PRESERVATION_COUNTERS = ['canonicalOperationsChecked', 'canonicalOperationsAdded', 'canonicalEventsChecked', 'canonicalEventsAdded', 'canonicalLegacyBudgetChecked', 'canonicalLegacyBudgetAdded'];
+
+export function canonicalPreservationSummaryValid(report) {
+  if (report?.canonicalCoverage === undefined) return report?.baselineScope === undefined && CANONICAL_PRESERVATION_COUNTERS.every(key => report?.[key] === undefined);
+  return ['verified', 'not-in-baseline'].includes(report.canonicalCoverage)
+    && report.baselineScope === (report.canonicalCoverage === 'verified' ? 'legacy-and-canonical' : 'legacy-only')
+    && CANONICAL_PRESERVATION_COUNTERS.every(key => Number.isSafeInteger(report[key]) && report[key] >= 0)
+    && (report.canonicalCoverage !== 'not-in-baseline' || CANONICAL_PRESERVATION_COUNTERS.every(key => report[key] === 0));
+}
 
 export function baselinePreservationAccepted(report) {
   return report?.comparisonContract === BASELINE_PRESERVATION_CONTRACT && report.baselinePreserved === true
+    && canonicalPreservationSummaryValid(report)
     && PRESERVATION_COUNTERS.every(key => Number.isSafeInteger(report[key]) && report[key] >= 0)
     && report.outputsAdded === 0 && report.expiredOutputsRemoved === 0
     && report.outputsChecked === report.outputPayloadsVerified + report.outputsUnavailable
@@ -52,9 +63,29 @@ function requests(rows) {
   return result;
 }
 
+function canonicalSnapshot(operationStore, eventPrefixCount) {
+  if (!operationStore?.preservationRows || eventPrefixCount !== undefined && (!Number.isSafeInteger(eventPrefixCount) || eventPrefixCount < 0)) throw Error('Canonical preservation context required');
+  const rows = operationStore.preservationRows(), operations = [];
+  for (const row of rows.operations) {
+    if (!terminal.has(row.state) || JSON.parse(row.body).state !== row.state) throw Error('Nonterminal or invalid canonical operation');
+    operations.push(rowHash(row));
+  }
+  const events = createHash('sha256');
+  let count = 0, prefixDigest = eventPrefixCount === 0 ? events.copy().digest('hex') : null;
+  for (const row of rows.events) {
+    events.update(JSON.stringify(row) + '\n'); count++;
+    if (count === eventPrefixCount) prefixDigest = events.copy().digest('hex');
+  }
+  const digest = events.digest('hex');
+  return {schema: rowHash(rows.schema), operations, legacyBudget: Array.from(rows.legacyBudget, rowHash),
+    events: {count, digest, prefixCount: eventPrefixCount ?? count, prefixDigest: eventPrefixCount === undefined ? digest : prefixDigest}};
+}
+
 /** Call synchronously in the service process at an idle, fenced boundary. */
-export function capturePreservationSnapshot({commandState, cliState, outputs, now = Date.now()}) {
-  if (!Number.isSafeInteger(now) || now <= 0 || !outputs) throw Error('Invalid preservation context');
+export function capturePreservationSnapshot({commandState, cliState, outputs, operationStore, canonicalEventPrefixCount, legacyOnly = false, now = Date.now()}) {
+  if (!Number.isSafeInteger(now) || now <= 0 || !outputs || typeof legacyOnly !== 'boolean' || legacyOnly && (operationStore || canonicalEventPrefixCount !== undefined)) throw Error('Invalid preservation context');
+  // Only the explicit pre-canonical offline migration path can create a legacy baseline.
+  const canonical = legacyOnly ? null : canonicalSnapshot(operationStore, canonicalEventPrefixCount);
   const command = commandState?.preservationRows() ?? null;
   const cli = cliState?.preservationRows() ?? null;
   const output = outputs.preservationRows(), savedOutputs = Object.create(null);
@@ -66,7 +97,7 @@ export function capturePreservationSnapshot({commandState, cliState, outputs, no
       payload: body.state === 'ready' ? payloadHash(outputs.root, row.id, body.size) : null,
       ...(body.stream ? {streamPayload: payloadHash(outputs.root, row.id, body.stream.size, '.stream', true)} : {})};
   }
-  return {version: 1, observedAt: now,
+  return {version: legacyOnly ? 1 : 2, observedAt: now, ...(canonical ? {canonical} : {}),
     command: command && {schema: rowHash(command.schema), policy: rowHash(command.policy), requests: requests(command.requests)},
     cli: cli && {schema: rowHash(cli.schema), requests: requests(cli.requests)},
     output: {schema: rowHash(output.schema), rows: savedOutputs}};
@@ -74,9 +105,23 @@ export function capturePreservationSnapshot({commandState, cliState, outputs, no
 
 /** Strictly compare old rows; new rows are counted, never treated as old data. */
 export function comparePreservationSnapshots(before, after) {
-  if (before?.version !== 1 || after?.version !== 1 || !Number.isSafeInteger(before.observedAt) || !Number.isSafeInteger(after.observedAt) || after.observedAt < before.observedAt) throw Error('Invalid preservation snapshots');
+  if (![1, 2].includes(before?.version) || ![1, 2].includes(after?.version) || before.version === 2 && !before.canonical || after.version === 2 && !after.canonical || !Number.isSafeInteger(before.observedAt) || !Number.isSafeInteger(after.observedAt) || after.observedAt < before.observedAt) throw Error('Invalid preservation snapshots');
   const report = {status: 'PASS', commandRequestsChecked: 0, cliRequestsChecked: 0, outputsChecked: 0, outputPayloadsVerified: 0, outputsUnavailable: 0, expiredOutputsRemoved: 0,
-    comparisonContract: BASELINE_PRESERVATION_CONTRACT, baselinePreserved: false, outputsAdded: 0};
+    comparisonContract: BASELINE_PRESERVATION_CONTRACT, baselinePreserved: false, outputsAdded: 0,
+    baselineScope: before.canonical ? 'legacy-and-canonical' : 'legacy-only', canonicalCoverage: before.canonical ? 'verified' : 'not-in-baseline',
+    ...Object.fromEntries(CANONICAL_PRESERVATION_COUNTERS.map(key => [key, 0]))};
+  if (before.canonical) {
+    const old = before.canonical, current = after.canonical;
+    if (!current || old.schema !== current.schema) throw Error('Canonical schema or presence changed');
+    for (const [name, checked, added] of [['operations', 'canonicalOperationsChecked', 'canonicalOperationsAdded'], ['legacyBudget', 'canonicalLegacyBudgetChecked', 'canonicalLegacyBudgetAdded']]) {
+      const retained = new Set(current[name]);
+      if (retained.size !== current[name].length || new Set(old[name]).size !== old[name].length || old[name].some(digest => !retained.has(digest))) throw Error('Existing canonical record changed or missing');
+      report[checked] = old[name].length; report[added] = current[name].length - old[name].length;
+    }
+    if (!Number.isSafeInteger(old.events.count) || old.events.count < 0 || !Number.isSafeInteger(current.events.count) || current.events.count < old.events.count
+      || (current.events.count === old.events.count ? current.events.digest !== old.events.digest : current.events.prefixCount !== old.events.count || current.events.prefixDigest !== old.events.digest)) throw Error('Canonical event prefix changed or missing');
+    report.canonicalEventsChecked = old.events.count; report.canonicalEventsAdded = current.events.count - old.events.count;
+  }
   for (const [name, counter] of [['command', 'commandRequestsChecked'], ['cli', 'cliRequestsChecked']]) {
     const old = before[name], current = after[name];
     if (old && !current) throw Error('Journal presence changed');
