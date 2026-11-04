@@ -5,6 +5,7 @@ import gzip
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import re
 import stat
@@ -47,7 +48,9 @@ def source_files(root):
                     continue
                 if not specifier.startswith(('./', '../')):
                     raise ValueError('Standalone client requires an undeclared external module: ' + specifier)
-                target = (path.parent / specifier).resolve()
+                # Normalize dot segments without resolving away a symlink or
+                # junction that must be rejected when that module is visited.
+                target = Path(os.path.abspath(path.parent / specifier))
                 relative = target.relative_to(root).as_posix()
                 pending.append(relative)
         files[name] = data
@@ -97,7 +100,8 @@ def package(root, output):
                 info.create_system, info.external_attr, info.compress_type = 3, (stat.S_IFREG | 0o644) << 16, zipfile.ZIP_DEFLATED
                 archive.writestr(info, data)
     sums = ''.join(hashlib.sha256(path.read_bytes()).hexdigest() + '  ' + path.name + '\n' for path in archives)
-    checksum.write_text(sums, encoding='utf-8', newline='\n')
+    with checksum.open('x', encoding='utf-8', newline='\n') as destination:
+        destination.write(sums)
     return {'version': CLIENT_VERSION, 'files': len(files), 'archives': [str(p) for p in archives], 'checksums': sums}
 
 
