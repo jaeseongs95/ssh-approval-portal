@@ -115,11 +115,17 @@ export function createWindowsProvisionPort({ runtime, target, timeoutMs = 60_000
           }).catch(() => { problem = true; });
         }
       });
+      target.verify();
       const bytes = Buffer.from(JSON.stringify({ mode, username, ...(mode === 'apply' ? { password } : {}) }) + '\n');
-      await new Promise((resolve, reject) => lease.stream.end(bytes, error => { bytes.fill(0); error ? reject(error) : resolve(); }));
-      const result = await Promise.race([lease.exitPromise, new Promise((_, reject) => {
-        timer = setTimeout(() => reject(Object.assign(new Error(), { code: 'REMOTE_OUTCOME_UNKNOWN' })), timeoutMs);
-      })]);
+      let result;
+      try {
+        result = await Promise.race([(async () => {
+          await new Promise((resolve, reject) => lease.stream.end(bytes, error => error ? reject(error) : resolve()));
+          return lease.exitPromise;
+        })(), new Promise((_, reject) => {
+          timer = setTimeout(() => reject(Object.assign(new Error(), { code: 'REMOTE_OUTCOME_UNKNOWN' })), timeoutMs);
+        })]);
+      } finally { bytes.fill(0); }
       await processing;
       if (problem || buffer.trim() || !last || result.reason !== 'exit' || result.remoteState !== 'exited' || !result.cleanupComplete) fail('REMOTE_OUTCOME_UNKNOWN');
       if (last.phase === 'failed') fail(last.code);

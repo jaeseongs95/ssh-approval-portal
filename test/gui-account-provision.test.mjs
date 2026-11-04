@@ -168,3 +168,20 @@ test('native port sends secret only through stdin; malformed output fails closed
   assert.match(WINDOWS_PROVISION_SOURCE, /Add-LocalGroupMember -SID 'S-1-5-32-555' -Member \$user/);
   assert.doesNotMatch(WINDOWS_PROVISION_SOURCE, /Set-LocalUser|Remove-LocalUser|PasswordNeverExpires|Set-ItemProperty|logoff|SendSAS/);
 });
+
+test('native port bounds stalled stdin and checks binding again before secret dispatch', async () => {
+  for (const changed of [false, true]) {
+    let writes = 0, checks = 0, closed = 0;
+    const channel = new Duplex({ read() {}, write() { writes++; /* deliberately stalled */ } });
+    const stderr = new PassThrough();
+    const target = { writeProfile: 'win-write', verify() {
+      if (changed && ++checks === 2) throw Object.assign(Error(password), { code: 'TARGET_CHANGED' });
+    } };
+    const runtime = { openDesktopProcessChannel: async () => ({ stream: channel, stderr,
+      exitPromise: new Promise(() => {}), close: async () => { closed++; } }) };
+    const port = createWindowsProvisionPort({ runtime, target, timeoutMs: 15 });
+    await assert.rejects(port({ mode: 'apply', username: 'ssh-gui-agent', password }), { code: changed ? 'TARGET_CHANGED' : 'REMOTE_OUTCOME_UNKNOWN' });
+    assert.equal(writes, changed ? 0 : 1); assert.equal(closed, 1);
+    channel.destroy(); stderr.destroy();
+  }
+});
