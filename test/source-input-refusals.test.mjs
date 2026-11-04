@@ -171,3 +171,37 @@ test('SOURCE-REFUSAL-06 기존 context 사유와 일반 예외 비반사를 유�
   } finally { f.app.targets.commands.runSource = original; }
   await f.noAdmission();
 });
+
+test('SOURCE-REFUSAL-07 public secret references retain source bytes and the normal approval boundary', async t => {
+  const f = await fixture(t);
+  const submitted = "reference = 'secret://local-file/windows-gui-agent'\nprint(reference)\n";
+  const reply = await f.call({ source: submitted });
+  assert.equal(reply.isError, undefined);
+  await f.app.targets.drain();
+  const job = f.app.queue.get(reply.structuredContent.data.id);
+  assert.equal(job.state, 'pending');
+  assert.equal(job.decision.reasonCode, 'source_execution_not_enabled');
+  assert.equal(f.app.targets.commands.source(job.id).source, submitted);
+  assert.equal(f.inputs.length, 0);
+  assert.equal(f.executions.length, 0);
+});
+
+test('SOURCE-REFUSAL-08 references never conceal later credentials or skip source admission guards', async t => {
+  const f = await fixture(t, true);
+  const reference = "reference = 'secret://local-file/windows-gui-agent'\n";
+  for (const literal of ["password='SYNTHETIC_LITERAL'", "token='SYNTHETIC_LITERAL'",
+    "secret='SYNTHETIC_LITERAL'", "api_key='SYNTHETIC_LITERAL'", "value='Bearer SYNTHETIC_LITERAL'",
+    "value='-----BEGIN PRIVATE KEY----- SYNTHETIC_LITERAL'"]) {
+    assertRefusal(await f.call({ source: reference + literal, context: '' }), 'source');
+    await f.noAdmission();
+  }
+  const reply = await f.call({ source: reference + 'print(reference)\n', context: '' });
+  assert.equal(reply.isError, undefined);
+  await f.app.targets.drain();
+  const job = f.app.queue.get(reply.structuredContent.data.id);
+  assert.equal(job.state, 'completed');
+  assert.equal(job.decision.reasonCode, 'test_server_bypass');
+  assert.equal(f.executions.length, 1);
+  assert.equal(f.executions[0].stdin, reference + 'print(reference)\n');
+  assert.equal(f.inputs.length, 0);
+});
