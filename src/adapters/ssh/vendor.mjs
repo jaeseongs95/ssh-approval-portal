@@ -246,7 +246,7 @@ export async function openSshDesktopProcess(registry, profile, { command, before
   const binding = await connectionBinding(registry, profile);
   return withConnectionLifecycle(binding.connection, async observed => {
     const guarded = withDispatchGuard(observed, beforeDispatch, binding.verify);
-    if (observed.profile.tty || observed.profile.readOnly !== false || observed.profile.workdir) throw failure('requires a writable non-PTY profile without workdir', true);
+    if (observed.profile.tty || observed.profile.readOnly !== false) throw failure('requires a writable non-PTY profile', true);
     await guarded.ensureConnected();
     if (signal?.aborted) throw failure('cancelled before dispatch', true);
     const client = guarded.getClient(), options = { ...guarded.channelEnv(), pty: false };

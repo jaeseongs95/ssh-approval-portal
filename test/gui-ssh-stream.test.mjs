@@ -122,13 +122,22 @@ test('dispatch guard and changed profiles refuse before exec, including callback
   assert.equal(late.stream.destroyed, true); assert.equal(late.clientEnds, 0);
 });
 
-test('profile tty, read-only and implicit workdir cannot change helper execution semantics', async () => {
-  for (const profile of [{ tty: true }, { readOnly: true }, { workdir: '/untrusted' }]) {
+test('profile tty and read-only cannot change helper execution semantics', async () => {
+  for (const profile of [{ tty: true }, { readOnly: true }]) {
     const f = fixture({ profile }); await assert.rejects(f.open(), /requires a writable non-PTY/); assert.equal(f.calls.length, 0);
   }
   const f = fixture();
   for (const value of ['', null, 'bad\0command']) await assert.rejects(f.open({ command: value }), /Invalid desktop helper/);
   assert.equal(f.acquisitions, 0);
+});
+
+test('registered profile workdir does not rewrite or reject the fixed absolute helper command', async () => {
+  const f = fixture({ profile: { workdir: '/registered-workspace' } });
+  const lease = await f.open();
+  assert.equal(f.calls.length, 1); assert.equal(f.calls[0].command, command); assert.equal(f.calls[0].options.pty, false);
+  f.finish();
+  const result = await lease.exitPromise;
+  assert.equal(result.exitCode, 0); assert.equal(result.cleanupComplete, true); assert.equal(f.clientEnds, 0);
 });
 
 test('stderr capture is bounded and overflow terminates with a typed result without entering stdout', async () => {
