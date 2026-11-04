@@ -85,8 +85,8 @@
     },
     {
       "path": "docker/Dockerfile",
-      "size": 1594,
-      "sha256": "5427c77a4884a6b6f3d5d3035d9d5874b6b4a27dfd31d3016c6877c3604a535c"
+      "size": 1935,
+      "sha256": "3b047f63fa7b6df2dd100744081e934f550ca16da9e371b7d0944d86ef6fb6b4"
     },
     {
       "path": "docker/compose.yaml",
@@ -125,8 +125,8 @@
     },
     {
       "path": "docs/agent-upload.ko.md",
-      "size": 20375,
-      "sha256": "106c498c2b9300079c1d907c34d71cfd499bff021a539c63af9a55aa34a99b20"
+      "size": 20696,
+      "sha256": "9035c26b70d50eede7606cab53f19efa6daf9021346a7d4f4f18fdaf8b5dd1e4"
     },
     {
       "path": "docs/aik-ags-provisional.ko.md",
@@ -135,8 +135,8 @@
     },
     {
       "path": "docs/approval-callback.ko.md",
-      "size": 2028,
-      "sha256": "31949bfea3a7522794432325eccf6e518d388b9cde9e87918c803968ebff57e3"
+      "size": 2349,
+      "sha256": "ffbd74645a66d4b9a942db6a15d41dabd815644b685a6327378fcd79831d3dd2"
     },
     {
       "path": "docs/architecture.en.md",
@@ -170,8 +170,8 @@
     },
     {
       "path": "docs/command-output.ko.md",
-      "size": 7293,
-      "sha256": "c1da4a426947aa7e0c02c959c4646085afff0ea9236da3942b4c2ec4f7d368ac"
+      "size": 7614,
+      "sha256": "8e8478d6354e1813dd2c79e6d7b7e8a668440375de0933fb09afd35bc2e6735e"
     },
     {
       "path": "docs/deployment-180.ko.md",
@@ -185,8 +185,8 @@
     },
     {
       "path": "docs/desktop.ko.md",
-      "size": 12721,
-      "sha256": "f34da4d41fef720795359362114aa2de47e7d3533b372e6e745ea6ff42d51d1f"
+      "size": 14002,
+      "sha256": "db363e94b04db0c62bc7a76c71371a70ccc291c1cb47385c28900655be8d5959"
     },
     {
       "path": "docs/environment-editor.md",
@@ -280,8 +280,8 @@
     },
     {
       "path": "native/freerdp-input/BUILD-RESULT.ko.md",
-      "size": 3807,
-      "sha256": "a85f694c214a473862d6de2d74138e419e12a638990dd2a8ec34f68cb505bb0e"
+      "size": 5678,
+      "sha256": "fa744b9f6c668b1e4be7cdecab2897b7f8aa04bdbc775b6e6bbd54bc1b08225b"
     },
     {
       "path": "native/freerdp-input/Dockerfile",
@@ -344,6 +344,11 @@
       "sha256": "6b0071c9d56fdf91b6baa09eede029fcf0ec02d560e79c1239dea2d090dbf8d9"
     },
     {
+      "path": "native/freerdp-input/test_bundle.py",
+      "size": 2462,
+      "sha256": "838cc6a77089cc23f25f9b730e444d5216d9f53369146bbb5cf096b4a6152f81"
+    },
+    {
       "path": "native/freerdp-input/xf_agni.c",
       "size": 4745,
       "sha256": "4ee52ffdb9bf328d7e996916a3a60b0db9a47bdcae6e142b551a6cc86abac6a8"
@@ -375,8 +380,8 @@
     },
     {
       "path": "scripts/build-freerdp-input.py",
-      "size": 7463,
-      "sha256": "e7cf5b0ce3e5d2c1279409dc8fb6aa381a01c58ce2f11ce0bca9943034ec0d43"
+      "size": 8326,
+      "sha256": "cf5ab47ad1f6fb9088e06b060ad0ae76e8a58212b61f59391bf340f4cda728be"
     },
     {
       "path": "scripts/capacity-defaults.mjs",
@@ -465,8 +470,8 @@
     },
     {
       "path": "scripts/deploy180.mjs",
-      "size": 26085,
-      "sha256": "d5c43ec7712990ec96c15c3eb86dc26a80b94dc2c3bfa98a6bab5e513c813412"
+      "size": 26163,
+      "sha256": "229688f2f3da8ca42496561756b1daf76d47b1add0b0c3200afaf51d9f0414ad"
     },
     {
       "path": "scripts/docker-secrets.py",
@@ -515,8 +520,8 @@
     },
     {
       "path": "scripts/install.sh",
-      "size": 10249,
-      "sha256": "13c826ae74a5f2dc8baacfae949fc3b8e6a39f5c216ade5c3352793c5fe46efb"
+      "size": 11132,
+      "sha256": "4195eef5f69ee2bb20431ab57c3b961711633bddb37a5bad5502982562749d9b"
     },
     {
       "path": "scripts/jev-shadow-protocol.mjs",
@@ -610,8 +615,8 @@
     },
     {
       "path": "scripts/prepare-freerdp-input.py",
-      "size": 13980,
-      "sha256": "a93f08e242a8e095a59e81e1e7e395d760a71273cb4d120bda68e7f6c351a76d"
+      "size": 14040,
+      "sha256": "f4ba788d21ba2994da3985bbac2ae2261af931e5df27314547863f9da7308710"
     },
     {
       "path": "scripts/prepare-oidc-proxy.py",
@@ -1395,8 +1400,8 @@
     },
     {
       "path": "test/browser/card-bootstrap.js",
-      "size": 4096,
-      "sha256": "649983c6e797ee9ba2c6be2245d194e072d455a9190c365394a5f2ec1a3a58fa"
+      "size": 4405,
+      "sha256": "1c531ee5f03a6e03b00fdbd82931cf2c69994c226a4656a27b965eb9d6cad719"
     },
     {
       "path": "test/browser/command-line-import.test.mjs",
@@ -1435,8 +1440,8 @@
     },
     {
       "path": "test/browser/queued-state.test.mjs",
-      "size": 4971,
-      "sha256": "c78573ed625c556c3a06e1277b3e02b2c12ad17eda885d3f25d1d08ac2dc0852"
+      "size": 5132,
+      "sha256": "1e952a188e2dbb7d1aca70ff7dfaa1b45555d952629adda1140e5cf1b2cc7c03"
     },
     {
       "path": "test/browser/regressions.test.mjs",
@@ -1472,6 +1477,11 @@
       "path": "test/capacity-ui.test.mjs",
       "size": 4339,
       "sha256": "00cb20727ed8188b4784ca0f280941332fe03cbc114b2a891b1c570e53ccf0ae"
+    },
+    {
+      "path": "test/card-mcp-contract.test.mjs",
+      "size": 9425,
+      "sha256": "c51339f9841202958b14495414127d9a315276237e265c469af6cfc44050272c"
     },
     {
       "path": "test/cli-entrypoint.test.mjs",
@@ -1944,6 +1954,11 @@
       "sha256": "94fda236232b8a417a886afe4cc4314590c99126b7d0a92f27bb397524088821"
     },
     {
+      "path": "test/native-install-paths.test.mjs",
+      "size": 5717,
+      "sha256": "dbbcff50bbcd8a2ce8ada0ea82f783ba0b156acd6b71947464691121ea342c53"
+    },
+    {
       "path": "test/non-cloudflare-container-test.sh",
       "size": 1479,
       "sha256": "df21502d4a40a33154828551853207c9f1a28276e73c9d01328424140251d738"
@@ -2390,8 +2405,8 @@
     },
     {
       "path": "test/test_package.py",
-      "size": 18334,
-      "sha256": "62c4d8e2538125c5faeed44ae20151029b2f7ce7b358cf2ff4add4a8fa850914"
+      "size": 19758,
+      "sha256": "9f40357974ebc6ac71b6f41f941116c5db4fe0e7333bc64f751f7f9ed6d7ea26"
     },
     {
       "path": "test/test_portal_setup.py",
@@ -2400,8 +2415,8 @@
     },
     {
       "path": "test/test_prepare_freerdp_input.py",
-      "size": 10733,
-      "sha256": "ff42c0d95a0623f15da7b986e9130e5a4aba2ddf816c6f2880198c3731d8ed86"
+      "size": 11120,
+      "sha256": "222210ad84fff6b15ed933d601ef7e9e8df7cd910875b62f42cc9c1596f3e529"
     },
     {
       "path": "test/test_release_package.py",
@@ -2565,8 +2580,8 @@
     },
     {
       "path": "ui/dist/card.html",
-      "size": 542826,
-      "sha256": "f7614ca7fc6fe64de29905dc0b2bec5cb932c27734bf15094bee4a202794a829"
+      "size": 544141,
+      "sha256": "5ac67e6ba3af4862e121ac61374222cf46ac1796f52e3e8635aa4c4550f0ac47"
     },
     {
       "path": "ui/package-lock.json",
@@ -2580,8 +2595,8 @@
     },
     {
       "path": "ui/src/controller.js",
-      "size": 8801,
-      "sha256": "6e7437caa8c9b0aa084abcd2b594aa4e9a46add478e6a83333635212847c8c21"
+      "size": 11004,
+      "sha256": "740595be4124ce72748b00b811a7e7b316883f71206dd91c523fc9fa33be0d1b"
     },
     {
       "path": "ui/src/decision.js",
@@ -2590,8 +2605,8 @@
     },
     {
       "path": "ui/src/host.js",
-      "size": 1399,
-      "sha256": "a09d3f902b2fd4a8b96a0ff14c3c1accd589372338bbffa831d7d99d7690cae4"
+      "size": 1561,
+      "sha256": "92b80afe6b5650096b97b52b341e701e70559ddf20e9db822cf7e4d8e768fa36"
     },
     {
       "path": "ui/src/i18n.js",
@@ -2610,8 +2625,8 @@
     },
     {
       "path": "vendor/freerdp-input-v1-linux-x64.tgz",
-      "size": 17694051,
-      "sha256": "91ae43e00d67bbf7581950043b167232061857bae4a75b093a74b7702d01a578"
+      "size": 17695062,
+      "sha256": "7154f69e580483763a38e9552ef5f872c037b6c8fe2c4c07f94e770b2886ba32"
     },
     {
       "path": "vendor/ssh-mcp-2.18.0.tgz",
