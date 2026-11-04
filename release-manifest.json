@@ -1,6 +1,6 @@
 {
   "version": "2.0.0",
-  "status": "candidate-pending-live-host-verification",
+  "status": "release",
   "runtime": "Node.js 24",
   "files": [
     {
@@ -535,8 +535,8 @@
     },
     {
       "path": "scripts/linux-desktop-session.py",
-      "size": 20662,
-      "sha256": "3f739f6f57ab8f3af6fa67632d370142371db857288a255b77d555b2cdb4b063"
+      "size": 22355,
+      "sha256": "6b9a4d131d89eb1184885a0efb29fe14f66dce2f8e380a060e25918fac00ce7f"
     },
     {
       "path": "scripts/maintenance-owner.sh",
@@ -1885,8 +1885,8 @@
     },
     {
       "path": "test/linux-desktop-session.test.mjs",
-      "size": 18903,
-      "sha256": "ea13344694261d1ee508b668c932072147afb4d650a282fa126c44018ec7fd34"
+      "size": 19952,
+      "sha256": "44310b114f65d8edeb0d5d67f7d8f02ea49a7a5305e71a3d06846699e7da31f8"
     },
     {
       "path": "test/local-secret-store.test.mjs",
@@ -2385,8 +2385,8 @@
     },
     {
       "path": "test/test_linux_desktop_session.py",
-      "size": 8056,
-      "sha256": "44de31e604d225e457f03897cd125268c0aa762ec6caf95e959db755e7ec3c49"
+      "size": 13003,
+      "sha256": "5c25eb1109f51a29d2a0f74d355a49d084d680fcf1fe28f93f35a6df252e3917"
     },
     {
       "path": "test/test_node_runtime.py",
