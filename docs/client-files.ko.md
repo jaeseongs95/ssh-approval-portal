@@ -8,6 +8,8 @@
 
 Node.js 24.2 이상인 24.x와 신뢰하는 기존 cloudflared 실행 파일이 필요합니다. 이 배포본은 Node·cloudflared·인증 정보를 포함하지 않습니다. npm 의존성·전역 설치·설치 프로그램은 필요 없습니다. 기존 cloudflared owner 로그인 캐시만 사용하며 로그인이나 설치를 자동 실행하지 않습니다.
 
+관리자 HTTPS origin의 인증 모드가 `access`여야 합니다. 기본 관리자 `token` 모드나 MCP 연결용 bearer로 대체할 수 없으며, `--origin`은 MCP 도구 URL이 아니라 관리자 사이트의 origin입니다. `ACCESS_MODE_REQUIRED`이면 이 전제를 확인하세요. 클라이언트는 인증 모드·설정·로그인을 자동으로 바꾸지 않습니다. [관리자 로그인 안내](https://github.com/jaeseongs95/ssh-approval-portal/blob/4ccfe36d4bde0943e88d6e12d53795dc56e9379a/docs/admin-login.ko.md)를 참고하세요.
+
 tar.gz 또는 zip을 새 작업 폴더에 풀고 그 폴더에서 아래 명령을 실행합니다. 예시 origin과 파일 경로는 실제 허용 대상으로 바꿉니다. cloudflared는 절대 경로로 지정할 수 있고, 생략하면 PORTAL_CLOUDFLARED와 PATH 순서로 기존 실행 파일을 확인합니다.
 
 ```powershell
@@ -48,8 +50,14 @@ status는 같은 UUID의 state·size·sha256·expiresAt·received·sequence만 �
 
 동일한 키가 이미 ready인 동일 크기·해시의 파일을 가리키면 그 UUID를 관측해 반환하며 파일 청크나 완료 요청을 다시 보내지 않습니다. 파일 바이트·크기·해시가 다르면 중지합니다.
 
+## 기존 원격 MCP에서 UUID 사용
+
+성공 UUID를 받은 에이전트는 `targets`로 대상 ID와 revision을 확인하고 `files`를 호출합니다. `stat`는 metadata를 조회합니다. `copy`·`move`에는 UUID와 안정된 `operationKey`, `target`, `expectedTargetRevision`, `remotePath`가 필요하며 `overwrite`·`elevate`는 선택 사항입니다. `data.request`가 있으면 그 `id`를 `observe`합니다. request가 null이거나 결과가 불명확하면 같은 UUID의 `file.operations`를 먼저 확인합니다. copy는 임시 원본을 유지하고 move는 대상 publication 성공을 확인한 뒤 소비합니다. `remove`는 임시 원본만 제거하며 이미 배치된 대상 파일을 삭제하지 않습니다. UUID 자체가 승인이나 OS 권한을 부여하지 않습니다. 자세한 필드는 [UUID files 계약](https://github.com/jaeseongs95/ssh-approval-portal/blob/4ccfe36d4bde0943e88d6e12d53795dc56e9379a/docs/mcp-tools.ko.md#모델-밖-파일-전송과-uuid-files-계약)을 따릅니다.
+
+현재 standalone 클라이언트에는 다운로드 요청·PC 저장 명령이 없습니다. 원격 MCP의 `submit`의 `download` 요청과 `artifact-read`는 승인된 서버 스냅샷을 읽는 공통 계약이며 PC 저장 완료를 뜻하지 않습니다. 실제 PC 저장은 허용된 모델 밖 코드나 지원 호스트의 파일 저장 UI에서 수행하고 결과를 확인해야 합니다. 모델 답변에 대량 base64를 재출력하지 않습니다.
+
 ## 배포 파일
 
-ssh-approval-portal-client-2.0.0.tar.gz와 같은 이름의.zip은 동일 클라이언트 소스를 담습니다. client-manifest.json은 포함 파일의 크기·SHA-256과 Node 요구사항을 기록합니다. SHA256SUMS-client-2.0.0은 두 압축 파일의 전체 해시입니다. 서버 설치 파일이나 인증 캐시는 포함하지 않습니다.
+ssh-approval-portal-client-2.0.0.tar.gz와 같은 이름의.zip은 동일 클라이언트 소스를 담습니다. client-manifest.json은 포함 파일의 크기·SHA-256과 Node 요구사항을 기록합니다. SHA256SUMS-client-2.0.0은 두 압축 파일의 전체 해시입니다. 서버 설치 파일이나 인증 캐시는 포함하지 않습니다. 실행 진입점은 `scripts/portal-files.mjs`이며 명령은 `doctor`·`upload`·`status`입니다. 별도 `scripts/portal-client.mjs`·`scripts/portal-file-mcp.mjs` 실행 스크립트는 이 client 자산에 포함하지 않습니다.
 
 개발자는 python scripts/package-client.py --output 새출력폴더로 같은 진입점의 소스 의존 그래프를 묶습니다. 기존 결과물은 덮어쓰지 않습니다. 로컬 생성 허용과 제품 동작 시험은 구분하며, 동작 회귀와 압축 해제 사본의 실행 검사는 승인된 TEST 환경에서 수행합니다.

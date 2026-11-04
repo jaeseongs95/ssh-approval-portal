@@ -4,7 +4,7 @@
 
 SSH 명령·파일 전송·OS 데스크톱을 기존 서버 정책과 소유자 승인으로 처리하는 표준 MCP 서버입니다. 특정 AI 벤더나 에이전트 SDK에 종속되지 않습니다. `targets`로 대상 revision·플랫폼·기능·파일 정책을 확인하고 `submit`·`observe`로 같은 작업을 제출·관측합니다. MCP Apps 카드는 선택 사항이며 중계기 하나에 SSH 대상을 최대 32개 등록합니다. [도구 계약](docs/mcp-tools.ko.md)과 [대상 설정](docs/multi-targets.ko.md)을 참고하세요.
 
-2.0.0 개발 범위에는 배포본에 포함하는 `scripts/portal-files.mjs`가 들어갑니다. 로컬 CLI가 owner 인증으로 PC 파일을 직접 HTTP 전송하고 성공 시 `{"uuid":"..."}`만 출력합니다. 파일 본문을 모델 인자나 대화로 옮기지 않습니다. 에이전트는 기존 원격 MCP 연결에서 `files`에 UUID를 넘겨 상태 조회·복사·이동·임시 원본 제거를 요청합니다. 두 번째 로컬 stdio MCP 서버는 선택 사항입니다. 원격 서버가 PC 경로를 직접 읽을 수는 없습니다. 자세한 인증·사용법은 [파일 클라이언트 안내](docs/client-files.ko.md)를 따릅니다.
+2.0.0 개발 범위에는 배포본에 포함하는 `scripts/portal-files.mjs`가 들어갑니다. 로컬 CLI가 owner 인증으로 PC 파일을 직접 HTTP 전송하고 성공 시 `{"uuid":"..."}`만 출력합니다. 파일 본문을 모델 인자나 대화로 옮기지 않습니다. 에이전트는 기존 원격 MCP 연결에서 `files`에 UUID를 넘겨 상태 조회·복사·이동·임시 원본 제거를 요청합니다. 두 번째 로컬 stdio MCP 서버는 선택 사항입니다. 원격 서버가 PC 경로를 직접 읽을 수는 없습니다. 현재 standalone 클라이언트의 명령은 `doctor`·`upload`·`status`이며 PC 다운로드 저장 명령은 없습니다. 자세한 인증·사용법은 [파일 클라이언트 안내](docs/client-files.ko.md)를 따릅니다.
 
 새 UUID 서버·클라이언트 경로는 2.0.0 통합 개발 대상입니다. 계약 설명은 최종 후보의 전체 시험·패키지·설치·배포 또는 모든 벤더/에이전트에서의 실동작 완료를 뜻하지 않습니다. 과거 ChatGPT 웹·Claude 데스크톱의 카드/파일 왕복과 구버전 구조 변경 시험은 해당 릴리스의 기록 범위에 한정됩니다. ChatGPT 데스크톱·Claude 웹 등 확인되지 않은 조합을 완료로 확대하지 않습니다. 실제 환경과 보존 근거는 해당 후보의 `VALIDATION.json` 및 실행 기록으로 판단합니다.
 
@@ -60,7 +60,7 @@ Linux 덮어쓰기는 기존 소유권·모드·확장 속성을 보존할 수 �
 npm run package:release -- --output /absolute/new/portal-2.0.0-release
 ```
 
-서버 `ssh-approval-portal-2.0.0.tar.gz`·`.zip`과 클라이언트 `ssh-approval-portal-client-2.0.0.tar.gz`·`.zip`의 4개 자산 및 네 자산을 함께 나열한 `SHA256SUMS`를 만듭니다. 기존 출력 디렉터리는 거절하며 이전 배포본을 덮어쓰지 않습니다. 클라이언트 실행에는 별도의 기존 Node.js `>=24.2.0 <25`와 신뢰하는 `cloudflared` 실행 파일·owner 로그인 캐시가 필요하며 이 런타임·인증값은 클라이언트 자산에 포함하지 않습니다. 기존 원격 MCP 연결을 그대로 쓰고 두 번째 로컬 MCP 서버는 선택 사항입니다. 이 명령 설명은 패키징 실행·시험·배포 완료를 뜻하지 않습니다.
+서버 `ssh-approval-portal-2.0.0.tar.gz`·`.zip`과 클라이언트 `ssh-approval-portal-client-2.0.0.tar.gz`·`.zip`의 4개 자산 및 네 자산을 함께 나열한 `SHA256SUMS`를 만듭니다. 기존 출력 디렉터리는 거절하며 이전 배포본을 덮어쓰지 않습니다. 클라이언트 실행에는 별도의 기존 Node.js `>=24.2.0 <25`와 신뢰하는 `cloudflared` 실행 파일·owner 로그인 캐시가 필요하며 이 런타임·인증값은 클라이언트 자산에 포함하지 않습니다. PC 클라이언트의 origin은 Access 모드가 구성된 관리자 HTTPS 사이트입니다. 기본 관리자 token 모드나 MCP bearer로 대체하지 않으며 클라이언트가 설정·로그인을 자동 변경하지 않습니다. 기존 원격 MCP 연결을 그대로 쓰고 두 번째 로컬 MCP 서버는 선택 사항입니다. 이 명령 설명은 패키징 실행·시험·배포 완료를 뜻하지 않습니다.
 
 ## 네이티브 설치와 업데이트
 
@@ -121,17 +121,17 @@ Compose 갱신은 제한된 구성에서 지원합니다. 실행 중인 중계�
 
 ## 검증과 상태 확인
 
-다음 명령은 허용된 TEST·CI 환경에서 실행할 검증 절차이며 이번 문서 수정에서 실행한 결과가 아닙니다. 2.0.0 최종 후보의 실제 클라이언트·패키지·설치·배포는 고정 commit과 실행 근거로 별도 확인합니다.
+다음은 허용된 TEST·CI 환경의 서버 검증 절차이며 이번 문서 수정에서 실행한 결과가 아닙니다. 2.0.0 최종 후보의 실제 클라이언트·패키지·설치·배포는 고정 commit과 실행 근거로 별도 확인합니다.
 
 ```sh
 npm ci --ignore-scripts
 npm run build:ui
 npm test
-npx playwright install chromium
-npm run test:browser
 python3 test/test_helper.py
 sudo bash scripts/status.sh
 ```
+
+브라우저 회귀는 로컬 PC의 격리 작업 사본에서 [브라우저 검사 안내](docs/browser-testing.ko.md)에 따라 실행합니다. 서버 제품 시험과 실행 위치를 구분합니다.
 
 UI는 별도 `ui` 의존성으로 빌드하며 서버 SDK를 업그레이드하지 않습니다. UI와 웹의 모듈을 바꾸면 `npm run build:ui`로 배포 자산을 다시 만듭니다. 계층 경계·호환성·향후 시험 기준은 [구조 안내](docs/architecture.ko.md)와 [검증 계획](test/PLAN.md)에 정리했습니다. `test/docker-tests.ps1`은 합성 데이터로 격리된 Ubuntu 컨테이너를 생성·정리합니다. 실제 클라이언트의 카드·파일 저장, 플랫폼 파일 입력과 실제 ARM 하드웨어 시험은 각각 수행한 근거가 있을 때만 완료로 기록합니다.
 
