@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { CHUNK_BYTES, MAX_BYTES } from '../../contracts/ports.mjs';
 import { withUploadSnapshot } from './local-files.mjs';
-import { createOwnerHttpSession, readPortalJson } from './owner-http-session.mjs';
+import { createOwnerHttpSession, readPortalJson, safePortalErrorCode } from './owner-http-session.mjs';
 
 const fail = (code, details = {}) => Object.assign(new Error(code), { code, ...details });
 export const opaqueUuidValid = value => typeof value === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(value);
@@ -76,7 +76,8 @@ export function createOpaqueFilesClient(options) {
         // allocate another artifact to discover what happened to the first one.
         let progress;
         if (uuid) { try { progress = await status(uuid); } catch { /* Original failure and UUID stay authoritative. */ } }
-        throw fail(publicErrors.has(error.code) ? error.code : 'ARTIFACT_UPLOAD_FAILED', { phase, ...(uuid ? { uuid } : {}), ...(progress ? { progress } : {}) });
+        throw fail(publicErrors.has(error.code) ? error.code : 'ARTIFACT_UPLOAD_FAILED', { phase, ...(uuid ? { uuid } : {}),
+          ...(safePortalErrorCode(error.serverCode) ? { serverCode: error.serverCode } : {}), ...(progress ? { progress } : {}) });
       }
     },
   };

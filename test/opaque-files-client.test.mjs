@@ -7,6 +7,7 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createOpaqueFilesClient, opaqueOperationKeyValid } from '../src/adapters/cli/opaque-files-client.mjs';
+import { createOwnerHttpSession } from '../src/adapters/cli/owner-http-session.mjs';
 import { main } from '../scripts/portal-files.mjs';
 
 // Run on approved TEST only. Actual filesystem snapshots, raw fetch request
@@ -48,6 +49,7 @@ async function fixture(t, options = {}) {
       assert.equal(headers.get('content-type'), 'application/octet-stream');
       assert.ok(init.body.length <= 262144); assert.equal(headers.get('x-chunk-sha256'), digest(init.body));
       assert.equal(Number(path.split('/').at(-1)), artifact.sequence);
+      if (options.chunkCode) return new Response(JSON.stringify({ error: options.chunkCode }), { status: 422, headers: { 'Content-Type': 'application/json' } });
       chunks.push(Buffer.from(init.body)); artifact.received += init.body.length; artifact.sequence++;
       if (options.chunkLost) throw Error('synthetic chunk response loss containing private marker');
       return json({ uuid, sequence: artifact.sequence + (options.badAck ? 1 : 0), received: artifact.received });
@@ -74,6 +76,85 @@ test('opaque upload sends exact385KiB as bounded raw bytes and returns only the 
   assert.equal(f.requests.filter(r => r.path === '/api/artifacts').length, 1);
   assert.equal(f.requests.filter(r => r.path.endsWith('/complete')).length, 1);
   assert.equal(f.artifact.state, 'ready');
+});
+
+// Delta selector: --test-name-pattern=^server cause:
+async function causeFixture(t, reply) {
+  const calls = [];
+  const session = createOwnerHttpSession({ origin, accessToken, fetch: async (url, init) => {
+    const path = new URL(url).pathname; calls.push({ path, method: init.method });
+    if (path === '/api/session') return json({ mode: 'access' });
+    if (path === '/api/session/start') return json({ connected: true }, { 'Set-Cookie': '__Host-ssh_admin_session=' + 'b'.repeat(64) + '; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=600' });
+    if (path === '/api/session/logout') return json({ connected: false });
+    return reply(init);
+  } });
+  t.after(() => session.close()); await session.connect();
+  return { session, calls };
+}
+
+test('server cause: shared session preserves typed causes without changing legacy refusal codes', async t => {
+  for (const [serverCode, status] of [['ARTIFACT_QUOTA', 507], ['ARTIFACT_NOT_FOUND', 404], ['CHUNK_HASH_MISMATCH', 422], ['ARTIFACT_HASH_MISMATCH', 422]]) {
+    const f = await causeFixture(t, () => new Response(JSON.stringify({ error: serverCode }), { status, headers: { 'Content-Type': 'application/json' } }));
+    await assert.rejects(f.session.json('/api/refused', {}), error => error.code === 'PORTAL_REQUEST_REFUSED' && error.status === status && error.serverCode === serverCode && error.message === 'PORTAL_REQUEST_REFUSED');
+    assert.equal(f.calls.filter(call => call.path === '/api/refused').length, 1);
+  }
+});
+
+test('server cause: malformed JSON or non-JSON error responses retain the original refusal only', async t => {
+  for (const [body, type] of [['{"error":', 'application/json'], ['{"error":"ARTIFACT_QUOTA"}', 'text/plain'], ['<html>private path /home/private and token</html>', 'text/html']]) {
+    const f = await causeFixture(t, () => new Response(body, { status: 409, headers: { 'Content-Type': type } }));
+    await assert.rejects(f.session.json('/api/refused', {}), error => error.code === 'PORTAL_REQUEST_REFUSED' && error.status === 409 && !Object.hasOwn(error, 'serverCode') && !error.message.includes('private'));
+  }
+});
+
+test('server cause: only a3..64 uppercase ASCII code is retained, never arbitrary error values', async t => {
+  for (const error of ['ab', 'A'.repeat(65), '/home/private/token', 'PASSWORD=private-marker', 'LOWER_case', { code: 'ARTIFACT_QUOTA' }, ['ARTIFACT_QUOTA'], null]) {
+    const f = await causeFixture(t, () => new Response(JSON.stringify({ error }), { status: 409, headers: { 'Content-Type': 'application/json' } }));
+    await assert.rejects(f.session.json('/api/refused', {}), value => value.code === 'PORTAL_REQUEST_REFUSED' && !Object.hasOwn(value, 'serverCode'));
+  }
+  for (const serverCode of ['ERR', 'A'.repeat(64), 'CODE_200']) {
+    const f = await causeFixture(t, () => new Response(JSON.stringify({ error: serverCode }), { status: 409, headers: { 'Content-Type': 'application/json' } }));
+    await assert.rejects(f.session.json('/api/refused', {}), value => value.serverCode === serverCode);
+  }
+});
+
+test('server cause: the existing1MiB JSON body limit also bounds optional refusal causes', async t => {
+  let cancelled = false, produced = 0;
+  const f = await causeFixture(t, () => new Response(new ReadableStream({
+    pull(controller) { produced++; controller.enqueue(Buffer.alloc(256 * 1024, 120)); if (produced === 32) controller.close(); },
+    cancel() { cancelled = true; },
+  }), { status: 507, headers: { 'Content-Type': 'application/json' } }));
+  await assert.rejects(f.session.json('/api/refused', {}), error => error.code === 'PORTAL_REQUEST_REFUSED' && error.status === 507 && !Object.hasOwn(error, 'serverCode'));
+  assert.ok(produced < 32); assert.equal(cancelled, true);
+});
+
+test('server cause:401 remains owner reauthentication and never accepts a contradictory server cause', async t => {
+  let cancelled = false;
+  const f = await causeFixture(t, () => new Response(new ReadableStream({
+    start(controller) { controller.enqueue(Buffer.from('{"error":"ARTIFACT_QUOTA"}')); }, cancel() { cancelled = true; },
+  }), { status: 401, headers: { 'Content-Type': 'application/json' } }));
+  await assert.rejects(f.session.json('/api/refused', {}), error => error.code === 'OWNER_REAUTH_REQUIRED' && error.status === 401 && !Object.hasOwn(error, 'serverCode'));
+  assert.equal(cancelled, true);
+});
+
+test('server cause: network uncertainty retains read/write distinctions without inventing a cause', async t => {
+  const f = await causeFixture(t, () => { throw Error('private stack path /home/private'); });
+  await assert.rejects(f.session.json('/api/refused', {}), error => error.code === 'PORTAL_RESULT_UNKNOWN' && !Object.hasOwn(error, 'serverCode'));
+  await assert.rejects(f.session.json('/api/refused'), error => error.code === 'PORTAL_READ_FAILED' && !Object.hasOwn(error, 'serverCode'));
+  assert.equal(f.calls.filter(call => call.path === '/api/refused').length, 2);
+});
+
+test('server cause: opaque upload and CLI stderr retain a safe chunk cause with the same UUID only', async t => {
+  const f = await fixture(t, { chunkCode: 'CHUNK_HASH_MISMATCH' }); let stdout = '', stderr = '';
+  const code = await main(['--origin', origin, '--cloudflared', join(f.root, 'cloudflared'), 'upload', '--file', f.file, '--operation-key', key],
+    { write: value => { stdout += value; } }, { write: value => { stderr += value; } }, () => accessToken, {},
+    options => createOpaqueFilesClient({ ...options, fetch: f.fetch }));
+  assert.equal(code, 1); assert.equal(stdout, '');
+  const last = JSON.parse(stderr.trim().split('\n').at(-1));
+  assert.deepEqual(last, { error: 'PORTAL_REQUEST_REFUSED', serverCode: 'CHUNK_HASH_MISMATCH', uuid, phase: 'chunks', state: 'staging', received: 0, sequence: 0 });
+  assert.doesNotMatch(stderr, /synthetic\.bin|synthetic\.owner\.credential|MUST-NOT-ESCAPE/);
+  assert.equal(f.requests.filter(r => r.path.includes('/chunks/')).length, 1);
+  assert.equal(f.requests.filter(r => r.path.endsWith('/complete')).length, 0);
 });
 
 test('opaque status projects safe metadata for the same UUID across declared states', async t => {
