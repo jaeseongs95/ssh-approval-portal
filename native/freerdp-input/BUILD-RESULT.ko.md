@@ -28,3 +28,13 @@ CMake/Ninja는 `cmake --build build --parallel 1 --target xfreerdp`를 실행했
 배포 archive의 최상위는 `runtime/`와 `source/`다. `runtime/manifest.json`의 files는 runtime 상대 경로 `bin/`, `lib/`, `licenses/`의 일반파일만 나열하며 자신은 제외한다. SONAME은 일반파일로 복사했다. `source/`는 upstream archive, license, 적용 patch, overlay, build script/options/cache 및 compiler/packages/protocol 로그를 포함하며 별도 manifest 없이 outer archive SHA로 결속된다.
 
 ACK는 native callback의 전송 결과일 뿐 Windows 앱의 소비를 증명하지 않는다. 실제 Windows의 긴 혼합 문자열 저장 SHA, 시스템키·포인터 순서 및 종료 통합시험은 이 작업에서 실행하지 않았으며 root 통합 검증 범위다. apt 저장소 snapshot은 고정하지 않아 bit-for-bit 재빌드를 주장하지 않는다.
+
+## r4 archive 권한 수정
+
+root의 실제 strict prepare에서 위 r3 archive의 `source/overlay` 디렉터리 한 개가 `0775`여서 `FREERDP_UNSAFE_ARCHIVE_MODE`로 거절됐다. r3의 protocol/build 통과가 archive guard 통과를 뜻하지 않는다. 실패 archive는 로컬 `evidence/repack-r4/old-91ae.tgz` 및 기존 TEST r3 경로에 보존했다.
+
+`write_bundle`에서 tar metadata를 명시해 모든 디렉터리는 `0755`, source 일반파일과 runtime manifest는 `0644`, runtime 일반파일은 그 manifest mode를 사용한다. symlink는 따라가지 않고 거절한다. 새 TEST `python3 native/freerdp-input/test_bundle.py -v`는 source 디렉터리0775/파일0777 및 symlink 사례 2개를 통과했다(exit0).
+
+기존 r3 build 산출물을 그대로 재포장해 새 bundle SHA256 `7154f69e580483763a38e9552ef5f872c037b6c8fe2c4c07f94e770b2886ba32`, 크기17,695,062 bytes를 얻었다. 40 entries 중 group/world writable mode는 0개다. binary SHA256 `469a39e0421b5947c84a1d4602069d69c81a05517cb5053ae806bcb2e59e49d3`와 patch SHA256 `ee8819a551c955ad425d084a2b207e5f8ebda60276ab0849c9ba6f47ffb5e2ab`는 직접 비교해 동일했다. 컴파일은 반복하지 않았다.
+
+수정하지 않은 strict prepare 모듈을 사용해 기존 r3 archive의 같은 오류를 재확인하고 새 archive는 fixture pin만 새 SHA로 결속했다. `prepared`와 후속 `reused`, capability probe exit0을 확인했다. 첫 fixture 시도는 fixture 루트/vendor 자체가 시험 실행기의 umask로0775가 되어 `FREERDP_UNSAFE_DIRECTORY`로 종료했다. 자기 fixture 두 디렉터리를0755로 고친 뒤 기존 재포장본의 검사만 계속했으며 제품 guard를 완화하지 않았다. 원시 결과는 `/tmp/ags-native-input-child78-repack-r4/result.json`, 성공 영수증은 `152d137add2befd7be5716691d97990176d04e91240174f4`다.
