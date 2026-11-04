@@ -106,6 +106,8 @@ The deployment target is Docker Engine with Compose v2 on Ubuntu 22.04/24.04. Th
 
 ```sh
 # Generate the assets above once; do not reuse their output directory.
+mkdir -p dist
+cp /absolute/new/portal-2.0.0-release/ssh-approval-portal-2.0.0.tar.gz dist/
 sudo bash scripts/prepare-docker.sh --admin-origin https://ssh-approve.example.com --grant-sudo-all
 sudo docker compose --env-file /etc/ssh-approval-portal/compose.env -f docker/compose.yaml build
 sudo docker compose --env-file /etc/ssh-approval-portal/compose.env -f docker/compose.yaml up -d --wait

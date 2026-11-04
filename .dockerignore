@@ -4,6 +4,7 @@ ui/node_modules
 dist/*
 !dist/ssh-approval-portal-1.7.6.tar.gz
 !dist/ssh-approval-portal-1.8.0.tar.gz
+!dist/ssh-approval-portal-2.0.0.tar.gz
 ssh-approval-portal-1.6.0
 **/__pycache__
 ssh-approval-portal-1.6.1
@@ -16,3 +17,4 @@ ssh-approval-portal-1.7.3
 ssh-approval-portal-1.7.5
 ssh-approval-portal-1.7.6
 ssh-approval-portal-1.8.0
+ssh-approval-portal-2.0.0

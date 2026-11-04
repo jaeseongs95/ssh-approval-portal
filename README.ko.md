@@ -104,6 +104,8 @@ sudo bash scripts/install.sh --admin-origin https://ssh-approve.example.com --gr
 
 ```sh
 # 위의 새 출력 디렉터리 패키징은 한 번만 실행합니다.
+mkdir -p dist
+cp /absolute/new/portal-2.0.0-release/ssh-approval-portal-2.0.0.tar.gz dist/
 sudo bash scripts/prepare-docker.sh --admin-origin https://ssh-approve.example.com --grant-sudo-all
 sudo docker compose --env-file /etc/ssh-approval-portal/compose.env -f docker/compose.yaml build
 sudo docker compose --env-file /etc/ssh-approval-portal/compose.env -f docker/compose.yaml up -d --wait
