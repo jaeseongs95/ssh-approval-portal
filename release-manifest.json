@@ -5,8 +5,8 @@
   "files": [
     {
       "path": ".dockerignore",
-      "size": 420,
-      "sha256": "e4a85274d2b7a3b3bf92b46c413012f581a654f5df0b38a7dd3172ed59fd949e"
+      "size": 485,
+      "sha256": "fe9dfe4497656a1a3834ded3b5d80f156c502615bf2aed375e6c3395935bf268"
     },
     {
       "path": "LICENSE",
@@ -15,13 +15,13 @@
     },
     {
       "path": "README.ko.md",
-      "size": 21643,
-      "sha256": "3bad751fda8d3d0ff45109c8e503f5f54f428aaeb22ba4a0ba84103bd1715d9e"
+      "size": 21734,
+      "sha256": "ca26e3f60cf2d3c05386125ef430713107e0f0dd8b57b4ee42a8f0ca263d4597"
     },
     {
       "path": "README.md",
-      "size": 19675,
-      "sha256": "c6c9c22a8242a4fc93f6551d628e31766f9141fa9fa62fae6b4dce6d1d88fae6"
+      "size": 19766,
+      "sha256": "896e7643426369435c2f6acd60d4051830a1940c34906306f57f9094ab9db250"
     },
     {
       "path": "THIRD_PARTY_NOTICES.json",
@@ -86,12 +86,12 @@
     {
       "path": "docker/Dockerfile",
       "size": 1594,
-      "sha256": "8cfd52cbb1fc3a971372b159b49f3e060aff8b6fa1cd936a452d9a6f4803a624"
+      "sha256": "5427c77a4884a6b6f3d5d3035d9d5874b6b4a27dfd31d3016c6877c3604a535c"
     },
     {
       "path": "docker/compose.yaml",
       "size": 1128,
-      "sha256": "ae5fe56d553fa30e382fe009fdb855fe25687da33747aec17bc9feaa2b2bea41"
+      "sha256": "608f48a8cf3fc2fd229db38ba2a5deccad9ac0237051aed49b96ae9bdcea5740"
     },
     {
       "path": "docs/admin-login.en.md",
@@ -2025,8 +2025,8 @@
     },
     {
       "path": "test/solid-architecture.test.mjs",
-      "size": 7990,
-      "sha256": "939138437c44aa766c8b312d637ce85a7263468b1a10b05d7870f3de60dda541"
+      "size": 8010,
+      "sha256": "f68d51ae3a6be64931f3300c956e0dc6cc9f0d1a31440c90b3fb2c130c11873e"
     },
     {
       "path": "test/solid-regression.fixture.mjs",
