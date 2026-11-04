@@ -76,8 +76,13 @@ export function createLinuxSessionDesktopAdapter({ openSession, width = 1280, he
         } catch {
           return { sessionState: 'unknown' };
         } finally {
-          await channel.close();
-          stderrStream?.removeListener('data', onStderr);
+          try { await channel.close(); }
+          finally {
+            // A native failure may dispose this channel before RFB.close().
+            // Mark its stream closed so RFB never flushes an ended writable.
+            channel.stream.destroy();
+            stderrStream?.removeListener('data', onStderr);
+          }
         }
       })();
       channel.inputStream?.once('close', () => { if (!nativeClosing) void closeChannel(); });

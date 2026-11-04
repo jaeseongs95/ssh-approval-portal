@@ -145,6 +145,11 @@ function nativeFixture({ rejectInput = false, closedReceipt = true, cleanupCompl
     if (closedReceipt) stderr.write(JSON.stringify({ agsDesktop: 1, event: 'closed', sessionRef, sessionState: 'terminated' }) + '\n');
     finishExit({ exitCode: 0, remoteState: 'exited', cleanupComplete }); this.push(null); callback();
   } });
+  const write = stream.write.bind(stream);
+  stream.write = (bytes, ...args) => {
+    if (stream.writableEnded) order.push('rfb-write-after-eof');
+    return write(bytes, ...args);
+  };
   const adapter = createLinuxSessionDesktopAdapter({ width: 800, height: 600, application: rdpApplication,
     async openSession({ command, nativeInput }) {
       assert.equal(nativeInput, true); sessionRef = /--session-ref ([a-f0-9]{48})/.exec(command)[1];
@@ -179,7 +184,24 @@ test('RDP partial native ACK는 재전송 없이 원 오류와 별도 helper cle
     error.code === 'DESKTOP_NATIVE_PARTIAL_OR_UNKNOWN' && error.nativeInput.callsAttempted === 1);
   const receipt = await desktop.close();
   assert.deepEqual(receipt, { sessionState: 'terminated', nativeInputState: 'unknown', nativeReleaseSent: false, logout: false });
+  assert.deepEqual(await desktop.close(), receipt);
   assert.equal(f.nativeFrames.length, 1); assert.equal(desktop.closed, true);
+  assert.equal(f.order.filter(event => event === 'rfb-eof').length, 1);
+  assert.equal(f.order.filter(event => event === 'helper-close').length, 1);
+  assert.equal(f.order.includes('rfb-write-after-eof'), false);
+});
+
+test('RDP partial native ACK 뒤 helper cleanup 증거가 없으면 close도 unknown을 유지한다', async () => {
+  for (const config of [{ closedReceipt: false }, { cleanupComplete: false }]) {
+    const f = nativeFixture({ ...config, rejectInput: true }), desktop = await f.adapter.open({ binding });
+    await assert.rejects(desktop.input([{ type: 'text', text: 'A' }]), error =>
+      error.code === 'DESKTOP_NATIVE_PARTIAL_OR_UNKNOWN' && error.nativeInput.callsAttempted === 1);
+    const receipt = await desktop.close();
+    assert.deepEqual(receipt, { sessionState: 'unknown', nativeInputState: 'unknown', nativeReleaseSent: false, logout: false });
+    assert.deepEqual(await desktop.close(), receipt);
+    assert.equal(f.nativeFrames.length, 1); assert.equal(f.order.includes('rfb-write-after-eof'), false);
+    assert.equal(f.order.filter(event => event === 'helper-close').length, 1);
+  }
 });
 
 test('RDP native CLOSE ACK는 helper 종료 영수증·cleanup 증거를 대신하지 않는다', async () => {
