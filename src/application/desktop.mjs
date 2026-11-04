@@ -10,7 +10,7 @@ export function createDesktopService({ adapter, authorize, verifyTarget, maxSess
     || typeof leaseKey !== 'function' || typeof canViewProtected !== 'function' || readState !== undefined && typeof readState !== 'function'
     || ![maxSessions, maxPerOwner, ttlMs, idleTtlMs].every(value => Number.isSafeInteger(value) && value > 0)) desktopFail('DESKTOP_INVALID_CONFIG');
   const sessions = new Map(), resources = new Map(), openRequests = new Map(); let shuttingDown = false;
-  const stateGeneration = state => JSON.stringify([state?.resourceGeneration ?? state?.generation, state?.sessionRef ?? null]);
+  const stateGeneration = state => JSON.stringify([state?.resourceGeneration ?? null, state?.generation ?? null, state?.sessionRef ?? null]);
   const view = item => ({ sessionId: item.id, ...item.binding, expiresAt: item.expiresAt, idleExpiresAt: item.idleExpiresAt, kind: 'desktop', readiness: item.readiness,
     ...(item.capabilities ? { capabilities: { ...item.capabilities } } : {}), lifecycle: item.lifecycle ?? 'attached',
     nextInputSequence: item.inputSequence + 1, lastInputReceipt: item.lastInput?.digest === null ? null : item.lastInput?.receipt ? { ...item.lastInput.receipt } : null });
@@ -55,6 +55,7 @@ export function createDesktopService({ adapter, authorize, verifyTarget, maxSess
         }
         try {
           const result = await item.desktop?.close();
+          if (result?.sessionState !== undefined && !['terminated', 'preserved', 'unknown'].includes(result.sessionState)) desktopFail('DESKTOP_INVALID_CLEANUP_RECEIPT');
           sessionState = ['terminated', 'preserved', 'unknown'].includes(result?.sessionState) ? result.sessionState
             : item.desktop && (item.lifecycle ?? item.desktop.lifecycle ?? 'attached') === 'attached' ? 'preserved' : 'unknown';
         }
