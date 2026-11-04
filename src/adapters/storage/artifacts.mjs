@@ -1,4 +1,4 @@
-import { randomBytes, createHash } from 'node:crypto';
+import { randomBytes, randomUUID, createHash } from 'node:crypto';
 import { mkdir, lstat, readdir, unlink, open, rename } from 'node:fs/promises';
 import { constants, openSync, closeSync, writeFileSync, fsyncSync, renameSync, lstatSync, unlinkSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
@@ -14,9 +14,25 @@ const privateFile = st => st.isFile() && !st.isSymbolicLink() && st.nlink === 1 
   (process.platform === 'win32' || (!(st.mode & 0o077) && st.uid === process.getuid()));
 const privateDirectory = st => st.isDirectory() && !st.isSymbolicLink() &&
   (process.platform === 'win32' || (!(st.mode & 0o077) && st.uid === process.getuid()));
-const charge = item => Math.max(1, item.size);
+const charge = item => item.state === 'consumed' ? 1 : Math.max(1, item.size);
+const validUUID = value => typeof value === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(value);
+const validOwner = value => typeof value === 'string' && value.length > 0 && value.length <= 512 && !/[\x00-\x1f\x7f]/.test(value);
+const validateProvenance = value => {
+  if (!value || Object.keys(value).length !== 3 || !validUUID(value.sourceUUID) || !validOwner(value.ownerId) || !idValid(value.requestId)) throw Error('Invalid artifact provenance');
+};
+const validateStaged = meta => {
+  if (!validUUID(meta.publicUUID) || !validOwner(meta.ownerId) || !validKey(meta.operationKey) || !validHash(meta.sha256) ||
+      meta.targetId !== undefined || meta.remotePath !== undefined || !Array.isArray(meta.actions)) throw Error('Invalid staged file metadata');
+  for (const action of meta.actions) {
+    if (!validKey(action.operationKey) || !validKey(action.requestKey) || !validHash(action.inputDigest) || !idValid(action.requestId) ||
+        !['copy', 'move'].includes(action.action) || !['reserved', 'submitted', 'refused', 'settled'].includes(action.state) ||
+        typeof action.targetId !== 'string' || !validHash(action.targetRevision) || typeof action.overwrite !== 'boolean' || typeof action.elevate !== 'boolean') throw Error('Invalid staged file action');
+    anyRemotePath(action.remotePath);
+  }
+  if (new Set(meta.actions.map(action => action.operationKey)).size !== meta.actions.length) throw Error('Duplicate staged file action');
+};
 const validateUpload = meta => {
-  anyRemotePath(meta.remotePath);
+  if (meta.purpose === 'staged') validateStaged(meta); else anyRemotePath(meta.remotePath);
   if (typeof meta.fileName !== 'string' || !meta.fileName || meta.fileName.length > 255 || /[\x00-\x1f\x7f/\\]/.test(meta.fileName)) throw Error('Invalid filename');
 };
 const ownership = meta => ({
@@ -27,13 +43,14 @@ const ownership = meta => ({
 });
 const snapshot = item => {
   const { path, last, chunks, ...metadata } = item;
-  return Object.freeze(metadata);
+  return Object.freeze(structuredClone(metadata));
 };
 
 /** Owns staging bytes, accounting and their complete lifecycle. All metadata is copied. */
 export class Artifacts {
   #items = new Map();
   #removing = new Map();
+  #consuming = new Map();
   #reserved = 0;
   #legacyReserved = 0;
   #orphans = [];
@@ -81,7 +98,7 @@ export class Artifacts {
         record = JSON.parse(await fd.readFile('utf8'));
       } finally { await fd.close(); }
       const { version, ...item } = record;
-      if (version !== 1 || item.id !== name.slice(0, -5) || !['staging', 'ready', 'deleting'].includes(item.state) ||
+      if (version !== 1 || item.id !== name.slice(0, -5) || !['staging', 'ready', 'deleting', 'consuming', 'consumed'].includes(item.state) ||
           !Number.isSafeInteger(item.size) || item.size < 0 || item.size > MAX_BYTES ||
           !Number.isSafeInteger(item.received) || item.received < 0 || item.received > item.size ||
           !Number.isSafeInteger(item.sequence) || item.sequence < 0 || !Array.isArray(item.chunks) || item.chunks.length !== item.sequence ||
@@ -89,6 +106,9 @@ export class Artifacts {
           (item.sha256 !== undefined && !validHash(item.sha256)) || (item.operationKey !== undefined && !validKey(item.operationKey)) ||
           (item.submissionId !== undefined && !idValid(item.submissionId))) throw Error('Invalid transfer metadata');
       validateUpload(item);
+      if (item.provenance !== undefined) { validateProvenance(item.provenance); if (item.purpose === 'staged' || item.direction !== 'upload') throw Error('Invalid artifact provenance'); }
+      if (['consuming', 'consumed'].includes(item.state) && (item.purpose !== 'staged' || !['moved', 'removed'].includes(item.consumeReason))) throw Error('Invalid consumed artifact');
+      if (item.purpose === 'staged' && [...this.#items.values()].some(x => x.publicUUID === item.publicUUID || (x.ownerId === item.ownerId && x.operationKey === item.operationKey))) throw Error('Duplicate staged file identity');
       if (item.chunks.some(c => !validHash(c.sha256) || !Number.isSafeInteger(c.size) || c.size < 1 || c.size > CHUNK_BYTES) ||
           (item.sequence && item.chunks.reduce((n, c) => n + c.size, 0) !== item.received)) throw Error('Invalid transfer chunk history');
       if (item.state === 'deleting') {
@@ -96,6 +116,10 @@ export class Artifacts {
         await this.#unlinkOwned(path); this.#syncRoot(); continue;
       }
       item.path = join(this.#root, item.id + '.part'); item.busy = false;
+      if (['consuming', 'consumed'].includes(item.state)) {
+        await this.#unlinkOwned(item.path); item.state = 'consumed'; item.pinned = false; this.#persist(item);
+        this.#items.set(item.id, item); this.#reserved += charge(item); continue;
+      }
       if (item.direction === 'download' && item.state === 'staging') item.pinned = false;
       let data;
       try { data = await this.#openOwned(item.path, constants.O_RDWR); }
@@ -228,12 +252,82 @@ export class Artifacts {
     try { this.#persist(item); const fd = await open(item.path, 'wx', 0o600); await fd.close(); } catch (err) { await this.remove(item.id); throw err; }
     return snapshot(item);
   }
+  async beginStaged({ ownerId, operationKey, fileName, size, sha256 }) {
+    const meta = { purpose: 'staged', publicUUID: randomUUID(), ownerId, operationKey, fileName, size, sha256, actions: [] };
+    validateUpload(meta);
+    const previous = [...this.#items.values()].find(x => x.purpose === 'staged' && x.ownerId === ownerId && x.operationKey === operationKey);
+    if (previous) {
+      if (['fileName', 'size', 'sha256'].some(key => previous[key] !== meta[key])) throw Error('Operation key conflicts with staged file');
+      return snapshot(previous);
+    }
+    const item = this.#allocate({ ...meta, direction: 'upload' });
+    try { this.#persist(item); const fd = await open(item.path, 'wx', 0o600); await fd.close(); }
+    catch (error) { await this.remove(item.id); throw error; }
+    return snapshot(item);
+  }
+  staged(uuid, ownerId) {
+    if (!validUUID(uuid) || !validOwner(ownerId)) throw Error('Staged file unavailable');
+    const item = [...this.#items.values()].find(x => x.purpose === 'staged' && x.publicUUID === uuid && x.ownerId === ownerId);
+    if (!item) throw Error('Staged file unavailable');
+    return snapshot(item);
+  }
+  reserveStagedAction(uuid, ownerId, action) {
+    const item = this.#get(this.staged(uuid, ownerId).id);
+    if ([...this.#items.values()].some(x => x.purpose === 'staged' && x.ownerId === ownerId && x.id !== item.id && x.actions.some(previous => previous.operationKey === action.operationKey))) {
+      throw Object.assign(Error('Operation key conflicts with staged action'), { code: 'OPERATION_KEY_CONFLICT' });
+    }
+    const previous = item.actions.find(x => x.operationKey === action.operationKey);
+    if (previous) {
+      if (previous.inputDigest !== action.inputDigest) throw Error('Operation key conflicts with staged action');
+      return structuredClone(previous);
+    }
+    if (item.state !== 'ready' || item.busy || this.#now() >= item.expiresAt ||
+        (action.action === 'move' && item.actions.some(x => x.state === 'reserved')) ||
+        item.actions.some(x => x.action === 'move' && !['refused', 'settled'].includes(x.state))) throw Error('Staged file is unavailable for transfer');
+    const next = { ...structuredClone(action), state: 'reserved' }, before = item.pinned;
+    validateStaged({ ...item, actions: [...item.actions, next] });
+    item.actions.push(next); item.pinned = true;
+    try { this.#persist(item); }
+    catch (error) { item.actions.pop(); item.pinned = before; throw error; }
+    return structuredClone(next);
+  }
+  settleStagedAction(uuid, ownerId, requestId, state) {
+    const item = this.#get(this.staged(uuid, ownerId).id), action = item.actions.find(x => x.requestId === requestId);
+    if (!action || !['submitted', 'refused', 'settled'].includes(state)) throw Error('Unknown staged file action');
+    const before = { state: action.state, pinned: item.pinned };
+    action.state = state; item.pinned = item.actions.some(x => ['reserved', 'submitted'].includes(x.state));
+    try { this.#persist(item); }
+    catch (error) { action.state = before.state; item.pinned = before.pinned; throw error; }
+  }
+  async consumeStaged(uuid, ownerId, reason) {
+    const item = this.#get(this.staged(uuid, ownerId).id);
+    if (this.#consuming.has(item.id)) return this.#consuming.get(item.id);
+    if (item.state === 'consumed') return snapshot(item);
+    if (!['moved', 'removed'].includes(reason) || item.busy || (reason === 'removed' && item.pinned)) throw Error('Staged file is busy');
+    const work = (async () => {
+      item.busy = true;
+      try {
+        const before = charge(item);
+        // The manifest commits consumption before unlink: restart completes unlink,
+        // never reconstructs bytes and never submits the remote publication again.
+        item.consumeReason = reason; item.state = 'consuming'; item.expiresAt = Math.max(item.expiresAt, this.#now() + EXPIRES_MS); this.#persist(item);
+        await this.#unlinkOwned(item.path); this.#syncRoot();
+        item.state = 'consumed'; item.pinned = false;
+        try { this.#persist(item); } catch (error) { item.state = 'consuming'; throw error; }
+        this.#reserved += charge(item) - before;
+        return snapshot(item);
+      } finally { item.busy = false; }
+    })();
+    this.#consuming.set(item.id, work);
+    try { return await work; } finally { this.#consuming.delete(item.id); }
+  }
   async append(id, sequence, bytes) {
     const x = this.#get(id);
-    if (x.state !== 'staging' || this.#now() >= x.expiresAt || x.busy || x.pinned) throw Error('Transfer is not writable');
+    if ((!['staging', ...(x.purpose === 'staged' ? ['ready'] : [])].includes(x.state)) || this.#now() >= x.expiresAt || x.busy || x.pinned) throw Error('Transfer is not writable');
     if (!Number.isSafeInteger(sequence) || sequence < 0 || !(bytes instanceof Uint8Array) || !bytes.length || bytes.length > CHUNK_BYTES) throw Error('Invalid chunk');
     const digest = hash(bytes);
     if (sequence < x.sequence && x.chunks[sequence]?.sha256 === digest && x.chunks[sequence]?.size === bytes.length) return { sequence: x.sequence, received: x.received };
+    if (x.state !== 'staging') throw Error('Transfer is not writable');
     if (sequence !== x.sequence || x.received + bytes.length > x.size) throw Error('Chunk sequence or size mismatch');
     x.busy = true;
     try {
@@ -252,18 +346,27 @@ export class Artifacts {
   }
   async finish(id) {
     const x = this.#get(id);
-    if (x.state === 'ready' && x.pinned) return snapshot(x);
+    if (x.state === 'ready' && (x.pinned || (x.purpose === 'staged' && this.#now() < x.expiresAt))) return snapshot(x);
     if (x.state !== 'staging' || x.busy || this.#now() >= x.expiresAt || x.received !== x.size) throw Error('Incomplete or expired upload');
     x.busy = true;
     try {
       const fd = await this.#verified(id, false, true);
       try { await fd.sync(); } finally { await fd.close(); }
-      x.state = 'ready'; x.pinned = true; this.#persist(x); x.busy = false; return snapshot(x);
+      x.state = 'ready'; x.pinned = x.purpose !== 'staged'; this.#persist(x); x.busy = false; return snapshot(x);
     } catch (err) { await this.remove(id); throw err; } finally { x.busy = false; }
   }
   async importFile(meta, openSource, { signal } = {}) {
     validateUpload(meta); signal?.throwIfAborted();
+    if (meta.provenance !== undefined) {
+      validateProvenance(meta.provenance);
+      const source = this.staged(meta.provenance.sourceUUID, meta.provenance.ownerId);
+      const action = source.actions.find(x => x.requestId === meta.provenance.requestId);
+      if (source.state !== 'ready' || !source.pinned || !action || action.state !== 'reserved' ||
+          source.fileName !== meta.fileName || action.targetId !== meta.targetId || action.targetRevision !== meta.targetRevision ||
+          action.remotePath !== meta.remotePath || action.overwrite !== (meta.overwrite === true) || action.elevate !== (meta.elevate === true)) throw Error('Opaque clone binding mismatch');
+    }
     const item = this.#allocate({ ...ownership(meta), direction: 'upload', fileName: meta.fileName, remotePath: meta.remotePath, size: this.maxBytes,
+      ...(meta.provenance ? { provenance: structuredClone(meta.provenance) } : {}),
       overwrite: meta.overwrite === true, elevate: meta.elevate === true });
     item.busy = true;
     let fd, source;
@@ -279,6 +382,10 @@ export class Artifacts {
       signal?.throwIfAborted();
       if (source.expectedSize != null && received !== source.expectedSize) throw Error('Incomplete source file');
       this.#resize(item, received); item.received = received; item.sha256 = digest.digest('hex');
+      if (meta.provenance) {
+        const original = this.staged(meta.provenance.sourceUUID, meta.provenance.ownerId);
+        if (item.size !== original.size || item.sha256 !== original.sha256) throw Error('Opaque clone content mismatch');
+      }
       await fd.close(); fd = null; item.busy = false;
       const ready = await this.finish(item.id); signal?.throwIfAborted();
       return ready;
