@@ -22,11 +22,11 @@
 | `artifact-status` | 같은 전송 `id`. staging metadata 또는 이미 제출된 작업을 조회합니다. |
 | `artifact-finish` | 같은 전송 `id`. 크기·해시 검증 뒤 기존 파일 승인 정책으로 제출합니다. |
 | `artifact-read` | 다운로드 **작업** `id`, 선택 `offsetBytes` 기본 0, `maxBytes` 1~262144·기본 65536. |
-| `desktop-open` | `target`,`expectedTargetRevision`. 실제 설정된 OS 그래픽데스크톱 세션을 엽니다. |
+| `desktop-open` | `target`,`expectedTargetRevision`,`requestKey`. `targets.gui.openRequest`에서 받은 키로 세션을 열거나 같은 세션을 회수합니다. |
 | `desktop-status` | `sessionId`,`epoch`. 화면 픽셀 없이 GUI 준비 상태와 인증 필요 상태를 조회합니다. |
 | `desktop-observe` | `sessionId`,`epoch`. PNG 이미지 `content[1]`과 같은 프레임의 JSON metadata를 반환합니다. |
 | `desktop-input` | 같은 세션·epoch·`frameId`·`geometryRevision`, 증가하는 `sequence`, 고유 `requestKey`, 명시적 `actions`. |
-| `desktop-close` | `sessionId`,`epoch`. lease·입력 상태·연결을 해제하며 OS 로그아웃은 하지 않습니다. |
+| `desktop-close` | `sessionId`,`epoch`. 입력·lease를 해제하고 backend의 `terminated`·`preserved`·`unknown` 정리 결과를 반환합니다. Windows 로그오프는 하지 않습니다. |
 
 데스크톱 도구는 실제 desktop application port가 연결됐을 때 등록합니다. 포트 연결과 원격 백엔드 설치·접근 성공은 별개입니다. `targets`의 capability와 실제 호출 결과로 지원 여부를 확인합니다.
 
