@@ -50,13 +50,15 @@ function fixture({ deferred = false, acknowledge = true } = {}) {
 test('forward close drains an empty paused ssh2 readable and observes protocol end/close', { timeout: 3000 }, async () => {
   const f = fixture(), lease = await f.open();
   f.stream.pause();
+  f.remoteClose(); await tick();
   assert.equal(f.stream.readableLength, 0); assert.equal(f.stream.readableEnded, false);
+  assert.deepEqual(f.events, ['finish'], 'protocol close is waiting on the paused readable EOF');
   const first = lease.close();
   assert.equal(lease.close(), first, 'one close operation per lease');
   await first;
   assert.equal(f.stream.readableEnded, true);
   assert.deepEqual(f.events, ['finish', 'end', 'close']);
-  assert.deepEqual(f.calls, ['eof', 'close']); f.assertSibling();
+  assert.deepEqual(f.calls, ['close']); f.assertSibling();
 });
 
 test('forward close discards buffered lease data without draining an unrelated channel', { timeout: 3000 }, async () => {
@@ -75,7 +77,7 @@ test('tunnel teardown settles both real ssh2 pipelines after the native socket h
     const lease = await f.open(options); delivered(); return lease;
   } });
   const socket = connect(tunnel.port, tunnel.host); socket.on('error', () => {});
-  t.after(() => { socket.destroy(); return tunnel.close(); });
+  t.after(() => { socket.destroy(); f.stream.resume(); return tunnel.close(); });
   await ready; await tick(); f.stream.pause();
   socket.destroy();
   assert.deepEqual(await tunnel.close(), { closed: true, cleanupComplete: true });
