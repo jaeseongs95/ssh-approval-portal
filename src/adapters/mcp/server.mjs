@@ -24,7 +24,7 @@ export function createMcpAdapter({ queue, files, settings, capabilities, uiHtml,
     const tool = (name, schema, outputSchema, handler, { description = name, readOnly = false, appOnly = false } = {}) => server.registerTool(name, {
       description, inputSchema: z.object(schema).strict(), outputSchema,
       annotations: { readOnlyHint: readOnly, destructiveHint: !readOnly },
-      _meta: { ui: { resourceUri: URI, visibility: appOnly ? ['app'] : ['model', 'app'] } },
+      _meta: { ui: appOnly ? { visibility: ['app'] } : { resourceUri: URI, visibility: ['model', 'app'] } },
     }, async (args, extra) => {
       try { return await handler(args, { ...extra, signal: AbortSignal.any([shutdownSignal, requestSignal, extra?.signal].filter(Boolean)) }); }
       catch (error) { return refused(error); }

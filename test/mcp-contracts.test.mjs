@@ -90,7 +90,13 @@ test('public MCP surface exposes operation and card tools while owner UI actions
     if (desktopNames.length) assert.deepEqual(desktopNames, ['desktop-open', 'desktop-observe', 'desktop-input', 'desktop-close']);
     const privateTools = tools.filter(tool => tool.name.startsWith('ui-'));
     assert.deepEqual(privateTools.map(tool => tool.name), ['ui-decide-request', 'ui-upload-begin', 'ui-upload-chunk', 'ui-upload-finish', 'ui-download-link', 'ui-read-command-output']);
-    for (const tool of privateTools) assert.deepEqual(tool._meta.ui.visibility, ['app']);
+    // UI actions update the current card; only public show tools can render a widget.
+    for (const tool of privateTools) {
+      assert.deepEqual(tool._meta.ui.visibility, ['app']);
+      assert.equal(tool._meta.ui.resourceUri, undefined, tool.name + ' must not render a widget');
+      assert.equal(tool._meta['openai/outputTemplate'], undefined, tool.name + ' must not render a legacy widget');
+    }
+    assert.deepEqual(tools.filter(tool => tool._meta?.ui?.resourceUri || tool._meta?.['openai/outputTemplate']).map(tool => tool.name), showNames);
     const resources = (await f.client.listResources()).resources;
     assert.equal(resources.length, 1); assert.equal(resources[0].mimeType, 'text/html;profile=mcp-app');
     for (const name of showNames) {
