@@ -38,6 +38,7 @@ export function createOpaqueFileService({ store, targets, queue, files, journal,
         if (action.action === 'move' && published(record, item, queue.get(record.id))) await store.consumeStaged(uuid, ownerId, 'moved');
         if (action.state !== 'settled') store.settleStagedAction(uuid, ownerId, action.requestId, 'settled');
       }
+      cleanupFailures.delete(uuid);
       return owned(uuid);
     });
     reconciliations.set(uuid, work);
@@ -160,7 +161,7 @@ export function createOpaqueFileService({ store, targets, queue, files, journal,
         cleanupFailures.delete(item.publicUUID);
       }
     },
-    busy: () => admissions.size > 0 || reconciliations.size > 0 || background.size > 0,
+    busy: () => admissions.size > 0 || reconciliations.size > 0 || background.size > 0 || cleanupFailures.size > 0,
     async close() {
       shutdown.abort();
       await Promise.allSettled([...admissions.values()].map(item => item.promise));

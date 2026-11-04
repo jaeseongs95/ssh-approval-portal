@@ -71,7 +71,7 @@ export class Artifacts {
     reservedBytes: this.#legacyReserved, liveReservedBytes: this.#reserved, totalReservedBytes: this.reserved, budgetBytes: this.budget,
     unsafeEntries: this.#orphans.filter(x => x.reason === 'unsafe_legacy_entry').length,
     entries: Object.freeze(this.#orphans.map(x => Object.freeze({ ...x }))) }); }
-  hasActiveWork() { return this.#removing.size > 0 || [...this.#items.values()].some(x => x.busy || x.pinned || x.state === 'staging'); }
+  hasActiveWork() { return this.#removing.size > 0 || [...this.#items.values()].some(x => x.busy || x.pinned || ['staging', 'consuming'].includes(x.state)); }
   async prepareRoot() {
     await mkdir(this.#root, { recursive: true, mode: 0o700 });
     const s = await lstat(this.#root);
