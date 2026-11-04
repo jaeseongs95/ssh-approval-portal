@@ -1,7 +1,7 @@
 import { randomUUID, createHash } from 'node:crypto';
 import { desktopFail, DesktopError } from '../../domain/desktop-lease.mjs';
+import { parseSecretReference } from '../../application/secret-service.mjs';
 
-const reference = value => typeof value === 'string' && /^[A-Za-z0-9_.:-]{1,256}$/.test(value);
 const executables = ['/usr/bin/xfreerdp', '/usr/bin/xfreerdp3'];
 
 /** Probe output only; package presence/version alone does not establish supported options. */
@@ -15,8 +15,9 @@ export function rdpClientCapabilities({ platform, executable, version, help } = 
 
 /** Fixed application description for the managed-display helper. Contains no credentials. */
 export function rdpSessionPlan({ config, endpoint, capabilities, width = 1280, height = 800 } = {}) {
-  if (!config || !reference(config.credentialRef)
-    || !Number.isInteger(width) || width < 320 || width > 4096
+  try { parseSecretReference(config?.credentialRef); }
+  catch { desktopFail('DESKTOP_INVALID_CONFIG'); }
+  if (!Number.isInteger(width) || width < 320 || width > 4096
     || !Number.isInteger(height) || height < 200 || height > 4096 || width * height > 4_194_304) desktopFail('DESKTOP_INVALID_CONFIG');
   if (endpoint?.host !== '127.0.0.1' || !Number.isInteger(endpoint.port) || endpoint.port < 1 || endpoint.port > 65535) desktopFail('DESKTOP_RDP_INVALID_TUNNEL');
   if (capabilities?.available !== true || !executables.includes(capabilities.executable)) desktopFail('DESKTOP_RDP_CLIENT_UNAVAILABLE');
