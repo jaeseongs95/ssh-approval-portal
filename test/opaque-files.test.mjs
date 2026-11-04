@@ -12,11 +12,11 @@ import { hash } from '../src/domain/validation.mjs';
 // Public application boundary + real manifests/SQLite. The file admission port
 // is synthetic (no SSH): it clones through the supplied fd and accepts the exact
 // AsyncLocalStorage identity, as the existing target file service does.
-async function fixture(t) {
+async function fixture(t, journalOptions = {}) {
   const root = await mkdtemp(join(tmpdir(), 'opaque-files-')), submissions = new AsyncLocalStorage();
   const ownerId = 'authenticated-owner-realm', target = { id: 'alpha', revision: 'a'.repeat(64), verify() {} };
   let store, journal, service, requests = 0;
-  const jobs = new Map(), queue = { maintenance: false, get: id => jobs.get(id) ?? null };
+  const jobs = new Map(), queue = { maintenance: false, get: id => jobs.get(id) ?? null, listAll: () => [...jobs.values()] };
   const targets = { select: id => { if (id !== undefined && id !== target.id) throw Error('Unknown target'); return target; } };
   const binding = { targetId: target.id, targetRevision: target.revision, fileTargetBound: true };
   const files = { async requestUpload(args, options) {
@@ -34,7 +34,7 @@ async function fixture(t) {
   } };
   const reopen = async () => {
     if (service) await service.close(); if (journal) journal.close();
-    store = new Artifacts(join(root, 'artifacts')); await store.init(); journal = createOperationStore(root);
+    store = new Artifacts(join(root, 'artifacts')); await store.init(); journal = createOperationStore({ filePath: join(root, 'operations.sqlite'), ...journalOptions });
     service = createOpaqueFileService({ store, journal, submissions, files, queue, targets, ownerId });
     return service;
   };
@@ -133,6 +133,74 @@ test('recovery removes only proven unaccepted clone provenance; missing-journal 
   assert.equal(f.store.has(clone.id), false);
   assert.equal(f.store.staged(uuid, f.ownerId).actions[0].state, 'refused');
   assert.equal(f.store.staged(uuid, f.ownerId).pinned, false); assert.equal(f.requests, 0);
+});
+
+test('unknown or missing-journal copy blocks a new move but preserves the original receipt', async t => {
+  for (const scenario of ['unknown', 'missing-journal', 'ordinary-pending']) await t.test(scenario, async child => {
+    const f = await fixture(child), uuid = await f.stage(), first = await f.service.copy(destination(uuid));
+    const get = f.journal.get, find = f.journal.find;
+    if (scenario === 'unknown') {
+      f.journal.update(first.requestId, { state: 'unknown', requiresReconciliation: true });
+      await f.reopen(); await f.service.reconcile();
+    }
+    if (scenario === 'missing-journal') {
+      f.journal.get = id => id === first.requestId ? null : get(id);
+      f.journal.find = key => { const result = find(key); return result?.job.id === first.requestId ? null : result; };
+    }
+    const next = { ...destination(uuid), operationKey: 'new-move-after-copy-01' };
+    if (scenario === 'ordinary-pending') {
+      assert.notEqual((await f.service.move(next)).requestId, first.requestId);
+      assert.equal(f.requests, 2, 'normal queued copies retain their independent-clone contract');
+    } else {
+      await assert.rejects(f.service.move(next), { code: 'OPAQUE_ACTION_RECONCILIATION_REQUIRED' });
+      await assert.rejects(f.service.remove({ uuid }), { code: 'ARTIFACT_BUSY' });
+      assert.equal((await f.service.copy(destination(uuid))).requestId, first.requestId);
+      assert.equal(f.requests, 1);
+    }
+    if (scenario === 'missing-journal') { f.journal.get = get; f.journal.find = find; }
+    const original = f.store.staged(uuid, f.ownerId);
+    assert.equal((await lstat(join(f.root, 'artifacts', original.id + '.part'))).size, 4);
+  });
+});
+
+async function unacceptedClone(f) {
+  const uuid = await f.stage(), original = f.store.staged(uuid, f.ownerId);
+  const action = { action: 'copy', operationKey: 'unaccepted-clone-key-01', requestKey: 'opaque:unaccepted-clone-key-01', inputDigest: 'd'.repeat(64),
+    requestId: 'e'.repeat(48), targetId: 'alpha', targetRevision: 'a'.repeat(64), remotePath: '/tmp/unaccepted.bin', overwrite: false, elevate: false };
+  f.store.reserveStagedAction(uuid, f.ownerId, action);
+  const clone = await f.store.importFile({ fileName: original.fileName, remotePath: action.remotePath, ...f.binding,
+    provenance: { sourceUUID: uuid, ownerId: f.ownerId, requestId: action.requestId } }, async () => {
+    const fd = await f.store.verified(original.id);
+    return { stream: fd.createReadStream({ start: 0, autoClose: false }), expectedSize: original.size, close: () => fd.close() };
+  });
+  return { uuid, clone, action };
+}
+
+test('startup orphan cleanup preserves other-job queue references and failed/incomplete journal reads', async t => {
+  for (const scenario of ['queue-reference', 'journal-read-failed', 'journal-truncated']) await t.test(scenario, async child => {
+    const f = await fixture(child), { uuid, clone } = await unacceptedClone(f);
+    f.journal.accept({ id: '9'.repeat(48), requestKey: 'unrelated-record', owner: f.ownerId, targetId: 'alpha', targetRevision: 'a'.repeat(64), kind: 'command', input: { command: 'unrelated' } });
+    const list = f.journal.list, listAll = f.queue.listAll;
+    if (scenario === 'queue-reference') f.queue.listAll = () => [{ id: '8'.repeat(48), operation: { kind: 'upload', artifactId: clone.id } }];
+    if (scenario === 'journal-read-failed') f.journal.list = () => { throw Object.assign(Error('Injected journal read failure'), { code: 'SQLITE_ERROR' }); };
+    if (scenario === 'journal-truncated') f.journal.list = () => [];
+    await assert.rejects(f.service.reconcile(), scenario === 'journal-read-failed' ? { code: 'SQLITE_ERROR' } : { code: 'OPAQUE_ACTION_RECONCILIATION_REQUIRED' });
+    assert.equal(f.store.has(clone.id), true); assert.equal(f.store.staged(uuid, f.ownerId).actions[0].state, 'reserved');
+    assert.equal(f.store.staged(uuid, f.ownerId).pinned, true); assert.equal(f.requests, 0);
+    f.journal.list = list; f.queue.listAll = listAll;
+    await f.service.reconcile(); assert.equal(f.store.has(clone.id), false);
+  });
+});
+
+test('startup reference scan includes retained legacy rows beyond the ordinary journal row limit', async t => {
+  const f = await fixture(t, { maxRows: 1 }), { uuid, clone } = await unacceptedClone(f);
+  for (const [index, artifactId] of [['8', '0'.repeat(48)], ['9', clone.id]]) {
+    f.journal.importLegacy({ id: index.repeat(48), kind: 'upload', state: 'completed', targetId: 'alpha', targetRevision: 'a'.repeat(64),
+      operation: { kind: 'upload', artifactId }, createdAt: 1, finishedAt: 2 }, { source: 'retained-upload-history' });
+  }
+  assert.equal(f.journal.usage().count, 2); assert.equal(f.journal.list().length, 2);
+  await assert.rejects(f.service.reconcile(), { code: 'OPAQUE_ACTION_RECONCILIATION_REQUIRED' });
+  assert.equal(f.store.has(clone.id), true); assert.equal(f.store.staged(uuid, f.ownerId).pinned, true); assert.equal(f.requests, 0);
 });
 
 test('chunk hash failure and wrong-owner UUID access do not change accepted bytes', async t => {
