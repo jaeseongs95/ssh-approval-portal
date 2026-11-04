@@ -108,7 +108,7 @@ test('server cause: malformed JSON or non-JSON error responses retain the origin
 });
 
 test('server cause: only a3..64 uppercase ASCII code is retained, never arbitrary error values', async t => {
-  for (const error of ['ab', 'A'.repeat(65), '/home/private/token', 'PASSWORD=private-marker', 'LOWER_case', { code: 'ARTIFACT_QUOTA' }, ['ARTIFACT_QUOTA'], null]) {
+  for (const error of ['ab', 'A'.repeat(65), 'ERR\n', 'ERR\r', 'ERR\r\n', '/home/private/token', 'PASSWORD=private-marker', 'LOWER_case', { code: 'ARTIFACT_QUOTA' }, ['ARTIFACT_QUOTA'], null]) {
     const f = await causeFixture(t, () => new Response(JSON.stringify({ error }), { status: 409, headers: { 'Content-Type': 'application/json' } }));
     await assert.rejects(f.session.json('/api/refused', {}), value => value.code === 'PORTAL_REQUEST_REFUSED' && !Object.hasOwn(value, 'serverCode'));
   }
@@ -261,7 +261,7 @@ test('CLI rejects missing stable key and invalid UUID before credential or netwo
 
 test('operation-key grammar matches the public16..128 ASCII contract at both boundaries', () => {
   for (const value of ['a'.repeat(16), 'a'.repeat(128), '_'.repeat(16), '.:-_'.repeat(4)]) assert.equal(opaqueOperationKeyValid(value), true);
-  for (const value of ['', 'a'.repeat(15), 'a'.repeat(129), '가'.repeat(16), 'a'.repeat(15) + '/', null]) assert.equal(opaqueOperationKeyValid(value), false);
+  for (const value of ['', 'a'.repeat(15), 'a'.repeat(129), '가'.repeat(16), 'a'.repeat(16) + '\n', 'a'.repeat(15) + '/', null]) assert.equal(opaqueOperationKeyValid(value), false);
 });
 
 test('client tar and zip contain identical verified sources and run without npm dependencies', { timeout: 30000 }, async t => {
