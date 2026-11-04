@@ -92,6 +92,11 @@ test('actual MCP files projects UUID metadata and observes the original queued p
     for (const bad of [{ action: 'stat', uuid, target: 'default' }, { action: 'copy', uuid, operationKey }, { action: 'stat', uuid: 'a'.repeat(48) }]) {
       const rejected = await f.call('files', bad); assert.equal(rejected.isError, true);
     }
+    for (const suffix of ['\n', '\r', '\r\n']) {
+      for (const bad of [{ action: 'stat', uuid: uuid + suffix }, { ...input, operationKey: operationKey + suffix }]) {
+        const rejected = await f.call('files', bad); assert.equal(rejected.isError, true);
+      }
+    }
     assert.equal(copies.length, 1);
   } finally { await f.close(); }
 });

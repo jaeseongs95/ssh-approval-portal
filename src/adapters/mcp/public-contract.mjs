@@ -7,8 +7,9 @@ const object = fields => z.object(fields).strict();
 const identifier = z.string().regex(/^[a-f0-9]{48}$/);
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
 const target = z.string().regex(/^[a-z][a-z0-9_-]{0,31}$/);
-const key = z.string().regex(/^[A-Za-z0-9_.:-]{16,128}$/);
-const uuid = z.string().regex(/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/);
+// Unlike $, this end assertion also rejects a final CR/LF in JSON Schema clients.
+const key = z.string().regex(/^[A-Za-z0-9_.:-]{16,128}(?![\s\S])/);
+const uuid = z.string().regex(/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}(?![\s\S])/);
 const integer = z.number().int().nonnegative();
 const textBytes = limit => z.string().min(1).max(limit).refine(value => utf8WithinLimit(value, limit), `Maximum ${limit} UTF-8 bytes`);
 export const operationState = z.enum(['accepted', 'pending', 'evaluating', 'queued', 'starting', 'running', 'terminating', 'completed', 'failed', 'cancelled', 'denied', 'expired', 'unknown']);
