@@ -328,8 +328,8 @@ if (import.meta.main) {
     if (['--migration-child', '--migration-check'].includes(process.argv[2])) {
       const { createOperationStore, LEGACY_IMPORT_BATCH_SIZE } = await import('../src/adapters/storage/operation-store.mjs');
       const { migrateLegacyOperations } = await import('../src/adapters/storage/operation-migration.mjs');
-      let text = ''; for await (const chunk of process.stdin) text += chunk;
-      const options = JSON.parse(text), store = createOperationStore(options.legacyRoot);
+      const chunks = []; for await (const chunk of process.stdin) chunks.push(chunk);
+      const options = JSON.parse(Buffer.concat(chunks).toString('utf8')), store = createOperationStore(options.legacyRoot);
       try {
         if (process.argv[2] === '--migration-check') {
           for (const { source, rows } of options.inventory) for (let offset = 0; offset < rows.length; offset += LEGACY_IMPORT_BATCH_SIZE) {
