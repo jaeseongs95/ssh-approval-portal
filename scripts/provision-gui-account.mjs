@@ -26,7 +26,7 @@ export function parseProvisionArgs(args) {
     else if (names.has(option) && typeof args[i + 1] === 'string' && !args[i + 1].startsWith('--')) result[names.get(option)] = args[++i];
     else fail('INVALID_ARGUMENTS');
   }
-  if (result.target !== 'windows' || !/^[a-f0-9]{64}$/.test(result.revision ?? '')
+  if (!/^[a-z][a-z0-9_-]{0,31}$/.test(result.target) || !/^[a-f0-9]{64}$/.test(result.revision ?? '')
       || !/^[a-z][a-z0-9-]{2,19}$/.test(result.username) || ['administrator', 'guest', 'defaultaccount'].includes(result.username)
       || result.status && (!/^[a-f0-9-]{36}$/.test(result.status) || result.apply)) fail('INVALID_ARGUMENTS');
   try { if (parseSecretReference(result.reference).provider !== 'local-file') fail('INVALID_ARGUMENTS'); }
