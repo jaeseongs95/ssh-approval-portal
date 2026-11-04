@@ -20,6 +20,19 @@ test('local helper preserves binary stdin/stdout and buffers early stderr separa
   assert.equal(result.cleanupComplete, true); assert.equal(result.error, undefined);
 });
 
+test('native input has a separate duplex fd without mixing credential or RFB bytes', async () => {
+  const lease = await open('import os,socket\ncontrol=socket.socket(fileno=3)\ndata=control.recv(32)\ncontrol.sendall(data[::-1])\ncontrol.close()\nos.write(1,os.read(0,32))\n', { nativeInput: true });
+  const controlBytes = Buffer.from([0, 255, 128, 1]), rfbBytes = Buffer.from('separate-bootstrap-stream');
+  const response = once(lease.inputStream, 'data');
+  lease.inputStream.write(controlBytes);
+  assert.deepEqual((await response)[0], Buffer.from(controlBytes).reverse());
+  lease.stream.end(rfbBytes);
+  assert.deepEqual(await all(lease.stream), rfbBytes);
+  const result = await lease.exitPromise;
+  assert.equal(result.exitCode, 0); assert.equal(result.cleanupComplete, true);
+  assert.equal(lease.inputStream.destroyed, true);
+});
+
 test('fixed minimal environment excludes parent credentials and bootstrap stays in stdin', async () => {
   const name = 'LOCAL_DESKTOP_TEST_PRIVATE_TOKEN';
   const previous = process.env[name]; process.env[name] = 'synthetic-parent-secret';

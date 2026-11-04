@@ -12,9 +12,9 @@ const failure = (reason, notStarted = false) => {
 
 /** Internal fixed-product helper only. Bootstrap and authentication bytes travel
  * through stdin; they never become command arguments, environment or diagnostics. */
-export async function openLocalDesktopProcess({ command, signal, beforeDispatch = async () => {} } = {}) {
+export async function openLocalDesktopProcess({ command, signal, nativeInput = false, beforeDispatch = async () => {} } = {}) {
   if (process.platform !== 'linux') throw failure('requires a Linux relay', true);
-  if (typeof command !== 'string' || !command.startsWith(helperPrefix) || command.includes('\0') || typeof beforeDispatch !== 'function') throw failure('invalid fixed helper command', true);
+  if (typeof command !== 'string' || !command.startsWith(helperPrefix) || command.includes('\0') || typeof nativeInput !== 'boolean' || typeof beforeDispatch !== 'function') throw failure('invalid fixed helper command', true);
   if (signal !== undefined && (!signal || typeof signal.aborted !== 'boolean' || typeof signal.addEventListener !== 'function' || typeof signal.removeEventListener !== 'function')) throw failure('invalid cancellation signal', true);
   if (signal?.aborted) throw failure('cancelled before dispatch', true);
   await beforeDispatch();
@@ -22,9 +22,10 @@ export async function openLocalDesktopProcess({ command, signal, beforeDispatch 
   if (signal?.aborted) throw failure('cancelled before dispatch', true);
   return new Promise((resolve, reject) => {
     // Do not spread process.env: this child must not inherit server credentials.
-    const child = spawn('/bin/sh', ['-c', `exec ${command}`], { cwd: '/', detached: true, stdio: ['pipe', 'pipe', 'pipe'],
+    const child = spawn('/bin/sh', ['-c', `exec ${command}`], { cwd: '/', detached: true, stdio: nativeInput ? ['pipe', 'pipe', 'pipe', 'pipe'] : ['pipe', 'pipe', 'pipe'],
       env: { PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' } });
     const stream = Duplex.from({ readable: child.stdout, writable: child.stdin });
+    const inputStream = nativeInput ? child.stdio[3] : undefined;
     const stderr = new PassThrough({ highWaterMark: 16 * 1024 }), captured = [];
     let started = false, settled = false, exitSeen = false, closed = false, exitCode = null, exitSignal = null, reason;
     let receivedBytes = 0, retainedBytes = 0, cleanupTimer, killTimer, deadline;
@@ -50,6 +51,7 @@ export async function openLocalDesktopProcess({ command, signal, beforeDispatch 
         ...(error ? { error } : {}), stderr: { text: redactText(Buffer.concat(captured).toString('utf8'), { entropyScan: true }),
           receivedBytes, retainedBytes, truncated: receivedBytes > retainedBytes } });
       stream.destroy();
+      inputStream?.destroy();
     };
     const checkCleanup = () => {
       if (settled) return;
@@ -77,6 +79,7 @@ export async function openLocalDesktopProcess({ command, signal, beforeDispatch 
     // become uncaught exceptions or replace the already observed result.
     stream.on('error', () => { if (!exitSeen) stop('channel_error'); });
     child.stdin.on('error', () => { if (!exitSeen) stop('input_failed'); });
+    inputStream?.on('error', () => { if (!exitSeen) stop('input_failed'); });
     child.stderr.on('error', () => stop('channel_error'));
     child.stderr.on('data', bytes => {
       if (settled) return;
@@ -88,7 +91,7 @@ export async function openLocalDesktopProcess({ command, signal, beforeDispatch 
     child.on('error', () => {
       if (!started) {
         settled = true; clearTimeout(cleanupTimer); clearTimeout(killTimer);
-        signal?.removeEventListener('abort', onAbort); stderr.destroy(); stream.destroy();
+        signal?.removeEventListener('abort', onAbort); stderr.destroy(); stream.destroy(); inputStream?.destroy();
         reject(failure('spawn failed', true));
       } else stop('channel_error');
     });
@@ -103,7 +106,7 @@ export async function openLocalDesktopProcess({ command, signal, beforeDispatch 
     child.once('spawn', () => {
       started = true;
       if (signal?.aborted) { stop('cancel'); reject(failure('cancel')); return; }
-      resolve({ stream, stderr, close: () => stop('close'), exitPromise });
+      resolve({ stream, stderr, ...(inputStream ? { inputStream } : {}), close: () => stop('close'), exitPromise });
     });
     signal?.addEventListener('abort', onAbort, { once: true });
     if (signal?.aborted) onAbort();
