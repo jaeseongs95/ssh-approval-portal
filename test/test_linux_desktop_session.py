@@ -139,6 +139,8 @@ class NativeRdpValidationTest(unittest.TestCase):
             elif args[0] == str(self.executable):
                 self.assertEqual(kwargs["pass_fds"], (3,))
                 self.assertIn("/ags-input-fd:3", args)
+                # FreeRDP bf217a5 cmdline.c:5522 disables Unicode unless requested.
+                self.assertEqual([arg for arg in args if arg.startswith("/kbd:")], ["/kbd:unicode:on"])
                 self.assertIn("-clipboard", args)
                 os.fstat(3)
             else:

@@ -304,7 +304,7 @@ def run(options):
                         if options.application == "terminal" else [
                             f"/v:127.0.0.1:{options.rdp_port}", "/from-stdin", "/sec:nla", "/cert:ignore",
                             f"/size:{options.width}x{options.height}", "/f", "/title:AGS agent RDP", "-clipboard", "/log-level:OFF",
-                            "/ags-input-fd:3"])
+                            "/kbd:unicode:on", "/ags-input-fd:3"])
             for executable, args in (("openbox", []), (app_name, app_args)):
                 child = subprocess.Popen([executables[executable], *args], env=environment,
                                          stdin=subprocess.PIPE if executable == app_name and credentials is not None else subprocess.DEVNULL,
