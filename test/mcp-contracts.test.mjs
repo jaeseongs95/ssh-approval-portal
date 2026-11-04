@@ -77,7 +77,7 @@ test('actual MCP files projects UUID metadata and observes the original queued p
   } });
   try {
     const descriptor = (await f.client.listTools()).tools.find(tool => tool.name === 'files');
-    const ajv = new Ajv2020({ strict: false }); addFormats(ajv); const validate = ajv.compile(descriptor.outputSchema);
+    const ajv = new Ajv({ strict: false }); addFormats(ajv); const validate = ajv.compile(descriptor.outputSchema);
     const stat = await f.call('files', { action: 'stat', uuid });
     assert.equal(validate(stat.structuredContent), true, JSON.stringify(validate.errors));
     assert.equal(stat.structuredContent.data.file.uuid, uuid); assert.equal(stat.structuredContent.data.request, null);
@@ -186,7 +186,9 @@ test('cardless discovery stays read-only and exposes limits plus owner authority
     assert.equal(result.data.approval.agentSelfApproval, false); assert.equal(result.data.approval.ownerUrl, settings.adminOrigin);
     assert.doesNotMatch(JSON.stringify(reply), /contract-mcp|contract-admin|approvalTicket|bootstrapTicket|downloadUrl/);
     assert.equal(f.calls.submit.length, 0); assert.equal(f.calls.append.length, 0); assert.equal(f.calls.imports.length, 0);
-    assert.match(f.client.getInstructions(), /stable operationKey/); assert.match(f.client.getInstructions(), /No local CLI/);
+    assert.match(f.client.getInstructions(), /stable operationKey/);
+    assert.match(f.client.getInstructions(), /One remote MCP connection is sufficient/);
+    assert.match(f.client.getInstructions(), /portal-files client reads and transmits bytes outside the model/);
   } finally { await f.close(); } }
 });
 
