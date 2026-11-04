@@ -275,10 +275,19 @@ class PackageContract(unittest.TestCase):
         # The default build must admit its archive, rather than only test overrides.
         rules = (SOURCE / '.dockerignore').read_text(encoding='utf-8').splitlines()
         self.assertIn('!' + archive_name, rules, 'Default Docker archive is excluded from build context')
-        command = 'python3 scripts/package.py --release'
+        metadata = json.loads((SOURCE / 'package.json').read_text(encoding='utf-8'))
+        version = metadata['version']
+        self.assertEqual(metadata['scripts']['package:release'], 'python3 scripts/package-release.py')
+        output_example = '/absolute/new/portal-' + version + '-release'
+        server_name = 'ssh-approval-portal-' + version + '.tar.gz'
+        self.assertEqual(archive_name, 'dist/' + server_name)
+        command = 'npm run package:release -- --output ' + output_example
         for readme in ('README.md', 'README.ko.md'):
-            self.assertIn(command, (SOURCE / readme).read_text(encoding='utf-8'),
+            instructions = (SOURCE / readme).read_text(encoding='utf-8')
+            self.assertIn(command, instructions,
                           'Extracted source Docker instructions omit archive preparation')
+            self.assertIn('mkdir -p dist', instructions)
+            self.assertIn('cp ' + output_example + '/' + server_name + ' dist/', instructions)
         source = Path(self.temporary.name) / 'release-source'
         for path in packager.collect_files(SOURCE):
             target = source / path.relative_to(SOURCE)
@@ -288,12 +297,23 @@ class PackageContract(unittest.TestCase):
         extracted = Path(self.temporary.name) / 'clean-extracted'
         with zipfile.ZipFile(archives[1]) as archive:
             archive.extractall(extracted)
-        version = json.loads((source / 'package.json').read_text(encoding='utf-8'))['version']
         root = extracted / ('ssh-approval-portal-' + version)
         self.assertFalse((root / archive_name).exists(), 'Release must not recursively embed its distribution')
-        result = subprocess.run([sys.executable, str(root / 'scripts/package.py'), '--release'],
+        output = Path(self.temporary.name) / 'new-release-assets'
+        result = subprocess.run([sys.executable, str(root / 'scripts/package-release.py'), '--release', '--output', str(output)],
                                 capture_output=True, text=True, timeout=20)
         self.assertEqual(result.returncode, 0, result.stderr)
+        names = {'ssh-approval-portal-' + version + suffix for suffix in ('.tar.gz', '.zip')}
+        names.update('ssh-approval-portal-client-' + version + suffix for suffix in ('.tar.gz', '.zip'))
+        self.assertEqual(set(json.loads(result.stdout)['archives']), names)
+        lines = (output / 'SHA256SUMS').read_text(encoding='utf-8').splitlines()
+        self.assertEqual(len(lines), 4)
+        checksums = dict(line.split('  ', 1)[::-1] for line in lines)
+        self.assertEqual(set(checksums), names)
+        for name in names:
+            self.assertEqual(hashlib.sha256((output / name).read_bytes()).hexdigest(), checksums[name])
+        (root / archive_name).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(output / server_name, root / archive_name)
         self.assertTrue((root / archive_name).is_file(), 'Documented preparation did not supply Docker COPY input')
         self.assertEqual((root / 'release-manifest.json').read_bytes(),
                          (source / 'release-manifest.json').read_bytes())
