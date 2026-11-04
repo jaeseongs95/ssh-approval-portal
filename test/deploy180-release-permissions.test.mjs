@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, chmod, chown, lstat, readFile, writeFile, rm, symlink, readdir } from 'node:fs/promises';
+import { mkdtemp, mkdir, chmod, chown, lstat, readFile, writeFile, rm, symlink, readlink, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -18,7 +18,7 @@ function serviceIdentity(t) {
   assert.notEqual(Number(uid.stdout), 0);
   return { uid: Number(uid.stdout), gid: Number(gid.stdout) };
 }
-async function fixture(t) {
+async function fixture(t, version = '2.0.0') {
   const identity = serviceIdentity(t); if (!identity) return null;
   const root = await mkdtemp(join(tmpdir(), 'portal-release-permissions-'));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -27,7 +27,7 @@ async function fixture(t) {
   await mkdir(sourceDir); await mkdir(join(sourceDir, 'src')); await mkdir(dataRoot, { mode: 0o700 });
   await chmod(dataRoot, 0o700); await chown(dataRoot, identity.uid, identity.gid);
   const files = {
-    'package.json': JSON.stringify({ name: 'deployment-permissions-fixture', version: '1.8.0', type: 'module' }),
+    'package.json': JSON.stringify({ name: 'deployment-permissions-fixture', version, type: 'module' }),
     'package-lock.json': '{}', 'bridge.mjs': 'export {};\n',
     'app.mjs': "import { value } from './node_modules/fixture/lib/entry.mjs'; export function createApplication() { return value; }\n",
     'scripts/check-package-imports.mjs': await readFile(new URL('../scripts/check-package-imports.mjs', import.meta.url), 'utf8'),
@@ -42,7 +42,7 @@ async function fixture(t) {
     const full = join(sourceDir, path), mode = path === 'bridge.mjs' ? 0o755 : path === 'src/private-fixture.json' ? 0o600 : 0o644;
     await mkdir(dirname(full), { recursive: true }); await writeFile(full, body); await chmod(full, mode); modes.set(path, mode);
   }
-  const manifest = JSON.stringify({ version: '1.8.0', files: Object.entries(files).map(([path, body]) => ({ path, size: Buffer.byteLength(body), sha256: digest(body) })) });
+  const manifest = JSON.stringify({ version, files: Object.entries(files).map(([path, body]) => ({ path, size: Buffer.byteLength(body), sha256: digest(body) })) });
   await writeFile(join(sourceDir, 'release-manifest.json'), manifest); await chmod(join(sourceDir, 'release-manifest.json'), 0o644);
   modes.set('release-manifest.json', 0o644);
   const outside = join(root, 'private-outside'); await mkdir(outside); await chmod(outside, 0o700);
@@ -69,6 +69,18 @@ function stagePrivate(f, stage = 'stage') {
     `catch(error){console.log(JSON.stringify({status:'failed',code:error.code}));process.exitCode=1}`, f.planPath, deployUrl, stage],
   { encoding: 'utf8', timeout: 30000 });
 }
+
+test('inspect accepts a 2.0 patch candidate and refuses historical or unsupported candidate versions before writing deployment state', { skip: !rootLinux }, async t => {
+  for (const version of ['2.0.3', '1.8.0', '2.1.0', '2.0.0-beta.1']) await t.test(version, async t => {
+    const f = await fixture(t, version); if (!f) return;
+    const result = stagePrivate(f, 'inspect'), receipt = JSON.parse(result.stdout);
+    assert.equal(result.status, version === '2.0.3' ? 0 : 1, result.stdout + result.stderr);
+    if (version === '2.0.3') assert.equal(receipt.version, version);
+    else assert.equal(receipt.code, 'UNSUPPORTED_DEPLOY_VERSION');
+    await assert.rejects(lstat(f.plan.appRoot), { code: 'ENOENT' });
+    await assert.rejects(lstat(join(f.root, 'stop-called')), { code: 'ENOENT' });
+  });
+});
 
 for (const existingParent of [false, true]) test(`umask077 staging permits real service imports with ${existingParent ? 'existing' : 'new'} public deployment parents`, { skip: !rootLinux }, async t => {
   const f = await fixture(t); if (!f) return;
@@ -110,6 +122,26 @@ test('activation detects service-uid import access failure before stopping the p
   const state = JSON.parse(await readFile(join(f.plan.appRoot, 'deployments', f.plan.generation + '.json'), 'utf8'));
   assert.equal(state.phase, 'staged');
   assert.equal((await lstat(f.release)).mode & 0o777, 0o700, 'existing permissions remain operator controlled');
+});
+
+test('pre-start recovery can select a preserved 1.8 release without accepting it as a new candidate', { skip: !rootLinux }, async t => {
+  const f = await fixture(t), historical = await fixture(t, '1.8.0'); if (!f || !historical) return;
+  const staged = stagePrivate(f); assert.equal(staged.status, 0, staged.stdout + staged.stderr);
+  const started = join(f.root, 'start-called'), stopped = join(f.root, 'stop-called');
+  f.plan.service.start = [process.execPath, '-e', `require('node:fs').writeFileSync(${JSON.stringify(started)},'start')`];
+  f.plan.service.status = [process.execPath, '-e', `process.exit(require('node:fs').existsSync(${JSON.stringify(stopped)})&&!require('node:fs').existsSync(${JSON.stringify(started)})?3:0)`];
+  await writeFile(f.planPath, JSON.stringify(f.plan));
+  const previousRelease = historical.plan.sourceDir;
+  const previousGeneration = digest(await readFile(join(previousRelease, 'release-manifest.json')));
+  await writeFile(join(f.plan.appRoot, 'deployments', f.plan.generation + '.json'), JSON.stringify({
+    generation: f.plan.generation, planHash: digest(JSON.stringify(f.plan)), phase: 'switching', previousRelease, previousGeneration,
+  }));
+  await symlink(f.release, f.plan.activePath);
+  const recovered = stagePrivate(f, 'recover');
+  assert.equal(recovered.status, 0, recovered.stdout + recovered.stderr);
+  assert.equal(JSON.parse(recovered.stdout).phase, 'recovered');
+  assert.equal(await readlink(f.plan.activePath), previousRelease);
+  assert.equal(await readFile(started, 'utf8'), 'start');
 });
 
 for (const unsafe of ['writable', 'foreign-owner', 'symlink']) test(`staging refuses an ${unsafe} releases parent without changing it`, { skip: !rootLinux }, async t => {
