@@ -4,7 +4,7 @@
 
 A standard MCP server for SSH commands, file transfers and OS desktops under existing server policy and owner approval. Its public contract is independent of AI vendors and agent SDKs. Start with `targets` to inspect revisions, platforms, capabilities and file policy; use `submit` and `observe` for the same operation. MCP Apps cards are optional. One bridge supports up to 32 registered SSH targets. See the [tool contract](docs/mcp-tools.ko.md) and [target configuration](docs/multi-targets.ko.md).
 
-The 2.0.0 scope includes the packaged `scripts/portal-files.mjs` client. The local CLI reads PC bytes and sends them over owner-authenticated HTTP, printing only `{"uuid":"..."}` on upload success. File bodies do not pass through model arguments or conversation text. Through the existing remote MCP connection, an agent supplies that UUID to `files` for status, copy, move or removal of the temporary source. A second local stdio server is optional. A remote server cannot directly read a PC path. Follow the [file client guide](docs/client-files.ko.md) for authentication and usage.
+The 2.0.0 scope includes the packaged `scripts/portal-files.mjs` client. The local CLI reads PC bytes and sends them over owner-authenticated HTTP, printing only `{"uuid":"..."}` on upload success. File bodies do not pass through model arguments or conversation text. Through the existing remote MCP connection, an agent supplies that UUID to `files` for status, copy, move or removal of the temporary source. A second local stdio server is optional. A remote server cannot directly read a PC path. The current standalone client provides `doctor`, `upload` and `status`; it has no command to save downloads to the PC. Follow the [file client guide](docs/client-files.ko.md) for authentication and usage.
 
 The UUID server/client path is part of 2.0.0 integration work. Contract descriptions do not establish a final full-suite, package, installation, deployment or all-vendor acceptance result. Earlier ChatGPT web/Claude desktop card and file round trips and older restructuring tests apply only to their recorded releases. Unverified combinations, including ChatGPT desktop and Claude web, remain unverified. Use the candidate's `VALIDATION.json` and execution records for environment and preservation evidence.
 
@@ -60,7 +60,7 @@ From source, package the server and model-external file client together into a n
 npm run package:release -- --output /absolute/new/portal-2.0.0-release
 ```
 
-This produces four assets: server `ssh-approval-portal-2.0.0.tar.gz`/`.zip` and client `ssh-approval-portal-client-2.0.0.tar.gz`/`.zip`, plus one `SHA256SUMS` covering all four. Existing output directories are refused. The client requires separately available Node.js `>=24.2.0 <25`, a trusted existing `cloudflared` executable and the owner's login cache; those runtimes and credentials are not bundled in client assets. Reuse the existing remote MCP connection; a second local MCP server is optional. These instructions do not establish a completed packaging, test or deployment result.
+This produces four assets: server `ssh-approval-portal-2.0.0.tar.gz`/`.zip` and client `ssh-approval-portal-client-2.0.0.tar.gz`/`.zip`, plus one `SHA256SUMS` covering all four. Existing output directories are refused. The client requires separately available Node.js `>=24.2.0 <25`, a trusted existing `cloudflared` executable and the owner's login cache; those runtimes and credentials are not bundled in client assets. The PC client origin must be an administrator HTTPS site already configured for Access mode. The default administrator token mode and MCP bearer are not substitutes; the client does not change settings or log in automatically. Reuse the existing remote MCP connection; a second local MCP server is optional. These instructions do not establish a completed packaging, test or deployment result.
 
 ## Native installation and updates
 
@@ -123,17 +123,17 @@ Compose updates support a limited configuration: the running bridge must support
 
 ## Verification and status
 
-These commands belong in authorized TEST/CI environments; they were not run for this documentation change. Final 2.0.0 client, package, installation and deployment results need their own pinned commit and execution evidence.
+These server verification commands belong in authorized TEST/CI environments; they were not run for this documentation change. Final 2.0.0 client, package, installation and deployment results need their own pinned commit and execution evidence.
 
 ```sh
 npm ci --ignore-scripts
 npm run build:ui
 npm test
-npx playwright install chromium
-npm run test:browser
 python3 test/test_helper.py
 sudo bash scripts/status.sh
 ```
+
+Run browser regressions in an isolated checkout on the local PC using the [browser testing guide](docs/browser-testing.ko.md). Keep this separate from server product tests.
 
 Build the UI with its separate `ui` dependencies without upgrading the server SDK. Rebuild distributable assets with `npm run build:ui` after changing UI or web modules. See the [architecture guide](docs/architecture.en.md) and [verification plan](test/PLAN.md) for boundaries, compatibility, and future test requirements. `test/docker-tests.ps1` creates and cleans up isolated Ubuntu containers with synthetic data. Record actual client card/file-save tests, platform file-input tests, and physical ARM hardware tests as complete only when each has its own execution evidence.
 
