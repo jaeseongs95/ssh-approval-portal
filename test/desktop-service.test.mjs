@@ -244,6 +244,10 @@ test('GUI-AGENT provider state is OS neutral and fences a replaced same-size ses
   readiness = desktopState({ ...readiness, sessionRef: 'managed:session-b' });
   await assert.rejects(service.input({ ...identity, frameId: frame.frameId, geometryRevision: frame.geometryRevision,
     sequence: 1, requestKey: 'old-session', actions: [{ type: 'text', text: 'never-send' }] }), error('DESKTOP_STALE_FRAME'));
+  const fresh = await service.observe(identity);
+  readiness = desktopState({ ...readiness, generation: 'c'.repeat(64) });
+  await assert.rejects(service.input({ ...identity, frameId: fresh.frameId, geometryRevision: fresh.geometryRevision,
+    sequence: 1, requestKey: 'changed-generation', actions: [{ type: 'text', text: 'never-send' }] }), error('DESKTOP_STALE_FRAME'));
   assert.equal(calls.length, 0);
 });
 
@@ -280,7 +284,8 @@ test('GUI-AGENT cleanup distinguishes attached preservation, managed termination
     { lifecycle: 'attached', close: async () => {}, expected: 'preserved' },
     { lifecycle: 'managed', close: async () => ({ sessionState: 'terminated' }), expected: 'terminated' },
     { lifecycle: 'managed', close: async () => {}, expected: 'unknown' },
-    { lifecycle: 'managed', close: async () => { throw Object.assign(Error('failed'), { code: 'DESKTOP_CLOSE_FAILED' }); }, expected: 'unknown', failure: true },
+    { lifecycle: 'managed', close: async () => { throw Object.assign(Error('failed'), { code: 'DESKTOP_CLOSE_FAILED' }); }, expected: 'unknown', failure: 'DESKTOP_CLOSE_FAILED' },
+    { lifecycle: 'attached', close: async () => ({ sessionState: 'invalid-outcome' }), expected: 'unknown', failure: 'DESKTOP_INVALID_CLEANUP_RECEIPT' },
   ]) {
     const { desktop } = fixture(); desktop.lifecycle = scenario.lifecycle; desktop.close = scenario.close;
     const { service } = fixture({ adapter: { open: async () => desktop } });
@@ -288,6 +293,6 @@ test('GUI-AGENT cleanup distinguishes attached preservation, managed termination
     const receipt = await service.close({ ownerId: binding.ownerId, sessionId: lease.sessionId, epoch: binding.epoch });
     assert.equal(receipt.sessionState, scenario.expected); assert.equal(receipt.logout, false);
     assert.equal(receipt.releaseSent, true); assert.equal(service.size(), 0);
-    assert.equal(receipt.cleanupError, scenario.failure ? 'DESKTOP_CLOSE_FAILED' : undefined);
+    assert.equal(receipt.cleanupError, scenario.failure);
   }
 });
