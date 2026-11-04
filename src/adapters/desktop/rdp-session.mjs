@@ -89,7 +89,10 @@ export function createRdpSessionDesktopAdapter({ openSession, openTunnel, readCl
         } catch { cleanupError = 'DESKTOP_RDP_DISPLAY_CLEANUP_FAILED'; }
         finally { controller.abort(); }
         if (!tunnel && tunnelOpening) { try { tunnel = await tunnelOpening; } catch { /* Open retains its error. */ } }
-        try { await tunnel?.close(); } catch { cleanupError ??= 'DESKTOP_RDP_TUNNEL_CLEANUP_FAILED'; }
+        try {
+          const receipt = await tunnel?.close();
+          if (receipt?.cleanupComplete === false) cleanupError ??= receipt.errorCode ?? 'DESKTOP_RDP_TUNNEL_CLEANUP_FAILED';
+        } catch { cleanupError ??= 'DESKTOP_RDP_TUNNEL_CLEANUP_FAILED'; }
         signal?.removeEventListener('abort', abort);
         // Detaching a native client never proves that its Windows OS session was logged off.
         return { sessionState: 'unknown', remoteSessionState: 'unknown', outerSessionState,

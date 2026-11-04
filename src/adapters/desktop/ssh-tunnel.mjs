@@ -10,7 +10,13 @@ export async function openDesktopTunnel({ openChannel, signal, beforeDispatch = 
   if (typeof openChannel !== 'function' || typeof beforeDispatch !== 'function') throw fail('DESKTOP_INVALID_CONFIG');
   if (signal?.aborted) throw fail('DESKTOP_CLOSED');
   const sockets = new Set(), openings = new Set(), channels = new Set();
+  const controller = new AbortController(), channelClosings = new WeakMap();
   let closing, closed = false, closeError;
+  const closeChannel = channel => {
+    if (!channelClosings.has(channel)) channelClosings.set(channel, Promise.resolve().then(() => channel.close())
+      .catch(() => { closeError = 'DESKTOP_TUNNEL_CLEANUP_UNKNOWN'; }));
+    return channelClosings.get(channel);
+  };
   const server = createServer(socket => {
     if (closed || sockets.size) { socket.destroy(); return; }
     sockets.add(socket);
@@ -19,16 +25,19 @@ export async function openDesktopTunnel({ openChannel, signal, beforeDispatch = 
     const opening = Promise.resolve().then(async () => {
       await beforeDispatch();
       if (closed || socket.destroyed || signal?.aborted) return;
-      const channel = await openChannel({ host: '127.0.0.1', port: 3389, signal, beforeDispatch });
+      const channel = await openChannel({ host: '127.0.0.1', port: 3389, signal: controller.signal, beforeDispatch });
       channels.add(channel);
       try {
         if (closed || socket.destroyed || signal?.aborted) return;
         // Keep errors local. Native-client diagnostics must not contain SSH
         // profile details, raw configuration, or a credential from this bridge.
-        await Promise.all([pipeline(socket, channel.stream), pipeline(channel.stream, socket)]);
+        const piping = [pipeline(socket, channel.stream), pipeline(channel.stream, socket)];
+        try { await Promise.all(piping); }
+        catch { socket.destroy(); await closeChannel(channel); }
+        await Promise.allSettled(piping);
       } catch { socket.destroy(); }
       finally {
-        try { await channel.close(); } catch { closeError = 'DESKTOP_TUNNEL_CLEANUP_UNKNOWN'; }
+        await closeChannel(channel);
         channels.delete(channel);
       }
     }).catch(() => { socket.destroy(); });
@@ -40,17 +49,20 @@ export async function openDesktopTunnel({ openChannel, signal, beforeDispatch = 
     if (closing) return closing;
     closed = true;
     signal?.removeEventListener('abort', onAbort);
+    controller.abort();
     closing = (async () => {
       const stopped = new Promise(resolve => {
         if (!server.listening) resolve();
         else server.close(() => resolve());
       });
       for (const socket of sockets) socket.destroy();
-      for (const channel of channels) {
-        try { await channel.close(); } catch { closeError = 'DESKTOP_TUNNEL_CLEANUP_UNKNOWN'; }
-      }
-      await Promise.allSettled([...openings]);
-      await stopped;
+      const pending = [...openings, ...[...channels].map(closeChannel), stopped];
+      // An opener/guard may ignore cancellation. Keep late-channel cleanup
+      // alive, but never report completed cleanup or await it without a bound.
+      await new Promise(resolve => {
+        const timer = setTimeout(() => { closeError = 'DESKTOP_TUNNEL_CLEANUP_UNKNOWN'; resolve(); }, 1000);
+        void Promise.allSettled(pending).then(() => { clearTimeout(timer); resolve(); });
+      });
       return { closed: true, cleanupComplete: !closeError, ...(closeError ? { errorCode: closeError } : {}) };
     })();
     return closing;

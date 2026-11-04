@@ -208,24 +208,53 @@ export async function openSshForward(registry, profile, { host, port, beforeDisp
     if (signal?.aborted) throw Error('Desktop channel cancelled before dispatch');
     const client = guarded.getClient();
     return new Promise((resolve, reject) => {
-      let done = false, stream;
-      const close = () => { if (stream && !stream.destroyed) stream.destroy(); };
+      let done = false, stream, closing, channelClosed = false;
+      const close = () => {
+        if (closing) return closing;
+        if (!stream) return Promise.resolve();
+        closing = new Promise((resolve, reject) => {
+          let settled = false;
+          const finish = error => {
+            if (settled) return;
+            settled = true; clearTimeout(timer); stream.removeListener('close', onClose);
+            signal?.removeEventListener('abort', onAbort);
+            error ? reject(error) : resolve();
+          };
+          const onClose = () => finish();
+          const timer = setTimeout(() => finish(Error('Desktop channel cleanup unconfirmed')), 1000);
+          stream.once('close', onClose);
+          try {
+            // ssh2 1.17 Channel.destroy() sends EOF/CLOSE; it does not destroy
+            // the Node readable. Protocol CLOSE emits close only after end.
+            // Discard this lease's unread bytes after unpiping so even an
+            // empty paused readable can finish its EOF/close path.
+            stream.unpipe?.();
+            if (!stream.destroyed) stream.destroy();
+            stream.resume?.(); stream.stderr?.resume?.();
+            if (channelClosed || stream.closed) finish();
+          } catch { finish(Error('Desktop channel cleanup unconfirmed')); }
+        });
+        return closing;
+      };
+      const closeQuietly = () => { void close().catch(() => {}); };
       const cleanOpening = () => { clearTimeout(timer); client.removeListener('close', onLost); client.removeListener('error', onLost); };
       const fail = error => {
-        if (done) { close(); return; }
-        done = true; cleanOpening(); signal?.removeEventListener('abort', onAbort); close(); reject(error);
+        if (done) { closeQuietly(); return; }
+        done = true; cleanOpening(); signal?.removeEventListener('abort', onAbort); closeQuietly(); reject(error);
       };
       const onLost = () => fail(Error('Desktop SSH transport lost'));
       const onAbort = () => fail(Error('Desktop channel cancelled'));
       const timer = setTimeout(() => fail(Error('Desktop channel opening timed out')), timeoutMs);
       client.once('close', onLost); client.once('error', onLost); signal?.addEventListener('abort', onAbort, { once: true });
+      if (signal?.aborted) { onAbort(); return; }
       try {
         client.forwardOut('127.0.0.1', 0, host, port, (error, opened) => {
           if (error) { fail(error); return; }
           stream = opened;
-          if (done || signal?.aborted) { close(); if (!done) fail(Error('Desktop channel cancelled')); return; }
+          stream.on('error', () => {});
+          stream.once('close', () => { channelClosed = true; signal?.removeEventListener('abort', onAbort); });
+          if (done || signal?.aborted) { closeQuietly(); if (!done) fail(Error('Desktop channel cancelled')); return; }
           done = true; cleanOpening();
-          stream.once('close', () => signal?.removeEventListener('abort', onAbort));
           resolve({ stream, close });
         });
       } catch (error) { fail(error); }
