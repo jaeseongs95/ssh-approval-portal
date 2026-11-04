@@ -15,7 +15,8 @@ export const desktopCatalogs = messageCatalog({
   '실행 중인 데스크톱': 'Open desktop',
   '연결 상태 확인': 'Check connection state',
   'Windows 계정 인증이 필요합니다. 로그인 화면을 확인하고 아래 일회성 입력을 사용하세요.': 'Windows account authentication is required. Inspect the login screen and use the one-time input below.',
-  '현재 화면과 대상 서버를 확인했고 Windows 로그인 입력란을 직접 선택했습니다.': 'I checked the current screen and target server, and selected the Windows login field.',
+  '현재 화면이 선택한 Windows 서버의 잠금 또는 로그인 화면임을 확인했습니다.': 'I confirmed this is the selected Windows server’s lock or login screen.',
+  'Windows 로그인 입력란을 직접 선택했습니다.': 'I selected the Windows login field.',
   '일회성 인증 입력': 'One-time authentication input',
   '현재 선택한 로그인 입력란으로 전송': 'Send to the selected login field',
   'Ctrl+Alt+Delete 요청': 'Request Ctrl+Alt+Delete',
@@ -67,14 +68,16 @@ export function createDesktopPanel({ document, api, getTarget, isSignedOut = () 
   const auth = el('fieldset'); auth.id = 'desktop-authentication';
   const authLabel = el('label', t('일회성 인증 입력')), credential = el('input');
   credential.type = 'password'; credential.maxLength = 2048; credential.autocomplete = 'off'; credential.setAttribute('autocomplete', 'off'); authLabel.append(credential);
-  const confirmationLabel = el('label', t('현재 화면과 대상 서버를 확인했고 Windows 로그인 입력란을 직접 선택했습니다.'));
+  const confirmationLabel = el('label', t('현재 화면이 선택한 Windows 서버의 잠금 또는 로그인 화면임을 확인했습니다.'));
   const confirmation = el('input'); confirmation.type = 'checkbox'; confirmationLabel.append(confirmation);
+  const fieldConfirmationLabel = el('label', t('Windows 로그인 입력란을 직접 선택했습니다.'));
+  const fieldConfirmation = el('input'); fieldConfirmation.type = 'checkbox'; fieldConfirmationLabel.append(fieldConfirmation);
   const authSend = el('button', t('현재 선택한 로그인 입력란으로 전송')), sas = el('button', t('Ctrl+Alt+Delete 요청'));
   authSend.type = sas.type = 'button';
-  auth.append(el('legend', t('일회성 인증 입력')), el('p', t('입력값은 저장하지 않습니다. 먼저 화면에서 로그인 입력란을 선택하세요. 전송 후 화면을 확인하고 Enter를 직접 누르세요. SAS 요청의 실제 동작은 서버 서비스와 정책에 따라 달라집니다.')), confirmationLabel, authLabel, authSend, sas);
+  auth.append(el('legend', t('일회성 인증 입력')), el('p', t('입력값은 저장하지 않습니다. 먼저 화면에서 로그인 입력란을 선택하세요. 전송 후 화면을 확인하고 Enter를 직접 누르세요. SAS 요청의 실제 동작은 서버 서비스와 정책에 따라 달라집니다.')), confirmationLabel, authLabel, fieldConfirmationLabel, authSend, sas);
   root.append(status, error, readinessStatus, controls, image, label, send, auth); document.getElementById('server-workspace')?.append(root);
   let session, frame, nextSequence, busy = false, uncertain = false, openingUncertain = false, generation = 0, pendingFrame, observedTarget = getTarget();
-  let closingRequested = false, closeFlight;
+  let closingRequested = false, closeFlight, sessionPlatform;
   const idleWaiters = [];
   const settled = () => { busy = false; lock(); for (const resolve of idleWaiters.splice(0)) resolve(); };
   const body = () => ({ sessionId: session.sessionId, epoch: session.epoch });
@@ -94,9 +97,11 @@ export function createDesktopPanel({ document, api, getTarget, isSignedOut = () 
     checkState.disabled = busy || !session || isSignedOut();
     const blocked = busy || !session || !frame || pendingFrame || uncertain || isSignedOut();
     image.setAttribute('aria-disabled', String(!!blocked)); text.disabled = !!blocked; send.disabled = !!blocked || !text.value;
-    auth.hidden = !session; credential.disabled = !!blocked;
-    confirmation.disabled = !!blocked; authSend.disabled = !!blocked || !confirmation.checked || !credential.value;
-    sas.disabled = !!blocked || !confirmation.checked;
+    const authBlocked = blocked || sessionPlatform !== 'windows';
+    auth.hidden = !session || sessionPlatform !== 'windows'; credential.disabled = !!authBlocked;
+    confirmation.disabled = fieldConfirmation.disabled = !!authBlocked;
+    authSend.disabled = !!authBlocked || !confirmation.checked || !fieldConfirmation.checked || !credential.value;
+    sas.disabled = !!authBlocked || !confirmation.checked;
     onStateChange();
   }
   async function observe() {
@@ -130,10 +135,11 @@ export function createDesktopPanel({ document, api, getTarget, isSignedOut = () 
     finally { settled(); }
   }
   async function authenticate(action) {
-    if (busy || !session || !frame || uncertain || pendingFrame || !confirmation.checked || isSignedOut()) return;
+    if (busy || !session || sessionPlatform !== 'windows' || !frame || uncertain || pendingFrame || !confirmation.checked
+      || action === 'credential' && !fieldConfirmation.checked || isSignedOut()) return;
     const request = { ...body(), frameId: frame.frameId, geometryRevision: frame.geometryRevision, sequence: nextSequence,
       requestKey: randomKey(), confirmed: true, action, ...(action === 'credential' ? { value: credential.value } : {}) };
-    credential.value = ''; confirmation.checked = false;
+    credential.value = ''; confirmation.checked = fieldConfirmation.checked = false;
     const token = generation; busy = true; lock();
     try {
       const receipt = await api('/api/desktop/authenticate', 'POST', request);
@@ -144,7 +150,7 @@ export function createDesktopPanel({ document, api, getTarget, isSignedOut = () 
     finally { request.value = undefined; settled(); }
     if (!uncertain && token === generation) await observe();
   }
-  credential.oninput = confirmation.onchange = lock;
+  credential.oninput = confirmation.onchange = fieldConfirmation.onchange = lock;
   authSend.onclick = () => { if (!authSend.disabled) return authenticate('credential'); };
   sas.onclick = () => { if (!sas.disabled) return authenticate('sas'); };
   open.onclick = async () => {
@@ -157,14 +163,14 @@ export function createDesktopPanel({ document, api, getTarget, isSignedOut = () 
       submitted = true;
       const value = await api('/api/desktop/open', 'POST', { target: targetId, expectedTargetRevision: target.revision });
       if (token !== generation) return;
-      session = value; error.textContent = ''; text.value = '';
+      session = value; sessionPlatform = target.platform ?? 'linux'; error.textContent = ''; text.value = '';
       showReadiness(value.readiness);
     } catch (failure) { if (token === generation) { openingUncertain = submitted && !(failure.status >= 400 && failure.status < 500); error.textContent = failure.message + (openingUncertain ? ' ' + t('데스크톱 연결 결과를 확인하지 못했습니다. 자동으로 다시 열지 않습니다.') : ''); } }
     finally { settled(); }
     if (session && !closingRequested) await observe();
   };
   async function closeSession() {
-    credential.value = ''; confirmation.checked = false;
+    credential.value = ''; confirmation.checked = fieldConfirmation.checked = false;
     closingRequested = true;
     if (closeFlight) return closeFlight;
     closeFlight = (async () => {
@@ -176,7 +182,7 @@ export function createDesktopPanel({ document, api, getTarget, isSignedOut = () 
         if (token !== generation) return;
         if (!result.closed) throw Error('DESKTOP_CLOSE_UNCONFIRMED');
         session = frame = pendingFrame = undefined; uncertain = false; image.hidden = true; image.removeAttribute('src'); text.value = '';
-        readinessStatus.textContent = ''; credential.value = ''; confirmation.checked = false;
+        readinessStatus.textContent = ''; credential.value = ''; confirmation.checked = fieldConfirmation.checked = false;
         status.textContent = t('연결을 닫았습니다. 서버 계정에서 로그아웃하지 않았습니다.');
         error.textContent = result.cleanupError ? t('데스크톱 정리 결과를 확인하세요: ') + result.cleanupError : '';
       } catch (failure) { if (token === generation) { uncertain = true; error.textContent = failure.message; } }
@@ -202,9 +208,9 @@ export function createDesktopPanel({ document, api, getTarget, isSignedOut = () 
   image.onpointerup = event => { image.focus(); void input(desktopPointerActions(event, image.getBoundingClientRect(), frame?.width ?? 0, frame?.height ?? 0)); };
   image.onkeydown = event => { if (event.key === 'Tab') return; const actions = desktopKeyActions(event); if (actions.length) { event.preventDefault(); void input(actions); } };
   // Pause background capture while an owner prepares a private one-time input.
-  const polling = timers.setInterval(() => { if (!document.hidden && document.body.dataset.page === 'settings' && !credential.value && !confirmation.checked && !uncertain && !pendingFrame) void observe(); }, 2000);
+  const polling = timers.setInterval(() => { if (!document.hidden && document.body.dataset.page === 'settings' && !credential.value && !confirmation.checked && !fieldConfirmation.checked && !uncertain && !pendingFrame) void observe(); }, 2000);
   document.addEventListener('admin-scope-change', () => { lock(); if (document.body.dataset.page !== 'settings') void closeSession(); });
-  document.getElementById('logout')?.addEventListener('click', () => { generation++; timers.clearInterval(polling); session = frame = pendingFrame = undefined; image.hidden = true; image.removeAttribute('src'); text.value = ''; credential.value = ''; confirmation.checked = false; readinessStatus.textContent = ''; lock(); });
+  document.getElementById('logout')?.addEventListener('click', () => { generation++; timers.clearInterval(polling); session = frame = pendingFrame = undefined; image.hidden = true; image.removeAttribute('src'); text.value = ''; credential.value = ''; confirmation.checked = fieldConfirmation.checked = false; readinessStatus.textContent = ''; lock(); });
   lock();
   return { root, close: closeSession, syncTarget() { if (observedTarget !== getTarget()) { observedTarget = getTarget(); openingUncertain = false; } lock(); }, reloadState: () => ({ blocked: busy || !!session || openingUncertain, dirty: text.value ? [t('실행 중인 데스크톱')] : [] }) };
 }
