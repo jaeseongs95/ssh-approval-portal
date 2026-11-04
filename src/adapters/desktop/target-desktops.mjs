@@ -1,5 +1,8 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { hash } from '../../domain/validation.mjs';
 import { desktopFail as fail } from '../../domain/desktop-lease.mjs';
 import { createRfbDesktopAdapter } from './rfb.mjs';
@@ -14,9 +17,12 @@ const backendOf = runtime => runtime.desktop?.backend ?? 'rfb';
 /** Probe fixed native binaries without inheriting the bridge's authentication environment. */
 export async function readNativeRdpCapabilities() {
   if (process.platform !== 'linux') return { available: false, executable: null };
+  const home = await mkdtemp(join(tmpdir(), 'portal-rdp-probe-'));
+  try {
   for (const executable of ['/usr/bin/xfreerdp3', '/usr/bin/xfreerdp']) {
     try {
-      const options = { env: { PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' }, timeout: 5000, maxBuffer: 131072, windowsHide: true };
+      const options = { env: { PATH: '/usr/bin:/bin', LANG: 'C.UTF-8', HOME: home,
+        XDG_CONFIG_HOME: home, XDG_CACHE_HOME: home, XDG_RUNTIME_DIR: home }, timeout: 5000, maxBuffer: 131072, windowsHide: true };
       const version = await run(executable, ['/version'], options);
       const help = await run(executable, ['/help'], options);
       const result = rdpClientCapabilities({ platform: process.platform, executable,
@@ -25,6 +31,7 @@ export async function readNativeRdpCapabilities() {
     } catch { /* A missing/incompatible native client is a capability, never an authentication failure. */ }
   }
   return { available: false, executable: null };
+  } finally { await rm(home, { recursive: true, force: true }); }
 }
 
 /** Concrete GUI backends. Target addresses, helpers and secrets never come from an agent request. */
