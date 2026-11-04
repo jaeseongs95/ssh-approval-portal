@@ -5,9 +5,19 @@ export const CALLER_CONTEXT_LIMIT = 8192;
 export const ASSESSMENT_CONTEXT_LIMIT = 12_288;
 // Source JSON escaping, argvJson (4096 UTF-16 units), cwd (512 bytes), fixed manifest/provenance.
 export const SOURCE_EVIDENCE_MAX_BYTES = 6 * PYTHON_SOURCE_MAX_BYTES + 3 * 4096 + 6 * 512 + 4096;
-const credentialMaterial = /-----BEGIN|\bBearer\s|(?:api[_-]?key|password|secret|token)\s*[=:]/i;
+const credentialMaterial = /-----BEGIN|\bBearer\s|(?:api[_-]?key|password|secret|token)\s*[=:]/gi;
+// Match the normalized provider/name grammar, with an explicit end of token.
+const secretReference = /^secret:\/\/[a-z][a-z0-9-]{0,31}\/[A-Za-z0-9][A-Za-z0-9_.-]{0,63}(?=$|[\s"'`,;)\]}])/;
 const byteLength = value => new TextEncoder().encode(value).byteLength;
-export const credentialText = value => credentialMaterial.test(value);
+export function credentialText(value) {
+  const text = String(value);
+  for (const match of text.matchAll(credentialMaterial)) {
+    if (match[0] === 'secret:' && !/[A-Za-z0-9_./:-]/.test(text[match.index - 1] ?? '')
+      && secretReference.test(text.slice(match.index))) continue;
+    return true;
+  }
+  return false;
+}
 // Resource names are useful context; commands reading them still require review.
 export const sensitiveText = value => credentialText(value) || /\/etc\/shadow|\.ssh\/id_|\/secrets(?:\/|\b)|\.env(?:\b|\/)/i.test(value);
 
@@ -30,7 +40,7 @@ export function assessmentContextWithinLimit(value, sourcePlan) {
 export function callerContext(value = '') {
   if (typeof value !== 'string' || value.includes('\0')) throw Object.assign(Error('Invalid command context'), { code: 'INVALID_COMMAND_CONTEXT' });
   if (value.length > CALLER_CONTEXT_LIMIT) throw Object.assign(Error('Invalid command context length'), { code: 'COMMAND_CONTEXT_TOO_LARGE' });
-  if (credentialMaterial.test(value)) throw Object.assign(Error('Invalid or sensitive command context'), { code: 'COMMAND_CONTEXT_CONTAINS_SECRET' });
+  if (credentialText(value)) throw Object.assign(Error('Invalid or sensitive command context'), { code: 'COMMAND_CONTEXT_CONTAINS_SECRET' });
   return value;
 }
 

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ApprovalQueue } from './support/approval-runtime.mjs';
 import { createRequestSafety } from '../src/application/request-safety.mjs';
-import { assessmentContext, callerContext, commandRequest, sensitiveText, ASSESSMENT_CONTEXT_LIMIT, SOURCE_EVIDENCE_MAX_BYTES } from '../src/domain/execution-context.mjs';
+import { assessmentContext, callerContext, commandRequest, credentialText, sensitiveText, ASSESSMENT_CONTEXT_LIMIT, SOURCE_EVIDENCE_MAX_BYTES } from '../src/domain/execution-context.mjs';
 import { preparePythonSource } from '../src/adapters/ssh/python-source.mjs';
 import { safetyInput } from '../src/domain/safety.mjs';
 import { createJevAssessor } from '../src/adapters/safety/jev.mjs';
@@ -108,5 +108,30 @@ test('source evidence uses a bounded separate budget tied to the actual private 
   for(const inputKind of ['observation','registration']) {
     const observer=createJevAssessor({apiKey:'synthetic-only',inputKind,fetchImpl:()=>assert.fail('source budget is execution-only')});
     assert.equal((await observer.assess(input,{sourcePlan:plan})).reason,'invalid_input');
+  }
+});
+
+test('normalized secret references are public identifiers, without hiding credential material', () => {
+  const references = ['secret://local-file/windows-gui-agent', 'secret://vault/model-safety-api-key',
+    'secret://a/A_1.2-3', `secret://${'a'.repeat(32)}/${'x'.repeat(64)}`];
+  for (const reference of references) {
+    const source = `reference = '${reference}'\nprint(reference)\n`;
+    assert.equal(credentialText(source), false, reference);
+    assert.equal(callerContext(reference), reference);
+    assert.equal(sensitiveText(reference), false);
+    assert.equal(credentialText(JSON.stringify({ reference })), false);
+    for (const literal of ['password=synthetic', 'api_key:synthetic', 'secret=synthetic',
+      'token=synthetic', 'Bearer synthetic', '-----BEGIN PRIVATE KEY-----']) {
+      for (const combined of [source + literal, literal + '\n' + source]) {
+        assert.equal(credentialText(combined), true, combined);
+        assert.throws(() => callerContext(combined), { code: 'COMMAND_CONTEXT_CONTAINS_SECRET' });
+      }
+    }
+  }
+  for (const reference of ['SECRET://local-file/name', 'secret://Local-file/name', 'secret: //local-file/name',
+    'secret://local-file/', 'secret://local-file/name/extra', 'secret://local-file/name?value=synthetic',
+    'secret://local-file/name#fragment', 'secret://local-file/name%20', 'secret://local-file/name\\extra',
+    'prefixsecret://local-file/name', `secret://${'a'.repeat(33)}/name`, `secret://local-file/${'x'.repeat(65)}`]) {
+    assert.equal(credentialText(reference), true, reference);
   }
 });
