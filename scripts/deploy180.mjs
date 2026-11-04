@@ -332,7 +332,8 @@ export async function runDeployment(stage, input, { fetchImpl = fetch } = {}) {
         await save({ phase: 'recovered', recoveredAt: Date.now() });
       }
     }
-    const result = { ...receipt, phase: state.phase, release, ...(state.migration ? { migration: state.migration } : {}) };
+    const result = { ...receipt, phase: state.phase, release, ...(state.migration ? { migration: state.migration } : {}),
+      ...(state.nativeRuntime ? { nativeRuntime: state.nativeRuntime } : {}) };
     await atomicJson(join(control, plan.generation + '-' + stage + '-receipt.json'), result);
     return result;
   } finally { await lock.close(); await unlink(lockPath); }
