@@ -27,6 +27,29 @@ class SessionError(Exception):
     pass
 
 
+def startup_remaining(deadline, phase_deadline=None, phase_code=None):
+    """전체 자원 수명이 먼저 만료되면 준비 단계의 timeout과 구분한다."""
+    now = time.monotonic()
+    if now >= deadline:
+        raise SessionError("DESKTOP_EXPIRED")
+    if phase_deadline is not None:
+        if now >= phase_deadline:
+            raise SessionError(phase_code)
+        return min(deadline, phase_deadline) - now
+    return deadline - now
+
+
+def startup_probe(args, deadline, timeout, phase_deadline=None, phase_code=None, **kwargs):
+    budget = startup_remaining(deadline, phase_deadline, phase_code)
+    try:
+        result = subprocess.run(args, timeout=min(timeout, budget), **kwargs)
+    except subprocess.TimeoutExpired:
+        startup_remaining(deadline, phase_deadline, phase_code)
+        raise
+    startup_remaining(deadline, phase_deadline, phase_code)
+    return result
+
+
 def report(event, **fields):
     print(json.dumps({"agsDesktop": 1, "event": event, **fields}, separators=(",", ":")),
           file=sys.stderr, flush=True)
@@ -270,6 +293,7 @@ def run(options):
         display_read, display_write = os.pipe()
         deadline = time.monotonic() + options.ttl_ms / 1000
         try:
+            startup_remaining(deadline)
             xvnc = subprocess.Popen([
                 executables["Xvnc"], "-inetd", "-displayfd", str(display_write),
                 "-nolisten", "tcp", "-noreset", "-auth", auth, "-geometry",
@@ -281,23 +305,27 @@ def run(options):
                 stdin=backend, stdout=backend, stderr=subprocess.DEVNULL,
                 pass_fds=(display_write,), env=environment, start_new_session=True)
             children.append(xvnc)
+            startup_remaining(deadline)
             backend.close()
             backend = None
             os.close(display_write)
             display_write = None
             with selectors.DefaultSelector() as selector:
                 selector.register(display_read, selectors.EVENT_READ)
-                if not selector.select(min(10, options.ttl_ms / 1000)):
+                display_deadline = min(deadline, time.monotonic() + 10)
+                events = selector.select(startup_remaining(deadline, display_deadline, "DESKTOP_START_TIMEOUT"))
+                startup_remaining(deadline, display_deadline, "DESKTOP_START_TIMEOUT")
+                if not events:
                     raise SessionError("DESKTOP_START_TIMEOUT")
                 allocated = os.read(display_read, 32).strip()
+            startup_remaining(deadline)
             if not allocated.isdigit() or xvnc.poll() is not None:
                 raise SessionError("DESKTOP_XVNC_START_FAILED")
             display = int(allocated)
             authority(auth, display, cookie)
             environment["DISPLAY"] = ":" + str(display)
-            result = subprocess.run([executables["xdpyinfo"]], env=environment,
-                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                    timeout=3, check=False)
+            result = startup_probe([executables["xdpyinfo"]], deadline, 3, env=environment,
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
             if result.returncode != 0:
                 raise SessionError("DESKTOP_DISPLAY_UNAVAILABLE")
             app_args = (["-title", "AGS agent terminal", "-geometry", "100x30+10+10", "-e", "/bin/sh"]
@@ -306,12 +334,14 @@ def run(options):
                             f"/size:{options.width}x{options.height}", "/f", "/title:AGS agent RDP", "-clipboard", "/log-level:OFF",
                             "/kbd:unicode:on", "/ags-input-fd:3"])
             for executable, args in (("openbox", []), (app_name, app_args)):
+                startup_remaining(deadline)
                 child = subprocess.Popen([executables[executable], *args], env=environment,
                                          stdin=subprocess.PIPE if executable == app_name and credentials is not None else subprocess.DEVNULL,
                                          stdout=subprocess.DEVNULL,
                                          stderr=subprocess.DEVNULL, start_new_session=True,
                                          pass_fds=(native_fd,) if executable == app_name and native_fd is not None else ())
                 children.append(child)
+                startup_remaining(deadline)
                 if executable == app_name and native_fd is not None:
                     os.close(native_fd)
                     native_fd = None
@@ -319,15 +349,15 @@ def run(options):
                     # WM가 SubstructureRedirect를 확보하고 EWMH 초기화를 끝낸 뒤 앱을 만든다.
                     wm_deadline = min(deadline, time.monotonic() + 5)
                     while True:
+                        startup_remaining(deadline, wm_deadline, "DESKTOP_WINDOW_MANAGER_NOT_READY")
                         if child.poll() is not None:
                             raise SessionError("DESKTOP_WINDOW_MANAGER_FAILED")
-                        state = subprocess.run([executables["xprop"], "-root", "_NET_SUPPORTING_WM_CHECK"],
-                                               env=environment, capture_output=True, timeout=1, check=False)
+                        state = startup_probe([executables["xprop"], "-root", "_NET_SUPPORTING_WM_CHECK"],
+                                              deadline, 1, wm_deadline, "DESKTOP_WINDOW_MANAGER_NOT_READY",
+                                              env=environment, capture_output=True, check=False)
                         if re.search(rb"window id # 0x[1-9a-fA-F][0-9a-fA-F]*", state.stdout):
                             break
-                        if time.monotonic() >= wm_deadline:
-                            raise SessionError("DESKTOP_WINDOW_MANAGER_NOT_READY")
-                        time.sleep(0.02)
+                        time.sleep(min(0.02, startup_remaining(deadline, wm_deadline, "DESKTOP_WINDOW_MANAGER_NOT_READY")))
                 if executable == app_name and credentials is not None:
                     try:
                         child.stdin.write((credentials["username"] + "\n" + credentials["domain"] + "\n"
@@ -339,18 +369,20 @@ def run(options):
             ready_deadline = min(deadline, time.monotonic() + 10)
             title = "AGS agent terminal" if options.application == "terminal" else "AGS agent RDP"
             while True:
+                startup_remaining(deadline, ready_deadline, "DESKTOP_WINDOW_NOT_READY")
                 if any(child.poll() is not None for child in children):
                     raise SessionError("DESKTOP_APPLICATION_START_FAILED")
-                window = subprocess.run([executables["xwininfo"], "-name", title, "-stats"],
-                                        env=environment, capture_output=True, timeout=1, check=False)
+                window = startup_probe([executables["xwininfo"], "-name", title, "-stats"],
+                                       deadline, 1, ready_deadline, "DESKTOP_WINDOW_NOT_READY",
+                                       env=environment, capture_output=True, check=False)
                 match = re.search(rb"Window id: (0x[0-9a-fA-F]+)", window.stdout)
                 if match and b"Map State: IsViewable" in window.stdout:
                     focus_window(environment["DISPLAY"], int(match[1], 16), cookie)
+                    startup_remaining(deadline)
                     break
-                if time.monotonic() >= ready_deadline:
-                    raise SessionError("DESKTOP_WINDOW_NOT_READY")
-                time.sleep(0.02)
+                time.sleep(min(0.02, startup_remaining(deadline, ready_deadline, "DESKTOP_WINDOW_NOT_READY")))
             generation = hashlib.sha256((options.session_ref + ":" + secrets.token_hex(32)).encode()).hexdigest()
+            startup_remaining(deadline)
             report("ready", sessionRef=options.session_ref, resourceGeneration=generation,
                    display=display, width=options.width, height=options.height,
                    pids=[child.pid for child in children])
@@ -373,7 +405,7 @@ def run(options):
                         os.close(fd)
                 if not closed:
                     report("closed", sessionRef=options.session_ref, sessionState="terminated", reason="startup_failed",
-                           cleanupScope="owned-descendants")
+                           cleanupScope="owned-descendants", pids=[child.pid for child in children])
 
 
 def main():
