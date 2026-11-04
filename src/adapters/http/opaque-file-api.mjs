@@ -53,7 +53,8 @@ export async function routeOpaqueFileApi(req, res, url, { opaqueFiles, json, aut
     let value;
     if (chunk) {
       const sequence = Number(route[3]);
-      if (!Number.isSafeInteger(sequence) || !bytes.length || !/^[a-f0-9]{64}$/.test(req.headers['x-chunk-sha256'] ?? '')) {
+      if (!Number.isSafeInteger(sequence) || !bytes.length || typeof req.headers['x-chunk-sha256'] !== 'string' ||
+          req.headers['x-chunk-sha256'].length !== 64 || !/^[a-f0-9]{64}$/.test(req.headers['x-chunk-sha256'])) {
         json(res, 400, { error: 'INVALID_ARTIFACT_CHUNK' }); return true;
       }
       value = await opaqueFiles.append({ uuid: route[1], sequence, bytes, sha256: req.headers['x-chunk-sha256'] });

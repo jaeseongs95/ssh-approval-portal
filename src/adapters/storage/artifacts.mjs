@@ -8,15 +8,15 @@ import { idValid, anyRemotePath, hash } from '../../domain/validation.mjs';
 import { CHUNK_BYTES, MAX_BYTES, EXPIRES_MS } from '../../contracts/ports.mjs';
 
 export { CHUNK_BYTES, MAX_BYTES } from '../../contracts/ports.mjs';
-const validHash = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
-const validKey = value => typeof value === 'string' && /^[A-Za-z0-9_.:-]{16,128}$/.test(value);
+const validHash = value => typeof value === 'string' && value.length === 64 && /^[a-f0-9]{64}$/.test(value);
+const validKey = value => typeof value === 'string' && value === value.trim() && /^[A-Za-z0-9_.:-]{16,128}$/.test(value);
 const artifactError = (code, message) => Object.assign(Error(message), { code });
 const privateFile = st => st.isFile() && !st.isSymbolicLink() && st.nlink === 1 &&
   (process.platform === 'win32' || (!(st.mode & 0o077) && st.uid === process.getuid()));
 const privateDirectory = st => st.isDirectory() && !st.isSymbolicLink() &&
   (process.platform === 'win32' || (!(st.mode & 0o077) && st.uid === process.getuid()));
 const charge = item => item.state === 'consumed' ? 1 : Math.max(1, item.size);
-const validUUID = value => typeof value === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(value);
+const validUUID = value => typeof value === 'string' && value.length === 36 && /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(value);
 const validOwner = value => typeof value === 'string' && value.length > 0 && value.length <= 512 && !/[\x00-\x1f\x7f]/.test(value);
 const validateProvenance = value => {
   if (!value || Object.keys(value).length !== 3 || !validUUID(value.sourceUUID) || !validOwner(value.ownerId) || !idValid(value.requestId)) throw Error('Invalid artifact provenance');

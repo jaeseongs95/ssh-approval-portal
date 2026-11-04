@@ -1,7 +1,7 @@
 import { randomBytes, createHash } from 'node:crypto';
 
 const digest = value => createHash('sha256').update(value).digest('hex');
-const keyValid = value => typeof value === 'string' && /^[A-Za-z0-9_.:-]{16,128}$/.test(value);
+const keyValid = value => typeof value === 'string' && value === value.trim() && /^[A-Za-z0-9_.:-]{16,128}$/.test(value);
 const settled = new Set(['completed', 'failed', 'cancelled', 'expired', 'denied']);
 const fail = code => { throw Object.assign(Error(code), { code, executionAttempted: false }); };
 const publicErrorCodes = new Set([
@@ -151,7 +151,7 @@ export function createOpaqueFileService({ store, targets, queue, files, journal,
     async begin(meta) { guard(); return { uuid: (await store.beginStaged({ ...meta, ownerId })).publicUUID }; },
     async append({ uuid, sequence, bytes, sha256 }) {
       guard();
-      if (!(bytes instanceof Uint8Array) || typeof sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(sha256) || digest(bytes) !== sha256) fail('CHUNK_HASH_MISMATCH');
+      if (!(bytes instanceof Uint8Array) || typeof sha256 !== 'string' || sha256.length !== 64 || !/^[a-f0-9]{64}$/.test(sha256) || digest(bytes) !== sha256) fail('CHUNK_HASH_MISMATCH');
       const item = owned(uuid), ack = await store.append(item.id, sequence, bytes);
       return { uuid: item.publicUUID, ...ack };
     },

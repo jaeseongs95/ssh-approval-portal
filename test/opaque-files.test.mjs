@@ -212,3 +212,11 @@ test('chunk hash failure and wrong-owner UUID access do not change accepted byte
   assert.equal((await f.service.remove({ uuid })).state, 'removed');
   assert.equal((await f.service.remove({ uuid })).state, 'removed');
 });
+
+test('copy and move operation keys reject trailing CR/LF before any admission', async t => {
+  const f = await fixture(t), uuid = await f.stage();
+  for (const action of ['copy', 'move']) for (const suffix of ['\r', '\n', '\r\n']) {
+    await assert.rejects(f.service[action]({ ...destination(uuid), operationKey: 'valid-operation-key' + suffix }), { code: 'INVALID_OPERATION_KEY' });
+  }
+  assert.equal(f.requests, 0); assert.deepEqual((await f.service.stat({ uuid })).operations, undefined);
+});

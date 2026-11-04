@@ -30,6 +30,18 @@ test('staged UUID allocation is owner-bound and operation-key idempotent without
   assert.deepEqual(store.get(item.id).actions, []);
 });
 
+test('staged identifiers and hashes reject trailing CR/LF without normalization', async t => {
+  const { store } = await fixture(t), bytes = Buffer.from('test');
+  for (const suffix of ['\r', '\n', '\r\n']) {
+    await assert.rejects(store.beginStaged(metadata(bytes, { operationKey: 'valid-operation-key' + suffix })), { code: 'INVALID_OPERATION_KEY' });
+    await assert.rejects(store.beginStaged(metadata(bytes, { sha256: hash(bytes) + suffix })), { code: 'INVALID_FILE_HASH' });
+    assert.equal(store.size, 0);
+  }
+  const item = await store.beginStaged(metadata(bytes));
+  for (const suffix of ['\r', '\n', '\r\n']) assert.throws(() => store.staged(item.publicUUID + suffix, 'verified-owner'), { code: 'ARTIFACT_NOT_FOUND' });
+  assert.equal(store.staged(item.publicUUID, 'verified-owner').id, item.id);
+});
+
 test('raw binary chunks recover after restart, reject altered retries, and complete idempotently', async t => {
   const f = await fixture(t), bytes = Buffer.alloc(CHUNK_BYTES + 3, 0x97);
   bytes.set([0, 0xff, 0x0a], CHUNK_BYTES);
