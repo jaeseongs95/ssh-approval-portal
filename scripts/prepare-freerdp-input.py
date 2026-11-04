@@ -17,9 +17,9 @@ import tarfile
 import tempfile
 
 SOURCE = Path(__file__).absolute().parents[1]
-# Native builder r3: compressed 17,694,051 bytes; source remains inside this archive.
+# Native builder r4: compressed 17,695,062 bytes; source remains inside this archive.
 BUNDLE_PATH = 'vendor/freerdp-input-v1-linux-x64.tgz'
-BUNDLE_SHA256 = '91ae43e00d67bbf7581950043b167232061857bae4a75b093a74b7702d01a578'
+BUNDLE_SHA256 = '7154f69e580483763a38e9552ef5f872c037b6c8fe2c4c07f94e770b2886ba32'
 UPSTREAM = 'bf217a504e54cc719880c228e82353382cd7d4fa'
 RUNTIME = Path('native/freerdp-input/runtime')
 COMPRESSED_LIMIT = 64 * 1024 * 1024
