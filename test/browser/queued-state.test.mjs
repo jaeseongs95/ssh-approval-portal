@@ -35,7 +35,8 @@ for (const locale of ['ko-KR', 'en-US']) {
     assert.equal(await page.locator('#controls button').textContent(), korean ? '실행 취소' : 'Cancel execution');
     assert.equal(await page.locator('.automatic-approval').count(), 1);
     await page.clock.runFor(2000);
-    assert.equal(await page.evaluate(() => window.fixture.calls.filter(call => call.name === 'get-request-status').length), 1);
+    await page.waitForFunction(() => window.fixture.calls.some(call => call.name === 'show-approval'));
+    assert.deepEqual(await page.evaluate(() => window.fixture.calls.map(call => ({ name: call.name, args: call.args }))), [{ name: 'show-approval', args: { id: 'queued-request' } }]);
     assert.equal(await page.evaluate(() => window.fixture.contexts.length), 0, 'queued is not a terminal notification');
     await page.locator('#controls button').click();
     const decisions = await page.evaluate(() => window.fixture.calls.filter(call => call.name === 'ui-decide-request'));
