@@ -16,7 +16,7 @@ const publicErrors = new Set(['OWNER_REAUTH_REQUIRED', 'PORTAL_REQUEST_REFUSED',
 
 function metadata(value, uuid) {
   if (!value || value.uuid !== uuid || !states.has(value.state) || !Number.isSafeInteger(value.size) || value.size < 0 || value.size > MAX_BYTES ||
-      typeof value.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(value.sha256) || !Number.isSafeInteger(value.expiresAt) || value.expiresAt <= 0 ||
+      typeof value.sha256 !== 'string' || value.sha256.length !== 64 || !/^[a-f0-9]{64}$/.test(value.sha256) || !Number.isSafeInteger(value.expiresAt) || value.expiresAt <= 0 ||
       !Number.isSafeInteger(value.received) || value.received < 0 || value.received > value.size ||
       !Number.isSafeInteger(value.sequence) || value.sequence < 0 || value.sequence > value.received ||
       (value.state === 'ready' && value.received !== value.size)) throw fail('INVALID_ARTIFACT_RESPONSE');

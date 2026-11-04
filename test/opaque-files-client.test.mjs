@@ -171,6 +171,11 @@ test('opaque status projects safe metadata for the same UUID across declared sta
     assert.doesNotMatch(JSON.stringify(result), /MUST-NOT-ESCAPE|private-original-name|operations/);
   }
   await assert.rejects(f.client.status('a'.repeat(48)), { code: 'INVALID_ARTIFACT_UUID' });
+  const hash = f.artifact.sha256;
+  for (const suffix of ['\n', '\r', '\r\n']) {
+    f.artifact.sha256 = hash + suffix;
+    await assert.rejects(f.client.status(uuid), { code: 'INVALID_ARTIFACT_RESPONSE' });
+  }
 });
 
 test('existing ready artifact yields UUID without chunk or completion replay', async t => {
