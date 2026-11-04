@@ -160,6 +160,13 @@ class PrivateRuntime(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, code): self.prepare()
         self.assertFalse(self.runtime.exists())
 
+    def test_group_writable_source_directory_is_rejected_without_publication(self):
+        member = tarfile.TarInfo('source/overlay'); member.type = tarfile.DIRTYPE; member.mode = 0o775
+        self.bundle(extra=[(member, None)])
+        with self.assertRaisesRegex(ValueError, 'FREERDP_UNSAFE_ARCHIVE_MODE'):
+            self.prepare()
+        self.assertFalse(self.runtime.exists())
+
     def test_existing_different_runtime_is_unchanged_and_never_replaced(self):
         self.bundle(); self.prepare()
         target = self.runtime / 'lib/libfixture.so.3'; target.write_bytes(b'preserve differing runtime')
