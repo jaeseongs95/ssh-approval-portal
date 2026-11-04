@@ -28,16 +28,16 @@ function rfbChannel() {
   return { stream, close() { stream.destroy(); } };
 }
 
-async function fixture(t) {
+async function fixture(t, options = {}) {
   const root = await mkdtemp(join(tmpdir(), 'desktop-http-')), profiles = new Map(), channels = [], requests = [];
   let app;
   t.after(async () => { await app?.close(); assert.ok(root.startsWith(join(tmpdir(), 'desktop-http-'))); await rm(root, { recursive: true, force: true }); });
-  const targets = ['alpha', 'beta'].map(id => ({ id, displayName: id, readProfile: id + '-read', writeProfile: id + '-write', credentialRevision: 'synthetic-v1', desktop: { enabled: true, port: 5901 } }));
+  const targets = ['alpha', 'beta'].map(id => ({ id, displayName: id, platform: options.platform ?? 'linux', readProfile: id + '-read', writeProfile: id + '-write', credentialRevision: 'synthetic-v1', desktop: { enabled: true, port: 5901 } }));
   const registry = { getProfile(name) {
     if (!profiles.has(name)) profiles.set(name, { host: '127.0.0.1', port: 22, user: 'synthetic', trustedHostKey: 'synthetic-host-key', readOnly: name.endsWith('-read') });
     return profiles.get(name);
   }, closeAll: async () => {} };
-  app = await createApplication({ registry, classify: () => 'read-only', executeCommand: async () => { throw Error('Unexpected command execution'); },
+  app = await createApplication({ registry, classify: () => 'read-only', executeCommand: options.executeCommand ?? (async () => { throw Error('Unexpected command execution'); }),
     openDesktopChannel: async (profile, options) => { channels.push({ profile, host: options.host, port: options.port }); return rfbChannel(); }, audit: () => {}, transferRoot: root, uiHtml: '<html></html>',
     env: { BRIDGE_MCP_TOKEN: 'synthetic-mcp', BRIDGE_ADMIN_TOKEN: 'synthetic-owner', BRIDGE_UI_TICKET_KEY: 'a'.repeat(64), BRIDGE_ADMIN_ORIGIN: adminOrigin,
       BRIDGE_JEV_ENABLED: 'false', BRIDGE_COMMAND_AUTOMATION: 'false', BRIDGE_TARGETS: JSON.stringify(targets), BRIDGE_DEFAULT_TARGET: 'alpha' } });
@@ -66,7 +66,7 @@ function panel(api) {
   const document = { documentElement: { lang: 'en' }, body: { dataset: { page: 'settings' } }, createElement: tag => new Element(tag),
     getElementById: id => id === 'server-workspace' ? workspace : undefined, addEventListener() {} };
   const value = createDesktopPanel({ document, api, getTarget: () => 'beta', timers: { setInterval() {}, clearInterval() {} } });
-  return { value, open: value.root.children.find(node => node.tagName === 'div').children[0], image: value.root.children.find(node => node.tagName === 'img'), error: value.root.children.find(node => node.className === 'error') };
+  return { value, open: value.root.children.find(node => node.tagName === 'div').children[0], image: value.root.children.find(node => node.tagName === 'img'), error: value.root.children.find(node => node.className === 'error'), auth: value.root.children.find(node => node.id === 'desktop-authentication') };
 }
 
 test('DESKTOP-HTTP actual UI open crosses authenticated HTTP/app contract and uses server epoch', async t => {
@@ -94,4 +94,31 @@ test('DESKTOP-HTTP rejects legacy UI fields, stale revision and unauthorized ope
   assert.equal((await f.request('/api/desktop/open', 'POST', body, { Authorization: 'Bearer synthetic-mcp' })).status, 401);
   assert.equal((await f.request('/api/desktop/open', 'POST', body, { Origin: 'https://untrusted.test' })).status, 403);
   assert.equal(f.channels.length, 0);
+});
+
+
+test('DESKTOP-HTTP owner login screen, nonstored credential field and SAS cross the real application route', async t => {
+  const f = await fixture(t, { platform: 'windows', executeCommand: async () => ({ failed: false,
+    execution: { exitCode: 0, stdout: { truncated: false } }, data: { stdout: JSON.stringify({ version: 1,
+      boot: '133900000000000000', consoleSessionId: 1, sessions: [{ id: 1, state: 1, locked: true }] }) } }) });
+  const p = panel(f.api); await p.open.onclick(); p.image.onload();
+  assert.equal(p.error.textContent, ''); assert.equal(p.auth.hidden, false);
+  const confirmation = p.auth.children[2].children[0], credential = p.auth.children[3].children[0];
+  const send = p.auth.children[4], sas = p.auth.children[5];
+  assert.equal(credential.type, 'password'); assert.equal(credential.autocomplete, 'off');
+  credential.value = 'SYNTHETIC-PRIVATE-VALUE'; confirmation.checked = true; credential.oninput();
+  await send.onclick();
+  assert.equal(credential.value, ''); assert.equal(confirmation.checked, false);
+  const privateRequest = f.requests.find(call => call.path === '/api/desktop/authenticate');
+  assert.equal(privateRequest.body.value, undefined, 'UI drops the in-memory request value after completion');
+  p.image.onload(); confirmation.checked = true; confirmation.onchange(); await sas.onclick();
+  assert.equal(p.error.textContent, '');
+  const requests = f.requests.filter(call => call.path === '/api/desktop/authenticate');
+  assert.equal(requests.length, 2); assert.equal(requests[1].body.action, 'sas');
+  assert.equal(requests[0].body.sequence, 1); assert.equal(requests[1].body.sequence, 2);
+  const identity = f.requests.find(call => call.path === '/api/desktop/observe').body;
+  const status = await f.api('/api/desktop/status', 'POST', identity);
+  assert.equal(status.readiness.state, 'auth_required'); assert.equal(status.readiness.sessionBindingVerified, false);
+  assert.doesNotMatch(JSON.stringify(status), /SYNTHETIC-PRIVATE|image\/png/);
+  await p.value.close();
 });

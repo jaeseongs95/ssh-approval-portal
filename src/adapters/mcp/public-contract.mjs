@@ -210,7 +210,13 @@ export function registerPublicTools(server, { operations, files, settings, targe
 
 const sessionId = z.string().uuid();
 const sessionIdentity = { sessionId, epoch: z.number().int().positive() };
-const sessionData = object({ ...sessionIdentity, targetId: target, targetRevision: digest, expiresAt: integer, idleExpiresAt: integer, kind: z.literal('desktop') });
+const desktopReadiness = object({ state: z.enum(['transport_ready', 'auth_required', 'desktop_ready', 'capture_unavailable']),
+  observedAt: integer, generation: digest.nullable(), osSessionId: z.number().int().positive().nullable(), locked: z.boolean().nullable(),
+  sessionBindingVerified: z.boolean(), displayBindingVerified: z.boolean(), inputVerified: z.boolean(), inputAllowed: z.boolean(), ownerOnly: z.boolean(),
+  blockers: z.array(z.enum(['DESKTOP_AUTH_REQUIRED', 'DESKTOP_SESSION_BINDING_UNVERIFIED', 'DESKTOP_SESSION_QUERY_FAILED',
+    'DESKTOP_SESSION_QUERY_UNSUPPORTED', 'DESKTOP_AUTH_BROKER_UNAVAILABLE', 'DESKTOP_CAPTURE_UNAVAILABLE'])).max(8) });
+const sessionData = object({ ...sessionIdentity, targetId: target, targetRevision: digest, expiresAt: integer, idleExpiresAt: integer, kind: z.literal('desktop'),
+  readiness: desktopReadiness.optional() });
 const frameData = sessionData.extend({ frameId: z.string().min(1).max(96), width: z.number().int().positive(), height: z.number().int().positive(),
   geometryRevision: z.number().int().positive(), coordinateSpace: z.literal('physical-pixels'), nextInputSequence: z.number().int().positive(),
   mimeType: z.literal('image/png'), imageContentIndex: z.literal(1) });
@@ -221,6 +227,7 @@ const actions = z.discriminatedUnion('type', [
 ]);
 Object.assign(publicInputSchemas, {
   'desktop-open': object({ target, expectedTargetRevision: digest }),
+  'desktop-status': object(sessionIdentity),
   'desktop-observe': object(sessionIdentity),
   'desktop-input': object({ ...sessionIdentity, frameId: z.string().min(1).max(96), geometryRevision: z.number().int().positive(),
     sequence: z.number().int().positive(), requestKey: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/), actions: z.array(actions).min(1).max(128) }),
@@ -228,15 +235,19 @@ Object.assign(publicInputSchemas, {
 });
 Object.assign(publicOutputSchemas, {
   'desktop-open': responseSchema(sessionData), 'desktop-observe': responseSchema(frameData),
+  'desktop-status': responseSchema(sessionData),
   'desktop-input': responseSchema(object({ sessionId, sequence: z.number().int().positive(), requestKey: z.string(), state: z.literal('sent') })),
   'desktop-close': responseSchema(object({ sessionId, closed: z.literal(true), releaseSent: z.boolean(), logout: z.literal(false), cleanupError: z.string().nullable() })),
 });
 function presentSession(value) {
-  return Object.fromEntries(['sessionId', 'epoch', 'targetId', 'targetRevision', 'expiresAt', 'idleExpiresAt', 'kind'].map(field => [field, value[field]]));
+  return { ...Object.fromEntries(['sessionId', 'epoch', 'targetId', 'targetRevision', 'expiresAt', 'idleExpiresAt', 'kind'].map(field => [field, value[field]])),
+    ...(value.readiness ? { readiness: value.readiness } : {}) };
 }
 function registerDesktopTools(register, desktop) {
   register('desktop-open', async args => presentSession(await desktop.open(args)),
-    'Open a configured Linux or Windows OS graphical desktop under the existing target and owner authority. This is a desktop session, not a terminal. A session is returned only after the real backend opens. Retain sessionId and epoch; unsupported, missing or unauthorized backends are refused.');
+    'Open the configured OS graphical transport under existing target and owner authority. A lease and RFB handshake do not prove desktop_ready. Inspect readiness; retain sessionId and epoch. A general Windows login screen may be observed. If account authentication is required, close the lease so the owner can use the portal one-time authentication input; do not request an RDP window or send credentials. Unverified WTS/display binding is diagnostic and does not disable an existing unlocked GUI.');
+  register('desktop-status', async args => presentSession(await desktop.status(args)),
+    'Read this lease’s GUI readiness without returning screen pixels. Distinguish transport_ready, auth_required and verified desktop_ready. SSH public-key authentication does not unlock Windows. Closing a blocked lease preserves the OS login session.');
   register('desktop-observe', async args => {
     const frame = await desktop.observe(args);
     if (frame.mimeType !== 'image/png' || typeof frame.data !== 'string' || !frame.data) failure('DESKTOP_INVALID_FRAME');

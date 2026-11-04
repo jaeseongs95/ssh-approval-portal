@@ -135,7 +135,7 @@ test('MCP 1.8 desktop observation returns actual image content and no owner iden
   const sessionId = '00000000-0000-4000-8000-000000000001';
   const lease = { sessionId, epoch: 1, targetId: 'windows', targetRevision: revision, expiresAt: 10000, idleExpiresAt: 9000, kind: 'desktop', ownerId: 'PRIVATE_OWNER' };
   const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZlSAAAAAASUVORK5CYII=';
-  const f = fixture({ desktop: { open: async () => lease, observe: async () => ({ ...lease, frameId: sessionId + ':1', width: 1, height: 1,
+  const f = fixture({ desktop: { open: async () => lease, status: async () => lease, observe: async () => ({ ...lease, frameId: sessionId + ':1', width: 1, height: 1,
     geometryRevision: 1, coordinateSpace: 'physical-pixels', nextInputSequence: 1, mimeType: 'image/png', data: png }) } });
   await f.call('desktop-open', { target: 'windows', expectedTargetRevision: revision });
   const frame = await f.call('desktop-observe', { sessionId, epoch: 1 });
