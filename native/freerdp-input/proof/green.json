@@ -1,0 +1,50 @@
+{
+  "schemaVersion": "1.0.0",
+  "kind": "engineering-run-receipt",
+  "argv": [
+    "sh",
+    "-c",
+    "./protocol-test; result=$?; exit \"$result\""
+  ],
+  "snapshot": {
+    "schemaVersion": "1.0.0",
+    "kind": "engineering-snapshot",
+    "files": [
+      {
+        "path": "native/freerdp-input/agni.c",
+        "digest": "sha256:dbf0706243fc7bcdd70834785fc83e5db850ec29e22be28b17ccc77e4d75faab",
+        "size": 19704,
+        "lineCount": 672
+      },
+      {
+        "path": "native/freerdp-input/agni.h",
+        "digest": "sha256:99071b0a92c548ec2352a437d32c6cb511f29c064423e06e97d155ffdb5347ca",
+        "size": 1026,
+        "lineCount": 38
+      },
+      {
+        "path": "native/freerdp-input/test_agni.c",
+        "digest": "sha256:6b0071c9d56fdf91b6baa09eede029fcf0ec02d560e79c1239dea2d090dbf8d9",
+        "size": 12560,
+        "lineCount": 455
+      }
+    ],
+    "digest": "sha256:6c145a9ec7ba9553e7d6a0ec24df83887fd855a92233831f2779672e8b305218"
+  },
+  "afterDigest": "sha256:6c145a9ec7ba9553e7d6a0ec24df83887fd855a92233831f2779672e8b305218",
+  "startedAt": "2026-11-04T06:04:30.062Z",
+  "finishedAt": "2026-11-04T06:04:30.272Z",
+  "status": "PASS",
+  "exitCode": 0,
+  "signal": null,
+  "stdout": "AGNI native protocol: 110 cases passed; partial header/body, UTF8, BE oracle, short/EAGAIN ACK, guards, failed native sends, order, release, noReplay, EOF\n",
+  "stderr": "",
+  "stdoutDigest": "sha256:41bc083d064051f68bf6f0f472118b0b407b64c37e8f39b221102af238425ac4",
+  "stderrDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "timeoutMs": 30000,
+  "executable": "sh",
+  "nodeVersion": "native-C11-GCC13",
+  "platform": "linux",
+  "environmentNote": "TEST Ubuntu24.04 pinned Docker, ASan+UBSan, CPU1 RAM2GiB",
+  "digest": "sha256:49a8a3e06ba37c93b6ae72b35d193684a1dedd160ebfab4300ce95b03c3de2b6"
+}
