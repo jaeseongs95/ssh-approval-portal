@@ -5,7 +5,8 @@ export function createCardHost(t) {
   return {
     async call(name, args, namespace = 'ssh-approval-bridge_') {
       const result = await app.callServerTool({ name: namespace + name, arguments: args });
-      if (result.isError) throw Error(t('요청이 거부되었습니다. 인증·만료·전송 상태를 확인하세요.'));
+      // Keep typed public errors available for operationKey recovery; private UI refusals stay unchanged.
+      if (result.isError && result.structuredContent?.contractVersion !== '2.0') throw Error(t('요청이 거부되었습니다. 인증·만료·전송 상태를 확인하세요.'));
       return result;
     },
     downloadFile: args => app.downloadFile(args),
