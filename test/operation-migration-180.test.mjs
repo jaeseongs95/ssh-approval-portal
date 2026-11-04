@@ -78,10 +78,12 @@ test('unsupported and unclean old schemas fail before import without changing th
   assert.throws(() => migrateLegacyOperations({ legacyRoot: dataRoot, archiveRoot: join(root, 'archive'), store: { importLegacy() { assert.fail('must not import'); } } }), { code: 'LEGACY_NOT_QUIESCENT' });
 });
 
-test('redeployment preserves the first import after real 1.8 journal recovery and still detects conflicting original evidence', async t => {
+for (const previousVersion of ['1.8.0', '2.0.0']) test(`redeployment preserves the first import after real ${previousVersion} journal recovery and still detects conflicting original evidence`, async t => {
   const { root, dataRoot } = await fixture(t), appRoot = join(root, 'app'), generation = 'a'.repeat(64);
   const release = fileURLToPath(new URL('../', import.meta.url)), control = join(appRoot, 'deployments');
   await mkdir(control, { recursive: true, mode: 0o700 });
+  const previousRelease = join(root, 'previous'); await mkdir(previousRelease);
+  await writeFile(join(previousRelease, 'release-manifest.json'), JSON.stringify({ version: previousVersion }));
   const commandJobs = ['running', 'pending'].map((state, index) => ({ id: String(index + 1).repeat(48), kind: 'command', state, createdAt: 10 + index, operation: { kind: 'command', command: 'printf preserved' } }));
   const cliJobs = ['queued', 'pending'].map((state, index) => ({ id: String(index + 3).repeat(48), kind: 'command', state, createdAt: 12 + index, operation: { agentCliContract: AGENT_CLI_CONTRACT } }));
   let commands = createCommandState(dataRoot), cli = createAgentCliState(dataRoot);
@@ -99,13 +101,13 @@ test('redeployment preserves the first import after real 1.8 journal recovery an
   } finally { commands.close(); cli.close(); }
   const paths = ['command-automation.sqlite', 'agent-cli.sqlite', 'operations.sqlite'];
   const before = await Promise.all(paths.map(name => readFile(join(dataRoot, name))));
-  const second = await prepareDeploymentMigration({ ...plan, generation: 'b'.repeat(64) }, release, { previousGeneration: generation });
+  const second = await prepareDeploymentMigration({ ...plan, generation: 'b'.repeat(64) }, release, { previousGeneration: generation, previousRelease });
   assert.equal(second.reused, true); assert.equal(second.originalGeneration, generation);
   for (let i = 0; i < paths.length; i++) assert.deepEqual(await readFile(join(dataRoot, paths[i])), before[i]);
   await assert.rejects(lstat(join(appRoot, 'legacy-archives', 'b'.repeat(64))), { code: 'ENOENT' });
   // A receipt written by the previous deployer is authoritative even without the new global marker.
   await rm(join(control, 'legacy-migration.json'));
-  const adopted = await prepareDeploymentMigration({ ...plan, generation: 'c'.repeat(64) }, release, { previousGeneration: generation });
+  const adopted = await prepareDeploymentMigration({ ...plan, generation: 'c'.repeat(64) }, release, { previousGeneration: generation, previousRelease });
   assert.equal(adopted.reused, true); assert.equal(adopted.originalGeneration, generation);
   const store = createOperationStore(dataRoot);
   let corrupted;
@@ -129,11 +131,11 @@ test('redeployment preserves the first import after real 1.8 journal recovery an
   for (let i = 0; i < 2; i++) assert.deepEqual(await readFile(join(dataRoot, paths[i])), before[i]);
 });
 
-test('an existing 1.8 deployment requires authoritative completed migration evidence and never guesses from a partial state', async t => {
+for (const previousVersion of ['1.8.0', '2.0.0', '2.0.3']) test(`an existing ${previousVersion} deployment requires authoritative completed migration evidence and never guesses from a partial state`, async t => {
   const { root, dataRoot } = await fixture(t), appRoot = join(root, 'app'), previousGeneration = 'a'.repeat(64);
   const control = join(appRoot, 'deployments'), previousRelease = join(root, 'previous');
   await mkdir(control, { recursive: true, mode: 0o700 }); await mkdir(previousRelease);
-  await writeFile(join(previousRelease, 'release-manifest.json'), JSON.stringify({ version: '1.8.0' }));
+  await writeFile(join(previousRelease, 'release-manifest.json'), JSON.stringify({ version: previousVersion }));
   const path = join(dataRoot, 'command-automation.sqlite'); legacy(path, [{ id: 'a'.repeat(48), state: 'running', createdAt: 10 }]);
   const before = await readFile(path), plan = { appRoot, dataRoot, generation: 'b'.repeat(64) }, release = fileURLToPath(new URL('../', import.meta.url));
   for (const prior of [null, { generation: previousGeneration, phase: 'migrating', migration: { type: 'portal.operation-migration.v1', sources: [], imported: 0, unknown: 0 } }]) {

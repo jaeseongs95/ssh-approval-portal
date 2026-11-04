@@ -90,7 +90,7 @@ async function candidate(root, generation) {
   const bytes = await readFile(join(root, 'release-manifest.json'));
   if (hash(bytes) !== generation) fail('DEPLOY_GENERATION_MISMATCH');
   const manifest = JSON.parse(bytes);
-  if (!/^1\.8\.\d+$/.test(manifest.version)) fail('UNSUPPORTED_DEPLOY_VERSION');
+  if (!/^2\.0\.\d+$/.test(manifest.version)) fail('UNSUPPORTED_DEPLOY_VERSION');
   await verifyRelease(root);
   return manifest;
 }
@@ -193,7 +193,7 @@ export async function prepareDeploymentMigration(plan, release, { previousGenera
     await atomicJson(markerPath, completed);
     return { ...completed.migration, reused: true, originalGeneration: completed.generation };
   }
-  if (/^1\.8\./.test(previousVersion)) fail('LEGACY_MIGRATION_RECEIPT_REQUIRED');
+  if (/^(?:1\.8|2\.0)\.\d+$/.test(previousVersion)) fail('LEGACY_MIGRATION_RECEIPT_REQUIRED');
   const archiveRoot = join(plan.appRoot, 'legacy-archives', plan.generation);
   const archiveParent = dirname(archiveRoot);
   try { await mkdir(archiveParent, { mode: 0o711 }); }
