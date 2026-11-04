@@ -10,7 +10,7 @@ function fixture(options = {}) {
   const desktop = { closed: false, async observe() { return { width: 4, height: 3, geometryRevision: state.geometry, data: Buffer.from('test-image') }; },
     async input(actions) { calls.push(['input', actions]); }, release() { calls.push(['release']); return { sent: true }; }, close() { this.closed = true; calls.push(['close']); } };
   const service = createDesktopService({ adapter: { async open() { return desktop; } }, authorize: () => state.authorized, verifyTarget: () => state.valid,
-    now: () => state.time, ...options });
+    now: () => state.time, monotonicNow: () => state.elapsed ?? 0, ...options });
   return { service, state, calls, desktop };
 }
 const error = code => value => value.code === code;
@@ -346,4 +346,10 @@ test('GUI-AGENT expired recovery records release admission without replay across
   state.time = 1000;
   for (const issued of old) await assert.rejects(service.open({ ...binding, requestKey: issued.requestKey }), error('DESKTOP_OPEN_REQUEST_EXPIRED'));
   assert.equal(service.issueOpenRequest().expiresAt, 1200); assert.equal(opens, 3);
+  state.elapsed = 100;
+  await assert.rejects(service.open({ ...binding, requestKey: fresh.requestKey }), error('DESKTOP_OPEN_REQUEST_EXPIRED'));
+  const afterElapsed = service.issueOpenRequest();
+  assert.equal(afterElapsed.expiresAt, 1300);
+  await service.open({ ...binding, requestKey: afterElapsed.requestKey });
+  assert.equal(opens, 4);
 });
