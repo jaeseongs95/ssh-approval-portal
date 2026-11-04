@@ -112,6 +112,16 @@ test('RDP normal close preserves the input channel until native detach acknowled
   assert.equal(receipt.nativeInputState, 'detached'); assert.equal(receipt.nativeReleaseSent, true);
 });
 
+test('RDP close preserves a tunnel cleanup-unknown receipt after successful native detach', async () => {
+  const f = fixture({ openTunnel: async () => ({ host: '127.0.0.1', port: 33001,
+    close: async () => ({ closed: true, cleanupComplete: false, errorCode: 'DESKTOP_TUNNEL_CLEANUP_UNKNOWN' }) }) });
+  const desktop = await f.adapter.open(), receipt = await desktop.close();
+  assert.equal(receipt.cleanupError, 'DESKTOP_TUNNEL_CLEANUP_UNKNOWN');
+  assert.equal(receipt.nativeInputState, 'detached'); assert.equal(receipt.outerSessionState, 'terminated');
+  assert.equal(receipt.sessionState, 'unknown'); assert.equal(receipt.remoteSessionState, 'unknown');
+  assert.equal(receipt.logout, false); assert.equal(receipt.mode, 'detach');
+});
+
 test('RDP private bootstrap rejects controls, oversized native input, malformed UTF16, and clears its buffer', async () => {
   let held, copied;
   await writeRdpCredentialBootstrap(new Writable({ write(bytes, _encoding, callback) { held = bytes; copied = Buffer.from(bytes); callback(); } }), credentials);

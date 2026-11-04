@@ -67,3 +67,42 @@ test('desktop tunnel retains an explicit cleanup failure', async () => {
   assert.doesNotMatch(JSON.stringify(receipt), /PRIVATE_CONNECTION_DETAIL/);
   socket.destroy();
 });
+
+test('tunnel close cancels a pending channel open with its own lease signal', { timeout: 3000 }, async () => {
+  let reached, aborted = false;
+  const entered = new Promise(resolve => { reached = resolve; });
+  const tunnel = await openDesktopTunnel({ openChannel: ({ signal }) => new Promise((resolve, reject) => {
+    signal.addEventListener('abort', () => { aborted = true; reject(Error('cancelled')); }, { once: true });
+    reached();
+  }) });
+  const socket = connect(tunnel.port, tunnel.host); socket.on('error', () => {});
+  await entered;
+  assert.deepEqual(await tunnel.close(), { closed: true, cleanupComplete: true });
+  assert.equal(aborted, true); socket.destroy();
+});
+
+test('unresponsive guard returns cleanup unknown and cannot dispatch after late completion', { timeout: 3000 }, async () => {
+  let reached, release, opened = 0;
+  const entered = new Promise(resolve => { reached = resolve; });
+  const gate = new Promise(resolve => { release = resolve; });
+  const tunnel = await openDesktopTunnel({ beforeDispatch: async () => { reached(); await gate; },
+    openChannel: async () => { opened++; return echoChannel(); } });
+  const socket = connect(tunnel.port, tunnel.host); socket.on('error', () => {});
+  await entered;
+  const receipt = await tunnel.close();
+  assert.deepEqual(receipt, { closed: true, cleanupComplete: false, errorCode: 'DESKTOP_TUNNEL_CLEANUP_UNKNOWN' });
+  release(); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(opened, 0); assert.deepEqual(await tunnel.close(), receipt); socket.destroy();
+});
+
+test('unresponsive opener remains unknown and closes a channel delivered after the deadline once', { timeout: 3000 }, async () => {
+  let reached, release, closes = 0, cleaned;
+  const entered = new Promise(resolve => { reached = resolve; });
+  const lateClosed = new Promise(resolve => { cleaned = resolve; });
+  const tunnel = await openDesktopTunnel({ openChannel: () => { reached(); return new Promise(resolve => { release = resolve; }); } });
+  const socket = connect(tunnel.port, tunnel.host); socket.on('error', () => {}); await entered;
+  const receipt = await tunnel.close();
+  assert.equal(receipt.cleanupComplete, false); assert.equal(receipt.errorCode, 'DESKTOP_TUNNEL_CLEANUP_UNKNOWN');
+  release(echoChannel(() => { closes++; cleaned(); })); await lateClosed;
+  assert.equal(closes, 1); assert.deepEqual(await tunnel.close(), receipt); socket.destroy();
+});
