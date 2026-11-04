@@ -11,7 +11,16 @@ const publicErrorCodes = new Set([
   'OPERATION_KEY_CONFLICT', 'INVALID_FILE_FLAG', 'INVALID_REMOTE_PATH', 'TARGET_REVISION_CONFLICT',
   'STAGED_FILE_CONSUMED', 'STAGED_FILE_EXPIRED', 'STAGED_FILE_CHANGED', 'MAINTENANCE', 'OPAQUE_FILES_CLOSED',
   'OPAQUE_ADMISSION_BUSY', 'OPAQUE_ACTION_CONFLICT', 'OPAQUE_ACTION_RECONCILIATION_REQUIRED', 'OPERATION_ACCEPTANCE_NOT_CONFIRMED', 'OPAQUE_FILES_UNAVAILABLE',
+  'ARTIFACT_PERMISSION_DENIED', 'ARTIFACT_STORAGE_FULL', 'ARTIFACT_STORAGE_IO_ERROR',
 ]);
+const storageErrorCodes = new Map([
+  ['EACCES', 'ARTIFACT_PERMISSION_DENIED'], ['EPERM', 'ARTIFACT_PERMISSION_DENIED'],
+  ['ENOSPC', 'ARTIFACT_STORAGE_FULL'], ['EDQUOT', 'ARTIFACT_STORAGE_FULL'], ['EIO', 'ARTIFACT_STORAGE_IO_ERROR'],
+]);
+const storageError = error => {
+  const code = storageErrorCodes.get(error?.code);
+  return code ? Object.assign(Error(code, { cause: error }), { code }) : error;
+};
 // Older store ports throw messages. Match complete known literals only; never
 // turn arbitrary messages, paths, filesystem error codes or stacks into output.
 const legacyErrorCodes = new Map([
@@ -41,7 +50,15 @@ export function createOpaqueFileService({ store, targets, queue, files, journal,
   if (!journal?.find || !journal?.get || !submissions?.run) throw Error('Durable opaque file admission required');
   const admissions = new Map(), reconciliations = new Map(), background = new Set(), cleanupFailures = new Map(), shutdown = new AbortController();
   let recovering = false;
-  const owned = uuid => store.staged(uuid, ownerId);
+  // Classify filesystem codes only at the server artifact-store port. The same
+  // code from authorization, SSH or another service is not a storage diagnosis.
+  const storeCall = (method, ...args) => {
+    try {
+      const value = store[method](...args);
+      return value && typeof value.then === 'function' ? Promise.resolve(value).catch(error => { throw storageError(error); }) : value;
+    } catch (error) { throw storageError(error); }
+  };
+  const owned = uuid => storeCall('staged', uuid, ownerId);
   const guard = () => { if (shutdown.signal.aborted) fail('OPAQUE_FILES_CLOSED'); if (queue.maintenance) fail('MAINTENANCE'); if (recovering) fail('OPAQUE_ADMISSION_BUSY'); };
   const actionRecord = action => {
     const record = journal.get(action.requestId) ?? journal.find(action.requestKey)?.job;
@@ -58,8 +75,8 @@ export function createOpaqueFileService({ store, targets, queue, files, journal,
         // Unknown is deliberately not settled: neither source deletion nor a
         // second remote publication is allowed without an authoritative outcome.
         if (!record || !settled.has(record.state)) continue;
-        if (action.action === 'move' && published(record, item, queue.get(record.id))) await store.consumeStaged(uuid, ownerId, 'moved');
-        if (action.state !== 'settled') store.settleStagedAction(uuid, ownerId, action.requestId, 'settled');
+        if (action.action === 'move' && published(record, item, queue.get(record.id))) await storeCall('consumeStaged', uuid, ownerId, 'moved');
+        if (action.state !== 'settled') storeCall('settleStagedAction', uuid, ownerId, action.requestId, 'settled');
       }
       cleanupFailures.delete(uuid);
       return owned(uuid);
@@ -109,7 +126,7 @@ export function createOpaqueFileService({ store, targets, queue, files, journal,
       return record?.state === 'unknown' || (previous.state === 'submitted' && !record);
     })) fail('OPAQUE_ACTION_RECONCILIATION_REQUIRED');
     if (now() >= item.expiresAt) fail('STAGED_FILE_EXPIRED');
-    const operation = store.reserveStagedAction(item.publicUUID, ownerId, { ...contract, operationKey: input.operationKey,
+    const operation = storeCall('reserveStagedAction', item.publicUUID, ownerId, { ...contract, operationKey: input.operationKey,
       requestKey, inputDigest, requestId: randomBytes(24).toString('hex') });
     const promise = Promise.resolve().then(async () => {
       try {
@@ -119,7 +136,7 @@ export function createOpaqueFileService({ store, targets, queue, files, journal,
           async open() {
             const current = owned(item.publicUUID);
             if (current.state !== 'ready' || current.sha256 !== item.sha256 || current.size !== item.size) fail('STAGED_FILE_CHANGED');
-            const fd = await store.verified(current.id);
+            const fd = await storeCall('verified', current.id);
             return { stream: fd.createReadStream({ start: 0, autoClose: false }), expectedSize: item.size, close: () => fd.close() };
           },
         };
@@ -129,17 +146,17 @@ export function createOpaqueFileService({ store, targets, queue, files, journal,
         }, { signal, provenance: { sourceUUID: item.publicUUID, ownerId, requestId: operation.requestId } }));
         const record = actionRecord(operation);
         if (!record) fail('OPERATION_ACCEPTANCE_NOT_CONFIRMED');
-        store.settleStagedAction(item.publicUUID, ownerId, operation.requestId, 'submitted');
+        storeCall('settleStagedAction', item.publicUUID, ownerId, operation.requestId, 'submitted');
         await reconcileOne(item.publicUUID);
         return { uuid: item.publicUUID, requestId: record.id, state: record.state };
       } catch (error) {
         const record = actionRecord(operation);
         if (record) {
-          store.settleStagedAction(item.publicUUID, ownerId, operation.requestId, 'submitted');
+          storeCall('settleStagedAction', item.publicUUID, ownerId, operation.requestId, 'submitted');
           await reconcileOne(item.publicUUID);
           return { uuid: item.publicUUID, requestId: record.id, state: record.state };
         }
-        store.settleStagedAction(item.publicUUID, ownerId, operation.requestId, 'refused');
+        storeCall('settleStagedAction', item.publicUUID, ownerId, operation.requestId, 'refused');
         throw error;
       }
     });
@@ -148,20 +165,20 @@ export function createOpaqueFileService({ store, targets, queue, files, journal,
     finally { if (admissions.get(requestKey)?.promise === promise) admissions.delete(requestKey); }
   };
   return {
-    async begin(meta) { guard(); return { uuid: (await store.beginStaged({ ...meta, ownerId })).publicUUID }; },
+    async begin(meta) { guard(); return { uuid: (await storeCall('beginStaged', { ...meta, ownerId })).publicUUID }; },
     async append({ uuid, sequence, bytes, sha256 }) {
       guard();
       if (!(bytes instanceof Uint8Array) || typeof sha256 !== 'string' || sha256.length !== 64 || !/^[a-f0-9]{64}$/.test(sha256) || digest(bytes) !== sha256) fail('CHUNK_HASH_MISMATCH');
-      const item = owned(uuid), ack = await store.append(item.id, sequence, bytes);
+      const item = owned(uuid), ack = await storeCall('append', item.id, sequence, bytes);
       return { uuid: item.publicUUID, ...ack };
     },
-    async complete({ uuid }) { guard(); const item = owned(uuid); await store.finish(item.id); return { uuid: item.publicUUID }; },
+    async complete({ uuid }) { guard(); const item = owned(uuid); await storeCall('finish', item.id); return { uuid: item.publicUUID }; },
     async stat({ uuid }) { return publicItem(await reconcileOne(uuid)); },
     copy: (input, options) => transfer('copy', input, options),
     move: (input, options) => transfer('move', input, options),
-    async remove({ uuid }) { guard(); await reconcileOne(uuid); return publicItem(await store.consumeStaged(uuid, ownerId, 'removed')); },
+    async remove({ uuid }) { guard(); await reconcileOne(uuid); return publicItem(await storeCall('consumeStaged', uuid, ownerId, 'removed')); },
     onTerminal(job) {
-      for (const item of store.list()) if (item.purpose === 'staged' && item.ownerId === ownerId && item.actions.some(x => x.requestId === job.id)) {
+      for (const item of storeCall('list')) if (item.purpose === 'staged' && item.ownerId === ownerId && item.actions.some(x => x.requestId === job.id)) {
         const work = reconcileOne(item.publicUUID);
         background.add(work);
         work.then(() => cleanupFailures.delete(item.publicUUID), error => cleanupFailures.set(item.publicUUID, error))
@@ -188,20 +205,20 @@ export function createOpaqueFileService({ store, targets, queue, files, journal,
         return references;
       };
       try {
-        for (const item of store.list()) if (item.purpose === 'staged' && item.ownerId === ownerId) {
+        for (const item of storeCall('list')) if (item.purpose === 'staged' && item.ownerId === ownerId) {
           for (const action of item.actions) if (action.state === 'reserved' && !actionRecord(action)) {
             // Admission precedes the first possible SSH publication. The journal
             // proves this reserved request was never accepted. Remove only clones
             // carrying its exact durable provenance; never replay the request.
             const referenced = artifactReferences();
             if (queue.get(action.requestId)) fail('OPAQUE_ACTION_RECONCILIATION_REQUIRED');
-            for (const clone of store.list()) if (clone.provenance?.ownerId === ownerId && clone.provenance.sourceUUID === item.publicUUID && clone.provenance.requestId === action.requestId) {
+            for (const clone of storeCall('list')) if (clone.provenance?.ownerId === ownerId && clone.provenance.sourceUUID === item.publicUUID && clone.provenance.requestId === action.requestId) {
               if (referenced.has(clone.id) || clone.submissionId || clone.targetId !== action.targetId || clone.targetRevision !== action.targetRevision ||
                   clone.remotePath !== action.remotePath || clone.overwrite !== action.overwrite || clone.elevate !== action.elevate ||
                   clone.fileName !== item.fileName || !['staging', 'ready'].includes(clone.state)) fail('OPAQUE_ACTION_RECONCILIATION_REQUIRED');
-              await store.remove(clone.id);
+              await storeCall('remove', clone.id);
             }
-            store.settleStagedAction(item.publicUUID, ownerId, action.requestId, 'refused');
+            storeCall('settleStagedAction', item.publicUUID, ownerId, action.requestId, 'refused');
           }
           await reconcileOne(item.publicUUID);
           cleanupFailures.delete(item.publicUUID);
