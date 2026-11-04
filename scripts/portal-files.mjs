@@ -2,7 +2,7 @@ import { parseArgs } from 'node:util';
 import { realpath } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { createOpaqueFilesClient, opaqueUuidValid } from '../src/adapters/cli/opaque-files-client.mjs';
+import { createOpaqueFilesClient, opaqueUuidValid, opaqueOperationKeyValid } from '../src/adapters/cli/opaque-files-client.mjs';
 import { resolveCloudflared, cachedAccessToken } from '../src/adapters/cli/cloudflared.mjs';
 import { diagnoseClient } from '../src/adapters/cli/doctor.mjs';
 import { validateLocalPath } from '../src/adapters/cli/local-files.mjs';
@@ -31,7 +31,7 @@ export async function main(argv = process.argv.slice(2), output = process.stdout
     if (command === 'status' && !opaqueUuidValid(positionals[1])) throw Object.assign(Error(), { code: 'INVALID_ARTIFACT_UUID' });
     if (command === 'upload') {
       validateLocalPath(values.file);
-      if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/.test(values['operation-key'])) throw Object.assign(Error(), { code: 'INVALID_OPERATION_KEY' });
+      if (!opaqueOperationKeyValid(values['operation-key'])) throw Object.assign(Error(), { code: 'INVALID_OPERATION_KEY' });
     }
     if (command === 'doctor') {
       result = await diagnose({ origin: values.origin, cloudflared: values.cloudflared, env: environment, runCredential });

@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createOpaqueFilesClient } from '../src/adapters/cli/opaque-files-client.mjs';
+import { createOpaqueFilesClient, opaqueOperationKeyValid } from '../src/adapters/cli/opaque-files-client.mjs';
 import { main } from '../scripts/portal-files.mjs';
 
 // Run on approved TEST only. Actual filesystem snapshots, raw fetch request
@@ -168,10 +168,15 @@ test('CLI lost response emits no success stdout and only bounded same-UUID progr
 
 test('CLI rejects missing stable key and invalid UUID before credential or network access', async t => {
   const f = await fixture(t); let count = 0;
-  for (const args of [['upload', '--file', f.file], ['status', 'a'.repeat(48)]]) {
+  for (const args of [['upload', '--file', f.file], ['upload', '--file', f.file, '--operation-key', 'a'.repeat(15)], ['status', 'a'.repeat(48)]]) {
     let stdout = '', stderr = '';
     assert.equal(await main(['--origin', origin, ...args], { write: text => { stdout += text; } }, { write: text => { stderr += text; } }, () => { count++; return accessToken; }), 1);
-    assert.equal(stdout, ''); assert.match(stderr, /INVALID_ARGUMENTS|INVALID_ARTIFACT_UUID/);
+    assert.equal(stdout, ''); assert.match(stderr, /INVALID_ARGUMENTS|INVALID_ARTIFACT_UUID|INVALID_OPERATION_KEY/);
   }
   assert.equal(count, 0);
+});
+
+test('operation-key grammar matches the public16..128 ASCII contract at both boundaries', () => {
+  for (const value of ['a'.repeat(16), 'a'.repeat(128), '_'.repeat(16), '.:-_'.repeat(4)]) assert.equal(opaqueOperationKeyValid(value), true);
+  for (const value of ['', 'a'.repeat(15), 'a'.repeat(129), '가'.repeat(16), 'a'.repeat(15) + '/', null]) assert.equal(opaqueOperationKeyValid(value), false);
 });
