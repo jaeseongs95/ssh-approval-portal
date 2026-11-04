@@ -4,10 +4,10 @@ import { withUploadSnapshot } from './local-files.mjs';
 import { createOwnerHttpSession, readPortalJson, safePortalErrorCode } from './owner-http-session.mjs';
 
 const fail = (code, details = {}) => Object.assign(new Error(code), { code, ...details });
-export const opaqueUuidValid = value => typeof value === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(value);
+export const opaqueUuidValid = value => typeof value === 'string' && value === value.trim() && /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(value);
 // Same operation-key grammar as the public server contract, without pulling
 // its server-side schema dependency into the standalone Node client.
-export const opaqueOperationKeyValid = value => typeof value === 'string' && /^[A-Za-z0-9_.:-]{16,128}$/.test(value);
+export const opaqueOperationKeyValid = value => typeof value === 'string' && value === value.trim() && /^[A-Za-z0-9_.:-]{16,128}$/.test(value);
 const states = new Set(['staging', 'ready', 'expired', 'consuming', 'moved', 'removed']);
 const publicErrors = new Set(['OWNER_REAUTH_REQUIRED', 'PORTAL_REQUEST_REFUSED', 'PORTAL_READ_FAILED', 'PORTAL_RESULT_UNKNOWN',
   'INVALID_PORTAL_RESPONSE', 'PORTAL_RESPONSE_TOO_LARGE', 'INVALID_ARTIFACT_RESPONSE', 'INVALID_ARTIFACT_ACK',

@@ -1,7 +1,7 @@
 import { validateOrigin } from '../config/settings.mjs';
 
 const fail = (code, details = {}) => Object.assign(new Error(code), { code, ...details });
-export const safePortalErrorCode = value => typeof value === 'string' && /^[A-Z][A-Z0-9_]{2,63}$/.test(value);
+export const safePortalErrorCode = value => typeof value === 'string' && value === value.trim() && /^[A-Z][A-Z0-9_]{2,63}$/.test(value);
 
 export async function readPortalJson(response) {
   if (!/^application\/json(?:;|$)/i.test(response.headers.get('content-type') ?? '')) throw fail('INVALID_PORTAL_RESPONSE');
