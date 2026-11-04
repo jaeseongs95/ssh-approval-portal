@@ -1,0 +1,50 @@
+{
+  "schemaVersion": "1.0.0",
+  "kind": "engineering-run-receipt",
+  "argv": [
+    "sh",
+    "-c",
+    "./protocol-test; result=$?; exit \"$result\""
+  ],
+  "snapshot": {
+    "schemaVersion": "1.0.0",
+    "kind": "engineering-snapshot",
+    "files": [
+      {
+        "path": "native/freerdp-input/agni.c",
+        "digest": "sha256:2dad1c0ceddd991080f6f1e64f7e3136132a2ab7744bdb6556275c8efda8fab0",
+        "size": 19704,
+        "lineCount": 672
+      },
+      {
+        "path": "native/freerdp-input/agni.h",
+        "digest": "sha256:99071b0a92c548ec2352a437d32c6cb511f29c064423e06e97d155ffdb5347ca",
+        "size": 1026,
+        "lineCount": 38
+      },
+      {
+        "path": "native/freerdp-input/test_agni.c",
+        "digest": "sha256:6b0071c9d56fdf91b6baa09eede029fcf0ec02d560e79c1239dea2d090dbf8d9",
+        "size": 12560,
+        "lineCount": 455
+      }
+    ],
+    "digest": "sha256:d0195663fb4b5c63825337b03ffc48fdca7574259e013bcad1475ce08483e8d8"
+  },
+  "afterDigest": "sha256:d0195663fb4b5c63825337b03ffc48fdca7574259e013bcad1475ce08483e8d8",
+  "startedAt": "2026-11-04T06:04:27.944Z",
+  "finishedAt": "2026-11-04T06:04:28.221Z",
+  "status": "FAIL",
+  "exitCode": 134,
+  "signal": null,
+  "stdout": "",
+  "stderr": "protocol-test: native/freerdp-input/test_agni.c:146: setup: Assertion `r32(hello + 8) == 88' failed.\nAborted (core dumped)\n",
+  "stdoutDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stderrDigest": "sha256:9eec50ac450d282ef7703443f5d62d13b6e9d3af1fd451de561092e351626dfa",
+  "timeoutMs": 30000,
+  "executable": "sh",
+  "nodeVersion": "native-C11-GCC13",
+  "platform": "linux",
+  "environmentNote": "TEST Ubuntu24.04 pinned Docker, ASan+UBSan, CPU1 RAM2GiB",
+  "digest": "sha256:0ea538f9f515da5dc8b920cfc82dc6964c90dfc083d9142b7747f2cc547ee83a"
+}

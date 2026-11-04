@@ -1,0 +1,54 @@
+{
+  "schemaVersion": "1.0.0",
+  "kind": "engineering-test-plan",
+  "taskId": "freerdp-private-native-input-v1",
+  "contractDigest": "sha256:4bd6de8b81225ac5ecd365e426c501b9159d68706f9089ce780383bf83d3f5f3",
+  "requirements": [
+    "BE_FRAME",
+    "COMPLETE_VALIDATION",
+    "NATIVE_GUARDS",
+    "UNICODE_ORDER",
+    "NO_REPLAY",
+    "OWNED_RELEASE"
+  ],
+  "scopeFiles": [
+    "native/freerdp-input/agni.c",
+    "native/freerdp-input/agni.h",
+    "native/freerdp-input/test_agni.c"
+  ],
+  "runner": "C11 assert socketpair component runner with ASan and UBSan",
+  "environment": "TEST Ubuntu24.04 pinned Docker image, CPU1 RAM2GiB, no Windows credentials",
+  "cases": [
+    {
+      "id": "AGNI-PROTOCOL-001",
+      "requirementIds": [
+        "BE_FRAME",
+        "COMPLETE_VALIDATION",
+        "NATIVE_GUARDS",
+        "UNICODE_ORDER",
+        "NO_REPLAY",
+        "OWNED_RELEASE"
+      ],
+      "scenario": "Byte oracle and every frame split, strict UTF8, surrogate/control policy, guard/sender failures, ordered key-pointer-release, EOF and sequence failures",
+      "entryPoint": "agni_new + inherited AF_UNIX stream + agni_pump",
+      "level": "integration",
+      "expectedBehavior": "No effect before validation; exact ordered native calls; truthful native-send ACK; owned release and fail-closed no replay",
+      "oracle": "test_agni.c exact bytes and recording native callbacks with unchanged assertions",
+      "testFiles": [
+        "native/freerdp-input/test_agni.c"
+      ],
+      "required": true,
+      "sensitivity": "mutation",
+      "sensitivityReason": "Swap native BE writer byte order in isolated source; same HELLO/frame assertions must fail",
+      "argv": [
+        "sh",
+        "-c",
+        "./protocol-test; result=$?; exit \"$result\""
+      ]
+    }
+  ],
+  "exclusions": [
+    "Real Windows application consumption: root integration TEST",
+    "Authentication/transport/OS session provisioning outside this native unit"
+  ]
+}
