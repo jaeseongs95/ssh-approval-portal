@@ -95,11 +95,12 @@ def entries(data):
         if not line.strip() or line.lstrip().startswith('#'):
             continue
         match = re.fullmatch(r'([A-Z_][A-Z0-9_]*)=(.*)', line)
-        if not match or match[1] in values:
+        if not match:
             raise Refused('unsupported-env')
         value = match[2].strip()
         if len(value) >= 2 and value[0] in "\"'" and value[-1] == value[0]:
             value = value[1:-1]
+        # Match EnvironmentFile and the application loader: the last assignment wins.
         values[match[1]] = value
     return values
 
@@ -146,7 +147,7 @@ class Editor:
         self.scheduler = scheduler or self.schedule
         self.release = release or self.release_maintenance
         self.capture = capture or (lambda owner: self.maintenance_action('capture', owner))
-        self.compare = compare or (lambda owner: self.maintenance_action('compare', owner))
+        self.compare = compare or (lambda owner: self.maintenance_action('compare-baseline', owner))
 
     def initialize(self):
         self.root.mkdir(mode=0o700, exist_ok=True)
@@ -243,7 +244,7 @@ class Editor:
 
     @staticmethod
     def release_maintenance(owner):
-        Editor.maintenance_action('release', owner)
+        Editor.maintenance_action('release-baseline-verified', owner)
 
     def restart(self, job, restart=None, healthy=None):
         restart = restart or (lambda: clean_run(['/usr/bin/systemctl', 'restart', SERVICE], timeout=200))
