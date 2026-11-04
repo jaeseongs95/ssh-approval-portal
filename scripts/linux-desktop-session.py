@@ -15,6 +15,7 @@ import selectors
 import shutil
 import signal
 import socket
+import stat
 import struct
 import subprocess
 import sys
@@ -70,6 +71,39 @@ def read_bootstrap():
         raise SessionError("DESKTOP_INVALID_BOOTSTRAP") from None
     finally:
         data.clear()
+
+
+def validate_native_rdp(options):
+    """부모 manifest에 고정된 private 파일과 전용 socket을 비밀 입력 전에 확인한다."""
+    path = options.rdp_executable
+    if (not os.path.isabs(path) or os.path.normpath(path) != path
+            or not path.endswith("/native/freerdp-input/runtime/bin/xfreerdp3")
+            or not re.fullmatch(r"[a-f0-9]{64}", options.rdp_executable_sha256 or "")
+            or not re.fullmatch(r"[a-f0-9]{64}", options.rdp_patch_digest or "")):
+        raise SessionError("DESKTOP_RDP_CLIENT_UNAVAILABLE")
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        with os.fdopen(fd, "rb") as source:
+            info = os.fstat(source.fileno())
+            if not stat.S_ISREG(info.st_mode) or not info.st_mode & 0o111:
+                raise SessionError("DESKTOP_RDP_CLIENT_UNAVAILABLE")
+            digest = hashlib.file_digest(source, "sha256").hexdigest()
+    except OSError:
+        raise SessionError("DESKTOP_RDP_CLIENT_UNAVAILABLE") from None
+    if digest != options.rdp_executable_sha256:
+        raise SessionError("DESKTOP_RDP_CLIENT_UNAVAILABLE")
+    try:
+        control = socket.socket(fileno=3)
+        try:
+            if control.family != socket.AF_UNIX or control.getsockopt(socket.SOL_SOCKET, socket.SO_TYPE) != socket.SOCK_STREAM:
+                raise SessionError("DESKTOP_NATIVE_INVALID_CHANNEL")
+            control.getpeername()
+            os.set_inheritable(3, False)
+        finally:
+            control.detach()
+    except OSError:
+        raise SessionError("DESKTOP_NATIVE_INVALID_CHANNEL") from None
+    return path
 
 
 def focus_window(display, window, cookie):
@@ -210,15 +244,18 @@ def relay(peer, children, deadline):
 
 
 def run(options):
-    app_name = "xterm" if options.application == "terminal" else os.path.basename(options.rdp_executable)
+    app_name = "xterm" if options.application == "terminal" else "rdp-native"
+    native_executable = validate_native_rdp(options) if options.application == "rdp" else None
     executables = {name: shutil.which(name, path="/usr/bin:/bin")
-                   for name in ("Xvnc", "openbox", app_name, "xdpyinfo", "xwininfo", "xprop")}
+                   for name in ("Xvnc", "openbox", "xdpyinfo", "xwininfo", "xprop")}
+    executables[app_name] = native_executable or shutil.which(app_name, path="/usr/bin:/bin")
     if not all(executables.values()):
         raise SessionError("DESKTOP_BACKEND_UNAVAILABLE")
     credentials = read_bootstrap() if options.application == "rdp" else None
     children = []
     peer = backend = None
     display_read = display_write = None
+    native_fd = 3 if native_executable else None
     closed = False
     with tempfile.TemporaryDirectory(prefix="ags-gui-") as root:
         os.chmod(root, 0o700)
@@ -266,13 +303,18 @@ def run(options):
             app_args = (["-title", "AGS agent terminal", "-geometry", "100x30+10+10", "-e", "/bin/sh"]
                         if options.application == "terminal" else [
                             f"/v:127.0.0.1:{options.rdp_port}", "/from-stdin", "/sec:nla", "/cert:ignore",
-                            f"/size:{options.width}x{options.height}", "/f", "/title:AGS agent RDP", "-clipboard", "/log-level:OFF"])
+                            f"/size:{options.width}x{options.height}", "/f", "/title:AGS agent RDP", "-clipboard", "/log-level:OFF",
+                            "/ags-input-fd:3"])
             for executable, args in (("openbox", []), (app_name, app_args)):
                 child = subprocess.Popen([executables[executable], *args], env=environment,
                                          stdin=subprocess.PIPE if executable == app_name and credentials is not None else subprocess.DEVNULL,
                                          stdout=subprocess.DEVNULL,
-                                         stderr=subprocess.DEVNULL, start_new_session=True)
+                                         stderr=subprocess.DEVNULL, start_new_session=True,
+                                         pass_fds=(native_fd,) if executable == app_name and native_fd is not None else ())
                 children.append(child)
+                if executable == app_name and native_fd is not None:
+                    os.close(native_fd)
+                    native_fd = None
                 if executable == "openbox":
                     # WM가 SubstructureRedirect를 확보하고 EWMH 초기화를 끝낸 뒤 앱을 만든다.
                     wm_deadline = min(deadline, time.monotonic() + 5)
@@ -326,7 +368,7 @@ def run(options):
                     peer.close()
                 if backend is not None:
                     backend.close()
-                for fd in (display_read, display_write):
+                for fd in (display_read, display_write, native_fd):
                     if fd is not None:
                         os.close(fd)
                 if not closed:
@@ -342,7 +384,9 @@ def main():
     parser.add_argument("--session-ref", required=True)
     parser.add_argument("--application", choices=("terminal", "rdp"), default="terminal")
     parser.add_argument("--rdp-port", type=int)
-    parser.add_argument("--rdp-executable", choices=("/usr/bin/xfreerdp", "/usr/bin/xfreerdp3"))
+    parser.add_argument("--rdp-executable")
+    parser.add_argument("--rdp-executable-sha256")
+    parser.add_argument("--rdp-patch-digest")
     parser.add_argument("--rdp-certificate-mode", choices=("ssh-tunnel",))
     options = parser.parse_args()
     if (not 64 <= options.width <= 4096 or not 64 <= options.height <= 4096
@@ -350,9 +394,11 @@ def main():
             or len(options.session_ref) != 48 or any(c not in "0123456789abcdef" for c in options.session_ref)):
         parser.error("invalid session options")
     if (options.application == "rdp" and (options.rdp_port is None or not 1 <= options.rdp_port <= 65535
-            or options.rdp_executable is None or options.rdp_certificate_mode != "ssh-tunnel")
+            or options.rdp_executable is None or options.rdp_executable_sha256 is None
+            or options.rdp_patch_digest is None or options.rdp_certificate_mode != "ssh-tunnel")
             or options.application == "terminal" and any(value is not None for value in (
-                options.rdp_port, options.rdp_executable, options.rdp_certificate_mode))):
+                options.rdp_port, options.rdp_executable, options.rdp_executable_sha256,
+                options.rdp_patch_digest, options.rdp_certificate_mode))):
         parser.error("invalid application options")
     os.umask(0o077)
     def cancelled(signum, frame):

@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { createRfbDesktopAdapter } from './rfb.mjs';
+import { openNativeRdpInput } from './rdp-native-input.mjs';
 import { desktopFail } from '../../domain/desktop-lease.mjs';
 
 const helper = readFileSync(new URL('../../../scripts/linux-desktop-session.py', import.meta.url), 'utf8');
@@ -20,21 +21,24 @@ export function createLinuxSessionDesktopAdapter({ openSession, width = 1280, he
     || !['terminal', 'rdp'].includes(application.kind)) desktopFail('DESKTOP_INVALID_CONFIG');
   const app = Object.freeze({ ...application });
   if (app.kind === 'terminal' && (Object.keys(app).some(key => key !== 'kind') || writeBootstrap !== undefined)
-    || app.kind === 'rdp' && (Object.keys(app).some(key => !['kind', 'host', 'port', 'executable', 'width', 'height', 'certificateMode'].includes(key))
+    || app.kind === 'rdp' && (Object.keys(app).some(key => !['kind', 'host', 'port', 'executable', 'executableSha256', 'patchDigest', 'width', 'height', 'certificateMode'].includes(key))
       || app.host !== '127.0.0.1' || !Number.isInteger(app.port) || app.port < 1 || app.port > 65535
-      || !['/usr/bin/xfreerdp', '/usr/bin/xfreerdp3'].includes(app.executable)
+      || typeof app.executable !== 'string' || !/^\/(?:[A-Za-z0-9._-]+\/)*native\/freerdp-input\/runtime\/bin\/xfreerdp3$/.test(app.executable)
+      || app.executable.split('/').some(part => part === '.' || part === '..')
+      || !/^[a-f0-9]{64}$/.test(app.executableSha256) || !/^[a-f0-9]{64}$/.test(app.patchDigest)
       || app.width !== width || app.height !== height || app.certificateMode !== 'ssh-tunnel'
       || typeof writeBootstrap !== 'function')) desktopFail('DESKTOP_INVALID_CONFIG');
   return {
     async open({ binding, signal }) {
       const sessionRef = randomBytes(24).toString('hex');
       const appArgs = app.kind === 'rdp'
-        ? ` --application rdp --rdp-port ${app.port} --rdp-executable ${quote(app.executable)} --rdp-certificate-mode ssh-tunnel` : '';
+        ? ` --application rdp --rdp-port ${app.port} --rdp-executable ${quote(app.executable)} --rdp-executable-sha256 ${app.executableSha256} --rdp-patch-digest ${app.patchDigest} --rdp-certificate-mode ssh-tunnel` : '';
       const command = `/usr/bin/python3 -I -B -S -X utf8 -c ${quote(helper)} --session-ref ${sessionRef} --width ${width} --height ${height} --ttl-ms ${ttlMs}${appArgs}`;
       if (Buffer.byteLength(command) > 32768) desktopFail('DESKTOP_INVALID_CONFIG');
-      const channel = await openSession({ binding, signal, command });
+      const channel = await openSession({ binding, signal, command, ...(app.kind === 'rdp' ? { nativeInput: true } : {}) });
       const stderrStream = channel.stderr ?? channel.stream.stderr;
-      let ready, closedReceipt, exited = false, stderr = '', closing, desktop;
+      let ready, closedReceipt, exited = false, stderr = '', closing, desktop, native, closingDesktop;
+      let nativeClosing = false, nativeInputState = 'unknown', nativeReleaseSent = false;
       let resolveReady, rejectReady;
       const readyPromise = new Promise((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
       readyPromise.catch(() => {});
@@ -64,9 +68,11 @@ export function createLinuxSessionDesktopAdapter({ openSession, width = 1280, he
       stderrStream?.on('data', onStderr);
       const closeChannel = () => closing ??= (async () => {
         try {
+          channel.inputStream?.destroy();
           channel.stream.end(); // EOF를 보내 helper가 소유 프로세스 정리를 마치도록 한다.
           const result = await wait(exitPromise, 5000, 'DESKTOP_CLOSE_TIMEOUT');
-          return { sessionState: closedReceipt && result?.exitCode === 0 && result?.remoteState === 'exited' ? 'terminated' : 'unknown' };
+          return { sessionState: closedReceipt && result?.exitCode === 0 && result?.remoteState === 'exited'
+            && result?.cleanupComplete !== false ? 'terminated' : 'unknown' };
         } catch {
           return { sessionState: 'unknown' };
         } finally {
@@ -74,22 +80,52 @@ export function createLinuxSessionDesktopAdapter({ openSession, width = 1280, he
           stderrStream?.removeListener('data', onStderr);
         }
       })();
+      channel.inputStream?.once('close', () => { if (!nativeClosing) void closeChannel(); });
       try {
         // 별도 승인된 native credential 공급자가 비밀을 stream에만 기록한다.
-        if (app.kind === 'rdp') await writeBootstrap(channel.stream);
-        desktop = await createRfbDesktopAdapter({ allowNoneSecurity: true,
+        let nativeOpening;
+        if (app.kind === 'rdp') {
+          if (!channel.inputStream) desktopFail('DESKTOP_NATIVE_INVALID_CHANNEL');
+          nativeOpening = openNativeRdpInput({ stream: channel.inputStream, patchDigest: app.patchDigest, width, height, signal });
+          nativeOpening.catch(() => {});
+          await writeBootstrap(channel.stream);
+        }
+        const desktopOpening = createRfbDesktopAdapter({ allowNoneSecurity: true,
           openChannel: async () => ({ stream: channel.stream, close: closeChannel }) }).open({ binding, signal });
-        await wait(readyPromise, 10000, 'DESKTOP_START_TIMEOUT');
+        [desktop, native] = await Promise.all([desktopOpening, nativeOpening,
+          wait(readyPromise, 10000, 'DESKTOP_START_TIMEOUT')]);
         if (exited) desktopFail('DESKTOP_TRANSPORT_CLOSED');
+        const nativeWork = async work => {
+          try { return await work(); }
+          catch (error) {
+            try { await closeChannel(); } catch { error.cleanupError = 'DESKTOP_CLEANUP_FAILED'; }
+            throw error;
+          }
+        };
         return {
-          get closed() { return exited || desktop.closed; },
+          get closed() { return exited || desktop.closed || native?.closed === true; },
           lifecycle: 'managed', capabilities: { observe: true, pointer: true, key: true, text: true },
-          observe: options => desktop.observe(options), input: actions => desktop.input(actions), release: () => desktop.release(),
+          observe: options => desktop.observe(options),
+          input: actions => native ? nativeWork(() => native.input(actions)) : desktop.input(actions),
+          release: () => native ? nativeWork(() => native.release()) : desktop.release(),
           readState: () => ({ state: exited ? 'capture_unavailable' : 'desktop_ready', observedAt: Date.now(),
             generation: ready.resourceGeneration, resourceGeneration: ready.resourceGeneration, sessionRef,
             osSessionId: null, locked: null, sessionBindingVerified: true, displayBindingVerified: true,
-            inputVerified: true, inputAllowed: !exited, ownerOnly: false, blockers: exited ? ['DESKTOP_CAPTURE_UNAVAILABLE'] : [] }),
-          async close() { await desktop.close(); return closeChannel(); },
+            inputVerified: app.kind !== 'rdp', inputAllowed: !exited && native?.closed !== true,
+            ownerOnly: false, blockers: exited ? ['DESKTOP_CAPTURE_UNAVAILABLE'] : [] }),
+          close: () => closingDesktop ??= (async () => {
+            if (native) {
+              nativeClosing = true;
+              try {
+                const receipt = await native.close();
+                nativeReleaseSent = receipt.sent === true;
+                nativeInputState = receipt.sent ? 'detached' : 'unknown';
+              } catch { nativeInputState = 'unknown'; }
+            }
+            try { await desktop.close(); } finally { await closeChannel(); }
+            const receipt = await closeChannel();
+            return native ? { ...receipt, nativeInputState, nativeReleaseSent, logout: false } : receipt;
+          })(),
         };
       } catch (error) {
         try { await closeChannel(); } catch { /* 원 open 오류는 보존한다. */ }

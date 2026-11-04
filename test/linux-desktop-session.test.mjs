@@ -19,6 +19,9 @@ async function eventually(check, timeout = 5000) {
 }
 const exists = path => access(path).then(() => true, () => false);
 const hash = value => createHash('sha256').update(value).digest('hex');
+const rdpApplication = { kind: 'rdp', host: '127.0.0.1', port: 3389,
+  executable: '/opt/ssh-approval/release/native/freerdp-input/runtime/bin/xfreerdp3',
+  executableSha256: 'b'.repeat(64), patchDigest: 'c'.repeat(64), width: 800, height: 600, certificateMode: 'ssh-tunnel' };
 
 function fixture(options = {}) {
   const channels = [];
@@ -64,11 +67,11 @@ test('Linux 관리형 세션의 경계값을 실행 전에 거절한다', () => 
 });
 
 test('RDP application은 고정 loopback·클라이언트·인증 모드만 허용한다', () => {
-  const application = { kind: 'rdp', host: '127.0.0.1', port: 3389, executable: '/usr/bin/xfreerdp',
-    width: 800, height: 600, certificateMode: 'ssh-tunnel' };
+  const application = rdpApplication;
   const config = { openSession() {}, width: 800, height: 600, application, writeBootstrap() {} };
   assert.doesNotThrow(() => createLinuxSessionDesktopAdapter(config));
-  for (const change of [{ host: 'example.com' }, { executable: '/tmp/client' }, { port: 0 },
+  for (const change of [{ host: 'example.com' }, { executable: '/tmp/client' }, { executable: '/usr/bin/xfreerdp3' },
+    { executableSha256: undefined }, { patchDigest: 'bad' }, { port: 0 },
     { certificateMode: 'ignore' }, { width: 900 }, { command: '/bin/sh' }, { password: 'forbidden' }]) {
     assert.throws(() => createLinuxSessionDesktopAdapter({ ...config, application: { ...application, ...change } }),
       error => error.code === 'DESKTOP_INVALID_CONFIG');
@@ -78,18 +81,120 @@ test('RDP application은 고정 loopback·클라이언트·인증 모드만 허�
 });
 
 test('RDP bootstrap 실패는 RFB 전에 원 오류를 보존하고 채널을 닫는다', async () => {
-  const stream = new PassThrough(), failure = Error('credential-provider-failed');
+  const stream = new PassThrough(), inputStream = new PassThrough(), failure = Error('credential-provider-failed');
   let calls = 0, closes = 0, command;
   const adapter = createLinuxSessionDesktopAdapter({ width: 800, height: 600,
-    application: { kind: 'rdp', host: '127.0.0.1', port: 3389, executable: '/usr/bin/xfreerdp3',
-      width: 800, height: 600, certificateMode: 'ssh-tunnel' },
-    async openSession(options) { command = options.command; return { stream, stderr: new PassThrough(),
+    application: rdpApplication,
+    async openSession(options) { assert.equal(options.nativeInput, true); command = options.command; return { stream, inputStream, stderr: new PassThrough(),
       exitPromise: Promise.resolve({ exitCode: 1, remoteState: 'exited' }), async close() { closes++; } }; },
     async writeBootstrap(writable) { assert.equal(writable, stream); calls++; throw failure; },
   });
   await assert.rejects(adapter.open({ binding }), error => error === failure);
   assert.equal(calls, 1); assert.equal(closes, 1);
+  assert.equal(inputStream.destroyed, true);
   assert.ok(Buffer.byteLength(command) <= 32768); assert.ok(!command.includes(failure.message));
+});
+
+test('RDP fd3가 없으면 credential 공급자를 호출하지 않는다', async () => {
+  let bootstraps = 0, closes = 0;
+  const adapter = createLinuxSessionDesktopAdapter({ width: 800, height: 600, application: rdpApplication,
+    async openSession({ nativeInput }) { assert.equal(nativeInput, true); return {
+      stream: new PassThrough(), stderr: new PassThrough(), exitPromise: Promise.resolve({ exitCode: 1 }),
+      async close() { closes++; } }; },
+    async writeBootstrap() { bootstraps++; },
+  });
+  await assert.rejects(adapter.open({ binding }), { code: 'DESKTOP_NATIVE_INVALID_CHANNEL' });
+  assert.equal(bootstraps, 0); assert.equal(closes, 1);
+});
+
+// Wire oracle는 설계 §11의 고정 숫자다. 실제 FreeRDP/Windows 소비를 모사하지 않는다.
+function nativeFixture({ rejectInput = false, closedReceipt = true, cleanupComplete = true } = {}) {
+  const rfbWrites = [], nativeFrames = [], order = [], stderr = new PassThrough();
+  let finishExit, sessionRef;
+  const exitPromise = new Promise(resolve => { finishExit = resolve; });
+  const wire = (kind, sequence, body) => {
+    const header = Buffer.alloc(20); header.write('AGNI'); header[4] = 1; header[5] = kind;
+    header.writeUInt32BE(body.length, 8); header.writeBigUInt64BE(sequence, 12);
+    return Buffer.concat([header, body]);
+  };
+  const hello = Buffer.alloc(88);
+  hello.writeUInt32BE(31); hello.writeUInt32BE(9856, 4); hello.writeUInt16BE(128, 8); hello.writeUInt16BE(256, 10);
+  hello.writeUInt32BE(2048, 12); hello.writeUInt32BE(4096, 16); hello.writeUInt32BE(9344, 20); hello[24] = 1;
+  hello.writeUInt16BE(3, 28); hello.writeUInt16BE(32, 30); hello.writeUInt16BE(1, 32);
+  Buffer.from('bf217a504e54cc719880c228e82353382cd7d4fa', 'hex').copy(hello, 36);
+  Buffer.from(rdpApplication.patchDigest, 'hex').copy(hello, 56);
+  const inputStream = new Duplex({ read() {}, write(bytes, encoding, callback) {
+    const frame = Buffer.from(bytes); nativeFrames.push(frame); order.push('native-' + frame[5]);
+    const body = frame.subarray(20), ack = Buffer.alloc(24);
+    ack[1] = 1; ack.writeUInt32BE(0xffffffff, 12); ack[16] = 6;
+    if (frame[5] === 4) ack[17] = 6;
+    else if (body[0] === 4) ack[17] = 2;
+    else if (rejectInput) {
+      ack[0] = 2; ack.writeUInt16BE(13, 2); ack.writeUInt32BE(1, 8); ack[16] = 1; ack[17] = 1;
+    }
+    this.push(wire(3, frame.readBigUInt64BE(12), ack)); callback();
+  } });
+  inputStream.push(wire(1, 0n, hello));
+  let rfbStarted = false;
+  const stream = new Duplex({ read() {
+    if (rfbStarted) return; rfbStarted = true;
+    const init = Buffer.alloc(24); init.writeUInt16BE(800); init.writeUInt16BE(600, 2);
+    this.push(Buffer.concat([Buffer.from('RFB 003.008\n'), Buffer.from([1, 1, 0, 0, 0, 0]), init]));
+  }, write(bytes, encoding, callback) { rfbWrites.push(Buffer.from(bytes)); callback(); }, final(callback) {
+    order.push('rfb-eof');
+    if (closedReceipt) stderr.write(JSON.stringify({ agsDesktop: 1, event: 'closed', sessionRef, sessionState: 'terminated' }) + '\n');
+    finishExit({ exitCode: 0, remoteState: 'exited', cleanupComplete }); this.push(null); callback();
+  } });
+  const adapter = createLinuxSessionDesktopAdapter({ width: 800, height: 600, application: rdpApplication,
+    async openSession({ command, nativeInput }) {
+      assert.equal(nativeInput, true); sessionRef = /--session-ref ([a-f0-9]{48})/.exec(command)[1];
+      assert.ok(Buffer.byteLength(command) <= 32768);
+      setImmediate(() => stderr.write(JSON.stringify({ agsDesktop: 1, event: 'ready', sessionRef,
+        resourceGeneration: 'd'.repeat(64), width: 800, height: 600 }) + '\n'));
+      return { stream, inputStream, stderr, exitPromise, async close() { order.push('helper-close'); } };
+    }, async writeBootstrap(writable) { assert.equal(writable, stream); order.push('bootstrap'); },
+  });
+  return { adapter, rfbWrites, nativeFrames, order, inputStream };
+}
+
+test('RDP text·key·pointer·release는 native 단일 큐만 쓰며 CLOSE ACK 뒤 helper를 닫는다', async () => {
+  const f = nativeFixture(), desktop = await f.adapter.open({ binding });
+  assert.equal(desktop.readState().inputVerified, false);
+  await desktop.input([{ type: 'text', text: 'A' }]);
+  assert.equal(f.nativeFrames[0].toString('hex'), '41474e4901020000000000090000000000000001010000000000000141');
+  await desktop.input([{ type: 'key', keysym: 0xffeb, down: true }, { type: 'pointer', x: 20, y: 30, buttons: 1 }]);
+  await desktop.release();
+  assert.equal(f.nativeFrames[2].toString('hex'), '41474e4901020000000000090000000000000003040000000000000101');
+  const receipt = await desktop.close();
+  assert.deepEqual(receipt, { sessionState: 'terminated', nativeInputState: 'detached', nativeReleaseSent: true, logout: false });
+  assert.deepEqual(await desktop.close(), receipt);
+  assert.equal(f.nativeFrames[3].toString('hex'), '41474e490104000000000001000000000000000401');
+  assert.ok(f.order.indexOf('native-4') < f.order.indexOf('rfb-eof'));
+  assert.equal(f.rfbWrites.filter(bytes => bytes[0] === 4 || bytes[0] === 5).length, 0);
+});
+
+test('RDP partial native ACK는 재전송 없이 원 오류와 별도 helper cleanup을 남긴다', async () => {
+  const f = nativeFixture({ rejectInput: true }), desktop = await f.adapter.open({ binding });
+  await assert.rejects(desktop.input([{ type: 'text', text: 'A' }]), error =>
+    error.code === 'DESKTOP_NATIVE_PARTIAL_OR_UNKNOWN' && error.nativeInput.callsAttempted === 1);
+  const receipt = await desktop.close();
+  assert.deepEqual(receipt, { sessionState: 'terminated', nativeInputState: 'unknown', nativeReleaseSent: false, logout: false });
+  assert.equal(f.nativeFrames.length, 1); assert.equal(desktop.closed, true);
+});
+
+test('RDP native CLOSE ACK는 helper 종료 영수증·cleanup 증거를 대신하지 않는다', async () => {
+  for (const config of [{ closedReceipt: false }, { cleanupComplete: false }]) {
+    const f = nativeFixture(config), desktop = await f.adapter.open({ binding });
+    assert.deepEqual(await desktop.close(), { sessionState: 'unknown', nativeInputState: 'detached', nativeReleaseSent: true, logout: false });
+  }
+});
+
+test('RDP 취소는 추가 INPUT/CLOSE 재전송 없이 helper를 회수한다', async () => {
+  const f = nativeFixture(), controller = new AbortController();
+  const desktop = await f.adapter.open({ binding, signal: controller.signal }); controller.abort();
+  const receipt = await desktop.close();
+  assert.equal(receipt.nativeInputState, 'unknown'); assert.equal(receipt.nativeReleaseSent, false);
+  assert.equal(f.nativeFrames.length, 0); assert.ok(f.order.includes('helper-close'));
 });
 
 test('TEST Linux GUI: 실제 화면·텍스트·포인터 입력과 소유 세션 종료', integration, async t => {
