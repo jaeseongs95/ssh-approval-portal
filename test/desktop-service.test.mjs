@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createDesktopService } from '../src/application/desktop.mjs';
+import { windowsDesktopState } from '../src/adapters/desktop/windows-state.mjs';
+import { desktopState } from '../src/domain/desktop-state.mjs';
 
 const binding = { ownerId: 'owner-a', targetId: 'linux', targetRevision: 'a'.repeat(64), epoch: 1 };
 function fixture(options = {}) {
@@ -12,6 +14,58 @@ function fixture(options = {}) {
   return { service, state, calls, desktop };
 }
 const error = code => value => value.code === code;
+
+test('GUI-AUTH login screens remain observable; owner private input and SAS never become model tools or replayable credentials', async () => {
+  const locked = windowsDesktopState({ version: 1, boot: '133900000000000000', consoleSessionId: 1,
+    sessions: [{ id: 1, state: 1, locked: true }, { id: 2, state: 4, locked: true }] }, 1000);
+  for (const owner of [true, false]) {
+    const f = fixture({ readState: () => locked, canViewProtected: () => owner });
+    const lease = await f.service.open(binding), identity = { ownerId: binding.ownerId, sessionId: lease.sessionId, epoch: binding.epoch };
+    assert.equal((await f.service.status(identity)).readiness.state, 'auth_required');
+    const frame = await f.service.observe(identity);
+    assert.equal(frame.data, Buffer.from('test-image').toString('base64'));
+    const args = { ...identity, frameId: frame.frameId, geometryRevision: frame.geometryRevision,
+      sequence: 1, requestKey: 'owner-private', confirmed: true, action: 'credential', value: 'SYNTHETIC-ONE-TIME' };
+    if (owner) {
+      const receipt = await f.service.authenticate(args);
+      assert.equal(args.value, undefined); assert.doesNotMatch(JSON.stringify(receipt), /SYNTHETIC|credential/);
+      assert.equal(f.calls.filter(call => call[0] === 'input').length, 1);
+      await assert.rejects(f.service.authenticate({ ...args, value: 'different' }), error('DESKTOP_INPUT_SEQUENCE'));
+      const fresh = await f.service.observe(identity);
+      await f.service.authenticate({ ...identity, frameId: fresh.frameId, geometryRevision: fresh.geometryRevision,
+        sequence: 2, requestKey: 'owner-sas', confirmed: true, action: 'sas' });
+      assert.deepEqual(f.calls.filter(call => call[0] === 'input')[1][1].map(action => [action.keysym, action.down]),
+        [[0xffe3,true],[0xffe9,true],[0xffff,true],[0xffff,false],[0xffe9,false],[0xffe3,false]]);
+    } else {
+      assert.throws(() => f.service.authenticate(args), error('DESKTOP_OWNER_AUTH_REQUIRED'));
+      // Unknown capture/session binding must not break the pre-existing ordinary input path.
+      await f.service.input({ ...args, actions: [{ type: 'key', keysym: 0xff1b, down: false }] });
+    }
+    await f.service.close(identity); assert.equal(f.service.size(), 0);
+  }
+});
+
+test('GUI-AUTH changed backend generation fences same-size frames and a lock appearing before dispatch', async () => {
+  let state = desktopState({ state: 'desktop_ready', observedAt: 1000, generation: 'a'.repeat(64), osSessionId: 2,
+    locked: false, sessionBindingVerified: true, displayBindingVerified: true, inputVerified: true, inputAllowed: true, ownerOnly: false, blockers: [] });
+  const f = fixture({ readState: () => state });
+  const lease = await f.service.open(binding), identity = { ownerId: binding.ownerId, sessionId: lease.sessionId, epoch: binding.epoch };
+  const frame = await f.service.observe(identity);
+  state = desktopState({ ...state, generation: 'b'.repeat(64) });
+  const args = { ...identity, frameId: frame.frameId, geometryRevision: frame.geometryRevision,
+    sequence: 1, requestKey: 'generation', actions: [{ type: 'text', text: 'never-send' }] };
+  await assert.rejects(f.service.input(args), error('DESKTOP_STALE_FRAME'));
+  const fresh = await f.service.observe(identity), observe = f.desktop.observe;
+  f.desktop.observe = async options => {
+    const result = await observe(options);
+    if (options?.includeImage === false) state = desktopState({ ...state, state: 'auth_required', locked: true,
+      generation: 'c'.repeat(64), inputAllowed: false, ownerOnly: false, blockers: ['DESKTOP_AUTH_REQUIRED'] });
+    return result;
+  };
+  await assert.rejects(f.service.input({ ...args, frameId: fresh.frameId }), error('DESKTOP_AUTH_REQUIRED'));
+  assert.equal(f.calls.filter(item => item[0] === 'input').length, 0);
+  assert.equal((await f.service.close(identity)).logout, false);
+});
 
 test('GUI lease fences owner, epoch, target revision and expires with key cleanup', async () => {
   const { service, state, calls } = fixture({ ttlMs: 100 });

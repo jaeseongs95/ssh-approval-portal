@@ -152,7 +152,7 @@ export function createProtocolAdapters({ queue, commands, files, store, lifecycl
         const body=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(Buffer.concat(chunks)));
         try { return json(res,200,capacity.set(body)); } catch(error) { return json(res,409,{error:error.code??error.message}); }
       }
-      const desktopRoute=/^\/api\/desktop\/(open|observe|input|close)$/.exec(url.pathname);
+      const desktopRoute=/^\/api\/desktop\/(open|status|observe|input|authenticate|close)$/.exec(url.pathname);
       if (desktopRoute && desktop) {
         if(req.method!=='POST')return json(res,405,{error:'METHOD_NOT_ALLOWED'});
         if((req.headers['content-type']??'').split(';')[0]!=='application/json')return json(res,415,{error:'JSON_REQUIRED'});
@@ -161,6 +161,7 @@ export function createProtocolAdapters({ queue, commands, files, store, lifecycl
         if(!body||typeof body!=='object'||Array.isArray(body)||Object.hasOwn(body,'ownerId'))return json(res,400,{error:'INVALID_DESKTOP_INPUT'});
         const owner='admin:'+createHash('sha256').update(authorization.principal?.subject??'token-principal').digest('hex');
         try{return json(res,200,await desktop[desktopRoute[1]](body,owner));}catch(error){return json(res,409,{error:error.code??'DESKTOP_REQUEST_FAILED'});}
+        finally { if(desktopRoute[1]==='authenticate'){body.value=undefined;for(const part of chunks)part.fill(0);} }
       }
       if (req.method === 'GET' && url.pathname === '/api/session') return json(res, 200, { mode: adminAccess.mode });
       if(agentCli && req.method==='GET' && url.pathname==='/api/agent-cli')return json(res,200,agentCli.get());

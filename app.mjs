@@ -9,6 +9,8 @@ import { createRuntimeCapacity } from './src/application/runtime-capacity.mjs';
 import { createRuntimeCapacityState } from './src/adapters/storage/runtime-capacity-state.mjs';
 import { createDesktopService } from './src/application/desktop.mjs';
 import { createRfbDesktopAdapter } from './src/adapters/desktop/rfb.mjs';
+import { createWindowsDesktopStateReader } from './src/adapters/desktop/windows-state.mjs';
+import { transportDesktopState } from './src/domain/desktop-state.mjs';
 import { dispatchStep, dispatchRefusal, dispatchFailureDetails } from './src/domain/dispatch-failure.mjs';
 import { executionFailureDetails } from './src/domain/execution-failure.mjs';
 import { ApprovalQueue } from './src/domain/approval-queue.mjs';
@@ -342,6 +344,7 @@ export async function createApplication({ registry, classify, executeCommand, ex
   };
   let desktop;
   if (openDesktopChannel) {
+    const readWindowsState = createWindowsDesktopStateReader({ executeCommand });
     const adapter = createRfbDesktopAdapter({ allowNoneSecurity: true,
       openChannel: ({ binding, host, port, signal }) => { const runtime = targets.select(binding.targetId); runtime.verify();
         if (runtime.revision !== binding.targetRevision) throw Object.assign(Error('DESKTOP_STALE_TARGET'),{code:'DESKTOP_STALE_TARGET'});
@@ -365,6 +368,16 @@ export async function createApplication({ registry, classify, executeCommand, ex
     desktopService = createDesktopService({ adapter,
       maxSessions: settings.maxConcurrency, maxPerOwner: settings.maxConcurrency,
       authorize: authorizeDesktop,
+      canViewProtected: binding => binding.ownerId.startsWith('admin:'),
+      readState: (binding, signal) => {
+        const runtime = targets.select(binding.targetId); runtime.verify();
+        if (runtime.revision !== binding.targetRevision) throw Object.assign(Error('DESKTOP_STALE_TARGET'), { code: 'DESKTOP_STALE_TARGET' });
+        if (platformOf(runtime) !== 'windows') return transportDesktopState();
+        return readWindowsState({ profile: runtime.readProfile, signal, beforeDispatch: async () => {
+          runtime.verify();
+          if (runtime.revision !== binding.targetRevision || queue.maintenance) throw Object.assign(Error('DESKTOP_STALE_TARGET'), { code: 'DESKTOP_STALE_TARGET' });
+        } });
+      },
       leaseKey: binding => {
         const runtime = targets.select(binding.targetId), profile = registry.getProfile(runtime.writeProfile);
         return hash(JSON.stringify([profile.trustedHostKey, runtime.desktop.port]));
@@ -392,7 +405,9 @@ export async function createApplication({ registry, classify, executeCommand, ex
         } catch (error) { permittedDesktop.delete(key); throw error; }
       },
       observe: (args, ownerId = 'mcp-shared-principal') => desktopService.observe({ ...args, ownerId }),
+      status: (args, ownerId = 'mcp-shared-principal') => desktopService.status({ ...args, ownerId }),
       input: (args, ownerId = 'mcp-shared-principal') => desktopService.input({ ...args, ownerId }),
+      authenticate: (args, ownerId) => desktopService.authenticate({ ...args, ownerId }),
       close: (args, ownerId = 'mcp-shared-principal') => desktopService.close({ ...args, ownerId }),
       closeOwner: ownerId => desktopService.closeOwner(ownerId),
     };

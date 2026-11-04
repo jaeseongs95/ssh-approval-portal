@@ -87,7 +87,7 @@ test('public MCP surface exposes operation and card tools while owner UI actions
     const showNames = ['show-ui-probe', 'show-approval', 'show-file-transfer'];
     assert.deepEqual(modelTools.filter(tool => !tool.name.startsWith('desktop-')).map(tool => tool.name), [...publicNames, ...showNames]);
     const desktopNames = modelTools.filter(tool => tool.name.startsWith('desktop-')).map(tool => tool.name);
-    if (desktopNames.length) assert.deepEqual(desktopNames, ['desktop-open', 'desktop-observe', 'desktop-input', 'desktop-close']);
+    if (desktopNames.length) assert.deepEqual(desktopNames, ['desktop-open', 'desktop-status', 'desktop-observe', 'desktop-input', 'desktop-close']);
     const privateTools = tools.filter(tool => tool.name.startsWith('ui-'));
     assert.deepEqual(privateTools.map(tool => tool.name), ['ui-decide-request', 'ui-upload-begin', 'ui-upload-chunk', 'ui-upload-finish', 'ui-download-link', 'ui-read-command-output']);
     for (const tool of privateTools) assert.deepEqual(tool._meta.ui.visibility, ['app']);
