@@ -30,14 +30,34 @@ async function fixture(t, extra = {}) {
   return { parent, directory, output, calls, context, target, deps, closed: () => closed };
 }
 
-test('argument parser fixes Windows target, requires revision/ref and rejects secret argv', () => {
+test('argument parser accepts target aliases, requires revision/ref and rejects secret argv', () => {
   assert.equal(parseProvisionArgs(baseArgs).apply, false);
-  for (const args of [[], [...baseArgs, '--password', password], [...baseArgs, '--target', 'default'], [...baseArgs, '--apply', '--apply'], [...baseArgs, '--secret-ref', 'secret://local-file/other'], [...baseArgs, '--username', 'administrator'], [...baseArgs, '--status', 'bad']]) {
+  assert.equal(parseProvisionArgs([...baseArgs, '--target', 'win-test_2']).target, 'win-test_2');
+  for (const args of [[], [...baseArgs, '--password', password], [...baseArgs, '--target', '../windows'], [...baseArgs, '--target', 'WINDOWS'], [...baseArgs, '--apply', '--apply'], [...baseArgs, '--secret-ref', 'secret://local-file/other'], [...baseArgs, '--username', 'administrator'], [...baseArgs, '--status', 'bad']]) {
     assert.throws(() => parseProvisionArgs(args), { code: 'INVALID_ARGUMENTS' });
   }
   const generated = new Set(Array.from({ length: 64 }, generateGuiPassword));
   assert.equal(generated.size, 64);
   for (const value of generated) assert.match(value, /^Aa9![A-Za-z0-9_-]{48}$/);
+});
+
+test('registered Windows alias resolves while unknown, Linux, stale and unpinned aliases refuse', async t => {
+  for (const variation of ['valid', 'unknown', 'linux', 'stale', 'unpinned']) {
+    const f = await fixture(t); f.target.id = 'win-test_2';
+    if (variation === 'unknown') f.context.targets = [];
+    if (variation === 'linux') f.target.platform = 'linux';
+    if (variation === 'stale') f.target.revision = 'b'.repeat(64);
+    if (variation === 'unpinned') f.context.runtime.registry.getProfile = () => ({});
+    const result = await runProvisionGuiAccount([...baseArgs, '--target', 'win-test_2'], f.deps);
+    if (variation === 'valid') {
+      assert.equal(result.stage, 'dry_run'); assert.equal(result.target, 'win-test_2');
+      assert.deepEqual(f.calls.map(x => x.mode), ['probe']);
+    } else {
+      assert.equal(result.code, variation === 'stale' ? 'TARGET_CHANGED' : 'INVALID_TARGET');
+      assert.equal(f.calls.length, 0);
+    }
+    assert.deepEqual(await fs.readdir(f.parent), []);
+  }
 });
 
 test('default dry-run leaves filesystem unchanged and emits no store path/password', async t => {
