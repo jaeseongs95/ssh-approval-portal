@@ -1,5 +1,6 @@
 import { hash, windowsRemotePath } from '../../domain/validation.mjs';
 import { validateCapacity } from './capacity.mjs';
+import { parseSecretReference } from '../../application/secret-service.mjs';
 
 const alias = value => typeof value === 'string' && /^[a-z][a-z0-9_-]{0,31}$/.test(value);
 const label = value => typeof value === 'string' && value.trim() && value.length <= 80 && !/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(value);
@@ -36,8 +37,19 @@ export function parseTargets(value, defaultTarget) {
     if (entry.desktop !== undefined) {
       const desktop = entry.desktop;
       if (!desktop || typeof desktop !== 'object' || Array.isArray(desktop) ||
-          Object.keys(desktop).some(key => !['enabled', 'port'].includes(key)) || typeof desktop.enabled !== 'boolean' ||
-          !Number.isInteger(desktop.port) || desktop.port < 1 || desktop.port > 65535) throw Error('Invalid target desktop configuration');
+          Object.keys(desktop).some(key => !['enabled', 'backend', 'port', 'width', 'height', 'credentialRef'].includes(key)) || typeof desktop.enabled !== 'boolean') throw Error('Invalid target desktop configuration');
+      const backend = desktop.backend ?? 'rfb';
+      if (!['rfb', 'xvnc', 'rdp'].includes(backend) || backend === 'xvnc' && entry.platform === 'windows'
+          || backend === 'rdp' && entry.platform !== 'windows') throw Error('Invalid desktop backend for target platform');
+      if (backend === 'rfb') {
+        if (!Number.isInteger(desktop.port) || desktop.port < 1 || desktop.port > 65535
+            || desktop.credentialRef !== undefined) throw Error('Invalid attached desktop configuration');
+      } else if (desktop.port !== undefined) throw Error('Managed desktop endpoints are selected by the backend');
+      if (backend === 'rdp') parseSecretReference(desktop.credentialRef);
+      else if (desktop.credentialRef !== undefined) throw Error('Desktop credentials require an RDP backend');
+      for (const key of ['width', 'height']) if (desktop[key] !== undefined &&
+        (!Number.isInteger(desktop[key]) || desktop[key] < 320 || desktop[key] > 4096)) throw Error('Invalid desktop geometry');
+      if ((desktop.width ?? 1280) * (desktop.height ?? 720) > 4194304) throw Error('Desktop geometry exceeds framebuffer limit');
       Object.freeze(desktop);
     }
     ids.add(entry.id);

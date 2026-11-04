@@ -9,7 +9,7 @@ import { createOpaqueFileService } from './src/application/opaque-files.mjs';
 import { createRuntimeCapacity } from './src/application/runtime-capacity.mjs';
 import { createRuntimeCapacityState } from './src/adapters/storage/runtime-capacity-state.mjs';
 import { createDesktopService } from './src/application/desktop.mjs';
-import { createRfbDesktopAdapter } from './src/adapters/desktop/rfb.mjs';
+import { createTargetDesktops } from './src/adapters/desktop/target-desktops.mjs';
 import { createWindowsDesktopStateReader } from './src/adapters/desktop/windows-state.mjs';
 import { transportDesktopState } from './src/domain/desktop-state.mjs';
 import { dispatchStep, dispatchRefusal, dispatchFailureDetails } from './src/domain/dispatch-failure.mjs';
@@ -69,7 +69,7 @@ const commandExecutor = execute => async (profile, command, beforeDispatch, opti
 };
 
 /** Assemble concrete ports. Business policy belongs to application/domain modules. */
-export async function createApplication({ registry, classify, executeCommand, executePythonSource, executeAgentCli, openDesktopChannel, agentReleaseCatalog, audit, transferRoot, env = process.env, uiHtml, accessKeySet, uploadSource, riskAssessor, policyRiskAssessor, secretResolver, riskEvaluators = {}, environmentTransport, requestAdmission }) {
+export async function createApplication({ registry, classify, executeCommand, executePythonSource, executeAgentCli, openDesktopChannel, openDesktopProcessChannel, agentReleaseCatalog, audit, transferRoot, env = process.env, uiHtml, accessKeySet, uploadSource, riskAssessor, policyRiskAssessor, secretResolver, riskEvaluators = {}, environmentTransport, requestAdmission }) {
   const settings = parseSettings(env);
   const adminAccess = createAdminAccess(env, accessKeySet);
   const browserSessions=['access','oidc'].includes(adminAccess.mode)?createBrowserSessionAdapter():undefined;
@@ -350,14 +350,10 @@ export async function createApplication({ registry, classify, executeCommand, ex
     return runtime.files.readAgentDownload(args, runtime.verify);
   };
   let desktop;
-  if (openDesktopChannel) {
+  if (openDesktopChannel || openDesktopProcessChannel) {
     const readWindowsState = createWindowsDesktopStateReader({ executeCommand });
-    const adapter = createRfbDesktopAdapter({ allowNoneSecurity: true,
-      openChannel: ({ binding, host, port, signal }) => { const runtime = targets.select(binding.targetId); runtime.verify();
-        if (runtime.revision !== binding.targetRevision) throw Object.assign(Error('DESKTOP_STALE_TARGET'),{code:'DESKTOP_STALE_TARGET'});
-        if (runtime.desktop?.enabled !== true) throw Object.assign(Error('DESKTOP_UNAVAILABLE'),{code:'DESKTOP_UNAVAILABLE'});
-        return openDesktopChannel(runtime.writeProfile, { host, port: runtime.desktop.port, signal, beforeDispatch: async () => { runtime.verify(); if (queue.maintenance) throw Error('MAINTENANCE_ACTIVE'); } });
-      } });
+    const backends = createTargetDesktops({ targets, registry, openDesktopChannel, openDesktopProcessChannel,
+      resolver, maintenance: () => queue.maintenance });
     const permittedDesktop = new Map(), desktopBindings = new Map();
     const authorizeDesktop = async binding => {
       const permission = permittedDesktop.get(JSON.stringify(binding));
@@ -372,7 +368,7 @@ export async function createApplication({ registry, classify, executeCommand, ex
       if (!validPolicy()) return false;
       try { await testServerMode.require(); runtime.verify(); return validPolicy(); } catch { return false; }
     };
-    desktopService = createDesktopService({ adapter,
+    desktopService = createDesktopService({ adapter: backends.adapter, requestCapacity: settings.requestCapacity,
       maxSessions: settings.maxConcurrency, maxPerOwner: settings.maxConcurrency,
       authorize: authorizeDesktop,
       canViewProtected: binding => binding.ownerId.startsWith('admin:'),
@@ -385,10 +381,7 @@ export async function createApplication({ registry, classify, executeCommand, ex
           if (runtime.revision !== binding.targetRevision || queue.maintenance) throw Object.assign(Error('DESKTOP_STALE_TARGET'), { code: 'DESKTOP_STALE_TARGET' });
         } });
       },
-      leaseKey: binding => {
-        const runtime = targets.select(binding.targetId), profile = registry.getProfile(runtime.writeProfile);
-        return hash(JSON.stringify([profile.trustedHostKey, runtime.desktop.port]));
-      },
+      leaseKey: backends.leaseKey,
       verifyTarget: binding => { try { const runtime = targets.select(binding.targetId); runtime.verify(); return runtime.revision === binding.targetRevision && !queue.maintenance; } catch { return false; } },
       onClose: receipt => {
         const binding = desktopBindings.get(receipt.sessionId);
@@ -398,7 +391,11 @@ export async function createApplication({ registry, classify, executeCommand, ex
     });
     let epoch = 0;
     desktop = {
-      async open({ target, expectedTargetRevision }, ownerId = 'mcp-shared-principal') {
+      async capabilities({ target, expectedTargetRevision }) {
+        const gui = await backends.capabilities({ targetId: target, targetRevision: expectedTargetRevision });
+        return { ...gui, ...(gui.configured ? { openRequest: desktopService.issueOpenRequest() } : {}) };
+      },
+      async open({ target, expectedTargetRevision, requestKey }, ownerId = 'mcp-shared-principal') {
         const runtime = targets.select(target); runtime.verify();
         if (expectedTargetRevision !== runtime.revision || queue.maintenance) throw Object.assign(Error('DESKTOP_STALE_TARGET'),{code:'DESKTOP_STALE_TARGET'});
         if (runtime.desktop?.enabled !== true) throw Object.assign(Error('DESKTOP_UNAVAILABLE'),{code:'DESKTOP_UNAVAILABLE'});
@@ -408,7 +405,10 @@ export async function createApplication({ registry, classify, executeCommand, ex
         const key = JSON.stringify(binding);
         permittedDesktop.set(key, { policyRevision: commandState?.policy().revision });
         try {
-          const session = await desktopService.open(binding); desktopBindings.set(session.sessionId, binding); return session;
+          const session = await desktopService.open({ ...binding, ...(requestKey === undefined ? {} : { requestKey }) });
+          if (desktopBindings.has(session.sessionId)) permittedDesktop.delete(key);
+          else desktopBindings.set(session.sessionId, binding);
+          return session;
         } catch (error) { permittedDesktop.delete(key); throw error; }
       },
       observe: (args, ownerId = 'mcp-shared-principal') => desktopService.observe({ ...args, ownerId }),
