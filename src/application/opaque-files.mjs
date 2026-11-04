@@ -40,8 +40,9 @@ export function createOpaqueFileService({ store, targets, queue, files, journal,
   if (typeof ownerId !== 'string' || !ownerId || ownerId.length > 512 || /[\x00-\x1f\x7f]/.test(ownerId)) throw Error('Verified opaque file owner required');
   if (!journal?.find || !journal?.get || !submissions?.run) throw Error('Durable opaque file admission required');
   const admissions = new Map(), reconciliations = new Map(), background = new Set(), cleanupFailures = new Map(), shutdown = new AbortController();
+  let recovering = false;
   const owned = uuid => store.staged(uuid, ownerId);
-  const guard = () => { if (shutdown.signal.aborted) fail('OPAQUE_FILES_CLOSED'); if (queue.maintenance) fail('MAINTENANCE'); };
+  const guard = () => { if (shutdown.signal.aborted) fail('OPAQUE_FILES_CLOSED'); if (queue.maintenance) fail('MAINTENANCE'); if (recovering) fail('OPAQUE_ADMISSION_BUSY'); };
   const actionRecord = action => {
     const record = journal.get(action.requestId) ?? journal.find(action.requestKey)?.job;
     if (record && (record.id !== action.requestId || record.owner !== ownerId || record.requestKey !== action.requestKey ||
@@ -103,6 +104,10 @@ export function createOpaqueFileService({ store, targets, queue, files, journal,
     }
     if (journal.find(requestKey)) fail('OPERATION_KEY_CONFLICT');
     if (['consuming', 'consumed'].includes(item.state)) fail('STAGED_FILE_CONSUMED');
+    if (action === 'move' && item.actions.some(previous => {
+      const record = actionRecord(previous);
+      return record?.state === 'unknown' || (previous.state === 'submitted' && !record);
+    })) fail('OPAQUE_ACTION_RECONCILIATION_REQUIRED');
     if (now() >= item.expiresAt) fail('STAGED_FILE_EXPIRED');
     const operation = store.reserveStagedAction(item.publicUUID, ownerId, { ...contract, operationKey: input.operationKey,
       requestKey, inputDigest, requestId: randomBytes(24).toString('hex') });
@@ -164,26 +169,46 @@ export function createOpaqueFileService({ store, targets, queue, files, journal,
       }
     },
     async reconcile() {
-      if (admissions.size) fail('OPAQUE_ADMISSION_BUSY');
-      for (const item of store.list()) if (item.purpose === 'staged' && item.ownerId === ownerId) {
-        for (const action of item.actions) if (action.state === 'reserved' && !actionRecord(action)) {
-          // Admission precedes the first possible SSH publication. The journal
-          // proves this reserved request was never accepted. Remove only clones
-          // carrying its exact durable provenance; never replay the request.
-          if (queue.get(action.requestId)) fail('OPAQUE_ACTION_RECONCILIATION_REQUIRED');
-          for (const clone of store.list()) if (clone.provenance?.ownerId === ownerId && clone.provenance.sourceUUID === item.publicUUID && clone.provenance.requestId === action.requestId) {
-            if (clone.submissionId || clone.targetId !== action.targetId || clone.targetRevision !== action.targetRevision ||
-                clone.remotePath !== action.remotePath || clone.overwrite !== action.overwrite || clone.elevate !== action.elevate ||
-                clone.fileName !== item.fileName || !['staging', 'ready'].includes(clone.state)) fail('OPAQUE_ACTION_RECONCILIATION_REQUIRED');
-            await store.remove(clone.id);
+      if (admissions.size || recovering) fail('OPAQUE_ADMISSION_BUSY');
+      recovering = true;
+      let references;
+      // Startup only, and only when there is an unaccepted reservation to clean.
+      // list() defaults to maxRows + legacyRows: include retained legacy bodies,
+      // and compare the count with the store's unfiltered SQL row count so a
+      // truncated or failed read never becomes evidence of no references.
+      const artifactReferences = () => {
+        if (references) return references;
+        if (!journal.list || !journal.usage || !queue.listAll) fail('OPAQUE_ACTION_RECONCILIATION_REQUIRED');
+        const records = journal.list(), jobs = queue.listAll();
+        if (!Array.isArray(records) || !Array.isArray(jobs) || records.length !== journal.usage().count) fail('OPAQUE_ACTION_RECONCILIATION_REQUIRED');
+        references = new Set();
+        for (const record of records) for (const id of [record.input?.operation?.artifactId, record.input?.artifactId,
+          record.legacy?.original?.operation?.artifactId, record.metadata?.approval?.operation?.artifactId]) if (typeof id === 'string') references.add(id);
+        for (const job of jobs) if (typeof job.operation?.artifactId === 'string') references.add(job.operation.artifactId);
+        return references;
+      };
+      try {
+        for (const item of store.list()) if (item.purpose === 'staged' && item.ownerId === ownerId) {
+          for (const action of item.actions) if (action.state === 'reserved' && !actionRecord(action)) {
+            // Admission precedes the first possible SSH publication. The journal
+            // proves this reserved request was never accepted. Remove only clones
+            // carrying its exact durable provenance; never replay the request.
+            const referenced = artifactReferences();
+            if (queue.get(action.requestId)) fail('OPAQUE_ACTION_RECONCILIATION_REQUIRED');
+            for (const clone of store.list()) if (clone.provenance?.ownerId === ownerId && clone.provenance.sourceUUID === item.publicUUID && clone.provenance.requestId === action.requestId) {
+              if (referenced.has(clone.id) || clone.submissionId || clone.targetId !== action.targetId || clone.targetRevision !== action.targetRevision ||
+                  clone.remotePath !== action.remotePath || clone.overwrite !== action.overwrite || clone.elevate !== action.elevate ||
+                  clone.fileName !== item.fileName || !['staging', 'ready'].includes(clone.state)) fail('OPAQUE_ACTION_RECONCILIATION_REQUIRED');
+              await store.remove(clone.id);
+            }
+            store.settleStagedAction(item.publicUUID, ownerId, action.requestId, 'refused');
           }
-          store.settleStagedAction(item.publicUUID, ownerId, action.requestId, 'refused');
+          await reconcileOne(item.publicUUID);
+          cleanupFailures.delete(item.publicUUID);
         }
-        await reconcileOne(item.publicUUID);
-        cleanupFailures.delete(item.publicUUID);
-      }
+      } finally { recovering = false; }
     },
-    busy: () => admissions.size > 0 || reconciliations.size > 0 || background.size > 0 || cleanupFailures.size > 0,
+    busy: () => recovering || admissions.size > 0 || reconciliations.size > 0 || background.size > 0 || cleanupFailures.size > 0,
     async close() {
       shutdown.abort();
       await Promise.allSettled([...admissions.values()].map(item => item.promise));
