@@ -134,3 +134,21 @@ test('only allowlisted typed codes and exact legacy literals cross the public er
     assert.deepEqual(await request(service, path, { method: 'GET' }), { routed: true, status: scenario.status, value: { error: scenario.code } });
   }
 });
+
+test('HTTP identifiers and hash fields reject CR/LF suffixes rather than trimming them', async t => {
+  const { service, store } = await fixture(t), bytes = Buffer.from('test'), body = metadata(bytes);
+  for (const suffix of ['\r', '\n', '\r\n']) {
+    assert.deepEqual(await request(service, '/api/artifacts', { body: { ...body, operationKey: body.operationKey + suffix } }),
+      { routed: true, status: 400, value: { error: 'INVALID_OPERATION_KEY' } });
+    assert.deepEqual(await request(service, '/api/artifacts', { body: { ...body, sha256: body.sha256 + suffix } }),
+      { routed: true, status: 400, value: { error: 'INVALID_FILE_HASH' } });
+    assert.equal(store.size, 0);
+  }
+  const { uuid } = (await request(service, '/api/artifacts', { body })).value;
+  for (const suffix of ['\r', '\n', '\r\n']) {
+    assert.equal((await request(service, '/api/artifacts/' + encodeURIComponent(uuid + suffix), { method: 'GET' })).status, 400);
+    assert.equal((await request(service, '/api/artifacts/' + uuid + '/chunks/0', { method: 'PUT', parts: [bytes],
+      headers: { 'content-type': 'application/octet-stream', 'x-chunk-sha256': hash(bytes) + suffix } })).status, 400);
+  }
+  assert.equal((await service.stat({ uuid })).received, 0);
+});
