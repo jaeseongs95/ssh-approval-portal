@@ -105,6 +105,15 @@ test('unknown dispatch persists credential and stops a second attempt without au
   assert.equal(applies, 1); assert.ok(!JSON.stringify(f.output).includes(password));
 });
 
+test('status refuses corrupt private state without printing attacker-controlled fields', async t => {
+  const f = await fixture(t);
+  const result = await runProvisionGuiAccount([...baseArgs, '--apply'], f.deps);
+  const file = path.join(f.directory, '.gui-operation-' + result.operationId, 'state.jsonl');
+  await fs.appendFile(file, JSON.stringify({ ...result, accountSid: password }) + '\n');
+  const status = await runProvisionGuiAccount([...baseArgs, '--status', result.operationId], f.deps);
+  assert.equal(status.code, 'LOCAL_STATE_FAILED'); assert.ok(!JSON.stringify(f.output).includes(password));
+});
+
 test('group failure preserves created SID and private credential without publishing', async t => {
   const f = await fixture(t, { windowsPort: () => async request => {
     if (request.mode === 'probe') return { accountExists: false, ready: true, domain: 'WINTEST' };

@@ -11,7 +11,8 @@ const hash = value => createHash('sha256').update(value).digest('hex');
 const sidPattern = /^S-1-5-21-(?:\d+-){3}\d+$/;
 const phases = new Set(['probe', 'creating', 'created', 'group_added', 'complete', 'failed']);
 const safeCodes = new Set(['INVALID_ARGUMENTS', 'SECRET_STORE_UNCONFIGURED', 'SECRET_STORE_MISMATCH', 'INVALID_TARGET', 'TARGET_CHANGED', 'ACCOUNT_EXISTS', 'SECRET_EXISTS', 'PROVISION_RECOVERY_REQUIRED', 'WINDOWS_UNAVAILABLE', 'WINDOWS_NOT_ADMIN', 'WINDOWS_FAILED', 'REMOTE_OUTCOME_UNKNOWN', 'LOCAL_STATE_FAILED', 'PUBLISH_FAILED', 'UNSAFE_STORE']);
-const safeError = error => safeCodes.has(error?.code) ? error.code : 'LOCAL_STATE_FAILED';
+const safeError = error => safeCodes.has(error?.code) ? error.code
+  : ['unsafe_store', 'unsafe_record', 'unsupported_platform'].includes(error?.code) ? 'UNSAFE_STORE' : 'LOCAL_STATE_FAILED';
 
 export function parseProvisionArgs(args) {
   const result = { target: 'windows', username: 'ssh-gui-agent', apply: false };
@@ -61,7 +62,7 @@ try {
   $exists=@(Get-LocalUser | Where-Object {$_.Name -ieq $request.username}).Count -gt 0
   $group=Get-LocalGroup -SID 'S-1-5-32-555'
   if ($request.mode -eq 'probe') {
-    Emit @{phase='probe';accountExists=$exists;ready=($admin -and -not $exists -and [bool]$group);domain=$env:COMPUTERNAME;code=$(if($exists){'ACCOUNT_EXISTS'}elseif(-not $admin){'WINDOWS_NOT_ADMIN'}else{'OK'})}; exit 0
+    Emit @{phase='probe';accountExists=$exists;ready=($admin -and -not $exists -and [bool]$group);domain=[Environment]::MachineName;code=$(if($exists){'ACCOUNT_EXISTS'}elseif(-not $admin){'WINDOWS_NOT_ADMIN'}else{'OK'})}; exit 0
   }
   if ($exists) { Emit @{phase='failed';code='ACCOUNT_EXISTS'}; exit 1 }
   if (-not $admin) { Emit @{phase='failed';code='WINDOWS_NOT_ADMIN'}; exit 1 }
@@ -78,7 +79,7 @@ try {
   $member=@(Get-LocalGroupMember -SID 'S-1-5-32-555' | Where-Object {$_.SID.Value -eq $sid}).Count -eq 1
   $administrator=@(Get-LocalGroupMember -SID 'S-1-5-32-544' | Where-Object {$_.SID.Value -eq $sid}).Count -gt 0
   if (-not $member -or $administrator) { throw 'membership' }
-  Emit @{phase='complete';sid=$sid;domain=$env:COMPUTERNAME}; exit 0
+  Emit @{phase='complete';sid=$sid;domain=[Environment]::MachineName}; exit 0
 } catch {
   Emit @{phase='failed';code='WINDOWS_FAILED';sid=$sid}; exit 1
 } finally {
@@ -162,6 +163,15 @@ function publicState(value) {
     secretState: value.secretState ?? 'not_created', ...(value.code ? { code: value.code } : {}), automaticRetry: false };
 }
 
+function validateSavedState(state, options) {
+  if (!state || state.operationId !== options.status || state.target !== options.target
+      || state.targetRevision !== options.revision || state.username !== options.username || state.reference !== options.reference
+      || !['reserved', 'credential_staged', 'dispatching', 'publishing', 'complete', 'stopped', ...[...phases].map(p => 'windows_' + p)].includes(state.stage)
+      || !['not_created', 'unknown', 'created'].includes(state.accountState)
+      || !['not_created', 'staged_private', 'linked_pending_unlink', 'published'].includes(state.secretState)
+      || state.accountSid != null && !sidPattern.test(state.accountSid) || state.code !== undefined && !safeCodes.has(state.code)) fail('LOCAL_STATE_FAILED');
+}
+
 /** Dry-run is read-only. Only explicit --apply creates state, credentials or an account. */
 export async function runProvisionGuiAccount(args, { env = process.env, loadRuntime = defaultRuntime,
   windowsPort = createWindowsProvisionPort, passwordFactory = generateGuiPassword, write = value => console.log(JSON.stringify(value)) } = {}) {
@@ -199,8 +209,8 @@ export async function runProvisionGuiAccount(args, { env = process.env, loadRunt
         if (!info.isFile() || info.nlink !== 1 || info.uid !== process.geteuid() || (info.mode & 0o777) !== 0o600 || info.size > 65536) fail('UNSAFE_STORE');
         text = await file.readFile('utf8');
       } finally { await file.close(); }
-      state = JSON.parse(text.trim().split('\n').at(-1));
-      if (state.target !== target.id || state.targetRevision !== options.revision || state.reference !== options.reference || state.username !== options.username) fail('TARGET_CHANGED');
+      const saved = JSON.parse(text.trim().split('\n').at(-1));
+      validateSavedState(saved, options); state = saved;
       const result = publicState(state); write(result); return result;
     }
     if (await exists(finalPath)) fail('SECRET_EXISTS');
