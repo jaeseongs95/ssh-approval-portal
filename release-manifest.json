@@ -270,8 +270,8 @@
     },
     {
       "path": "helper/environment-helper.py",
-      "size": 16329,
-      "sha256": "aa13f77a99d7f4b93bdff7f2c902dc6f543ffaf42fb71f8840a36140e3d01168"
+      "size": 16420,
+      "sha256": "4b9440e3846fcf40367c9859bd158ff18c7fd3d800dc5336e0e9124ce534295e"
     },
     {
       "path": "helper/file-helper.py",
@@ -2375,8 +2375,8 @@
     },
     {
       "path": "test/test_environment_helper.py",
-      "size": 20524,
-      "sha256": "3c5be295fce29b42b2f50bfac8c9fc8951dcd600a128b879d30af813ac384262"
+      "size": 23698,
+      "sha256": "5795f25cb8356a990e56c591baf94f724d30e602d1be7a9f1a079d84460bed45"
     },
     {
       "path": "test/test_helper.py",
