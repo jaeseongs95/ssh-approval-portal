@@ -75,7 +75,7 @@ test('move keeps the source for unknown outcomes and consumes once only after co
   assert.equal((await lstat(join(f.root, 'artifacts', original.id + '.part'))).size, 4);
   await assert.rejects(f.service.remove({ uuid }), /busy/);
   assert.equal((await f.service.move(args)).requestId, first.requestId); assert.equal(f.requests, 1);
-  await assert.rejects(f.service.move({ ...args, operationKey: 'other-move-action-01' }), /unavailable/);
+  await assert.rejects(f.service.move({ ...args, operationKey: 'other-move-action-01' }), { code: 'OPAQUE_ACTION_RECONCILIATION_REQUIRED' });
   f.journal.outcome(first.requestId, success);
   f.service.onTerminal({ id: first.requestId });
   const moved = await f.service.stat({ uuid });
