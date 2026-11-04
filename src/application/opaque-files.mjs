@@ -4,6 +4,28 @@ const digest = value => createHash('sha256').update(value).digest('hex');
 const keyValid = value => typeof value === 'string' && /^[A-Za-z0-9_.:-]{16,128}$/.test(value);
 const settled = new Set(['completed', 'failed', 'cancelled', 'expired', 'denied']);
 const fail = code => { throw Object.assign(Error(code), { code, executionAttempted: false }); };
+const publicErrorCodes = new Set([
+  'ARTIFACT_QUOTA', 'ARTIFACT_NOT_FOUND', 'ARTIFACT_HASH_MISMATCH', 'CHUNK_HASH_MISMATCH', 'ARTIFACT_CHUNK_CONFLICT',
+  'ARTIFACT_EXPIRED', 'ARTIFACT_INCOMPLETE', 'ARTIFACT_NOT_WRITABLE', 'ARTIFACT_NOT_READY', 'ARTIFACT_BUSY', 'ARTIFACT_STORAGE_UNSAFE',
+  'INVALID_OPERATION_KEY', 'INVALID_FILE_NAME', 'INVALID_FILE_SIZE', 'INVALID_FILE_HASH', 'INVALID_ARTIFACT_CHUNK', 'FILE_TOO_LARGE',
+  'OPERATION_KEY_CONFLICT', 'INVALID_FILE_FLAG', 'INVALID_REMOTE_PATH', 'TARGET_REVISION_CONFLICT',
+  'STAGED_FILE_CONSUMED', 'STAGED_FILE_EXPIRED', 'STAGED_FILE_CHANGED', 'MAINTENANCE', 'OPAQUE_FILES_CLOSED',
+  'OPAQUE_ADMISSION_BUSY', 'OPAQUE_ACTION_CONFLICT', 'OPAQUE_ACTION_RECONCILIATION_REQUIRED', 'OPERATION_ACCEPTANCE_NOT_CONFIRMED', 'OPAQUE_FILES_UNAVAILABLE',
+]);
+// Older store ports throw messages. Match complete known literals only; never
+// turn arbitrary messages, paths, filesystem error codes or stacks into output.
+const legacyErrorCodes = new Map([
+  ['Staged file unavailable', 'ARTIFACT_NOT_FOUND'], ['Unknown transfer', 'ARTIFACT_NOT_FOUND'], ['Invalid transfer ID', 'ARTIFACT_NOT_FOUND'],
+  ['Invalid filename', 'INVALID_FILE_NAME'], ['Invalid operation key', 'INVALID_OPERATION_KEY'], ['Invalid file hash', 'INVALID_FILE_HASH'],
+  ['Transfer is not writable', 'ARTIFACT_NOT_WRITABLE'], ['Invalid chunk', 'INVALID_ARTIFACT_CHUNK'],
+  ['Chunk sequence or size mismatch', 'ARTIFACT_CHUNK_CONFLICT'], ['Incomplete or expired upload', 'ARTIFACT_INCOMPLETE'],
+  ['Artifact hash mismatch', 'ARTIFACT_HASH_MISMATCH'], ['Artifact not ready', 'ARTIFACT_NOT_READY'], ['Staged file is busy', 'ARTIFACT_BUSY'],
+  ['Operation key conflicts with staged file', 'OPERATION_KEY_CONFLICT'], ['Operation key conflicts with staged action', 'OPERATION_KEY_CONFLICT'],
+  ['Unsafe artifact file', 'ARTIFACT_STORAGE_UNSAFE'], ['Artifact file changed', 'ARTIFACT_STORAGE_UNSAFE'], ['Unsafe artifact removal', 'ARTIFACT_STORAGE_UNSAFE'],
+]);
+export function opaqueFileErrorCode(error) {
+  return publicErrorCodes.has(error?.code) ? error.code : legacyErrorCodes.get(error?.message) ?? 'ARTIFACT_INTERNAL_ERROR';
+}
 const published = (record, item, job) => record?.state === 'completed' && record.result?.failed === false &&
   !record.auditError && !record.metadata?.approval?.auditError && !job?.auditError &&
   record.result.data?.published === true && record.result.data.size === item.size && record.result.data.sha256 === item.sha256 &&

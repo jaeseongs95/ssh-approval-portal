@@ -10,6 +10,7 @@ import { CHUNK_BYTES, MAX_BYTES, EXPIRES_MS } from '../../contracts/ports.mjs';
 export { CHUNK_BYTES, MAX_BYTES } from '../../contracts/ports.mjs';
 const validHash = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 const validKey = value => typeof value === 'string' && /^[A-Za-z0-9_.:-]{16,128}$/.test(value);
+const artifactError = (code, message) => Object.assign(Error(message), { code });
 const privateFile = st => st.isFile() && !st.isSymbolicLink() && st.nlink === 1 &&
   (process.platform === 'win32' || (!(st.mode & 0o077) && st.uid === process.getuid()));
 const privateDirectory = st => st.isDirectory() && !st.isSymbolicLink() &&
@@ -33,7 +34,7 @@ const validateStaged = meta => {
 };
 const validateUpload = meta => {
   if (meta.purpose === 'staged') validateStaged(meta); else anyRemotePath(meta.remotePath);
-  if (typeof meta.fileName !== 'string' || !meta.fileName || meta.fileName.length > 255 || /[\x00-\x1f\x7f/\\]/.test(meta.fileName)) throw Error('Invalid filename');
+  if (typeof meta.fileName !== 'string' || !meta.fileName || meta.fileName.length > 255 || /[\x00-\x1f\x7f/\\]/.test(meta.fileName)) throw artifactError('INVALID_FILE_NAME', 'Invalid filename');
 };
 const ownership = meta => ({
   ...(meta.targetId === undefined ? {} : { targetId: meta.targetId, targetRevision: meta.targetRevision,
@@ -218,7 +219,8 @@ export class Artifacts {
     } catch (error) { await fd.close(); throw error; }
   }
   #allocate(meta, pinned = false) {
-    if (!Number.isSafeInteger(meta.size) || meta.size < 0 || meta.size > this.maxBytes) throw Error('File exceeds transfer limit');
+    if (!Number.isSafeInteger(meta.size) || meta.size < 0) throw artifactError('INVALID_FILE_SIZE', 'File exceeds transfer limit');
+    if (meta.size > this.maxBytes) throw artifactError('FILE_TOO_LARGE', 'File exceeds transfer limit');
     if (this.reserved + charge(meta) > this.budget) throw Object.assign(Error('Staging budget exhausted'), { code: 'ARTIFACT_QUOTA' });
     const id = randomBytes(24).toString('hex');
     const item = { ...meta, id, path: join(this.#root, id + '.part'), received: 0, sequence: 0, last: null, chunks: [],
@@ -253,11 +255,13 @@ export class Artifacts {
     return snapshot(item);
   }
   async beginStaged({ ownerId, operationKey, fileName, size, sha256 }) {
+    if (!validKey(operationKey)) throw artifactError('INVALID_OPERATION_KEY', 'Invalid operation key');
+    if (!validHash(sha256)) throw artifactError('INVALID_FILE_HASH', 'Invalid file hash');
     const meta = { purpose: 'staged', publicUUID: randomUUID(), ownerId, operationKey, fileName, size, sha256, actions: [] };
     validateUpload(meta);
     const previous = [...this.#items.values()].find(x => x.purpose === 'staged' && x.ownerId === ownerId && x.operationKey === operationKey);
     if (previous) {
-      if (['fileName', 'size', 'sha256'].some(key => previous[key] !== meta[key])) throw Error('Operation key conflicts with staged file');
+      if (['fileName', 'size', 'sha256'].some(key => previous[key] !== meta[key])) throw artifactError('OPERATION_KEY_CONFLICT', 'Operation key conflicts with staged file');
       return snapshot(previous);
     }
     const item = this.#allocate({ ...meta, direction: 'upload' });
@@ -266,9 +270,9 @@ export class Artifacts {
     return snapshot(item);
   }
   staged(uuid, ownerId) {
-    if (!validUUID(uuid) || !validOwner(ownerId)) throw Error('Staged file unavailable');
+    if (!validUUID(uuid) || !validOwner(ownerId)) throw artifactError('ARTIFACT_NOT_FOUND', 'Staged file unavailable');
     const item = [...this.#items.values()].find(x => x.purpose === 'staged' && x.publicUUID === uuid && x.ownerId === ownerId);
-    if (!item) throw Error('Staged file unavailable');
+    if (!item) throw artifactError('ARTIFACT_NOT_FOUND', 'Staged file unavailable');
     return snapshot(item);
   }
   reserveStagedAction(uuid, ownerId, action) {
@@ -281,9 +285,11 @@ export class Artifacts {
       if (previous.inputDigest !== action.inputDigest) throw Error('Operation key conflicts with staged action');
       return structuredClone(previous);
     }
-    if (item.state !== 'ready' || item.busy || this.#now() >= item.expiresAt ||
+    if (item.state !== 'ready') throw artifactError('ARTIFACT_NOT_READY', 'Staged file is unavailable for transfer');
+    if (this.#now() >= item.expiresAt) throw artifactError('ARTIFACT_EXPIRED', 'Staged file is unavailable for transfer');
+    if (item.busy ||
         (action.action === 'move' && item.actions.some(x => x.state === 'reserved')) ||
-        item.actions.some(x => x.action === 'move' && !['refused', 'settled'].includes(x.state))) throw Error('Staged file is unavailable for transfer');
+        item.actions.some(x => x.action === 'move' && !['refused', 'settled'].includes(x.state))) throw artifactError('ARTIFACT_BUSY', 'Staged file is unavailable for transfer');
     const next = { ...structuredClone(action), state: 'reserved' }, before = item.pinned;
     validateStaged({ ...item, actions: [...item.actions, next] });
     item.actions.push(next); item.pinned = true;
@@ -303,7 +309,8 @@ export class Artifacts {
     const item = this.#get(this.staged(uuid, ownerId).id);
     if (this.#consuming.has(item.id)) return this.#consuming.get(item.id);
     if (item.state === 'consumed') return snapshot(item);
-    if (!['moved', 'removed'].includes(reason) || item.busy || (reason === 'removed' && item.pinned)) throw Error('Staged file is busy');
+    if (!['moved', 'removed'].includes(reason)) throw Error('Invalid staged file consumption');
+    if (item.busy || (reason === 'removed' && item.pinned)) throw artifactError('ARTIFACT_BUSY', 'Staged file is busy');
     const work = (async () => {
       item.busy = true;
       try {
@@ -323,12 +330,16 @@ export class Artifacts {
   }
   async append(id, sequence, bytes) {
     const x = this.#get(id);
+    if (x.purpose === 'staged' && ['consuming', 'consumed'].includes(x.state)) throw artifactError('STAGED_FILE_CONSUMED', 'Transfer is not writable');
+    if (x.purpose === 'staged' && this.#now() >= x.expiresAt) throw artifactError('ARTIFACT_EXPIRED', 'Transfer is not writable: expired');
+    if (x.purpose === 'staged' && (x.busy || x.pinned)) throw artifactError('ARTIFACT_BUSY', 'Transfer is not writable: busy');
     if ((!['staging', ...(x.purpose === 'staged' ? ['ready'] : [])].includes(x.state)) || this.#now() >= x.expiresAt || x.busy || x.pinned) throw Error('Transfer is not writable');
-    if (!Number.isSafeInteger(sequence) || sequence < 0 || !(bytes instanceof Uint8Array) || !bytes.length || bytes.length > CHUNK_BYTES) throw Error('Invalid chunk');
+    if (!Number.isSafeInteger(sequence) || sequence < 0 || !(bytes instanceof Uint8Array) || !bytes.length || bytes.length > CHUNK_BYTES) throw artifactError('INVALID_ARTIFACT_CHUNK', 'Invalid chunk');
     const digest = hash(bytes);
     if (sequence < x.sequence && x.chunks[sequence]?.sha256 === digest && x.chunks[sequence]?.size === bytes.length) return { sequence: x.sequence, received: x.received };
+    if (x.purpose === 'staged' && sequence < x.sequence) throw artifactError('ARTIFACT_CHUNK_CONFLICT', 'Chunk sequence or size mismatch');
     if (x.state !== 'staging') throw Error('Transfer is not writable');
-    if (sequence !== x.sequence || x.received + bytes.length > x.size) throw Error('Chunk sequence or size mismatch');
+    if (sequence !== x.sequence || x.received + bytes.length > x.size) throw artifactError('ARTIFACT_CHUNK_CONFLICT', 'Chunk sequence or size mismatch');
     x.busy = true;
     try {
       const fd = await this.#openOwned(x.path, constants.O_WRONLY);
@@ -346,7 +357,10 @@ export class Artifacts {
   }
   async finish(id) {
     const x = this.#get(id);
+    if (x.purpose === 'staged' && ['consuming', 'consumed'].includes(x.state)) throw artifactError('STAGED_FILE_CONSUMED', 'Incomplete or expired upload');
     if (x.state === 'ready' && (x.pinned || (x.purpose === 'staged' && this.#now() < x.expiresAt))) return snapshot(x);
+    if (x.purpose === 'staged' && this.#now() >= x.expiresAt) throw artifactError('ARTIFACT_EXPIRED', 'Incomplete or expired upload');
+    if (x.purpose === 'staged' && x.busy) throw artifactError('ARTIFACT_BUSY', 'Incomplete or expired upload');
     if (x.state !== 'staging' || x.busy || this.#now() >= x.expiresAt || x.received !== x.size) throw Error('Incomplete or expired upload');
     x.busy = true;
     try {
@@ -462,7 +476,7 @@ export class Artifacts {
       const st = await fd.stat(); if (!st.isFile() || st.size !== x.size) throw Error('Artifact changed');
       const digest = createHash('sha256');
       for await (const bytes of fd.createReadStream({ autoClose: false })) digest.update(bytes);
-      if (digest.digest('hex') !== x.sha256) throw Error('Artifact hash mismatch');
+      if (digest.digest('hex') !== x.sha256) throw artifactError('ARTIFACT_HASH_MISMATCH', 'Artifact hash mismatch');
       return fd;
     } catch (err) { await fd.close(); throw err; }
   }
