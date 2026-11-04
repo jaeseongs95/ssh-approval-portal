@@ -82,7 +82,7 @@ test('typed submit rejection is not mistaken for an accepted ID or a new rendere
 });
 
 test('late observe cannot replace another card or fetch its private presentation',async t=>{
- const f=await fixture(t);await f.receiveJob();let release;f.hold(new Promise(done=>release=done));const refresh=f.controller.refresh();
- while(f.observations.length===0)await new Promise(done=>setImmediate(done));await f.receiveTransfer();release();await refresh;
+ const f=await fixture(t);await f.receiveJob();let release;f.hold(new Promise(done=>release=done));const refresh=f.controller.refresh().catch(error=>error);
+ while(f.calls.length===0)await new Promise(done=>setImmediate(done));await f.receiveTransfer();release();assert.equal(await refresh,undefined);
  assert.equal(f.state.mode,'transfer');assert.deepEqual(f.calls.map(c=>c.name),['observe']);assert.equal(f.submissions.length,0);
 });
