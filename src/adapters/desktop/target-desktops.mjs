@@ -1,38 +1,14 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { hash } from '../../domain/validation.mjs';
 import { desktopFail as fail } from '../../domain/desktop-lease.mjs';
 import { createRfbDesktopAdapter } from './rfb.mjs';
 import { createLinuxSessionDesktopAdapter } from './linux-session.mjs';
-import { createRdpSessionDesktopAdapter, rdpClientCapabilities } from './rdp-session.mjs';
+import { createRdpSessionDesktopAdapter } from './rdp-session.mjs';
+import { readNativeRdpCapabilities } from './rdp-runtime.mjs';
 import { openLocalDesktopProcess } from './local-process.mjs';
 import { openDesktopTunnel } from './ssh-tunnel.mjs';
 
-const run = promisify(execFile);
+export { readNativeRdpCapabilities } from './rdp-runtime.mjs';
 const backendOf = runtime => runtime.desktop?.backend ?? 'rfb';
-
-/** Probe fixed native binaries without inheriting the bridge's authentication environment. */
-export async function readNativeRdpCapabilities() {
-  if (process.platform !== 'linux') return { available: false, executable: null };
-  const home = await mkdtemp(join(tmpdir(), 'portal-rdp-probe-'));
-  try {
-  for (const executable of ['/usr/bin/xfreerdp3', '/usr/bin/xfreerdp']) {
-    try {
-      const options = { env: { PATH: '/usr/bin:/bin', LANG: 'C.UTF-8', HOME: home,
-        XDG_CONFIG_HOME: home, XDG_CACHE_HOME: home, XDG_RUNTIME_DIR: home }, timeout: 5000, maxBuffer: 131072, windowsHide: true };
-      const version = await run(executable, ['/version'], options);
-      const help = await run(executable, ['/help'], options);
-      const result = rdpClientCapabilities({ platform: process.platform, executable,
-        version: version.stdout + version.stderr, help: help.stdout + help.stderr });
-      if (result.available) return result;
-    } catch { /* A missing/incompatible native client is a capability, never an authentication failure. */ }
-  }
-  return { available: false, executable: null };
-  } finally { await rm(home, { recursive: true, force: true }); }
-}
 
 /** Concrete GUI backends. Target addresses, helpers and secrets never come from an agent request. */
 export function createTargetDesktops({ targets, registry, openDesktopChannel, openDesktopProcessChannel,
@@ -102,8 +78,8 @@ export function createTargetDesktops({ targets, registry, openDesktopChannel, op
           } catch { fail('DESKTOP_RDP_CREDENTIAL_UNAVAILABLE'); }
         },
         openSession: ({ application, writeBootstrap, ...args }) => createLinuxSessionDesktopAdapter({ ...args,
-          application, writeBootstrap, openSession: ({ command, signal: localSignal }) =>
-            openLocalProcess({ command, signal: localSignal, beforeDispatch: guard(binding) }) }).open({ binding, signal }),
+          application, writeBootstrap, openSession: ({ command, signal: localSignal, nativeInput }) =>
+            openLocalProcess({ command, signal: localSignal, nativeInput, beforeDispatch: guard(binding) }) }).open({ binding, signal }),
       }).open({ binding, signal });
     },
   };
@@ -112,11 +88,14 @@ export function createTargetDesktops({ targets, registry, openDesktopChannel, op
       const runtime = targets.select(binding.targetId); runtime.verify();
       if (runtime.revision !== binding.targetRevision) fail('DESKTOP_STALE_TARGET');
       const backend = backendOf(runtime), configured = runtime.desktop?.enabled === true;
+      const native = configured && backend === 'rdp' && openDesktopChannel ? await readRdpCapabilities() : null;
       const available = configured && (backend === 'rfb' ? Boolean(openDesktopChannel)
-        : backend === 'xvnc' ? Boolean(openDesktopProcessChannel) : Boolean(openDesktopChannel) && (await readRdpCapabilities()).available);
+        : backend === 'xvnc' ? Boolean(openDesktopProcessChannel) : native?.available === true);
       return { configured, backend: configured ? backend : null, lifecycle: configured ? backend === 'rfb' ? 'attached' : 'managed' : null,
         status: !configured ? 'disabled' : available ? 'configured' : 'backend_unavailable',
-        reason: configured && !available ? backend === 'rdp' ? 'DESKTOP_RDP_CLIENT_UNAVAILABLE' : 'DESKTOP_BACKEND_UNAVAILABLE' : null,
+        reason: configured && !available ? backend === 'rdp'
+          ? /^DESKTOP_RDP_[A-Z_]+$/.test(native?.reason) ? native.reason : 'DESKTOP_RDP_CLIENT_UNAVAILABLE'
+          : 'DESKTOP_BACKEND_UNAVAILABLE' : null,
         actions: configured ? ['observe', 'pointer', 'key', 'text'] : [], requiresUserClient: false };
     },
     leaseKey(binding) {

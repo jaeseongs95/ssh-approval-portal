@@ -1,28 +1,27 @@
 import { randomUUID, createHash } from 'node:crypto';
 import { desktopFail, DesktopError } from '../../domain/desktop-lease.mjs';
 import { parseSecretReference } from '../../application/secret-service.mjs';
+import { nativeRdpCapabilities, nativeRdpExecutable } from './rdp-runtime.mjs';
 
-const executables = ['/usr/bin/xfreerdp', '/usr/bin/xfreerdp3'];
+/** Explicit native capability plus the verified private executable, not stock help text. */
+export const rdpClientCapabilities = input => Object.freeze(nativeRdpCapabilities(input));
 
-/** Probe output only; package presence/version alone does not establish supported options. */
-export function rdpClientCapabilities({ platform, executable, version, help } = {}) {
-  const valid = platform === 'linux' && executables.includes(executable)
-    && typeof version === 'string' && /\b(?:2|3)\.\d+\.\d+\b/.test(version)
-    && typeof help === 'string' && help.length <= 131072;
-  const options = valid && ['from-stdin', 'ignore', 'nla', 'log-level', 'size', 'clipboard'].every(option => help.includes(option));
-  return Object.freeze({ available: Boolean(options), executable: options ? executable : null });
-}
-
-/** Fixed application description for the managed-display helper. Contains no credentials. */
-export function rdpSessionPlan({ config, endpoint, capabilities, width = 1280, height = 800 } = {}) {
+function validatePlan(config, width, height) {
   try { parseSecretReference(config?.credentialRef); }
   catch { desktopFail('DESKTOP_INVALID_CONFIG'); }
   if (!Number.isInteger(width) || width < 320 || width > 4096
     || !Number.isInteger(height) || height < 200 || height > 4096 || width * height > 4_194_304) desktopFail('DESKTOP_INVALID_CONFIG');
+}
+
+/** Fixed application description for the managed-display helper. Contains no credentials. */
+export function rdpSessionPlan({ config, endpoint, capabilities, width = 1280, height = 800 } = {}) {
+  validatePlan(config, width, height);
   if (endpoint?.host !== '127.0.0.1' || !Number.isInteger(endpoint.port) || endpoint.port < 1 || endpoint.port > 65535) desktopFail('DESKTOP_RDP_INVALID_TUNNEL');
-  if (capabilities?.available !== true || !executables.includes(capabilities.executable)) desktopFail('DESKTOP_RDP_CLIENT_UNAVAILABLE');
+  if (capabilities?.available !== true || capabilities.executable !== nativeRdpExecutable
+    || !/^[a-f0-9]{64}$/.test(capabilities.executableSha256) || !/^[a-f0-9]{64}$/.test(capabilities.patchDigest)) desktopFail('DESKTOP_RDP_CLIENT_UNAVAILABLE');
   return Object.freeze({ kind: 'rdp', host: endpoint.host, port: endpoint.port,
-    executable: capabilities.executable, certificateMode: 'ssh-tunnel', width, height });
+    executable: capabilities.executable, executableSha256: capabilities.executableSha256,
+    patchDigest: capabilities.patchDigest, certificateMode: 'ssh-tunnel', width, height });
 }
 
 /** /from-stdin:force consumes password before username/domain in FreeRDP 2; use /from-stdin.
@@ -60,8 +59,7 @@ export function createRdpSessionDesktopAdapter({ openSession, openTunnel, readCl
   verifyServerIdentity, config, width = 1280, height = 800, ttlMs = 900_000, now = Date.now } = {}) {
   if (![openSession, openTunnel, readClientCapabilities, credentialProvider, verifyServerIdentity].every(value => typeof value === 'function')
     || !Number.isSafeInteger(ttlMs) || ttlMs < 1000 || ttlMs > 3_600_000) desktopFail('DESKTOP_INVALID_CONFIG');
-  rdpSessionPlan({ config, endpoint: { host: '127.0.0.1', port: 3389 },
-    capabilities: { available: true, executable: '/usr/bin/xfreerdp3' }, width, height });
+  validatePlan(config, width, height);
   config = Object.freeze({ credentialRef: config.credentialRef });
   return {
     async open({ binding, signal } = {}) {
@@ -69,27 +67,33 @@ export function createRdpSessionDesktopAdapter({ openSession, openTunnel, readCl
       let capabilities;
       try { capabilities = await readClientCapabilities({ binding, signal }); }
       catch { desktopFail('DESKTOP_RDP_CLIENT_UNAVAILABLE'); }
-      if (capabilities?.available !== true) desktopFail('DESKTOP_RDP_CLIENT_UNAVAILABLE');
+      if (capabilities?.available !== true) desktopFail(/^DESKTOP_RDP_[A-Z_]+$/.test(capabilities?.reason) ? capabilities.reason : 'DESKTOP_RDP_CLIENT_UNAVAILABLE');
       let tunnel, tunnelOpening, desktop, opening, closing, bootstrapUsed = false, closed = false;
       const controller = new AbortController();
       const sessionRef = `rdp:${randomUUID()}`;
       const resourceGeneration = createHash('sha256').update(sessionRef).digest('hex');
       const close = () => closing ??= (async () => {
-        closed = true; controller.abort();
-        let outerSessionState = 'unknown', cleanupError;
+        closed = true;
+        if (!desktop) controller.abort();
+        let outerSessionState = 'unknown', nativeInputState = 'unknown', nativeReleaseSent = false, cleanupError;
         if (!desktop && opening) { try { desktop = await opening; } catch { /* Open retains its error. */ } }
         try {
           if (desktop) {
             const receipt = await desktop.close();
             outerSessionState = receipt?.sessionState === 'terminated' ? 'terminated' : 'unknown';
+            nativeInputState = receipt?.nativeInputState === 'detached' ? 'detached' : 'unknown';
+            nativeReleaseSent = receipt?.nativeReleaseSent === true;
+            if (receipt?.nativeInputState === 'unknown') cleanupError = 'DESKTOP_RDP_INPUT_DETACH_UNKNOWN';
+            cleanupError ??= receipt?.cleanupError;
           }
         } catch { cleanupError = 'DESKTOP_RDP_DISPLAY_CLEANUP_FAILED'; }
+        finally { controller.abort(); }
         if (!tunnel && tunnelOpening) { try { tunnel = await tunnelOpening; } catch { /* Open retains its error. */ } }
         try { await tunnel?.close(); } catch { cleanupError ??= 'DESKTOP_RDP_TUNNEL_CLEANUP_FAILED'; }
         signal?.removeEventListener('abort', abort);
         // Detaching a native client never proves that its Windows OS session was logged off.
         return { sessionState: 'unknown', remoteSessionState: 'unknown', outerSessionState,
-          logout: false, mode: 'detach', ...(cleanupError ? { cleanupError } : {}) };
+          nativeInputState, nativeReleaseSent, logout: false, mode: 'detach', ...(cleanupError ? { cleanupError } : {}) };
       })();
       const abort = () => { controller.abort(); void close().catch(() => {}); };
       signal?.addEventListener('abort', abort, { once: true });

@@ -73,18 +73,22 @@ export function createDesktopService({ adapter, authorize, verifyTarget, maxSess
       try { releaseSent = (await item.desktop?.release())?.sent === true; }
       catch (error) { cleanupError = error.code ?? 'DESKTOP_RELEASE_FAILED'; }
       finally {
-        item.controller.abort();
+        // Cancel an opening/in-flight operation immediately. An idle session can
+        // finish its native release/close acknowledgement before transport abort.
+        if (!item.desktop || item.pending) item.controller.abort();
         // Keep the physical resource reserved until even a late open settles and closes.
         if (!item.desktop && item.opening) {
           try { item.desktop = await item.opening; } catch { /* The original open caller receives its failure. */ }
         }
         try {
           const result = await item.desktop?.close();
+          if (typeof result?.cleanupError === 'string') cleanupError ??= result.cleanupError;
           if (result?.sessionState !== undefined && !['terminated', 'preserved', 'unknown'].includes(result.sessionState)) desktopFail('DESKTOP_INVALID_CLEANUP_RECEIPT');
           sessionState = ['terminated', 'preserved', 'unknown'].includes(result?.sessionState) ? result.sessionState
             : item.desktop && (item.lifecycle ?? item.desktop.lifecycle ?? 'attached') === 'attached' ? 'preserved' : 'unknown';
         }
         catch (error) { cleanupError ??= error.code ?? 'DESKTOP_CLOSE_FAILED'; }
+        finally { item.controller.abort(); }
         sessions.delete(item.id);
         if (resources.get(item.resourceKey) === item.id) resources.delete(item.resourceKey);
       }

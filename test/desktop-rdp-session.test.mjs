@@ -1,11 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Writable } from 'node:stream';
+import { nativeRdpExecutable } from '../src/adapters/desktop/rdp-runtime.mjs';
 import { createRdpSessionDesktopAdapter, rdpClientCapabilities, rdpSessionPlan,
   writeRdpCredentialBootstrap } from '../src/adapters/desktop/rdp-session.mjs';
 
 const config = { credentialRef: 'secret://fixture/windows-agent' };
-const capabilities = { available: true, executable: '/usr/bin/xfreerdp3' };
+const capabilities = { available: true, executable: nativeRdpExecutable,
+  executableSha256: 'a'.repeat(64), patchDigest: 'b'.repeat(64) };
 const credentials = { username: 'fixture-user', domain: '', password: 'fixture-private-password' };
 const binding = { targetId: 'windows', targetRevision: 'a'.repeat(64), epoch: 1 };
 const identity = { mode: 'pinned-ssh-loopback', hostKeyVerified: true,
@@ -16,7 +18,7 @@ function fixture(overrides = {}) {
   const seen = { credentials: 0, displayClosed: 0, tunnelClosed: 0, released: 0, bootstrap: null };
   const display = { observe: async () => ({ width: 1280, height: 800, geometryRevision: 1, data: Buffer.from('fixture') }),
     input: async actions => { seen.actions = actions; }, release: async () => { seen.released++; return { sent: true }; },
-    close: async () => { seen.displayClosed++; return { sessionState: 'terminated' }; } };
+    close: async () => { seen.displayClosed++; return { sessionState: 'terminated', nativeInputState: 'detached', nativeReleaseSent: true }; } };
   const options = { config, readClientCapabilities: async () => capabilities,
     openTunnel: async args => { seen.tunnel = args; return { host: '127.0.0.1', port: 33001, close: async () => { seen.tunnelClosed++; } }; },
     credentialProvider: async args => { seen.credentials++; seen.credentialRequest = args; return credentials; },
@@ -35,7 +37,9 @@ test('RDP relay: native/display readiness is distinct from Windows logon and clo
   const desktop = await f.adapter.open({ binding });
   assert.equal(f.seen.tunnel.host, '127.0.0.1'); assert.equal(f.seen.tunnel.port, 3389);
   assert.equal(f.seen.session.application.port, 33001);
-  assert.equal(f.seen.session.application.executable, '/usr/bin/xfreerdp3');
+  assert.equal(f.seen.session.application.executable, nativeRdpExecutable);
+  assert.equal(f.seen.session.application.executableSha256, capabilities.executableSha256);
+  assert.equal(f.seen.session.application.patchDigest, capabilities.patchDigest);
   assert.equal(f.seen.session.application.certificateMode, 'ssh-tunnel');
   assert.equal(JSON.stringify(f.seen.session.application).includes(credentials.password), false);
   assert.deepEqual(JSON.parse(f.seen.bootstrap), credentials);
@@ -49,7 +53,8 @@ test('RDP relay: native/display readiness is distinct from Windows logon and clo
   assert.equal((await desktop.observe()).data.toString(), 'fixture');
   await desktop.release(); assert.equal(f.seen.released, 1);
   const receipt = await desktop.close();
-  assert.deepEqual(receipt, { sessionState: 'unknown', remoteSessionState: 'unknown', outerSessionState: 'terminated', logout: false, mode: 'detach' });
+  assert.deepEqual(receipt, { sessionState: 'unknown', remoteSessionState: 'unknown', outerSessionState: 'terminated',
+    nativeInputState: 'detached', nativeReleaseSent: true, logout: false, mode: 'detach' });
   assert.deepEqual(await desktop.close(), receipt);
   assert.equal(f.seen.displayClosed, 1); assert.equal(f.seen.tunnelClosed, 1);
   assert.throws(() => desktop.observe(), { code: 'DESKTOP_CLOSED' });
@@ -78,14 +83,33 @@ test('RDP relay validates public plan and restricts the tunnel to loopback', () 
   }
 });
 
-test('RDP client capability needs actual native help/version and every required option', () => {
-  const probe = { platform: 'linux', executable: '/usr/bin/xfreerdp3', version: 'FreeRDP version 3.32.1',
-    help: '/from-stdin /cert:ignore /sec:nla /log-level:OFF /size: /clipboard' };
+test('RDP client capability requires the private framed protocol, upstream pin and executable digest', () => {
+  const probe = { platform: 'linux', ...capabilities, native: { protocol: 'ags-native-input/1',
+    upstreamCommit: 'bf217a504e54cc719880c228e82353382cd7d4fa', patchDigest: capabilities.patchDigest } };
   assert.deepEqual(rdpClientCapabilities(probe), capabilities);
-  for (const changed of [{ platform: 'windows' }, { executable: '/tmp/xfreerdp3' }, { version: 'unknown' },
-    { help: probe.help.replace('from-stdin', '') }, { help: probe.help.replace('ignore', '') }]) {
+  for (const changed of [{ platform: 'windows' }, { executable: '/usr/bin/xfreerdp3' }, { executableSha256: 'unknown' },
+    { native: undefined }, { native: { ...probe.native, protocol: 'stock' } },
+    { native: { ...probe.native, upstreamCommit: 'a'.repeat(40) } },
+    { native: { ...probe.native, patchDigest: 'c'.repeat(64) } }, { native: { ...probe.native, extra: true } }]) {
     assert.equal(rdpClientCapabilities({ ...probe, ...changed }).available, false);
   }
+  assert.equal(rdpClientCapabilities({ platform: 'linux', executable: '/usr/bin/xfreerdp3',
+    version: 'FreeRDP version 3.32.1', help: '/from-stdin /cert:ignore /sec:nla /log-level:OFF /size: /clipboard' }).available, false);
+});
+
+test('RDP normal close preserves the input channel until native detach acknowledgement', async () => {
+  const f = fixture(); const desktop = await f.adapter.open();
+  let acknowledged = false;
+  f.display.close = async () => {
+    assert.equal(f.seen.session.signal.aborted, false);
+    await Promise.resolve();
+    assert.equal(f.seen.session.signal.aborted, false);
+    acknowledged = true;
+    return { sessionState: 'terminated', nativeInputState: 'detached', nativeReleaseSent: true };
+  };
+  const receipt = await desktop.close();
+  assert.equal(acknowledged, true); assert.equal(f.seen.session.signal.aborted, true);
+  assert.equal(receipt.nativeInputState, 'detached'); assert.equal(receipt.nativeReleaseSent, true);
 });
 
 test('RDP private bootstrap rejects controls, oversized native input, malformed UTF16, and clears its buffer', async () => {

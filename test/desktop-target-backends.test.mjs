@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createTargetDesktops } from '../src/adapters/desktop/target-desktops.mjs';
 import { parseTargets } from '../src/adapters/config/targets.mjs';
+import { nativeRdpExecutable } from '../src/adapters/desktop/rdp-runtime.mjs';
 
 const revision = 'a'.repeat(64);
 const binding = { targetId: 'fixture', targetRevision: revision, ownerId: 'fixture-owner', epoch: 1 };
@@ -13,7 +14,8 @@ function fixture(desktop, options = {}) {
     openDesktopChannel: async () => { calls.push('channel'); throw Error('fixture channel refused'); },
     openDesktopProcessChannel: async () => assert.fail('unexpected process'),
     resolver: { resolve: async () => { calls.push('credential'); throw Error('PRIVATE_SECRET'); } },
-    readRdpCapabilities: async () => ({ available: true, executable: '/usr/bin/xfreerdp3' }), ...options };
+    readRdpCapabilities: async () => ({ available: true, executable: nativeRdpExecutable,
+      executableSha256: 'a'.repeat(64), patchDigest: 'b'.repeat(64) }), ...options };
   return { service: createTargetDesktops(deps), runtime, calls, deps };
 }
 
@@ -40,6 +42,10 @@ test('discovery distinguishes configured backend from available native support w
   assert.equal(value.status, 'backend_unavailable');
   assert.equal(value.reason, 'DESKTOP_RDP_CLIENT_UNAVAILABLE');
   assert.equal(value.requiresUserClient, false); assert.deepEqual(f.calls, []);
+  const broken = fixture({ enabled: true, backend: 'rdp', credentialRef: 'secret://fixture/rdp' },
+    { readRdpCapabilities: async () => ({ available: false, reason: 'DESKTOP_RDP_NATIVE_HASH_MISMATCH' }) });
+  assert.equal((await broken.service.capabilities(binding)).reason, 'DESKTOP_RDP_NATIVE_HASH_MISMATCH');
+  assert.deepEqual(broken.calls, []);
   f.runtime.desktop = { enabled: false, backend: 'xvnc' };
   assert.equal((await f.service.capabilities(binding)).status, 'disabled');
 });

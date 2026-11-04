@@ -189,6 +189,25 @@ test('closing a pending open keeps the physical resource reserved until its late
   assert.equal(desktop.closed, true); assert.equal(service.size(), 0);
 });
 
+test('idle GUI close waits for release and detach before aborting its private transport', async () => {
+  let signal, releaseSeen = false, closeSeen = false;
+  const { desktop } = fixture();
+  desktop.release = async () => {
+    assert.equal(signal.aborted, false); await Promise.resolve();
+    assert.equal(signal.aborted, false); releaseSeen = true; return { sent: true };
+  };
+  desktop.close = async () => {
+    assert.equal(signal.aborted, false); assert.equal(releaseSeen, true);
+    await Promise.resolve(); assert.equal(signal.aborted, false); closeSeen = true;
+    return { sessionState: 'unknown', cleanupError: 'DESKTOP_RDP_INPUT_DETACH_UNKNOWN' };
+  };
+  const { service } = fixture({ adapter: { open: async args => { signal = args.signal; return desktop; } } });
+  const lease = await service.open(binding);
+  const receipt = await service.close({ ownerId: binding.ownerId, sessionId: lease.sessionId, epoch: binding.epoch });
+  assert.equal(closeSeen, true); assert.equal(signal.aborted, true); assert.equal(receipt.releaseSent, true);
+  assert.equal(receipt.cleanupError, 'DESKTOP_RDP_INPUT_DETACH_UNKNOWN'); assert.equal(receipt.logout, false);
+});
+
 
 test('GUI-AGENT an open request recovers one pending lease and keeps its original epoch', async t => {
   const gate = Promise.withResolvers(); let opens = 0;
