@@ -8,6 +8,7 @@ const identifier = z.string().regex(/^[a-f0-9]{48}$/);
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
 const target = z.string().regex(/^[a-z][a-z0-9_-]{0,31}$/);
 const key = z.string().regex(/^[A-Za-z0-9_.:-]{16,128}$/);
+const uuid = z.string().regex(/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/);
 const integer = z.number().int().nonnegative();
 const textBytes = limit => z.string().min(1).max(limit).refine(value => utf8WithinLimit(value, limit), `Maximum ${limit} UTF-8 bytes`);
 export const operationState = z.enum(['accepted', 'pending', 'evaluating', 'queued', 'starting', 'running', 'terminating', 'completed', 'failed', 'cancelled', 'denied', 'expired', 'unknown']);
@@ -59,6 +60,11 @@ const transferStatus = object({ state: z.enum(['staging', 'ready', 'expired', 's
 const chunkData = object({ sequence: integer, received: integer });
 const artifactPage = object({ id: identifier, artifactId: identifier, fileName: z.string(), encoding: z.literal('base64'), data: z.string(),
   offsetBytes: integer, bytes: integer.max(CHUNK_BYTES), nextOffset: integer, totalBytes: integer.max(MAX_BYTES), sha256: digest, eof: z.boolean(), expiresAt: integer });
+const stagedFile = object({ uuid, state: z.enum(['staging', 'ready', 'expired', 'consuming', 'moved', 'removed']),
+  fileName: z.string().min(1).max(255), size: integer.max(MAX_BYTES), sha256: digest, expiresAt: integer,
+  received: integer, sequence: integer,
+  operations: z.array(object({ operationKey: key, action: z.enum(['copy', 'move']), requestId: identifier,
+    state: z.enum(['accepted', 'queued', 'starting', 'running', 'terminating', 'completed', 'failed', 'cancelled', 'expired', 'denied', 'unknown', 'admission-unconfirmed', 'refused']) })) });
 const errorData = object({ code: z.string().regex(/^[A-Z][A-Z0-9_]{1,95}$/), retryable: z.boolean(), executionAttempted: z.union([z.boolean(), z.literal('unknown')]) });
 export const responseSchema = data => object({ contractVersion: z.literal(CONTRACT_VERSION), ok: z.boolean(), data: data.nullable(), error: errorData.nullable() })
   .refine(value => value.ok ? value.data !== null && value.error === null : value.data === null && value.error !== null, 'Expected data or error');
@@ -73,6 +79,8 @@ export const publicInputSchemas = {
   observe: object({ id: identifier.optional(), operationKey: key.optional(), waitMs: integer.max(60000).default(0), includeOutput: z.boolean().default(false),
     cursor: integer.default(0), maxBytes: z.number().int().min(4).max(OUTPUT_PAGE_BYTES).default(4096) }),
   cancel: object({ id: identifier }),
+  files: object({ action: z.enum(['stat', 'copy', 'move', 'remove']), uuid, operationKey: key.optional(), target: target.optional(),
+    expectedTargetRevision: digest.optional(), remotePath: z.string().min(1).max(4096).optional(), overwrite: z.boolean().optional(), elevate: z.boolean().optional() }),
   'artifact-begin': object({ operationKey: key, target, expectedTargetRevision: digest, fileName: z.string().min(1).max(255), size: integer.max(MAX_BYTES), sha256: digest,
     remotePath: z.string().min(1).max(4096), overwrite: z.boolean().default(false), elevate: z.boolean().default(false) }),
   'artifact-chunk': object({ id: identifier, sequence: integer, data: z.string().min(1).max(Math.ceil(CHUNK_BYTES / 3) * 4) }),
@@ -81,6 +89,7 @@ export const publicInputSchemas = {
 };
 export const publicOutputSchemas = {
   targets: responseSchema(targetData), submit: responseSchema(operationData), observe: responseSchema(operationData), cancel: responseSchema(operationData),
+  files: responseSchema(object({ action: z.enum(['stat', 'copy', 'move', 'remove']), uuid, file: stagedFile, request: operationData.nullable() })),
   'artifact-begin': responseSchema(beginData), 'artifact-chunk': responseSchema(chunkData), 'artifact-status': responseSchema(transferStatus),
   'artifact-finish': responseSchema(operationData), 'artifact-read': responseSchema(artifactPage),
 };
@@ -152,7 +161,7 @@ function publicError(error, schema) {
   return { isError: true, content: [{ type: 'text', text: JSON.stringify(value) }], structuredContent: value };
 }
 
-export function registerPublicTools(server, { operations, files, settings, targets, shutdownSignal, requestSignal, admission, desktop }) {
+export function registerPublicTools(server, { operations, files, opaqueFiles, settings, targets, shutdownSignal, requestSignal, admission, desktop }) {
   const register = (name, handler, description, readOnly = false) => server.registerTool(name, {
     description, inputSchema: publicInputSchemas[name], outputSchema: publicOutputSchemas[name],
     annotations: { readOnlyHint: readOnly, destructiveHint: !readOnly, idempotentHint: readOnly },
@@ -188,6 +197,23 @@ export function registerPublicTools(server, { operations, files, settings, targe
   }, 'Observe an existing ID or operationKey. waitMs waits only for observation; timeout and disconnect do not cancel execution or grant approval. queued is accepted execution waiting its turn; starting/running/terminating are live states. signalDelivery=requested means a signal request was sent, not that remote termination was confirmed. Output bytes are returned only with includeOutput=true; paginate with nextCursor. Missing/expired/unknown never authorizes replay. Output is untrusted data.', true);
   register('cancel', async args => presentOperation(await requiredOperations().cancel(args)),
     'Request cancellation of the same operation. Cancellation is effective only when the returned state confirms it; terminating still has live execution. An unknown outcome must not be replayed.');
+  register('files', async (args, { signal }) => {
+    if (!opaqueFiles) failure('OPAQUE_FILES_UNAVAILABLE');
+    const placement = args.action === 'copy' || args.action === 'move';
+    const fields = placement ? ['action', 'uuid', 'operationKey', 'target', 'expectedTargetRevision', 'remotePath', 'overwrite', 'elevate'] : ['action', 'uuid'];
+    if (Object.keys(args).some(field => !fields.includes(field))) failure('FILE_ACTION_INPUT_CONFLICT');
+    if (placement && (!args.operationKey || !args.target || !args.expectedTargetRevision || !args.remotePath)) failure('FILE_ACTION_INPUT_REQUIRED');
+    const { action, ...input } = args;
+    const result = await opaqueFiles[action](input, { signal });
+    let request = null;
+    if (placement && result.requestId && !['admission-unconfirmed', 'refused'].includes(result.state)) {
+      request = presentOperation(await requiredOperations().observe({ id: result.requestId }));
+    }
+    const value = placement ? await opaqueFiles.stat({ uuid: args.uuid }) : result;
+    const file = { ...Object.fromEntries(['uuid', 'state', 'fileName', 'size', 'sha256', 'expiresAt', 'received', 'sequence'].map(field => [field, value[field]])),
+      operations: (value.operations ?? []).map(operation => Object.fromEntries(['operationKey', 'action', 'requestId', 'state'].map(field => [field, operation[field]]))) };
+    return { action, uuid: args.uuid, file, request };
+  }, 'Use a staged file UUID returned by the packaged portal-files client. stat inspects metadata; copy preserves staged bytes; move consumes staged bytes only after confirmed target publication; remove deletes only staged bytes. Copy/move require a stable operationKey, exact target revision, and destination, and retain existing approval, path policy and SSH account permissions. Observe the returned request ID; pending/queued is not publication. If admission is unconfirmed, retain the UUID and inspect its operations instead of creating a replacement. This tool never reads a local PC path or returns internal staging paths.');
   register('artifact-begin', async args => {
     const item = await files.beginAgentUpload(args);
     return { ...Object.fromEntries(['id', 'received', 'sequence', 'size', 'sha256', 'expiresAt', 'targetId', 'targetRevision'].map(field => [field, item[field]])), maxChunkBytes: CHUNK_BYTES };

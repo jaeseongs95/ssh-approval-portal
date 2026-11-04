@@ -17,7 +17,7 @@ import { createFileSource } from '../src/adapters/sources/file-source.mjs';
 // source port still checks URL host policy, import cancellation and source concurrency.
 const file = { download_url: 'https://files.example.test/source?signature=URL_SECRET_SENTINEL', file_id: 'FILE_REFERENCE_SENTINEL' };
 const bytes = Buffer.from('FILE_BYTES_NEVER_IN_MODEL\0\xff');
-const publicNames = ['targets', 'submit', 'observe', 'cancel', 'artifact-begin', 'artifact-chunk', 'artifact-status', 'artifact-finish', 'artifact-read'];
+const publicNames = ['targets', 'submit', 'observe', 'cancel', 'files', 'artifact-begin', 'artifact-chunk', 'artifact-status', 'artifact-finish', 'artifact-read'];
 const listen = server => new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const ownerHeaders = { Authorization: 'Bearer test-admin', Origin: 'https://example.test' };
 const waitFor = async condition => {

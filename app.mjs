@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { createOperationStore } from './src/adapters/storage/operation-store.mjs';
 import { createOperationScheduler } from './src/domain/operation-scheduler.mjs';
 import { createOperations } from './src/application/operations.mjs';
+import { createOpaqueFileService } from './src/application/opaque-files.mjs';
 import { createRuntimeCapacity } from './src/application/runtime-capacity.mjs';
 import { createRuntimeCapacityState } from './src/adapters/storage/runtime-capacity-state.mjs';
 import { createDesktopService } from './src/application/desktop.mjs';
@@ -74,7 +75,7 @@ export async function createApplication({ registry, classify, executeCommand, ex
   const browserSessions=['access','oidc'].includes(adminAccess.mode)?createBrowserSessionAdapter():undefined;
   const signer = new Tickets(env.BRIDGE_UI_TICKET_KEY);
   const definitions = resolveTargets(settings, registry);
-  let outputs, commandState, dormantCommandState, cliState, maintenanceState, operationStore, scheduler, capacity, desktopService;
+  let outputs, commandState, dormantCommandState, cliState, maintenanceState, operationStore, scheduler, capacity, desktopService, opaqueFiles;
   const store = new Artifacts(transferRoot, { maxBytes: settings.maxBytes, budget: settings.budget, canReap: () => !maintenanceState?.occupied() });
   const submissions = new AsyncLocalStorage();
   const probeExecutors = new Map();
@@ -225,7 +226,7 @@ export async function createApplication({ registry, classify, executeCommand, ex
         // SFTP returns only after its own verified channel/file cleanup. Uncertain transfer errors remain unknown.
         return outcome.execution ? outcome : { ...outcome, execution: { phase: 'settled', reason: 'exit', remoteState: 'exited', cleanupComplete: true, requiresReconciliation: false, exitCode: outcome.failed ? 1 : 0 } };
       },
-      onTerminal: job => { try { cli?.onTerminal(job); automation?.onTerminal(job); } finally { files?.onTerminal(job); } },
+      onTerminal: job => { try { cli?.onTerminal(job); automation?.onTerminal(job); } finally { try { files?.onTerminal(job); } finally { opaqueFiles?.onTerminal(job); } } },
     });
     automation = commandState && createCommandAutomation({ queue, state: commandState, definition, classify: targetClassify, evaluators, audit: targetAudit,
       ...(executePythonSource ? { prepareSource: preparePythonSource } : {}), sourceBudget, maxCalls: settings.jevMaxCalls, budget: automationBudget });
@@ -336,6 +337,12 @@ export async function createApplication({ registry, classify, executeCommand, ex
     newRevision: () => randomBytes(16).toString('hex'),
     scheduler: { ...scheduler, list: () => operationStore.list() }, audit, maintenance: () => targets.queue.maintenance });
   const operations = createOperations({ targets, queue, commands, files, journal: operationStore, scheduler, submissions, outputs });
+  // Both adapters authenticate the portal owner before reaching this shared authority realm.
+  // The UUID is a file reference, never an authentication credential.
+  opaqueFiles = createOpaqueFileService({ store, targets, queue, files, journal: operationStore, submissions, ownerId: 'portal-owner-v1' });
+  await opaqueFiles.reconcile();
+  const targetFilesBusy = files.busy;
+  files.busy = () => targetFilesBusy() || opaqueFiles.busy();
   files.readDownload = args => {
     const record = operationStore.get(args.id); if (!record) throw Object.assign(Error('OPERATION_NOT_FOUND'),{code:'OPERATION_NOT_FOUND'});
     const runtime = targets.select(record.targetId); runtime.verify();
@@ -483,7 +490,7 @@ export async function createApplication({ registry, classify, executeCommand, ex
     },
     assessor: settings.jevEnabled ? risk : undefined });
   let protocols;
-  const lifecycle = createLifecycleService({ queue, store, commands, files, maintenanceState, closeConnections: async () => { await desktopService?.closeAll(); await targets.drain(); await registry.closeAll(); },
+  const lifecycle = createLifecycleService({ queue, store, commands, files, maintenanceState, closeConnections: async () => { await desktopService?.closeAll(); await targets.drain(); try { await opaqueFiles.close(); } finally { await registry.closeAll(); } },
     onReap: () => { protocols?.reapCapabilities(); void modelCatalog.refreshDue(); } });
   const preservationInstance = randomBytes(32).toString('hex');
   const preservation = {
@@ -525,7 +532,7 @@ export async function createApplication({ registry, classify, executeCommand, ex
     verifyCliTarget: id => { targets.select(id).verify(); }, present: presentJob });
   let deploymentGeneration = null;
   try { deploymentGeneration = createHash('sha256').update(await readFile(new URL('./release-manifest.json', import.meta.url))).digest('hex'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
-  protocols = createProtocolAdapters({ queue, commands, files, store, lifecycle, settings, signer, adminAccess, browserSessions, targets, requestSafety, retainedHistory, operations, capacity, desktop, deploymentGeneration,
+  protocols = createProtocolAdapters({ queue, commands, files, opaqueFiles, store, lifecycle, settings, signer, adminAccess, browserSessions, targets, requestSafety, retainedHistory, operations, capacity, desktop, deploymentGeneration,
     authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal: shutdown.signal, commandPolicy, commandOutputs, environmentEditor,agentCli, preservation, requestAdmission, automationMetrics: createAutomationMetrics({state:commandState}) });
   const timer = setInterval(() => { lifecycle.reap().catch(() => {}); try { outputs.reap(); } catch { /* Failed deletions stay charged. */ } }, 30_000); timer.unref();
   let closing;
@@ -540,5 +547,5 @@ export async function createApplication({ registry, classify, executeCommand, ex
       })))).finally(() => { scheduler.close(); capacity?.close(); operationStore.close(); browserSessions?.close(); for (const runtime of runtimes) {runtime.commands.close();runtime.cli?.close();} commandState?.close();dormantCommandState?.close();cliState?.close(); maintenanceState?.close(); outputs.close(); });
     },
   };
-  } catch (error) { scheduler?.close(); capacity?.close(); operationStore?.close(); browserSessions?.close(); commandState?.close();dormantCommandState?.close();cliState?.close(); maintenanceState?.close(); outputs?.close(); throw error; }
+  } catch (error) { scheduler?.close(); await opaqueFiles?.close().catch(() => {}); capacity?.close(); operationStore?.close(); browserSessions?.close(); commandState?.close();dormantCommandState?.close();cliState?.close(); maintenanceState?.close(); outputs?.close(); throw error; }
 }

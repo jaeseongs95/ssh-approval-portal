@@ -46,7 +46,7 @@ export function createFileService({ store, queue, transfers, platform = 'linux',
     return item;
   };
   const service = {
-    async requestUpload({ source, fileName, remotePath: path, overwrite = false, elevate = false }, { signal, binding, verifyTarget } = {}) {
+    async requestUpload({ source, fileName, remotePath: path, overwrite = false, elevate = false }, { signal, binding, verifyTarget, provenance } = {}) {
       validate(path, elevate); guard(); signal?.throwIfAborted();
       if (binding) {
         fileTargetFields(binding);
@@ -62,6 +62,7 @@ export function createFileService({ store, queue, transfers, platform = 'linux',
         let artifact, submitted = false;
         try {
           artifact = await store.importFile({ fileName, remotePath: path, overwrite, elevate,
+            ...(provenance === undefined ? {} : { provenance }),
             ...(binding ? { ...binding, fileTargetBound: true } : {}) }, () => source.open({ signal: combined }), { signal: combined });
           combined.throwIfAborted(); guard();
           if (binding) verifyTarget();

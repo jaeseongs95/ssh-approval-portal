@@ -15,7 +15,7 @@ import { callerContext } from '../src/domain/execution-context.mjs';
 // Contract 1.8 replaces legacy setup and command envelopes. Retain their HTTP,
 // strict-schema, exact-byte, context, redaction, cardless, paging and private UI coverage.
 const identifier = 'a'.repeat(48), revision = 'b'.repeat(64), operationKey = 'contract-fixture-key-180';
-const publicNames = ['targets', 'submit', 'observe', 'cancel', 'artifact-begin', 'artifact-chunk', 'artifact-status', 'artifact-finish', 'artifact-read'];
+const publicNames = ['targets', 'submit', 'observe', 'cancel', 'files', 'artifact-begin', 'artifact-chunk', 'artifact-status', 'artifact-finish', 'artifact-read'];
 const settings = { mcpToken: 'contract-mcp', adminToken: 'contract-admin', adminOrigin: 'https://example.test', uiEnabled: true, prefix: 'ssh-approval-bridge_', maxBytes: 64 };
 const job = () => ({ id: identifier, operationKey, kind: 'command', operation: { kind: 'command', command: 'sudo id' }, command: 'sudo id',
   profile: 'aws-local', commandClass: 'privileged', target: 'fixture@localhost:22', state: 'pending', createdAt: 10, expiresAt: Date.now() + 600_000 });
@@ -49,6 +49,67 @@ async function fixture(overrides = {}) {
   return { client, calls, commands, operations, pending, files, adapters, mcpBase, adminBase, call: (name, args = {}) => client.callTool({ name, arguments: args }),
     async close() { await client.close(); await Promise.all([adapters.mcpHttp, adapters.adminHttp].map(server => new Promise(resolve => server.close(resolve)))); } };
 }
+
+test('MCP initialization distinguishes remote calls from model-external local file transfer', async () => {
+  const f = await fixture();
+  try {
+    const guidance = f.client.getInstructions();
+    assert.match(guidance, /Contract 2\.0/);
+    assert.match(guidance, /portal-files client reads and transmits bytes outside the model and returns a UUID/);
+    assert.match(guidance, /One remote MCP connection is sufficient/);
+    assert.match(guidance, /remote server cannot read a path on the caller computer/);
+    assert.match(guidance, /Do not transcribe large file bytes into model tool arguments/);
+    assert.match(guidance, /second local MCP server is optional/);
+    assert.doesNotMatch(guidance, /No local CLI, stdio server, client setup or UI is required/);
+    assert.equal(f.client.getServerVersion().version, metadata.version);
+  } finally { await f.close(); }
+});
+
+test('actual MCP files projects UUID metadata and observes the original queued placement', async () => {
+  const uuid = '12345678-1234-4234-8234-123456789abc';
+  const placement = { operationKey, action: 'copy', requestId: identifier, state: 'queued', internalPath: '/private/never-disclose' };
+  const metadata = { uuid, state: 'ready', fileName: 'sample.bin', size: 3, sha256: 'd'.repeat(64),
+    expiresAt: Date.now() + 600000, received: 3, sequence: 1, operations: [placement], internalPath: '/private/never-disclose' };
+  const copies = [];
+  const f = await fixture({ opaqueFiles: {
+    stat: async () => metadata,
+    copy: async (input, options) => { copies.push({ input, options }); return { uuid, requestId: identifier, state: 'queued' }; },
+  } });
+  try {
+    const descriptor = (await f.client.listTools()).tools.find(tool => tool.name === 'files');
+    const ajv = new Ajv2020({ strict: false }); addFormats(ajv); const validate = ajv.compile(descriptor.outputSchema);
+    const stat = await f.call('files', { action: 'stat', uuid });
+    assert.equal(validate(stat.structuredContent), true, JSON.stringify(validate.errors));
+    assert.equal(stat.structuredContent.data.file.uuid, uuid); assert.equal(stat.structuredContent.data.request, null);
+    assert.doesNotMatch(JSON.stringify(stat), /private\/never-disclose|internalPath/);
+    const input = { action: 'copy', uuid, operationKey, target: 'default', expectedTargetRevision: revision, remotePath: '/home/operator/sample.bin' };
+    const copied = await f.call('files', input);
+    assert.equal(validate(copied.structuredContent), true, JSON.stringify(validate.errors));
+    assert.equal(copied.structuredContent.data.request.id, identifier);
+    assert.equal(copies.length, 1); assert.deepEqual(copies[0].input, Object.fromEntries(Object.entries(input).filter(([name]) => name !== 'action')));
+    assert.ok(copies[0].options.signal instanceof AbortSignal);
+    assert.deepEqual(f.calls.observe, [{ id: identifier }]);
+    for (const bad of [{ action: 'stat', uuid, target: 'default' }, { action: 'copy', uuid, operationKey }, { action: 'stat', uuid: 'a'.repeat(48) }]) {
+      const rejected = await f.call('files', bad); assert.equal(rejected.isError, true);
+    }
+    assert.equal(copies.length, 1);
+  } finally { await f.close(); }
+});
+
+test('MCP files retains unconfirmed admission in UUID status without inventing an observable job', async () => {
+  const uuid = '12345678-1234-4234-8234-123456789abc';
+  const f = await fixture({ opaqueFiles: {
+    move: async () => ({ uuid, requestId: identifier, state: 'admission-unconfirmed' }),
+    stat: async () => ({ uuid, state: 'consuming', fileName: 'sample.bin', size: 3, sha256: 'd'.repeat(64), expiresAt: Date.now() + 600000,
+      received: 3, sequence: 1, operations: [{ operationKey, action: 'move', requestId: identifier, state: 'admission-unconfirmed' }] }),
+  } });
+  try {
+    const result = await f.call('files', { action: 'move', uuid, operationKey, target: 'default', expectedTargetRevision: revision, remotePath: '/home/operator/sample.bin' });
+    assert.equal(result.isError, undefined); assert.equal(result.structuredContent.data.request, null);
+    assert.equal(result.structuredContent.data.file.operations[0].state, 'admission-unconfirmed');
+    assert.equal(f.calls.observe.length, 0);
+  } finally { await f.close(); }
+});
 
 test('actual MCP HTTP preserves 5 KiB and 32 KiB native commands plus bilingual path-only context', async () => {
   const f = await fixture(); try {

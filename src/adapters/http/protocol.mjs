@@ -1,5 +1,6 @@
 import metadata from '../../../package.json' with { type: 'json' };
 import { routeFileApi } from './file-api.mjs';
+import { routeOpaqueFileApi } from './opaque-file-api.mjs';
 import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -72,9 +73,9 @@ async function readMcpMessage(req, res) {
   return { message };
 }
 
-export function createProtocolAdapters({ queue, commands, files, store, lifecycle, settings, signer, adminAccess, browserSessions, authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal, targets, requestSafety, commandPolicy, commandOutputs, automationMetrics, environmentEditor,agentCli, preservation, retainedHistory, requestAdmission, operations, capacity, desktop, deploymentGeneration = null }) {
+export function createProtocolAdapters({ queue, commands, files, opaqueFiles, store, lifecycle, settings, signer, adminAccess, browserSessions, authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal, targets, requestSafety, commandPolicy, commandOutputs, automationMetrics, environmentEditor,agentCli, preservation, retainedHistory, requestAdmission, operations, capacity, desktop, deploymentGeneration = null }) {
   const capabilities = createCapabilities({ queue, store, signer, settings, targets, adminAuthMode: adminAccess.mode });
-  const mcpServer = createMcpAdapter({ queue, commands, files, settings, capabilities, uiHtml, bindFileSource, shutdownSignal, targets, requestSafety, commandOutputs, operations, desktop });
+  const mcpServer = createMcpAdapter({ queue, commands, files, opaqueFiles, settings, capabilities, uiHtml, bindFileSource, shutdownSignal, targets, requestSafety, commandOutputs, operations, desktop });
   const admission = {
     mcp: createRequestAdmission(requestAdmission?.mcp),
     admin: createRequestAdmission({ maxActive: 4, maxQueued: 16, maxWaitMs: 5000, maxDetached: 8, ...requestAdmission?.admin }),
@@ -138,6 +139,7 @@ export function createProtocolAdapters({ queue, commands, files, store, lifecycl
         if(url.pathname.endsWith('/start'))browserSessions.start(req,res,authorization.principal);else { await desktop?.closeOwner('admin:'+createHash('sha256').update(authorization.principal.subject).digest('hex')); browserSessions.end(req,res,authorization.principal); }
         return json(res,200,{connected:url.pathname.endsWith('/start')});
       }
+      if (await routeOpaqueFileApi(req, res, url, { opaqueFiles, json, authorize, authorization })) return;
       if (await routeFileApi(req, res, url, { files, store, queue, targets, json, authorize })) return;
       const filter = url.searchParams.getAll('target');
       if (filter.length && (!['/api/requests', '/api/pending', '/api/automation-metrics'].includes(url.pathname) || filter.length !== 1 || !targets)) throw Error('Conflicting target selector');
