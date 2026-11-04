@@ -59,7 +59,7 @@ test('GUI-STATE public desktop status carries typed readiness and no screen pixe
   const schema = publicOutputSchemas['desktop-status'];
   assert.equal(typeof schema?.safeParse, 'function');
   // Use the same published response envelope; a status never returns an image or credentials.
-  const reply = schema.safeParse({ contractVersion: '1.8', ok: true, data, error: null });
+  const reply = schema.safeParse({ contractVersion: '2.0', ok: true, data, error: null });
   assert.equal(reply.success, true, reply.error?.message);
   assert.doesNotMatch(JSON.stringify(reply.data), /image\/png|password|credential/i);
 });

@@ -111,7 +111,7 @@ test('public MCP surface exposes operation and card tools while owner UI actions
     const result = await f.call('submit', { kind: 'command', operationKey, command: 'sudo id' });
     assert.deepEqual(JSON.parse(result.content[0].text), result.structuredContent);
     assert.deepEqual(Object.keys(result.structuredContent).sort(), ['contractVersion', 'data', 'error', 'ok']);
-    assert.equal(result.structuredContent.contractVersion, '1.8'); assert.equal(result.structuredContent.ok, true); assert.equal(result.structuredContent.error, null); assert.equal(result._meta, undefined);
+    assert.equal(result.structuredContent.contractVersion, '2.0'); assert.equal(result.structuredContent.ok, true); assert.equal(result.structuredContent.error, null); assert.equal(result._meta, undefined);
   } finally { await f.close(); }
 });
 

@@ -24,7 +24,7 @@ const refusals = {
 // Internal field precedence remains covered separately below.
 function assertError(reply, code) {
   assert.equal(reply.isError, true);
-  const value = { contractVersion: '1.8', ok: false, data: null,
+  const value = { contractVersion: '2.0', ok: false, data: null,
     error: { code, retryable: false, executionAttempted: 'unknown' } };
   assert.deepEqual(reply.structuredContent, value);
   assert.deepEqual(JSON.parse(reply.content[0].text), value);

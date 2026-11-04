@@ -215,7 +215,7 @@ test('validated long waits have a separate finite budget without blocking contro
   const overflow = await f.call('observe', { id: job.id, waitMs: 60000 });
   assert.equal(overflow.isError, true);
   assert.deepEqual(JSON.parse(overflow.content[0].text), {
-    contractVersion: '1.8', ok: false, data: null, error: { code: 'REQUEST_WAIT_LIMIT', retryable: false, executionAttempted: 'unknown' },
+    contractVersion: '2.0', ok: false, data: null, error: { code: 'REQUEST_WAIT_LIMIT', retryable: false, executionAttempted: 'unknown' },
   });
   assert.equal((await f.snapshot()).mcp.detached, 1, 'overflow must not register another detached observation');
   assert.equal((await f.call('observe', { id: 'invalid' })).isError, true);

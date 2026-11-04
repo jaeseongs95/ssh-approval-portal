@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { CHUNK_BYTES, MAX_BYTES, COMMAND_MAX_BYTES, PYTHON_SOURCE_MAX_BYTES, OUTPUT_PAGE_BYTES, utf8WithinLimit } from '../../contracts/ports.mjs';
 import { CALLER_CONTEXT_LIMIT } from '../../domain/execution-context.mjs';
 
-export const CONTRACT_VERSION = '1.8';
+export const CONTRACT_VERSION = '2.0';
 const object = fields => z.object(fields).strict();
 const identifier = z.string().regex(/^[a-f0-9]{48}$/);
 const digest = z.string().regex(/^[a-f0-9]{64}$/);

@@ -54,7 +54,7 @@ async function fixture({ open, allowed = true, enabled = true, auditFail = false
   const call = (name, args = {}) => client.callTool({ name, arguments: args });
   const ok = async (name, args) => {
     const result = await call(name, args); assert.notEqual(result.isError, true, JSON.stringify(result));
-    assert.equal(result.structuredContent.contractVersion, '1.8'); assert.equal(result.structuredContent.ok, true);
+    assert.equal(result.structuredContent.contractVersion, '2.0'); assert.equal(result.structuredContent.ok, true);
     assert.deepEqual(JSON.parse(result.content[0].text), result.structuredContent); noPayloadLeak(result); return result.structuredContent.data;
   };
   const input = extra => ({ operationKey: `agent-upload-contract-${++sequence}`, target: 'default',

@@ -8,7 +8,7 @@ function operationResponse(name, reply) {
     value = publicOutputSchemas[name].parse(reply?.structuredContent ?? (reply?.contractVersion ? reply : JSON.parse(text)));
     if (reply?.structuredContent && text !== undefined && JSON.stringify(publicOutputSchemas[name].parse(JSON.parse(text))) !== JSON.stringify(value)) throw Error('SSH representations differ');
     if (reply?.isError === true && value.ok) throw Error('SSH error result cannot be successful');
-  } catch { throw Error('Invalid SSH 1.8 response; reconcile without replay'); }
+  } catch { throw Error('Invalid SSH 2.0 response; reconcile without replay'); }
   if (!value.ok) throw Object.assign(Error(`SSH request refused (${value.error.code})`), value.error);
   return value.data;
 }
@@ -57,7 +57,7 @@ export function createAikSshTool({ authority, mcp }) {
       return job;
     },
     async output(id, { cursor, offsetBytes = 0, maxBytes = 4096, format = 'text' } = {}) {
-      if (format !== 'text') throw Error('SSH 1.8 output supports text pages only');
+      if (format !== 'text') throw Error('SSH 2.0 output supports text pages only');
       if (cursor !== undefined && offsetBytes !== 0 && cursor !== offsetBytes) throw Error('Conflicting output cursors');
       cursor ??= offsetBytes;
       const input = publicInputSchemas.observe.parse({ id, includeOutput: true, cursor, maxBytes });
