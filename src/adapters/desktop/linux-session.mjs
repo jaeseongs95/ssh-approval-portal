@@ -11,14 +11,26 @@ const wait = (promise, timeoutMs, code) => new Promise((resolve, reject) => {
 });
 
 /** 고정 제품 helper만 실행한다. 모델 요청으로 source/command/실행 파일을 받지 않는다. */
-export function createLinuxSessionDesktopAdapter({ openSession, width = 1280, height = 720, ttlMs = 900000 } = {}) {
+export function createLinuxSessionDesktopAdapter({ openSession, width = 1280, height = 720, ttlMs = 900000,
+  application = { kind: 'terminal' }, writeBootstrap } = {}) {
   if (typeof openSession !== 'function' || !Number.isSafeInteger(width) || !Number.isSafeInteger(height)
     || width < 64 || height < 64 || width > 4096 || height > 4096 || width * height > 4194304
     || !Number.isSafeInteger(ttlMs) || ttlMs < 1000 || ttlMs > 900000 || Buffer.byteLength(helper) > 24576) desktopFail('DESKTOP_INVALID_CONFIG');
+  if (!application || typeof application !== 'object' || Array.isArray(application)
+    || !['terminal', 'rdp'].includes(application.kind)) desktopFail('DESKTOP_INVALID_CONFIG');
+  const app = Object.freeze({ ...application });
+  if (app.kind === 'terminal' && (Object.keys(app).some(key => key !== 'kind') || writeBootstrap !== undefined)
+    || app.kind === 'rdp' && (Object.keys(app).some(key => !['kind', 'host', 'port', 'executable', 'width', 'height', 'certificateMode'].includes(key))
+      || app.host !== '127.0.0.1' || !Number.isInteger(app.port) || app.port < 1 || app.port > 65535
+      || !['/usr/bin/xfreerdp', '/usr/bin/xfreerdp3'].includes(app.executable)
+      || app.width !== width || app.height !== height || app.certificateMode !== 'ssh-tunnel'
+      || typeof writeBootstrap !== 'function')) desktopFail('DESKTOP_INVALID_CONFIG');
   return {
     async open({ binding, signal }) {
       const sessionRef = randomBytes(24).toString('hex');
-      const command = `/usr/bin/python3 -I -B -S -X utf8 -c ${quote(helper)} --session-ref ${sessionRef} --width ${width} --height ${height} --ttl-ms ${ttlMs}`;
+      const appArgs = app.kind === 'rdp'
+        ? ` --application rdp --rdp-port ${app.port} --rdp-executable ${quote(app.executable)} --rdp-certificate-mode ssh-tunnel` : '';
+      const command = `/usr/bin/python3 -I -B -S -X utf8 -c ${quote(helper)} --session-ref ${sessionRef} --width ${width} --height ${height} --ttl-ms ${ttlMs}${appArgs}`;
       if (Buffer.byteLength(command) > 32768) desktopFail('DESKTOP_INVALID_CONFIG');
       const channel = await openSession({ binding, signal, command });
       const stderrStream = channel.stderr ?? channel.stream.stderr;
@@ -63,6 +75,8 @@ export function createLinuxSessionDesktopAdapter({ openSession, width = 1280, he
         }
       })();
       try {
+        // 별도 승인된 native credential 공급자가 비밀을 stream에만 기록한다.
+        if (app.kind === 'rdp') await writeBootstrap(channel.stream);
         desktop = await createRfbDesktopAdapter({ allowNoneSecurity: true,
           openChannel: async () => ({ stream: channel.stream, close: closeChannel }) }).open({ binding, signal });
         await wait(readyPromise, 10000, 'DESKTOP_START_TIMEOUT');
