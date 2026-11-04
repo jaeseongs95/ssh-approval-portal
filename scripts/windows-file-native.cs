@@ -27,7 +27,8 @@ namespace SshApproval {
         }
     }
 
-    // All pathname components stay open without write/delete sharing until completion.
+    // Directory handles bind leaf I/O to checked directory objects. Metadata-only
+    // directory opens do not prevent another writer from setting a reparse point.
     // Opens fail immediately on conflicts: there is no lock wait or lock-order cycle.
     public static class WindowsFiles {
         const uint Read = 0x80000000, Write = 0x40000000, Delete = 0x10000;
@@ -42,6 +43,24 @@ namespace SshApproval {
         }
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         static extern SafeFileHandle CreateFile(string path, uint access, uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
+        [StructLayout(LayoutKind.Sequential)]
+        struct UnicodeString { public ushort Length, MaximumLength; public IntPtr Buffer; }
+        [StructLayout(LayoutKind.Sequential)]
+        struct ObjectAttributes {
+            public int Length;
+            public IntPtr RootDirectory, ObjectName;
+            public uint Attributes;
+            public IntPtr SecurityDescriptor, SecurityQualityOfService;
+        }
+        [StructLayout(LayoutKind.Sequential)]
+        struct IoStatus { public IntPtr Status, Information; }
+        [DllImport("ntdll.dll")]
+        static extern int NtCreateFile(out SafeFileHandle handle, uint access, ref ObjectAttributes attributes, out IoStatus status,
+            IntPtr allocation, uint fileAttributes, uint share, uint disposition, uint options, IntPtr ea, uint eaLength);
+        [DllImport("ntdll.dll")]
+        static extern int NtSetInformationFile(SafeFileHandle handle, out IoStatus status, IntPtr value, uint length, int kind);
+        [DllImport("ntdll.dll")]
+        static extern uint RtlNtStatusToDosError(int status);
         [DllImport("kernel32.dll", SetLastError = true)]
         static extern IntPtr GetStdHandle(int standardHandle);
         [DllImport("kernel32.dll", SetLastError = true)]
@@ -115,10 +134,10 @@ namespace SshApproval {
                 if (!new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator)) Fail("PERMISSION_DENIED");
             }
         }
-        static void NativeFailure(string missing, string step = "native") {
-            int error = Marshal.GetLastWin32Error();
+        static void NativeFailure(string missing, string step = "native", int? nativeError = null) {
+            int error = nativeError ?? Marshal.GetLastWin32Error();
             string code = error == 2 || error == 3 ? missing : error == 5 || error == 32 || error == 33 ? "PERMISSION_DENIED" :
-                error == 80 || error == 183 ? "DESTINATION_EXISTS" : error == 1920 || error == 4390 ? "UNSAFE_PATH" : "OPERATION_FAILED";
+                error == 80 || error == 183 ? "DESTINATION_EXISTS" : error == 267 || error == 1920 || error == 1921 || error == 4390 ? "UNSAFE_PATH" : "OPERATION_FAILED";
             throw new FileFailure(code, step, error, fromOs: true);
         }
         public static string CheckedPath(string value) {
@@ -167,6 +186,47 @@ namespace SshApproval {
                 if (length >= actual.Capacity || !actual.ToString().TrimEnd('\\').Equals(("\\\\?\\" + path).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase)) Fail("UNSAFE_PATH");
                 return handle;
             } catch { handle.Dispose(); throw; }
+        }
+        static SafeFileHandle OpenLeaf(SafeFileHandle parent, string leaf, uint access, uint share, bool create, string missing, string account) {
+            if (String.IsNullOrEmpty(leaf) || leaf == "." || leaf == ".." || leaf.IndexOfAny(new char[] { '\\', '/', ':' }) >= 0) Fail("UNSAFE_PATH");
+            IntPtr name = Marshal.StringToHGlobalUni(leaf);
+            IntPtr unicode = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(UnicodeString)));
+            GCHandle pin = new GCHandle();
+            SafeFileHandle handle = null;
+            try {
+                UnicodeString value = new UnicodeString { Length = (ushort)(leaf.Length * 2), MaximumLength = (ushort)(leaf.Length * 2 + 2), Buffer = name };
+                Marshal.StructureToPtr(value, unicode, false);
+                ObjectAttributes attributes = new ObjectAttributes { Length = Marshal.SizeOf(typeof(ObjectAttributes)),
+                    RootDirectory = parent.DangerousGetHandle(), ObjectName = unicode, Attributes = 0x40 };
+                if (create) {
+                    // Assign a private DACL atomically, before any inherited reader or writer
+                    // could open a newly created upload/snapshot file.
+                    RawSecurityDescriptor descriptor = new RawSecurityDescriptor("D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;" + account + ")");
+                    byte[] bytes = new byte[descriptor.BinaryLength];
+                    descriptor.GetBinaryForm(bytes, 0);
+                    pin = GCHandle.Alloc(bytes, GCHandleType.Pinned);
+                    attributes.SecurityDescriptor = pin.AddrOfPinnedObject();
+                }
+                IoStatus io;
+                // FILE_CREATE=2 / FILE_OPEN=1; NON_DIRECTORY + synchronous no-follow.
+                int status = NtCreateFile(out handle, access | 0x100080, ref attributes, out io, IntPtr.Zero, 0x80,
+                    share, create ? 2u : 1u, OpenReparse | 0x40 | 0x20, IntPtr.Zero, 0);
+                if (status < 0) {
+                    if (handle != null) handle.Dispose();
+                    handle = null;
+                    NativeFailure(missing, "open", (int)RtlNtStatusToDosError(status));
+                }
+                try {
+                    Inspect(handle, false);
+                    return handle;
+                } catch {
+                    // Cleanup is handle-based too, including a newly created file that
+                    // fails validation before the caller can enter its own cleanup scope.
+                    if (create) Remove(handle);
+                    throw;
+                }
+            } catch { if (handle != null) handle.Dispose(); throw; }
+            finally { if (pin.IsAllocated) pin.Free(); Marshal.FreeHGlobal(unicode); Marshal.FreeHGlobal(name); }
         }
         sealed class DirectoryChain : IDisposable {
             readonly List<SafeFileHandle> handles = new List<SafeFileHandle>();
@@ -386,10 +446,11 @@ namespace SshApproval {
                 if (!SetFileInformationByHandle(handle, 4, data, 4)) NativeFailure("OPERATION_FAILED", "remove");
             } finally { Marshal.FreeHGlobal(data); }
         }
-        static void Rename(SafeFileHandle handle, string path, bool overwrite) {
-            // An absolute name avoids Win32's inconsistent RootDirectory handling.
-            // Every ancestor remains pinned; the destination name is never followed.
-            byte[] name = Encoding.Unicode.GetBytes("\\\\?\\" + path);
+        static void Rename(SafeFileHandle handle, string leaf, bool overwrite) {
+            if (String.IsNullOrEmpty(leaf) || leaf == "." || leaf == ".." || leaf.IndexOfAny(new char[] { '\\', '/', ':' }) >= 0) Fail("UNSAFE_PATH");
+            // Native single-leaf + NULL RootDirectory uses the source handle's actual
+            // parent. Win32 normalizes a relative name against process CWD instead.
+            byte[] name = Encoding.Unicode.GetBytes(leaf);
             int pointer = IntPtr.Size == 8 ? 8 : 4;
             int lengthOffset = pointer + IntPtr.Size;
             int nameOffset = lengthOffset + 4;
@@ -403,7 +464,9 @@ namespace SshApproval {
                 Marshal.WriteIntPtr(data, pointer, IntPtr.Zero);
                 Marshal.WriteInt32(data, lengthOffset, name.Length);
                 Marshal.Copy(name, 0, IntPtr.Add(data, nameOffset), name.Length);
-                if (!SetFileInformationByHandle(handle, overwrite ? 22 : 3, data, (uint)(nameOffset + name.Length + 2))) NativeFailure("OPERATION_FAILED", overwrite ? "rename_replace" : "rename_new");
+                IoStatus io;
+                int status = NtSetInformationFile(handle, out io, data, (uint)(nameOffset + name.Length + 2), overwrite ? 65 : 10);
+                if (status < 0) NativeFailure("OPERATION_FAILED", overwrite ? "rename_replace" : "rename_new", (int)RtlNtStatusToDosError(status));
             } finally { Marshal.FreeHGlobal(data); }
         }
         public static Dictionary<string, object> Execute(string action, string id, string path, string hash, long size, long maximum, bool overwrite, string root, string stage, string account, string installer) {
@@ -424,25 +487,23 @@ namespace SshApproval {
                 CheckWriters(stages.Last, account, "STAGING_UNAVAILABLE");
                 if (roots != null) {
                     roots.CheckTrust(account, installer, true);
-                    CheckWriters(roots.Last, account, "PERMISSION_DENIED");
                 }
                 if (action == "policy") return new Dictionary<string, object> {
                     { "protocol", "file-path-policy-v1" }, { "allowedRoot", root }, { "rootPolicyApplied", rootPolicy }
                 };
-                string staged = stage + "\\" + id + ".part";
                 if (action == "cleanup") {
-                    try { using (SafeFileHandle file = Open(staged, Delete, 1, 3, false, "FILE_NOT_FOUND")) Remove(file); }
+                    try { using (SafeFileHandle file = OpenLeaf(stages.Last, id + ".part", Delete, 1, false, "FILE_NOT_FOUND", account)) Remove(file); }
                     catch (FileFailure failure) { if (failure.Code != "FILE_NOT_FOUND") throw; }
                     return new Dictionary<string, object> { { "cleaned", true }, { "rootPolicyApplied", rootPolicy } };
                 }
                 using (DirectoryChain parents = new DirectoryChain(Path.GetDirectoryName(path), "PARENT_NOT_FOUND")) {
                     parents.CheckTrust(account, installer, true);
-                    CheckWriters(parents.Last, account, "PERMISSION_DENIED");
+                    string leaf = Path.GetFileName(path);
                     if (action == "snapshot") {
-                        using (SafeFileHandle source = Open(path, Read, 1, 3, false, "FILE_NOT_FOUND")) {
+                        using (SafeFileHandle source = OpenLeaf(parents.Last, leaf, Read, 1, false, "FILE_NOT_FOUND", account)) {
                             Info before = Inspect(source, false);
                             if (before.Size > maximum) Fail("FILE_TOO_LARGE");
-                            using (SafeFileHandle destination = Open(staged, Read | Write | Delete, 1, 1, false, "STAGING_UNAVAILABLE")) {
+                            using (SafeFileHandle destination = OpenLeaf(stages.Last, id + ".part", Read | Write | Delete, 0, true, "STAGING_UNAVAILABLE", account)) {
                                 bool complete = false;
                                 try {
                                     using (FileStream input = Stream(source, FileAccess.Read))
@@ -461,14 +522,14 @@ namespace SshApproval {
                     SafeFileHandle previous = null;
                     Info old = new Info();
                     try {
-                        try { previous = Open(path, Read | 0x20000, 1 | 4, 3, false, "FILE_NOT_FOUND"); old = Inspect(previous, false); }
+                        try { previous = OpenLeaf(parents.Last, leaf, Read | 0x20000, 1 | 4, false, "FILE_NOT_FOUND", account); old = Inspect(previous, false); }
                         catch (FileFailure failure) { if (failure.Code != "FILE_NOT_FOUND") throw; }
                         if (previous != null && !overwrite) Fail("DESTINATION_EXISTS");
-                        using (SafeFileHandle source = Open(staged, Read, 1, 3, false, "STAGING_UNAVAILABLE")) {
+                        using (SafeFileHandle source = OpenLeaf(stages.Last, id + ".part", Read, 1, false, "STAGING_UNAVAILABLE", account)) {
                             Info before = Inspect(source, false);
                             if (before.Size != size) Fail("FILE_CHANGED");
-                            string temporary = Path.GetDirectoryName(path) + "\\.ssh-approval-" + Guid.NewGuid().ToString("N") + ".part";
-                            using (SafeFileHandle destination = Open(temporary, Read | Write | Delete | 0xC0000, 1, 1, false, "PARENT_NOT_FOUND")) {
+                            string temporary = ".ssh-approval-" + Guid.NewGuid().ToString("N") + ".part";
+                            using (SafeFileHandle destination = OpenLeaf(parents.Last, temporary, Read | Write | Delete | 0xC0000, 0, true, "PARENT_NOT_FOUND", account)) {
                                 bool published = false;
                                 try {
                                     using (FileStream input = Stream(source, FileAccess.Read))
@@ -476,13 +537,13 @@ namespace SshApproval {
                                         Dictionary<string, object> result = Copy(input, output, maximum);
                                         if ((long)result["size"] != size || (string)result["sha256"] != hash || !Same(before, Inspect(source, false))) Fail("FILE_CHANGED");
                                         if (previous != null) {
-                                            using (SafeFileHandle current = Open(path, Read, 1 | 4, 3, false, "FILE_CHANGED")) {
+                                            using (SafeFileHandle current = OpenLeaf(parents.Last, leaf, Read, 1 | 4, false, "FILE_CHANGED", account)) {
                                                 if (!Same(old, Inspect(current, false))) Fail("FILE_CHANGED");
                                             }
                                             PreserveMetadata(previous, destination, old);
                                         }
                                         // With no previous destination, never replace a file created concurrently.
-                                        Rename(destination, path, previous != null && overwrite);
+                                        Rename(destination, leaf, previous != null && overwrite);
                                         published = true;
                                         result.Add("published", true);
                                         result.Add("rootPolicyApplied", rootPolicy);
