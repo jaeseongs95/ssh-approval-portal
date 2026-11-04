@@ -82,4 +82,8 @@ test('consumption is a restart-safe tombstone with the original UUID and metadat
   await assert.rejects(lstat(join(f.root, item.id + '.part')), { code: 'ENOENT' });
   await reopened.consumeStaged(item.publicUUID, 'verified-owner', 'moved');
   assert.equal((await f.open()).staged(item.publicUUID, 'verified-owner').state, 'consumed');
+  const next = await reopened.beginStaged(metadata(bytes, { operationKey: 'concurrent-remove-01' }));
+  await reopened.append(next.id, 0, bytes); await reopened.finish(next.id);
+  await Promise.all([reopened.consumeStaged(next.publicUUID, 'verified-owner', 'removed'), reopened.consumeStaged(next.publicUUID, 'verified-owner', 'removed')]);
+  assert.equal(reopened.reserved, 2, 'each tombstone is charged once despite concurrent duplicate removal');
 });
