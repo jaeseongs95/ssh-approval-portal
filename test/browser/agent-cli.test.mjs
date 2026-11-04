@@ -1,4 +1,5 @@
 import test from 'node:test';
+import {appendFileSync} from 'node:fs';
 import { cliTab } from './admin-ui.mjs';
 import assert from 'node:assert/strict';
 import {fileURLToPath} from 'node:url';
@@ -8,14 +9,30 @@ import {launchBrowser,browserName} from './browser.mjs';
 const root=fileURLToPath(new URL('../../',import.meta.url)),id='a'.repeat(48),revision='b'.repeat(64);
 const savedJob=(requestId=id)=>({id:requestId,state:'completed',createdAt:1000,operation:{agentCliContract:'agent-cli-install-v1',agentCliProvider:'codex',agentCliTargetId:'alpha',agentCliTargetRevision:revision,agentCliProfile:'alpha-write'},result:{structuredContent:{output:{id:'d'.repeat(48)}}}});
 const gate=()=>{let resolve;return {promise:new Promise(done=>resolve=done),resolve:()=>resolve()};};
+let fixtureSequence=0;
 async function fixture(run,{width=390,locale='ko-KR',compiled=false}={}){
- const f=await fixtureServer(root);f.state.compiled=compiled;let browser,context,page;
+ const fixtureId=++fixtureSequence,started=performance.now(),pendingHttp=new Map();let requestSequence=0,traceFailed=false,failed=false;
+ const errorDetails=error=>({name:error?.name??typeof error,message:error?.message??String(error),stack:error?.stack??null});
+ const trace=(event,details={})=>{
+  if(!process.env.UI_AGENT_CLI_FIXTURE_TRACE||traceFailed)return;
+  try{appendFileSync(process.env.UI_AGENT_CLI_FIXTURE_TRACE,JSON.stringify({at:new Date().toISOString(),elapsedMs:performance.now()-started,pid:process.pid,fixtureId,event,...details})+'\n');}
+  catch(error){traceFailed=true;console.error('FIXTURE_TRACE_ERROR',error);}
+ };
+ trace('fixture.start',{width,locale,compiled});
+ let f;try{f=await fixtureServer(root);}catch(error){trace('fixture.error',{phase:'server.create',error:errorDetails(error)});throw error;}
+ f.state.compiled=compiled;let browser,context,page;
+ trace('server.ready',{origin:f.origin});
  const posts=[],gets=[],holds=new Map(),allHolds=[],jobs=new Map();let lostSubmit=false,lostStart=false,installed={},loginResult={state:'signed_in'},historyResult;
  const binding=targetId=>({targetId,targetRevision:revision,profile:targetId+'-write',displayName:targetId+' <server>',sshTarget:'mcpops@'+targetId+'.example',enabled:true});
  const p=provider=>({planId:'c'.repeat(48),binding:binding('alpha'),installation:{provider,installed:false,managed:false,version:null,installationRevision:'d'.repeat(64),login:'not_checked'},release:{provider,packageName:provider==='codex'?'@openai/codex':'@anthropic-ai/claude-code',version:'1.2.3',releaseDigest:'e'.repeat(64)},expiresAt:Date.now()+300000});
  f.state.agentCli=async(req,res,url)=>{
+  if(process.env.UI_AGENT_CLI_FIXTURE_TRACE){
+   const requestId=++requestSequence,request={requestId,method:req.method,path:url.pathname};pendingHttp.set(requestId,request);trace('http.begin',request);
+   const complete=event=>{if(pendingHttp.delete(requestId))trace('http.end',{...request,outcome:event});};
+   res.once('finish',()=>complete('finish'));res.once('close',()=>complete('close'));req.once('aborted',()=>complete('aborted'));
+  }
   if(req.method==='POST'){let raw='';for await(const chunk of req)raw+=chunk;posts.push({path:url.pathname,body:JSON.parse(raw)});}else gets.push(url.pathname+url.search);
-  const body=posts.at(-1)?.body,route=url.pathname.slice('/api/agent-cli'.length),hold=holds.get(route);if(hold){holds.delete(route);hold.entered.resolve();await hold.release.promise;}
+  const body=posts.at(-1)?.body,route=url.pathname.slice('/api/agent-cli'.length),hold=holds.get(route);if(hold){holds.delete(route);trace('gate.entered',{gateId:hold.gateId,route});hold.entered.resolve();await hold.release.promise;}
   res.setHeader('Content-Type','application/json');const send=value=>res.end(JSON.stringify(value));
   if(route==='')return send({available:true,providers:[{id:'codex'},{id:'claude'}],bindings:['alpha','beta'].map(binding)});
   if(route==='/login-status')return send({binding:binding(body.targetId),provider:body.provider,checkedAt:Date.now(),...loginResult});
@@ -33,8 +50,22 @@ async function fixture(run,{width=390,locale='ko-KR',compiled=false}={}){
   await page.addInitScript(()=>{const original=window.fetch;window.fixtureFetchCalls=[];window.fetch=(url,options)=>{window.fixtureFetchCalls.push({path:String(url).split('?')[0],method:options?.method??'GET'});return original(url,options);};});
   page.on('pageerror',error=>console.error('FIXTURE_PAGE_ERROR '+error.message));
   await page.goto(f.origin+'/settings');await cliTab(page);const panel=page.locator('#agent-cli-settings');await panel.waitFor();await page.locator('#server-target option[value=alpha]').waitFor({state:'attached'});assert.equal(await page.locator('#server-target').inputValue(),'');assert.equal(await page.locator('#cli-inspect').isDisabled(),true);await page.locator('#server-target').selectOption('alpha');
-  await run({page,panel,posts,gets,jobs,context,origin:f.origin,setHistoryResult(value){historyResult=value;},setLoginResult(value){loginResult=value;},setInstallation(value){installed=value;},setLostSubmit(){lostSubmit=true;},setLostStart(){lostStart=true;},hold(route){const h={entered:gate(),release:gate()};holds.set(route,h);allHolds.push(h);return h;},prepare:async provider=>{if(provider)await page.locator('#cli-provider').selectOption(provider);await page.locator('#cli-inspect').click();await page.locator('#cli-summary').waitFor({state:'visible'});},create:async()=>{await page.locator('#cli-ack').check();await page.locator('#cli-submit').click();await page.locator('#cli-start').waitFor({state:'visible'});}});
- }finally{for(const h of allHolds)h.release.resolve();await context?.close();await browser?.close();await f.close();}
+  await run({page,panel,posts,gets,jobs,context,origin:f.origin,setHistoryResult(value){historyResult=value;},setLoginResult(value){loginResult=value;},setInstallation(value){installed=value;},setLostSubmit(){lostSubmit=true;},setLostStart(){lostStart=true;},hold(route){const release=gate(),gateId=allHolds.length+1;let released=false;const h={gateId,entered:gate(),release:{promise:release.promise,resolve(){trace('gate.release',{gateId,route,alreadyReleased:released});released=true;release.resolve();}}};holds.set(route,h);allHolds.push(h);trace('gate.created',{gateId,route});return h;},prepare:async provider=>{if(provider)await page.locator('#cli-provider').selectOption(provider);await page.locator('#cli-inspect').click();await page.locator('#cli-summary').waitFor({state:'visible'});},create:async()=>{await page.locator('#cli-ack').check();await page.locator('#cli-submit').click();await page.locator('#cli-start').waitFor({state:'visible'});}});
+ }catch(error){failed=true;trace('fixture.error',{phase:'run',error:errorDetails(error)});throw error;}
+ finally{
+  trace('cleanup.begin',{pendingHttp:[...pendingHttp.values()]});
+  for(const h of allHolds)h.release.resolve();
+  const cleanupErrors=[];
+  // A rejected close must not skip the remaining resources or replace the test error.
+  for(const [resource,value] of [['context',context],['browser',browser],['server',f]]){
+   if(!value){trace('close.skipped',{resource});continue;}
+   trace('close.begin',{resource,pendingHttp:[...pendingHttp.values()]});
+   try{await value.close();trace('close.end',{resource,pendingHttp:[...pendingHttp.values()]});}
+   catch(error){cleanupErrors.push(error);trace('close.error',{resource,error:errorDetails(error),pendingHttp:[...pendingHttp.values()]});}
+  }
+  trace('fixture.end',{failed,cleanupErrors:cleanupErrors.map(errorDetails),pendingHttp:[...pendingHttp.values()]});
+  if(cleanupErrors.length){if(!failed)throw new AggregateError(cleanupErrors,'Agent CLI fixture cleanup failed');console.error('FIXTURE_CLEANUP_ERROR',new AggregateError(cleanupErrors,'Agent CLI fixture cleanup also failed'));}
+ }
 }
 
 for(const locale of ['ko-KR','en-US'])for(const width of [320,390,768,1024,1440])test(`CLI UI ${browserName} ${locale} ${width}: scoped explicit flow, keyboard and scrolling`,()=>fixture(async f=>{
