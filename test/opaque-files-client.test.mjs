@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -179,4 +181,38 @@ test('CLI rejects missing stable key and invalid UUID before credential or netwo
 test('operation-key grammar matches the public16..128 ASCII contract at both boundaries', () => {
   for (const value of ['a'.repeat(16), 'a'.repeat(128), '_'.repeat(16), '.:-_'.repeat(4)]) assert.equal(opaqueOperationKeyValid(value), true);
   for (const value of ['', 'a'.repeat(15), 'a'.repeat(129), '가'.repeat(16), 'a'.repeat(15) + '/', null]) assert.equal(opaqueOperationKeyValid(value), false);
+});
+
+test('client tar and zip contain identical verified sources and run without npm dependencies', { timeout: 30000 }, async t => {
+  const root = await mkdtemp(join(tmpdir(), 'opaque-client-package-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const run = promisify(execFile), python = process.platform === 'win32' ? 'python' : 'python3';
+  const { stdout } = await run(python, ['scripts/package-client.py', '--output', join(root, 'dist')], { cwd: process.cwd() });
+  const built = JSON.parse(stdout); assert.equal(built.version, '2.0.0');
+  const verify = `import hashlib,json,pathlib,sys,tarfile,zipfile
+root=pathlib.Path(sys.argv[1]); prefix='ssh-approval-portal-client-2.0.0/'
+with tarfile.open(root/'dist'/(prefix[:-1]+'.tar.gz'),'r:gz') as archive:
+    tar={m.name:archive.extractfile(m).read() for m in archive.getmembers()}
+    assert all(name.startswith(prefix) and '..' not in pathlib.PurePosixPath(name).parts for name in tar)
+    archive.extractall(root/'unpacked',filter='data')
+with zipfile.ZipFile(root/'dist'/(prefix[:-1]+'.zip')) as archive:
+    zipped={name:archive.read(name) for name in archive.namelist()}
+assert tar==zipped
+manifest=json.loads(tar[prefix+'client-manifest.json'])
+assert manifest['version']=='2.0.0'
+for item in manifest['files']:
+    data=tar[prefix+item['path']]
+    assert len(data)==item['size'] and hashlib.sha256(data).hexdigest()==item['sha256']
+assert len(tar)==len(manifest['files'])+1
+assert not any('/node_modules/' in name or name.endswith('/.env') or name.endswith('/app.mjs') for name in tar)
+metadata=json.loads(tar[prefix+'package.json'])
+assert metadata['version']=='2.0.0' and metadata['dependencies']=={} and metadata['engines']['node']=='>=24.2.0 <25'
+print(json.dumps({'files':len(tar),'manifestVerified':True,'tarZipEqual':True}))
+`;
+  const verified = JSON.parse((await run(python, ['-c', verify, root])).stdout);
+  assert.equal(verified.manifestVerified, true); assert.equal(verified.tarZipEqual, true);
+  const environment = { ...process.env }; delete environment.NODE_PATH;
+  const help = await run(process.execPath, ['scripts/portal-files.mjs', '--help'],
+    { cwd: join(root, 'unpacked', 'ssh-approval-portal-client-2.0.0'), env: environment });
+  assert.match(help.stdout, /file client2\.0\.0/); assert.equal(help.stderr, '');
 });
