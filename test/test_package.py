@@ -58,6 +58,42 @@ class PackageContract(unittest.TestCase):
         self.assertNotIn(marker, str(caught.exception))
         self.assertFalse((self.root / 'release-manifest.json').exists())
 
+    def test_native_sources_and_pinned_bundle_ship_but_generated_runtime_does_not(self):
+        names = ['native/freerdp-input/overlay/input.c', 'native/freerdp-input/overlay/input.h',
+                 'native/freerdp-input/native.patch', 'native/freerdp-input/LICENSE',
+                 'native/freerdp-input/README.md', 'native/freerdp-input/build-lock.json',
+                 'native/freerdp-input/build.sh', 'native/freerdp-input/Dockerfile',
+                 'native/freerdp-input/apply_patch.py', 'native/freerdp-input/tests/prove_protocol.py']
+        for name in names: self.write(name, 'synthetic reproducible native source\n')
+        self.write('scripts/build-freerdp-input.py', '# synthetic native builder\n')
+        self.write('vendor/fixture-native.tgz', 'synthetic pinned bundle bytes')
+        self.write('native/freerdp-input/runtime/bin/xfreerdp3', 'do not package generated executable')
+        self.write('native/freerdp-input/runtime/manifest.json', '{}')
+        self.write('native/freerdp-input/build/compiler-output.txt', 'do not package build output')
+        archives, _ = packager.package(self.root)
+        manifest = json.loads((self.root / 'release-manifest.json').read_text())
+        paths = {entry['path'] for entry in manifest['files']}
+        self.assertEqual({name for name in paths if name.startswith('native/')}, set(names))
+        self.assertIn('vendor/fixture-native.tgz', paths)
+        self.assertIn('scripts/build-freerdp-input.py', paths)
+        for archive_path in archives:
+            with self.subTest(archive=archive_path.name):
+                if archive_path.suffix == '.zip':
+                    with zipfile.ZipFile(archive_path) as archive: found = set(archive.namelist())
+                else:
+                    with tarfile.open(archive_path) as archive: found = set(archive.getnames())
+                prefix = 'ssh-approval-portal-0.3.0/'
+                self.assertTrue({prefix + name for name in names}.issubset(found))
+                self.assertFalse(any('/runtime/' in name or '/build/' in name for name in found if '/native/' in name))
+
+    def test_native_source_symlink_is_rejected_before_manifest_publication(self):
+        native = self.root / 'native/freerdp-input'; native.mkdir(parents=True)
+        outside = self.root / 'unpackaged.c'; outside.write_text('preserve outside source')
+        try: (native / 'input.c').symlink_to(outside)
+        except OSError: self.skipTest('OS symlink permission unavailable; Linux TEST must cover this case')
+        with self.assertRaisesRegex(ValueError, 'Unsafe package symlink'): packager.package(self.root)
+        self.assertFalse((self.root / 'release-manifest.json').exists())
+
     def run_node(self, script, *arguments):
         node = shutil.which('node')
         self.assertIsNotNone(node, 'Package import contract requires the configured Node runtime')
