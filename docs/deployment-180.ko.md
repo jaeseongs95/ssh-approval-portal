@@ -8,7 +8,9 @@
 
 ## 배포 계획
 
-공식 `python3 scripts/package.py` 생성물의 `release-manifest.json` SHA-256을 `generation`으로 고정한다. 계획 파일에는 경로와 공개 서비스 제어 명령만 넣는다. 비밀·토큰·로그인 설정을 넣지 않는다. 배포 계획은 관리자 입력이며 웹 요청으로 받지 않는다.
+통합 배포 자산은 `npm run package:release -- --output /absolute/new/portal-2.0.0-release`로 아직 존재하지 않는 새 절대 디렉터리에 만든다. 서버·클라이언트의 tar.gz/zip 4개와 통합 `SHA256SUMS`를 생성하며 기존 출력은 거절한다. 이 문서 수정에서는 패키징을 실행하지 않았다. 클라이언트에는 별도 기존 Node.js `>=24.2.0 <25`·신뢰하는 `cloudflared`·owner 로그인 캐시가 필요하고 런타임·인증값은 클라이언트 자산에 넣지 않는다. 두 번째 로컬 MCP 서버는 선택 사항이다.
+
+그중 공식 서버 패키지의 `release-manifest.json` SHA-256을 `generation`으로 고정한다. 계획 파일에는 경로와 공개 서비스 제어 명령만 넣는다. 비밀·토큰·로그인 설정을 넣지 않는다. 배포 계획은 관리자 입력이며 웹 요청으로 받지 않는다.
 
 ```json
 {

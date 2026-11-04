@@ -52,6 +52,16 @@ The single-file limit is 64 MiB and default staging budget is 512 MiB. `BRIDGE_T
 
 Linux overwrites do not report completion unless existing ownership, mode and extended attributes can be preserved. New files use mode 0600; sudo uploads are root-owned. See [Windows transfer limits](docs/windows-targets.ko.md). Observation timeout or connection failure does not establish cancellation or non-execution. Inspect the original UUID, operationKey and request ID; never replay uncertain placement under a new key.
 
+## Build server and client release assets
+
+From source, package the server and model-external file client together into a new absolute output directory that does not exist yet.
+
+```sh
+npm run package:release -- --output /absolute/new/portal-2.0.0-release
+```
+
+This produces four assets: server `ssh-approval-portal-2.0.0.tar.gz`/`.zip` and client `ssh-approval-portal-client-2.0.0.tar.gz`/`.zip`, plus one `SHA256SUMS` covering all four. Existing output directories are refused. The client requires separately available Node.js `>=24.2.0 <25`, a trusted existing `cloudflared` executable and the owner's login cache; those runtimes and credentials are not bundled in client assets. Reuse the existing remote MCP connection; a second local MCP server is optional. These instructions do not establish a completed packaging, test or deployment result.
+
 ## Native installation and updates
 
 The previous release was validated for Ubuntu 22.04/24.04 on x86_64. The ARM64 installation path remains available, but validation is deferred to a later enhancement. An internet connection and an administrator terminal on the server are required. The runtime requires Node 24.2 or later within the 24.x series. Node 24 is installed in a dedicated path without replacing the system Node installation.
@@ -95,7 +105,7 @@ Signing out stops automatic refresh and clears the displayed requests. Access mo
 The deployment target is Docker Engine with Compose v2 on Ubuntu 22.04/24.04. The bridge runs as a non-root user with a read-only root filesystem and dropped capabilities. Prepare the SSH account, sudo permissions, and file helper on the target server. Do not grant the container `--privileged` or access to the Docker socket. `scripts/prepare-docker.sh` also uses the shared `scripts/ensure-node-runtime.sh` to prepare a host Node 24 runtime in `/opt/ssh-approval/node` without replacing the system Node installation.
 
 ```sh
-python3 scripts/package.py --release
+# Generate the assets above once; do not reuse their output directory.
 sudo bash scripts/prepare-docker.sh --admin-origin https://ssh-approve.example.com --grant-sudo-all
 sudo docker compose --env-file /etc/ssh-approval-portal/compose.env -f docker/compose.yaml build
 sudo docker compose --env-file /etc/ssh-approval-portal/compose.env -f docker/compose.yaml up -d --wait

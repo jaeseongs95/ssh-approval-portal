@@ -52,6 +52,16 @@ UUID 업로드는 임시 저장 완료이며 대상 서버 배치 완료가 아�
 
 Linux 덮어쓰기는 기존 소유권·모드·확장 속성을 보존할 수 없으면 완료로 보고하지 않습니다. 새 파일은 mode 0600이며 sudo 업로드는 root 소유입니다. Windows의 보존 범위는 [Windows 전송 제약](docs/windows-targets.ko.md)을 따릅니다. 관측 timeout이나 연결 실패는 취소·미실행을 뜻하지 않습니다. 원래 UUID·operationKey·request ID를 조회하고 불명확한 배치를 새 키로 재실행하지 않습니다.
 
+## 서버·클라이언트 배포 자산 생성
+
+소스에서 서버와 모델 밖 파일 전송 클라이언트를 함께 묶으려면 아직 존재하지 않는 새 절대 출력 디렉터리를 지정합니다.
+
+```sh
+npm run package:release -- --output /absolute/new/portal-2.0.0-release
+```
+
+서버 `ssh-approval-portal-2.0.0.tar.gz`·`.zip`과 클라이언트 `ssh-approval-portal-client-2.0.0.tar.gz`·`.zip`의 4개 자산 및 네 자산을 함께 나열한 `SHA256SUMS`를 만듭니다. 기존 출력 디렉터리는 거절하며 이전 배포본을 덮어쓰지 않습니다. 클라이언트 실행에는 별도의 기존 Node.js `>=24.2.0 <25`와 신뢰하는 `cloudflared` 실행 파일·owner 로그인 캐시가 필요하며 이 런타임·인증값은 클라이언트 자산에 포함하지 않습니다. 기존 원격 MCP 연결을 그대로 쓰고 두 번째 로컬 MCP 서버는 선택 사항입니다. 이 명령 설명은 패키징 실행·시험·배포 완료를 뜻하지 않습니다.
+
 ## 네이티브 설치와 업데이트
 
 이전 릴리스는 Ubuntu 22.04/24.04 x86_64에서 검증했습니다. ARM64 설치 경로는 남아 있지만 검증은 후속 고도화로 보류했습니다. 인터넷 연결과 서버 관리자 터미널이 필요합니다. 런타임은 Node 24.2 이상, 25 미만을 요구합니다. Node 24는 전용 경로에 설치하며 시스템 Node를 교체하지 않습니다.
@@ -93,7 +103,7 @@ sudo bash scripts/install.sh --admin-origin https://ssh-approve.example.com --gr
 운영 대상은 Ubuntu 22.04/24.04의 Docker Engine과 Compose v2입니다. 중계기는 비 root 사용자, 읽기 전용 root filesystem과 capability 제거 설정으로 실행합니다. SSH 계정·sudo·파일 helper는 대상 서버에 준비하며 컨테이너에 `--privileged`나 Docker socket을 주지 않습니다. `scripts/prepare-docker.sh`도 공유 `scripts/ensure-node-runtime.sh`로 호스트의 `/opt/ssh-approval/node`에 Node 24 런타임을 준비하며 시스템 Node를 교체하지 않습니다.
 
 ```sh
-python3 scripts/package.py --release
+# 위의 새 출력 디렉터리 패키징은 한 번만 실행합니다.
 sudo bash scripts/prepare-docker.sh --admin-origin https://ssh-approve.example.com --grant-sudo-all
 sudo docker compose --env-file /etc/ssh-approval-portal/compose.env -f docker/compose.yaml build
 sudo docker compose --env-file /etc/ssh-approval-portal/compose.env -f docker/compose.yaml up -d --wait

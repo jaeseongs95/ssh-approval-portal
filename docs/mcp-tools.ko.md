@@ -59,7 +59,9 @@
 
 기존 `/api/files/uploads`나 MCP `artifact-finish`의 자동 제출 의미와 다르다. owner 인증·Origin 검사 뒤 body 수신 후에도 권한을 재확인한다. 응답·오류에는 임시 경로나 파일 본문을 넣지 않는다.
 
-`files`의 action은 `stat`, `copy`, `move`, `remove`다. UUID 입력 필드는 `uuid`다. `copy`·`move`는 안정된 `operationKey`와 대상·`expectedTargetRevision`·`remotePath`, 선택 `overwrite`·`elevate`로 기존 대상 upload 정책에 연결한다. 결과 `requestId`를 기존 `observe`로 조회한다. `stat`는 metadata만 읽고 `remove`는 해당 임시 원본만 소비한다. copy는 원본을 유지하고 move는 publication 성공을 확인한 뒤 원본을 소비한다. UUID가 승인이나 OS 권한을 부여하지 않는다.
+`files`의 action은 `stat`, `copy`, `move`, `remove`다. UUID 입력 필드는 `uuid`다. `copy`·`move`는 안정된 `operationKey`와 대상·`expectedTargetRevision`·`remotePath`, 선택 `overwrite`·`elevate`로 기존 대상 upload 정책에 연결한다. 공개 응답 `data.request`가 있으면 `data.request.id`를 `observe({id: ...})`로 조회한다. `stat`는 metadata만 읽고 `remove`는 해당 임시 원본만 소비한다. copy는 원본을 유지하고 move는 publication 성공을 확인한 뒤 원본을 소비한다. UUID가 승인이나 OS 권한을 부여하지 않는다.
+
+공개 MCP `files` 응답은 공통 `{contractVersion,ok,data,error}` envelope 안의 `data:{action,uuid,file:metadata,request:operationData|null}`다. `file`은 임시 파일의 상태·크기·해시·만료·진행·연결 작업 metadata이며 내부 경로·바이트는 없다. `stat`·`remove`의 `request`는 `null`이다. copy/move에서도 admission이 미확정이거나 거절된 경우 `request`가 `null`일 수 있으므로, 이를 미실행 증거로 삼지 말고 같은 UUID의 `file.operations`를 확인한다. 서비스 내부 반환형 `{uuid,requestId,state}`를 공개 MCP 최상위 결과로 해석하지 않는다.
 
 같은 키·같은 입력은 기존 UUID/작업을 회수하고 다른 입력은 충돌로 거절한다. 응답 유실·admission 불명·unknown publication은 새 키로 재실행하지 않는다. 원래 UUID·request ID·상태를 조회한다. 임시 원본 만료·소비·대상 배치·PC 저장은 구분한다. 최종 허용 필드와 응답은 통합된 공개 스키마를 기준으로 한다.
 
