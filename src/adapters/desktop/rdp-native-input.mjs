@@ -113,7 +113,10 @@ export async function openNativeRdpInput({ stream, patchDigest, width, height, s
       const flags = ack[17], held = ack.readUInt16BE(18), buttons = ack[20];
       if (status > 2 || ack[1] !== 1 || code > 20 || succeeded > attempted || attempted > MAX_CALLS
         || ack[16] > 6 || flags > 7 || held > 256 || (buttons & ~0x87) !== 0 || ack.subarray(21).some(Boolean)
-        || status === 1 && attempted !== 0 || status === 2 && attempted === 0 || status !== 0 && code === 0) throw fault('INVALID_ACK');
+        || status === 1 && (attempted !== 0 || (flags & 1) !== 0) || status === 2 && attempted === 0 || status !== 0 && code === 0
+        || mode === 'input' && (flags & 6) !== 0 || mode === 'release' && (flags & 4) !== 0
+        || mode === 'close' && (flags & 4) === 0 || (flags & 2) !== 0 && (held !== 0 || buttons !== 0)
+        || code === 13 && ((flags & 1) === 0 || attempted !== succeeded + 1)) throw fault('INVALID_ACK');
       if (status !== 0) {
         const error = fault(status === 1 ? 'REJECTED' : 'PARTIAL_OR_UNKNOWN');
         error.nativeInput = { scope: 'nativeSend', status, errorCode: code, callsSucceeded: succeeded, callsAttempted: attempted,
