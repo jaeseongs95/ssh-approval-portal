@@ -21,10 +21,10 @@ async function fixture(t){
   async submit(input){submissions.push(structuredClone(input));if(reject)throw Object.assign(Error('private rejection detail'),{code:'TARGET_REVISION_CHANGED'});let value=keys.get(input.operationKey);if(!value){value={...job,id:(++serial).toString(16).padStart(48,'0'),kind:'download',operation:{kind:'download',remotePath:input.remotePath,elevate:input.elevate},operationKey:input.operationKey,state:'pending'};keys.set(input.operationKey,value);jobs.set(value.id,value);}return value;},
   async observe(input){observations.push(structuredClone(input));if(hold)await hold;const value=input.id?jobs.get(input.id):keys.get(input.operationKey);if(missing||!value)throw Object.assign(Error('private missing detail'),{code:'OPERATION_NOT_FOUND'});return value;},
  };
- const server=createMcpAdapter({queue:{get:value=>jobs.get(value)},files:{},settings:{uiEnabled:true,prefix:'fixture_',maxBytes:64},capabilities,targets,operations,uiHtml:'<html>fixture</html>',shutdownSignal:new AbortController().signal,commandOutputs:{read:()=>({outputId,bytes:7,nextOffset:7,eof:true,text:'PRIVATE_OUTPUT_BODY'})}})();
+ const server=createMcpAdapter({queue:{get:value=>missing?undefined:jobs.get(value)},files:{},settings:{uiEnabled:true,prefix:'fixture_',maxBytes:64},capabilities,targets,operations,uiHtml:'<html>fixture</html>',shutdownSignal:new AbortController().signal,commandOutputs:{read:()=>({outputId,bytes:7,nextOffset:7,eof:true,text:'PRIVATE_OUTPUT_BODY'})}})();
  const client=new Client({name:'card-contract',version:'1'}),[ct,st]=InMemoryTransport.createLinkedPair();await server.connect(st);await client.connect(ct);
  t.after(async()=>{await client.close();await server.close();});
- t.mock.method(App.prototype,'callServerTool',async({name,arguments:args})=>{assert.ok(name.startsWith('fixture_'));name=name.slice('fixture_'.length);calls.push({name,args:structuredClone(args)});const result=await client.callTool({name,arguments:args});if(name==='submit'&&lost){lost=false;throw Error('synthetic response lost');}return result;});
+ t.mock.method(App.prototype,'callServerTool',async({name,arguments:args})=>{assert.ok(name.startsWith('fixture_'));name=name.slice('fixture_'.length);calls.push({name,args:structuredClone(args)});if(name==='show-approval'&&hold)await hold;const result=await client.callTool({name,arguments:args});if(name==='submit'&&lost){lost=false;throw Error('synthetic response lost');}return result;});
  const host=createCardHost(s=>s);host.updateModelContext=async value=>{contexts.push(value);return {};};
  const state=createCardState(),view={t:s=>s,clear(){},error:s=>{if(s)errors.push(s);},setBusy(){},job:(value,meta)=>rendered.push({job:value,meta}),transfer(){},missing(){errors.push('missing');},output:(text,metadata)=>rendered.push({text,metadata})};
  const timers={setInterval(fn){const key=intervals.size+1;intervals.set(key,fn);return key;},clearInterval(key){intervals.delete(key);}};
@@ -34,18 +34,18 @@ async function fixture(t){
  return {client,controller,state,job,calls,submissions,observations,errors,rendered,contexts,intervals,jobs,receiveJob,receiveTransfer,loseReply(){lost=true;},reject(){reject=true;},missing(){missing=true;},hold(value){hold=value;}};
 }
 
-test('card polls the actual MCP observe envelope and renews the private job presentation without output reads',async t=>{
+test('card polls the actual MCP presentation once per refresh and renews private tickets without output reads',async t=>{
  const f=await fixture(t);await f.receiveJob();
  for(const state of active){f.job.state=state;await f.controller.refresh();assert.equal(f.state.job.state,state);assert.equal(f.intervals.size,1,state+' must keep polling');}
  f.job.state='completed';await f.controller.refresh();
  assert.equal(f.state.job.state,'completed');assert.equal(f.intervals.size,0);assert.equal(f.state.meta.viewTicket,'private-view');
- assert.ok(f.calls.every(c=>['observe','show-approval'].includes(c.name)));assert.ok(f.calls.filter(c=>c.name==='observe').every(c=>c.args.includeOutput===false));
- assert.ok(f.observations.every(c=>c.id===id));assert.doesNotMatch(JSON.stringify(f.contexts),/private-view|private-approval|PRIVATE_OUTPUT_BODY/);
+ assert.equal(f.calls.length,active.length+1);assert.ok(f.calls.every(c=>c.name==='show-approval'&&c.args.id===id));assert.equal(f.observations.length,0);
+ assert.doesNotMatch(JSON.stringify(f.contexts),/private-view|private-approval|PRIVATE_OUTPUT_BODY/);
 });
 
-test('card distinguishes an actual public operation-not-found envelope from a stale rendered job',async t=>{
- const f=await fixture(t);await f.receiveJob();f.missing();await f.controller.refresh();
- assert.deepEqual(f.errors,['missing']);assert.equal(f.intervals.size,0);assert.equal(f.submissions.length,0);
+test('missing card preserves the actual MCP refusal without inventing a terminal state or resubmitting',async t=>{
+ const f=await fixture(t);await f.receiveJob();f.missing();await assert.rejects(f.controller.refresh(),/요청이 거부/);
+ assert.equal(f.state.job.state,'queued');assert.deepEqual(f.errors,[]);assert.equal(f.submissions.length,0);assert.deepEqual(f.calls.map(c=>c.name),['show-approval']);
 });
 
 test('download card submits current MCP fields with a stable key and pinned target revision, then loads the private card',async t=>{
@@ -81,8 +81,8 @@ test('typed submit rejection is not mistaken for an accepted ID or a new rendere
  assert.equal(f.submissions.length,1);assert.equal(f.state.mode,'transfer');assert.equal(f.errors.length,1);assert.doesNotMatch(f.errors[0],/private rejection/);assert.deepEqual(f.calls.map(c=>c.name),['submit']);
 });
 
-test('late observe cannot replace another card or fetch its private presentation',async t=>{
+test('late presentation cannot replace another card',async t=>{
  const f=await fixture(t);await f.receiveJob();let release;f.hold(new Promise(done=>release=done));const refresh=f.controller.refresh().catch(error=>error);
  while(f.calls.length===0)await new Promise(done=>setImmediate(done));await f.receiveTransfer();release();assert.equal(await refresh,undefined);
- assert.equal(f.state.mode,'transfer');assert.deepEqual(f.calls.map(c=>c.name),['observe']);assert.equal(f.submissions.length,0);
+ assert.equal(f.state.mode,'transfer');assert.deepEqual(f.calls.map(c=>c.name),['show-approval']);assert.equal(f.submissions.length,0);
 });
