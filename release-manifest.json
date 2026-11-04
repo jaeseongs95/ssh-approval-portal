@@ -15,13 +15,13 @@
     },
     {
       "path": "README.ko.md",
-      "size": 21734,
-      "sha256": "ca26e3f60cf2d3c05386125ef430713107e0f0dd8b57b4ee42a8f0ca263d4597"
+      "size": 22242,
+      "sha256": "19630893477998395c6cf8def9719bc3100363463d48d530645dda88aaeb0cf5"
     },
     {
       "path": "README.md",
-      "size": 19766,
-      "sha256": "896e7643426369435c2f6acd60d4051830a1940c34906306f57f9094ab9db250"
+      "size": 20253,
+      "sha256": "ec0a7621fecd7b2eeb24b0cda2c8dc3351a0cd6c9fdea470501d3fe0601bc6c3"
     },
     {
       "path": "THIRD_PARTY_NOTICES.json",
@@ -115,8 +115,8 @@
     },
     {
       "path": "docs/agent-clients.ko.md",
-      "size": 10707,
-      "sha256": "70d32953546539e74f65f578fb45af36c726d952853a56c9083cd3dce874645f"
+      "size": 12899,
+      "sha256": "5d0d565cacd203ddbee844fcc7e7b0b535f81effe5b270ca1eaf4069e6cdb6db"
     },
     {
       "path": "docs/agent-upload.en.md",
@@ -155,8 +155,8 @@
     },
     {
       "path": "docs/client-files.ko.md",
-      "size": 5527,
-      "sha256": "0d0fd2110672e4ea348a2d53a66a6112cc32bc5c959908ba8bed6587d2fee6e3"
+      "size": 7829,
+      "sha256": "d72007e53d2f1457b530d8ad9e5a2f54f3ba775786d311562151df8829dc8157"
     },
     {
       "path": "docs/command-automation.ko.md",
