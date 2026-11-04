@@ -1,6 +1,6 @@
 FROM ubuntu:24.04 AS build
 ARG TARGETARCH
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl xz-utils libstdc++6 && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl xz-utils libstdc++6 python3 && rm -rf /var/lib/apt/lists/*
 RUN architecture="$TARGETARCH"; [ "$architecture" != amd64 ] || architecture=x64; \
     curl -fsS --proto '=https' "https://nodejs.org/dist/v24.21.0/node-v24.21.0-linux-$architecture.tar.xz" -o /node.tar.xz && \
     curl -fsS --proto '=https' https://nodejs.org/dist/v24.21.0/SHASUMS256.txt -o /SHASUMS256.txt && \
@@ -9,10 +9,15 @@ RUN architecture="$TARGETARCH"; [ "$architecture" != amd64 ] || architecture=x64
 ENV PATH=/runtime/bin:${PATH}
 ARG PACKAGE_ARCHIVE=dist/ssh-approval-portal-2.0.0.tar.gz
 COPY ${PACKAGE_ARCHIVE} /package.tar.gz
-RUN mkdir /app && tar -xzf /package.tar.gz -C /app --strip-components=1 && cd /app && node scripts/verify.mjs . && npm ci --omit=dev --ignore-scripts && node scripts/check-package-imports.mjs
+RUN mkdir /app && tar -xzf /package.tar.gz -C /app --strip-components=1 && cd /app && node scripts/verify.mjs . && npm ci --omit=dev --ignore-scripts && python3 scripts/prepare-freerdp-input.py && node scripts/check-package-imports.mjs
 
 FROM ubuntu:24.04
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates libstdc++6 && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates libstdc++6 && \
+    if [ "$(dpkg --print-architecture)" = amd64 ]; then \
+      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        libx11-6 libxext6 libxinerama1 libxcursor1 libxi6 libxrender1 libxrandr2 libxfixes3 \
+        libxkbfile1 libssl3t64 libicu74; \
+    fi && rm -rf /var/lib/apt/lists/*
 COPY --from=build --chown=0:0 /runtime/bin/node /usr/local/bin/node
 COPY --from=build /runtime/LICENSE /usr/share/licenses/node/LICENSE
 COPY --from=build /app /opt/portal
