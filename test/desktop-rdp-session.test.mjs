@@ -4,7 +4,7 @@ import { Writable } from 'node:stream';
 import { createRdpSessionDesktopAdapter, rdpClientCapabilities, rdpSessionPlan,
   writeRdpCredentialBootstrap } from '../src/adapters/desktop/rdp-session.mjs';
 
-const config = { credentialRef: 'windows-agent', serverName: 'windows.example.test', certFingerprint: 'ab'.repeat(32) };
+const config = { credentialRef: 'secret://fixture/windows-agent' };
 const capabilities = { available: true, executable: '/usr/bin/xfreerdp3' };
 const credentials = { username: 'fixture-user', domain: '', password: 'fixture-private-password' };
 const binding = { targetId: 'windows', targetRevision: 'a'.repeat(64), epoch: 1 };
@@ -39,7 +39,7 @@ test('RDP relay: native/display readiness is distinct from Windows logon and clo
   assert.equal(f.seen.session.application.certificateMode, 'ssh-tunnel');
   assert.equal(JSON.stringify(f.seen.session.application).includes(credentials.password), false);
   assert.deepEqual(JSON.parse(f.seen.bootstrap), credentials);
-  assert.equal(f.seen.credentials, 1); assert.equal(f.seen.credentialRequest.credentialRef, 'windows-agent');
+  assert.equal(f.seen.credentials, 1); assert.equal(f.seen.credentialRequest.credentialRef, 'secret://fixture/windows-agent');
   assert.equal(desktop.lifecycle, 'managed');
   assert.deepEqual(desktop.nativeReadiness, { display: 'ready', client: 'started', windows: 'unverified' });
   const state = await desktop.readState();
@@ -72,7 +72,10 @@ test('RDP relay validates public plan and restricts the tunnel to loopback', () 
   for (const endpoint of [{ host: '0.0.0.0', port: 3389 }, { host: '127.0.0.1', port: 0 }, { host: 'remote.test', port: 3389 }]) {
     assert.throws(() => rdpSessionPlan({ config, endpoint, capabilities }), { code: 'DESKTOP_RDP_INVALID_TUNNEL' });
   }
-  assert.throws(() => fixture({ config: { credentialRef: '../secret' } }), { code: 'DESKTOP_INVALID_CONFIG' });
+  for (const credentialRef of ['windows-agent', '../secret', 'secret://local-file/../key', 'secret://LOCAL/key',
+    'secret://fixture/key/child', 'secret://fixture/key?query']) {
+    assert.throws(() => fixture({ config: { credentialRef } }), { code: 'DESKTOP_INVALID_CONFIG' });
+  }
 });
 
 test('RDP client capability needs actual native help/version and every required option', () => {
