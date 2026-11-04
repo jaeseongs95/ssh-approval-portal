@@ -19,6 +19,26 @@ IMAGE = 'ubuntu@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce11
 def sha(path):
     return hashlib.file_digest(open(path,'rb'),'sha256').hexdigest()
 
+def write_bundle(destination, runtime, notices):
+    """Archive permissions are a release contract, independent of source umask."""
+    modes = {item['path']: item['mode'] for item in json.loads((runtime/'manifest.json').read_text())['files']}
+    def metadata(member):
+        if member.isdir():
+            member.mode = 0o755
+        elif member.isreg():
+            if member.name.startswith('runtime/') and member.name != 'runtime/manifest.json':
+                member.mode = modes[member.name.removeprefix('runtime/')]
+            else:
+                member.mode = 0o644
+        else:
+            raise RuntimeError('non-regular entry in private bundle')
+        member.uid = member.gid = 0
+        member.uname = member.gname = 'root'
+        return member
+    with tarfile.open(destination, 'w:gz', dereference=False) as tf:
+        tf.add(runtime, arcname='runtime', filter=metadata)
+        tf.add(notices, arcname='source', filter=metadata)
+
 def main():
     ap=argparse.ArgumentParser(description=__doc__)
     ap.add_argument('--output',required=True)
@@ -113,8 +133,7 @@ def main():
     run(['dpkg-query','-W'],'build-packages.txt',10)
     for log in ('compiler.txt','build-packages.txt','ldd.txt','readelf.txt','capabilities.json','protocol-test.log'):
         shutil.copyfile(out/log,notices/log)
-    with tarfile.open(out/'freerdp-input-v1-linux-x64.tgz','w:gz',dereference=True) as tf:
-        tf.add(runtime,arcname='runtime');tf.add(notices,arcname='source')
+    write_bundle(out/'freerdp-input-v1-linux-x64.tgz', runtime, notices)
     print(json.dumps({'patchSha256':digest,'executableSha256':sha(executable),
         'bundleSha256':sha(out/'freerdp-input-v1-linux-x64.tgz'),'protocolTests':'passed'}))
 
