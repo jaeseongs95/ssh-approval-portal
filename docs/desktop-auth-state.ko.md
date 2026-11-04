@@ -4,7 +4,7 @@
 
 ## 제품 경로
 
-관리 포털에서 데스크톱을 열고 로그인 화면과 대상 서버를 확인한다. Windows 로그인 입력란을 직접 선택한 뒤 확인란을 체크하고 비밀번호 형식 입력란의 값을 한 번 보낸다. 값은 전송 전에 화면에서 지운다. Enter는 자동 전송하지 않으며 화면 확인 후 직접 누른다. Ctrl+Alt+Delete 버튼도 같은 프레임·순서 검사를 거쳐 기존 RFB key event를 한 번 전송한다. `sent`는 Windows의 SAS 수락이나 로그인 성공을 의미하지 않는다.
+관리 포털에서 데스크톱을 열고 현재 화면이 선택한 Windows 서버의 잠금 또는 로그인 화면임을 확인한다. 잠금화면에서는 이 확인만으로 Ctrl+Alt+Delete를 요청할 수 있으며 아직 없는 로그인 입력란 선택을 요구하지 않는다. 로그인 화면이 나온 뒤 Windows 입력란을 직접 선택했다는 별도 확인을 체크하고 비밀번호 형식 입력란의 값을 한 번 보낸다. 값은 전송 전에 화면에서 지운다. Enter는 자동 전송하지 않으며 화면 확인 후 직접 누른다. Ctrl+Alt+Delete 버튼도 같은 프레임·순서 검사를 거쳐 기존 RFB key event를 한 번 전송한다. `sent`는 Windows의 SAS 수락이나 로그인 성공을 의미하지 않는다. Windows 인증 패널은 Windows 대상으로 연 lease에만 표시하며 Linux GUI의 일반 관측·입력 경로는 유지한다.
 
 `/api/desktop/authenticate`는 기존 관리자 인증·Origin·owner/epoch/target revision·프레임·geometry·sequence 검사를 사용한다. MCP 인증 도구는 추가하지 않는다. 물리 리소스의 단일 lease 때문에 모델은 owner lease 화면을 가져갈 수 없다. 모델 lease를 먼저 닫으면 owner가 포털에서 열 수 있다. lease 종료는 OS 로그아웃이 아니다.
 
@@ -18,9 +18,9 @@
 
 일반 로그인 화면은 모델도 볼 수 있다. 모든 조회 세션이 잠겼거나 세션이 없을 때 `auth_required`를 진단값으로 표시하며, console 잠금 하나로 다른 정상 세션을 인증 필요로 판단하지 않는다. 미검증 WTS 정보나 조회 실패만으로 별개 RFB 화면의 기존 입력 경로를 차단하지 않는다. 조회 실패는 `transport_ready`와 query blocker로 표시하며 캡처 실패라고 단정하지 않는다.
 
-## TEST 인계: 미실행
+## 실제 OS 경로의 TEST 인계: 미실행
 
-로컬 제품 시험·로그인·서비스 변경은 하지 않았다. 로컬에서는 구문 검사만 허용된다. 생성된 `web/dist` 번들도 재빌드하지 않았으므로 TEST 후보 빌드로 최신 소스를 반영해야 한다.
+로컬 Node 제품 시험·로그인·서비스 변경은 하지 않았다. 2.0.0 후속 UI 수정은 허용된 로컬 Edge Chromium 156.0.4314.58에서 Windows/Linux × 한국어/영어 4조건으로 source 모듈을 직접 로드해 확인했다. SAS의 화면 확인과 인증값의 필드 선택 확인을 분리했고 Linux에서는 Windows 인증 패널과 요청을 숨기고 막았다. 이 브라우저 검사는 합성 API를 사용하므로 실제 OS SAS·인증·입력 성공 증거는 아니다. 생성된 `web/dist` 번들도 재빌드하지 않았으므로 TEST 후보 빌드로 최신 소스를 반영해야 한다.
 
 1. TEST/CI에서 `node --test test/desktop-state.test.mjs test/desktop-service.test.mjs test/desktop-http.test.mjs test/mcp-contracts.test.mjs test/mcp180-bytes.test.mjs`를 실행한다. 회귀 소스는 일반 로그인 관측, owner 인증, 값 비반환·비재전송, SAS 순서와 기존 GUI 입력을 다룬다.
 2. SAS 정책 단일 값·tvnserver 서비스 계정과 PID를 읽고 기존 SSH/RFB 어댑터로 잠긴 화면을 입력 없이 확인한다. 정책 허용과 SAS 실제 성공은 별개다. VNC 레지스트리 전체를 읽지 않는다.
