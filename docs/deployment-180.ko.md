@@ -1,4 +1,6 @@
-# 1.8 배포와 이력 이전
+# 2.0 배포와 구형 이력 이전
+
+2.0.0 후보에도 기존 `scripts/deploy180.mjs`와 문서 파일명을 유지한다. `180`은 기존 배포·이력 이전 경로의 식별자이며 현재 제품 버전은 아니다. migration fixture·상태 파일·영수증의 이름과 과거 실행 기록은 바꾸지 않는다. UUID 서버·배포본 클라이언트를 포함한 최종 후보의 전체 시험·패키지·설치·배포는 별도 근거로 확인한다.
 
 `scripts/deploy180.mjs`는 앱을 실행하거나 앱 HTTP API에 의존하지 않는 Node.js 24 배포 진입점이다. `inspect`, `stage`, `activate`, `verify`, `recover`를 각각 호출한다. 서비스 설치, unit/env 교체, SSH 키 생성과 인증 재설정은 수행하지 않는다. 기존 관리 서비스와 `app/releases/...`를 가리키는 활성 심볼릭 링크가 전제다. 일반 디렉터리로 설치된 구형 서비스는 이 도구가 자동 이동하지 않는다.
 
@@ -11,7 +13,7 @@
 ```json
 {
   "generation": "<release-manifest.json의 64자리 SHA-256>",
-  "sourceDir": "/srv/portal-candidate/ssh-approval-portal-1.8.0",
+  "sourceDir": "/srv/portal-candidate/ssh-approval-portal-2.0.0",
   "appRoot": "/var/lib/ssh-mcp/app",
   "activePath": "/var/lib/ssh-mcp/app/approval-bridge",
   "dataRoot": "/var/lib/ssh-mcp/transfers",
@@ -70,14 +72,16 @@ sudo /opt/ssh-approval/node/bin/node scripts/deploy180.mjs recover --plan /srv/p
 
 실패 직후 자동 rollback하지 않는다. 운영자는 실패 영수증과 `appRoot/deployments/<generation>.json`의 단계를 확인하고 위 명령을 실행한다. `recover`는 준비 원본 디렉터리가 없어도 동작한다. 서비스를 먼저 중지한 뒤 활성 링크와 모든 지원 영구 데이터의 byte hash·mtime·파일 목록을 비교한다. operations DB뿐 아니라 기존 history/policy/maintenance DB, command-output manifest·payload·stream, transfer part·JSON, `orphans`의 격리 파일·진단도 검사한다. 새로운 저장소나 알 수 없는 항목도 복구를 차단한다.
 
-새 서비스 시작 시도 뒤 이 fingerprint가 바뀌면 `DOWNMIGRATION_FORBIDDEN_AFTER_WRITES`로 거부한다. 시작 초기화나 TTL 정리도 보수적으로 새 쓰기로 취급한다. 이 경우 서비스는 중지 상태로 남으며 새 DB·출력·후보 링크를 보존한다. 새 데이터를 옛 스키마로 되돌리지 말고 같은 1.8 스키마를 읽을 수 있는 수정 릴리스로 전진 복구한다. 쓰기가 없음을 확인한 경우에만 고정된 이전 manifest를 검증하고 링크를 되돌려 기존 서비스를 시작한다. 이전 DB를 덮어쓰거나 새 DB를 삭제하지 않는다.
+새 서비스 시작 시도 뒤 이 fingerprint가 바뀌면 `DOWNMIGRATION_FORBIDDEN_AFTER_WRITES`로 거부한다. 시작 초기화나 TTL 정리도 보수적으로 새 쓰기로 취급한다. 이 경우 서비스는 중지 상태로 남으며 새 DB·출력·후보 링크를 보존한다. 새 데이터를 옛 스키마로 되돌리지 말고 해당 영구 스키마를 읽을 수 있는 수정 릴리스로 전진 복구한다. 쓰기가 없음을 확인한 경우에만 고정된 이전 manifest를 검증하고 링크를 되돌려 기존 서비스를 시작한다. 이전 DB를 덮어쓰거나 새 DB를 삭제하지 않는다.
 
 동시 호출은 `.deploy180.lock`으로 거부한다. 프로세스 강제 종료 뒤 잠금 파일이 남을 수 있다. 배포 프로세스가 실제로 종료됐는지 관리자가 확인한 뒤 해당 잠금만 수동 해제한다. 도구는 다른 프로세스의 잠금을 자동 삭제하지 않는다. 실패한 임시 stage나 보관 자료도 자동 삭제하지 않는다.
 
 각 성공 단계는 `portal.deployment-receipt.v1` JSON과 `deployments/<generation>-<stage>-receipt.json`을 남긴다. 실패는 비밀이나 자식 출력 대신 구분 가능한 `code`와 실패 단계의 JSON을 출력하며 종료 코드 1을 반환한다. 상태 파일과 성공 영수증은 `0600`이다. 제품 시험용 검사는 `node --test test/operation-migration-180.test.mjs`이며 허용된 서버·CI에서 실행한다.
 
-이 문서는 현재 소스의 절차와 실패 경계를 설명하며 실제 설치·운영 전환 완료를 주장하지 않는다. 2026-11-03 고정 commit `8ba925e4313934c29bcb6ec74816c148b85c89d6`에서 TEST Linux Node 24.22.1로 `node --test --test-reporter=tap --test-concurrency=2 --test-timeout=60000 test/operation-migration-180.test.mjs`를 실행하여 15개 통과, 실패·취소·skip 0, 종료 코드 0을 확인했다. 이는 격리 fixture의 이력 이전·재배포·복구 회귀 결과이며 최종 후보 전체 시험 또는 실제 배포 성공을 뜻하지 않는다. 실제 서비스 중지·기동, 운영 데이터 보존과 복구는 각 실행의 고정 commit·명령·종료 코드·영수증으로 별도 확인해야 한다.
+## 과거 실행 근거와 현재 후보의 제한
 
-이후 이력 용량·batch 수정은 base commit `12b11e92799d2be652a746085ac2969c99784fa1`에 정확한 8파일 패치(SHA-256 `248e5da7220c4ef2c818e7cf7660304dc9f5e46a7886c1bd305e0cdcc567505f`)를 적용한 격리 TEST에서 검증했다. `mcpbridge` UID로 `node --test --test-reporter=tap --test-concurrency=1 --test-timeout=180000`에 `test/operation-migration-batch.test.mjs`, `test/operation-migration-retained-budget.test.mjs`, `test/operation-store.test.mjs`, `test/operation-migration-180.test.mjs`, `test/operation-scheduler.test.mjs`의 동일 5개 시험 파일을 실행했다. 실제 TAP은 47개 통과, 실패·취소·skip 0, 종료 코드 0, 24922.118237ms다. 배포 자식의 기존 60000ms 제한은 유지했다. [실행 영수증](../design180/live-candidate/migration-timeout-r3/execution-receipt.json), [원 TAP](../design180/live-candidate/migration-timeout-r3/green-r3.tap), [8파일 핀](../design180/live-candidate/migration-timeout-r3/patch-pins.json)에 입력·명령·결과를 고정했다.
+이 문서는 소스의 절차와 실패 경계를 설명하며 실제 설치·운영 전환 완료를 주장하지 않는다. 다음은 당시 고정 후보의 기존 기록이며 2.0.0 최종 후보의 통과 근거로 확대하지 않는다. 2026-11-03 고정 commit `8ba925e4313934c29bcb6ec74816c148b85c89d6`에서 TEST Linux Node 24.22.1로 `node --test --test-reporter=tap --test-concurrency=2 --test-timeout=60000 test/operation-migration-180.test.mjs`를 실행하여 15개 통과, 실패·취소·skip 0, 종료 코드 0을 확인했다. 이는 격리 fixture의 이력 이전·재배포·복구 회귀 결과이며 최종 후보 전체 시험 또는 실제 배포 성공을 뜻하지 않는다. 실제 서비스 중지·기동, 운영 데이터 보존과 복구는 각 실행의 고정 commit·명령·종료 코드·영수증으로 별도 확인해야 한다.
 
-이는 합성 원본의 용량·일반 rollback·재열기·hot-journal 복구 회귀다. 실제 디스크 장애를 주입한 rollback 실패 시험은 하지 않았으며 연결 폐기 경로는 소스로 검토했다. 실제 본서비스의 기존 partial 이력과 원본 사이 의미 충돌 여부도 별도 확인 대상이다. 새 패키지의 최종 manifest 검증, TEST 본서비스 1.8 전환, PROD 운영 전환과 릴리스는 완료되지 않았다. 앞선 timeout·실패와 공식 복구 근거도 그대로 보존한다.
+이후 이력 용량·batch 수정은 base commit `12b11e92799d2be652a746085ac2969c99784fa1`에 정확한 8파일 패치(SHA-256 `248e5da7220c4ef2c818e7cf7660304dc9f5e46a7886c1bd305e0cdcc567505f`)를 적용한 격리 TEST에서 검증했다. `mcpbridge` UID로 `node --test --test-reporter=tap --test-concurrency=1 --test-timeout=180000`에 `test/operation-migration-batch.test.mjs`, `test/operation-migration-retained-budget.test.mjs`, `test/operation-store.test.mjs`, `test/operation-migration-180.test.mjs`, `test/operation-scheduler.test.mjs`의 동일 5개 시험 파일을 실행했다. 실제 TAP은 47개 통과, 실패·취소·skip 0, 종료 코드 0, 24922.118237ms다. 배포 자식의 기존 60000ms 제한은 유지했다. 당시 작업 공간의 `design180/live-candidate/migration-timeout-r3/execution-receipt.json`, `green-r3.tap`, `patch-pins.json`에 입력·명령·결과를 고정했다.
+
+이는 합성 원본의 용량·일반 rollback·재열기·hot-journal 복구 회귀다. 실제 디스크 장애를 주입한 rollback 실패 시험은 하지 않았으며 연결 폐기 경로는 소스로 검토했다. 실제 본서비스의 기존 partial 이력과 원본 사이 의미 충돌 여부도 별도 확인 대상이다. 당시 기록에서는 최종 manifest·TEST 본서비스 1.8 전환·PROD 전환·릴리스를 완료로 보지 않았다. 이 문서 수정만으로 이후 상태나 2.0.0 전환 완료를 판정하지 않는다. 앞선 timeout·실패와 공식 복구 근거도 그대로 보존한다.

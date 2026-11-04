@@ -1,27 +1,14 @@
-# SSH Approval Portal 1.8.0
+# SSH Approval Portal 2.0.0
 
-[English](README.md) · [공통 에이전트 연결](docs/agent-clients.ko.md) · [관리자 작업 공간](docs/admin-workspace.ko.md) · [관리자 로그인](docs/admin-login.ko.md) · [에이전트 파일 업로드](docs/agent-upload.ko.md) · [구조와 호환성](docs/architecture.ko.md)
+[English](README.md) · [연결·도구 계약](docs/mcp-tools.ko.md) · [관리자 로그인](docs/admin-login.ko.md) · [파일 전송 클라이언트](docs/client-files.ko.md) · [구조와 호환성](docs/architecture.ko.md)
 
-SSH 명령과 파일 전송을 사용자가 확인하고 승인할 수 있는 표준 MCP 서버입니다. 명령·조회·승인 대기·출력 읽기는 AI 공급자와 관계없이 호환 MCP 클라이언트에서 사용하며 MCP Apps 카드는 선택 사항입니다. `get-client-capabilities`로 파일 입력과 로컬 전송의 사전 조건을 확인하세요. 중계기 하나에 SSH 대상을 최대 32개 등록할 수 있습니다. 통합 관리자 화면에서 전체 요청을 확인하고 서버별로 좁혀 개별 요청을 처리합니다. [대상 설정 안내](docs/multi-targets.ko.md)를 참고하세요.
+SSH 명령·파일 전송·OS 데스크톱을 기존 서버 정책과 소유자 승인으로 처리하는 표준 MCP 서버입니다. 특정 AI 벤더나 에이전트 SDK에 종속되지 않습니다. `targets`로 대상 revision·플랫폼·기능·파일 정책을 확인하고 `submit`·`observe`로 같은 작업을 제출·관측합니다. MCP Apps 카드는 선택 사항이며 중계기 하나에 SSH 대상을 최대 32개 등록합니다. [도구 계약](docs/mcp-tools.ko.md)과 [대상 설정](docs/multi-targets.ko.md)을 참고하세요.
 
-Windows SSH 대상의 PowerShell 명령·이름 정책·파일 전송·Python 코드 제출·서버 CLI 등록 방법은 [Windows 대상 등록](docs/windows-targets.ko.md)을 확인하세요. Python과 Node.js/npm은 기능별 사전 준비가 필요합니다. 중계기 자체의 Windows 호스팅은 후속 릴리스 범위입니다.
+2.0.0 개발 범위에는 배포본에 포함하는 `scripts/portal-files.mjs`가 들어갑니다. 로컬 CLI가 owner 인증으로 PC 파일을 직접 HTTP 전송하고 성공 시 `{"uuid":"..."}`만 출력합니다. 파일 본문을 모델 인자나 대화로 옮기지 않습니다. 에이전트는 기존 원격 MCP 연결에서 `files`에 UUID를 넘겨 상태 조회·복사·이동·임시 원본 제거를 요청합니다. 두 번째 로컬 stdio MCP 서버는 선택 사항입니다. 원격 서버가 PC 경로를 직접 읽을 수는 없습니다. 자세한 인증·사용법은 [파일 클라이언트 안내](docs/client-files.ko.md)를 따릅니다.
 
-Jev는 사전승인 목록 밖의 명령을 평가하는 보조 도구입니다. 사용자 설정에 따라 자동승인하거나 사용자 확인을 요청합니다. 별도의 [합성 평가 도구](docs/jev-observation.ko.md)도 제공합니다.
+새 UUID 서버·클라이언트 경로는 2.0.0 통합 개발 대상입니다. 계약 설명은 최종 후보의 전체 시험·패키지·설치·배포 또는 모든 벤더/에이전트에서의 실동작 완료를 뜻하지 않습니다. 과거 ChatGPT 웹·Claude 데스크톱의 카드/파일 왕복과 구버전 구조 변경 시험은 해당 릴리스의 기록 범위에 한정됩니다. ChatGPT 데스크톱·Claude 웹 등 확인되지 않은 조합을 완료로 확대하지 않습니다. 실제 환경과 보존 근거는 해당 후보의 `VALIDATION.json` 및 실행 기록으로 판단합니다.
 
-[시크릿 관리](docs/secret-management.ko.md)는 비밀 참조와 공급자 포트를 분리합니다. 첫 backend는 POSIX 전용 private 로컬 저장소이며, 관리자 CLI에서 값을 숨김 입력하고 Jev에는 참조로 공급합니다. 실제 키 값은 채팅·MCP 결과·패키지에 넣지 않습니다.
-
-**1.6.2** 후보는 유지보수 예약 소유권과 재시작 후 데이터 보존 비교를 추가합니다. 기존 승인 정책과 모델 판정 기준은 유지합니다. 실제 검증 환경과 보존 범위는 `VALIDATION.json`에서 확인하며, 서비스 정상 응답만으로 데이터 보존을 확인했다고 보지는 않습니다. 1.6.1에는 승인·완료 대기, 평가 실패 상세와 MCP 입력 크기 제한이 반영됐습니다.
-
-| 구분 | 확인한 범위와 남은 제약 |
-| --- | --- |
-| ChatGPT 웹 | 기존 카드의 실제 승인·거부와 PC 파일 업로드·다운로드 왕복을 확인했습니다. |
-| Claude 데스크톱 앱 | 기존 카드의 실제 승인·거부와 PC 파일 업로드·다운로드 왕복을 확인했습니다. |
-| ChatGPT 데스크톱·Claude 웹 | 전체 기능을 실제 클라이언트에서 확인하지 않았습니다. |
-| ChatGPT `request-upload` | 실제 파일 입력이 `upload-source-not-configured` 응답과 공급자 hostname 반환까지 도달했습니다. 공급자 파일 가져오기·승인·SSH 왕복은 이 관측으로 확인되지 않았습니다. |
-| 원격 Claude의 호스트 파일 입력 | 해당 시험의 `file_uuid`와 빈 `download_url`은 입력 검증에 실패했고 샌드박스 HTTPS는 proxy CONNECT 403으로 차단됐습니다. 이 경로는 지원하지 않습니다. PC 파일 접근 권한이 있는 Claude Code 등 로컬 에이전트의 CLI·stdio 전송은 별도 지원 경로입니다. |
-| 구조 변경 검증 | 비ARM 구현은 Node 94개·Linux Python 21개, 브라우저 회귀, amd64 설치·업데이트·복원·Compose와 실제 SSH 파일 왕복 근거를 대조하고 독립 최종 검토 2건을 통과했습니다. 1.0.0 버전 변경분의 검증 범위는 릴리스의 `VALIDATION.json`에 기록합니다. |
-
-파일 공급자 허용 목록의 기본값은 비어 있습니다. `BRIDGE_UPLOAD_SOURCE_HOSTS`에는 정확한 hostname과 앞에 `*.`가 붙은 domain 패턴을 쉼표로 구분해 함께 입력할 수 있습니다. 예를 들어 `files.example.test,*.downloads.example.test`는 가상 주소를 사용한 설정 예입니다. 패턴은 점 경계를 기준으로 한 단계 이상의 모든 깊이 하위 도메인에 일치하며, 기준 domain 자체는 포함하지 않습니다. 단독 `*`, 다른 위치의 wildcard, URL·IP 주소·포트는 거부합니다. wildcard를 선택하면 포함되는 모든 하위 호스트를 신뢰하게 되므로, 신뢰 범위를 확인하지 않은 공유 CDN을 넓게 허용하지 않습니다. 카드 승인은 `BRIDGE_UI_ENABLED=false`, 웹 관리자 인증은 `BRIDGE_ADMIN_AUTH_MODE=token`이 기본값입니다. 기존 클라이언트 시험의 성공을 새 에이전트 업로드나 다른 플랫폼의 성공으로 해석하지 않습니다.
+Windows SSH 대상의 PowerShell·파일·Python·서버 CLI는 [Windows 대상 등록](docs/windows-targets.ko.md)을 참고하세요. 기능별 사전 준비가 필요하며 중계기의 Windows 호스팅은 후속 범위입니다. Jev는 사전승인 목록 밖의 명령을 평가하는 보조 공급자입니다. [시크릿 관리](docs/secret-management.ko.md)는 실제 값을 채팅·MCP 응답·패키지에 넣지 않고 참조로 연결합니다. 카드 기본값은 `BRIDGE_UI_ENABLED=false`, 관리자 인증 기본값은 `BRIDGE_ADMIN_AUTH_MODE=token`입니다.
 
 ## 자동승인은 어떻게 동작하나요?
 
@@ -45,36 +32,33 @@ Jev는 사전승인 목록 밖의 명령을 평가하는 보조 도구입니다.
 
 ## 승인과 파일 전송
 
-검증된 일반 조회는 즉시 실행할 수 있습니다. 명령·파일 전송의 자동승인은 위의 서버별 정책을 따르며, 나머지는 카드 또는 웹에서 사용자가 승인한 뒤 한 번만 실행합니다. 업로드 바이트는 자동 또는 사용자 승인이 확정된 뒤 대상 서버로 전송합니다.
-
-에이전트는 평가용 작업 설명을 영어 `context`로, 관리자용 설명을 같은 뜻의 한국어 `displayContext`로 함께 보냅니다. 한국어 설명은 Jev로 전송하지 않으며, 실행 명령과 경로는 번역하지 않습니다. 설명은 요청자의 주장이지 실행 권한의 근거가 아닙니다.
-
-`ui-*` 도구는 카드 전용이며 승인 티켓을 모델 응답에 노출하지 않습니다.
+서버 정책과 유효한 소유자 승인이 실행 권한을 결정합니다. 에이전트는 영어 `context`와 같은 의미의 한국어 `displayContext`를 제공할 수 있습니다. 설명은 호출자의 주장이며 실행 권한을 대신하지 않습니다. 접수·승인·원격 완료·PC 저장은 서로 다른 상태입니다.
 
 | 도구 | 동작 |
 | --- | --- |
-| `read-command` | 읽기 전용으로 판정된 명령을 실행합니다. |
-| `run-command` | 서버 정책으로 자동승인하거나 사용자 승인 대기에 등록합니다. |
-| `get-request-status`·`show-approval` | 요청 상태를 조회하고 승인·거부 카드를 표시합니다. |
-| `show-file-transfer` | PC 파일을 선택해 업로드하거나 서버 파일을 내려받는 카드를 표시합니다. |
-| `request-download` | 서버 정책에 따라 파일을 자동 준비하거나 사용자 승인을 요청합니다. PC 저장은 별도입니다. |
-| `get-client-capabilities` | 표준 MCP·선택적 카드·호스트 파일 입력·로컬 CLI/stdio 전송의 지원 조건을 조회합니다. |
-| `request-upload` | `openai/fileParams` 호스트 파일 입력을 임시 저장해 업로드 요청합니다. PC 파일은 공급자 공통 CLI 또는 로컬 stdio 도구를 사용합니다. |
-| `show-ui-probe` | 명령이나 파일을 실행하지 않고 카드와 비공개 메타데이터 전달을 확인합니다. |
+| `targets` | 대상 revision·플랫폼·capability·파일 정책·한도를 조회합니다. |
+| `submit` | 안정된 `operationKey`로 `command`, Python `source`, `download`를 제출합니다. |
+| `observe`·`cancel` | 상태는 같은 ID/키로 조회하고 취소는 기존 ID로 요청합니다. 출력은 `includeOutput:true`일 때만 읽습니다. |
+| `files` | UUID의 `stat`, 대상 배치 `copy`/`move`, 임시 원본 `remove`를 처리하는 2.0 계약입니다. |
+| `artifact-begin/chunk/status/finish` | 이미 확보한 작은 바이트를 대상·크기·SHA-256에 고정해 준비하고 파일 승인 정책으로 제출합니다. |
+| `artifact-read` | 완료된 다운로드 snapshot의 제한된 base64 페이지를 읽습니다. 큰 PC 파일은 패키지 클라이언트로 전송합니다. |
+| `desktop-open/status/observe/input/close` | 실제 OS 데스크톱 lease·준비 상태·PNG 프레임·입력·종료를 처리합니다. |
 
-PC 파일은 카드에서 고르고 목적지 경로·덮어쓰기·sudo를 지정합니다. 중계기는 받은 바이트의 SHA-256과 설정을 고정해 승인 요청을 만듭니다. 새 `request-upload` 경로도 같은 승인을 거칩니다. 관리자가 실제 공급자를 확인하고 정확한 hostname 또는 앞에 `*.`가 붙은 domain 패턴을 허용하기 전에는 파일을 가져오지 않습니다. 설정과 클라이언트 제약은 [에이전트 업로드 안내](docs/agent-upload.ko.md)를 확인하세요. 로그인 쿠키, 임의 URL이나 채팅에 붙인 파일 바이트로 대신하지 않습니다.
+UUID 업로드는 임시 저장 완료이며 대상 서버 배치 완료가 아닙니다. `copy`는 임시 원본을 유지하고 `move`는 publication 확정 뒤 원본을 소비합니다. `remove`는 해당 임시 UUID 객체만 제거합니다. 배치에는 기존 승인·대상 revision·경로 검증·OS 권한·TEST 정책이 적용됩니다. 내부 임시 경로는 모델에 반환하지 않으며 UUID 소지만으로 권한을 부여하지 않습니다. [공개 계약](docs/mcp-tools.ko.md)을 참고하세요.
 
-파일 하나의 한도는 64 MiB, 임시 저장 총량의 기본값은 512 MiB입니다. `BRIDGE_TRANSFER_MAX_BYTES`는 64 MiB 이하로, `BRIDGE_TRANSFER_BUDGET_BYTES`는 파일 한도 이상으로 조절할 수 있습니다. 디렉터리·링크·장치 파일은 거부합니다. 폴더는 ZIP으로 전송하며 서버에서 자동으로 압축을 풀거나 파일을 실행하지 않습니다. 파일 스냅샷과 다운로드는 바이트를 마스킹하지 않습니다. 다운로드 링크는 10분·1회용이며 저장에 실패하면 카드에서 재발급합니다.
+`show-ui-probe`, `show-approval`, `show-file-transfer` 3개는 모델에도 보이는 선택적 카드 열기 도구이며 UI resource를 렌더링합니다. `ui-*` 6개만 app 전용이며 렌더링 resource 없이 비공개 metadata에 티켓을 전달합니다. 카드가 없는 클라이언트도 공개 MCP와 관리자 웹을 사용할 수 있습니다. 구버전 `read-command`·`run-command`·`request-upload`·setup 도구는 현재 공개 도구명이 아닙니다.
 
-Linux 대상은 기존 파일의 소유권·모드·확장 속성을 보존할 수 없는 경우 덮어쓰기를 완료로 보고하지 않습니다. 새 Linux 파일의 모드는 0600이며 sudo 업로드는 root 소유입니다. Windows 덮어쓰기는 기존 파일의 소유자·DACL·무결성 레이블·생성·접근·수정 시간을 보존하며 무결성 레이블을 제외한 감사 설정 등 나머지 SACL·대체 데이터 스트림(ADS)·기타 확장 메타데이터의 완전한 보존은 보장하지 않습니다. [Windows 전송 제약](docs/windows-targets.ko.md)을 확인하세요. 요청·파일·서버 변경, 만료 또는 재시작으로 유실된 요청에는 새 승인이 필요합니다. 연결 실패나 최종 반영 결과가 불명확한 작업은 자동으로 다시 실행하지 않습니다.
+파일당 최대 64 MiB, 기본 임시 저장 총량은 512 MiB입니다. `BRIDGE_TRANSFER_MAX_BYTES`는 64 MiB 이하, `BRIDGE_TRANSFER_BUDGET_BYTES`는 단일 파일 한도 이상이어야 합니다. 디렉터리·링크·장치 파일은 거부하며 ZIP 자동 해제나 파일 자동 실행은 하지 않습니다. UUID·전송·다운로드는 반환된 만료·보존 상태를 따릅니다. 파일 바이트를 마스킹하는 전송은 아닙니다.
+
+Linux 덮어쓰기는 기존 소유권·모드·확장 속성을 보존할 수 없으면 완료로 보고하지 않습니다. 새 파일은 mode 0600이며 sudo 업로드는 root 소유입니다. Windows의 보존 범위는 [Windows 전송 제약](docs/windows-targets.ko.md)을 따릅니다. 관측 timeout이나 연결 실패는 취소·미실행을 뜻하지 않습니다. 원래 UUID·operationKey·request ID를 조회하고 불명확한 배치를 새 키로 재실행하지 않습니다.
 
 ## 네이티브 설치와 업데이트
 
 이전 릴리스는 Ubuntu 22.04/24.04 x86_64에서 검증했습니다. ARM64 설치 경로는 남아 있지만 검증은 후속 고도화로 보류했습니다. 인터넷 연결과 서버 관리자 터미널이 필요합니다. 런타임은 Node 24.2 이상, 25 미만을 요구합니다. Node 24는 전용 경로에 설치하며 시스템 Node를 교체하지 않습니다.
 
 ```sh
-tar -xzf ssh-approval-portal-1.8.0.tar.gz
-cd ssh-approval-portal-1.8.0
+tar -xzf ssh-approval-portal-2.0.0.tar.gz
+cd ssh-approval-portal-2.0.0
 sudo bash scripts/install.sh --admin-origin https://ssh-approve.example.com --grant-sudo-all
 ```
 
@@ -125,6 +109,8 @@ Compose 갱신은 제한된 구성에서 지원합니다. 실행 중인 중계�
 
 ## 검증과 상태 확인
 
+다음 명령은 허용된 TEST·CI 환경에서 실행할 검증 절차이며 이번 문서 수정에서 실행한 결과가 아닙니다. 2.0.0 최종 후보의 실제 클라이언트·패키지·설치·배포는 고정 commit과 실행 근거로 별도 확인합니다.
+
 ```sh
 npm ci --ignore-scripts
 npm run build:ui
@@ -139,7 +125,7 @@ UI는 별도 `ui` 의존성으로 빌드하며 서버 SDK를 업그레이드하�
 
 릴리스의 `release-manifest.json`과 `SHA256SUMS`를 검증하세요. 패키지에는 node_modules, 실제 설정, 토큰, 개인키와 사용자 세션을 넣지 않습니다. 현재 후보의 시험 기록과 위 검증 범위를 함께 확인하세요. 공개 게시와 Cloudflare 설정 변경은 자동으로 수행하지 않습니다.
 
-승인 완료 agent 알림: [승인 대기 도구 안내](docs/approval-callback.ko.md). `wait-for-request`는 실제 승인·실행 종료를 대기 중인 MCP 호출에 전달합니다.
+공개 대기는 `observe`의 `waitMs`를 사용합니다. `waitTimedOut`는 관측 제한 시간이며 재제출을 허용하지 않습니다. [구버전 승인 대기 안내](docs/approval-callback.ko.md)의 도구명은 과거 기록입니다.
 
 관리자 설정의 중요 자동승인 설정에서 **테스트 서버**를 켜면 해당 대상의 명령·Python 코드·CLI 설치·파일 전송은 위험 심사와 개별 승인을 건너뜁니다. 금지 명령과 다른 자동승인 허용 설정보다 우선하며 기본값은 꺼짐입니다. 테스트 서버 지정은 관리자가 판단합니다. 관리자 인증, 대상 결속, 입력·파일 검증, SSH 계정 권한과 유지보수·동시 실행 제한은 유지됩니다. 해제하면 기존 설정이 다시 적용됩니다.
 

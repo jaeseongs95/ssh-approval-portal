@@ -2,7 +2,7 @@
 
 [한국어](architecture.ko.md) · [README](../README.md)
 
-This document describes the responsibilities and public contracts in the 1.8 source. Implemented contracts, observed tests, and real-client or production acceptance require separate evidence. The existence of a feature does not establish release or deployment readiness.
+This document describes the responsibilities and public contracts in the 2.0.0 candidate source. Implemented contracts, observed tests, and real-client or production acceptance require separate evidence. The existence of a feature does not establish release or deployment readiness.
 
 ## Layers and composition
 
@@ -18,7 +18,7 @@ Vendor internal imports are localized in `src/adapters/ssh/vendor.mjs`, which ch
 
 ## Neutral tools and approval
 
-`src/adapters/mcp/public-contract.mjs` owns input/output schemas and reply validation for `contractVersion: "1.8"`. The model-facing base surface has nine tools.
+`src/adapters/mcp/public-contract.mjs` owns input/output schemas and reply validation for `contractVersion: "2.0"`. The public tools and the 2.0 UUID file contract are listed below.
 
 | Tool | Contract |
 | --- | --- |
@@ -27,11 +27,12 @@ Vendor internal imports are localized in `src/adapters/ssh/vendor.mjs`, which ch
 | `observe` | Inspect the same ID or key; include paginated output only when requested |
 | `cancel` | Request cancellation of the same operation; inspect its returned state for confirmation |
 | `artifact-begin`, `artifact-chunk`, `artifact-status`, `artifact-finish` | Stage and submit authorized bytes bound to size, SHA-256 and target revision |
+| `files` | UUID stat, target copy/move and temporary-source remove; final integration/validation is separate |
 | `artifact-read` | Read bounded base64 pages of a verified snapshot for a completed download |
 
-When a desktop service is composed, four more tools are registered: `desktop-open`, `desktop-observe`, `desktop-input` and `desktop-close`. Registration alone does not establish target availability: check capabilities and current policy. Existing `show-*` and `ui-*` tools are app-only owner card actions, not a model approval path. Public schemas exclude approval/download tickets and internal host objects.
+When a desktop service is composed, five tools are registered: `desktop-open`, `desktop-status`, `desktop-observe`, `desktop-input` and `desktop-close`. Check capabilities, readiness and policy for target availability. The three `show-*` card openers are visible to model and app and carry a rendering resource. Only the six owner `ui-*` tools are app-only, with private metadata and no rendering resource. Public schemas exclude approval/download tickets and internal host objects.
 
-Neutral tools do not require a separate local CLI, stdio server or card installation. The caller must already possess upload bytes; platform file references do not automatically supply those bytes. See the [agent-upload guide](agent-upload.en.md) for platform limits. Administrator agent CLI installation, login and update are separate use cases, not prerequisites for neutral tools.
+Remote commands, observation and desktops do not require a separate local server or cards. For PC files, the packaged `scripts/portal-files.mjs` sends bytes directly over owner-authenticated HTTP and returns only a UUID. The existing remote MCP `files` tool uses that UUID; a second local stdio server is optional. A remote server cannot read PC paths. Existing `artifact-*` tools remain for small bytes already available to the caller, not for retranscribing large files through model arguments. Follow the [file client guide](client-files.ko.md). Administrator agent CLI installation, login and update remain separate use cases.
 
 Server policy and valid owner approval authorize execution. An ID confirms acceptance, not successful execution. The same key with the same immutable input recovers the same operation; conflicting input is refused. Observation timeout or disconnect does not cancel work. Never use a fresh key to replay an uncertain outcome. `terminating` still represents live execution resources; `unknown` requires reconciliation.
 
@@ -51,7 +52,12 @@ The SSH registry owns authenticated connection reuse, host keys and ProxyJump. E
 
 `src/adapters/storage/artifacts.mjs` owns staging bytes, reservations, manifests, completion and release. Synchronized bytes and manifests restore acknowledged chunks after restart, roll back unacknowledged tails and quarantine files without metadata for diagnosis. Durable storage does not authorize SSH upload replay. Approval binds filename, size, SHA-256, destination, overwrite, elevation and target revision.
 
-The per-file maximum is 64 MiB, the default staging budget is 512 MiB, approval expiry is one hour, and staging/download links default to ten minutes. Command output follows its separate store's retention timestamps and output references, with a default one-hour TTL. Public output pages contain redacted adapter outcomes and do not guarantee complete remote stdout/stderr capture. Expired or deleted bytes are not regenerated by replaying commands. See [1.8 deployment and migration](deployment-180.ko.md) for legacy history, redeployment and recovery.
+The per-file maximum is 64 MiB, the default staging budget is 512 MiB, approval expiry is one hour, and staging/download links default to ten minutes. Command output follows its separate store's retention timestamps and output references, with a default one-hour TTL. Public output pages contain redacted adapter outcomes and do not guarantee complete remote stdout/stderr capture. Expired or deleted bytes are not regenerated by replaying commands. See [Deployment and legacy migration](deployment-180.ko.md) for legacy history, redeployment and recovery.
+
+
+The 2.0 UUID path reserves storage with owner API `POST /api/artifacts`, sends raw `application/octet-stream` chunks with `X-Chunk-SHA256` to `PUT /api/artifacts/:uuid/chunks/:sequence`, completes temporary storage with `POST /api/artifacts/:uuid/complete`, and reads public metadata through `GET /api/artifacts/:uuid`. Replies exclude internal paths. Existing owner authentication, Origin and expiry checks apply; a UUID is not approval.
+
+Keep the UUID source separate from target-placement artifacts. A server-side stream creates a target-bound upload artifact and uses existing approval, Transfers and remote helpers. Copy retains the source; move consumes it only after durable successful-publication evidence. Unknown placement does not permit replay or a source-deletion success claim. UUID mapping, chunk ACKs and provenance follow existing manifest/journal recovery boundaries. Final server/client integration and real restart regressions need separate evidence.
 
 ## Real OS desktops
 
@@ -73,6 +79,6 @@ File selection, drafts and progress belong to the current view. Earlier asynchro
 
 ## Validation boundaries
 
-Source boundary tests, real SSH execution, real OS GUI, administrator browser behavior, platform MCP clients, packaging, installation and deployment each require their own evidence. Follow the [verification plan](../test/PLAN.md) for commands and environments. Product tests run on authorized TEST servers or CI. For this task, browser regression ran locally in headless Chromium as explicitly requested by the user.
+Source boundary tests, real SSH execution, real OS GUI, administrator browser behavior, platform MCP clients, packaging, installation and deployment each require their own evidence. Follow the [verification plan](../test/PLAN.md) for commands and environments. Product tests run on authorized TEST servers or CI. The browser results below are historical records; no product tests were run for this 2.0 documentation change.
 
 The 2026-11-03 browser evidence covers 245 unique legacy cases and six new capacity/desktop cases across pinned commits and partial runs. It is not a single complete suite pass at a final SHA. The six new cases use actual administrator DOM interactions with fixture APIs to check inheritance, CAS, response loss, input ordering, close and logout; they do not prove input against an actual VNC server or OS screen. Actual CLI provider installation/login/update, Linux/Windows OS GUI, ChatGPT/Claude cards and file inputs, external sign-in, physical ARM hardware and production deployment each require execution evidence in their own environment. Updating this document does not mark unverified work complete.

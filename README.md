@@ -1,27 +1,14 @@
-# SSH Approval Portal 1.8.0
+# SSH Approval Portal 2.0.0
 
-[한국어](README.ko.md) · [Agent client setup (Korean)](docs/agent-clients.ko.md) · [Administrator sign-in](docs/admin-login.en.md) · [Agent file uploads](docs/agent-upload.en.md) · [Architecture and compatibility](docs/architecture.en.md)
+[한국어](README.ko.md) · [Connection and tool contract](docs/mcp-tools.ko.md) · [Administrator sign-in](docs/admin-login.en.md) · [File client guide (Korean)](docs/client-files.ko.md) · [Architecture](docs/architecture.en.md)
 
-An MCP server for reviewing and approving SSH commands and file transfers. Core execution, status, approval waits and output reads work through standard MCP without requiring a particular AI vendor or MCP Apps cards. Use `get-client-capabilities` to discover prerequisites for host file inputs and local file transports. One bridge supports up to 32 registered SSH targets. The unified administrator screen shows requests across targets and lets the owner filter and act on each request. See [target configuration](docs/multi-targets.ko.md).
+A standard MCP server for SSH commands, file transfers and OS desktops under existing server policy and owner approval. Its public contract is independent of AI vendors and agent SDKs. Start with `targets` to inspect revisions, platforms, capabilities and file policy; use `submit` and `observe` for the same operation. MCP Apps cards are optional. One bridge supports up to 32 registered SSH targets. See the [tool contract](docs/mcp-tools.ko.md) and [target configuration](docs/multi-targets.ko.md).
 
-Windows SSH 대상의 PowerShell 명령·이름 정책·파일 전송·Python 코드 제출·서버 CLI 등록 방법은 [Windows 대상 등록](docs/windows-targets.ko.md)을 확인하세요. Python과 Node.js/npm은 기능별 사전 준비가 필요합니다. 중계기 자체의 Windows 호스팅은 후속 릴리스 범위입니다.
+The 2.0.0 scope includes the packaged `scripts/portal-files.mjs` client. The local CLI reads PC bytes and sends them over owner-authenticated HTTP, printing only `{"uuid":"..."}` on upload success. File bodies do not pass through model arguments or conversation text. Through the existing remote MCP connection, an agent supplies that UUID to `files` for status, copy, move or removal of the temporary source. A second local stdio server is optional. A remote server cannot directly read a PC path. Follow the [file client guide](docs/client-files.ko.md) for authentication and usage.
 
-Jev assists with commands outside the preapproved list. Owner settings determine whether its assessment can lead to automatic approval or requires owner review. A separate [synthetic evaluation tool](docs/jev-observation.ko.md) is also available.
+The UUID server/client path is part of 2.0.0 integration work. Contract descriptions do not establish a final full-suite, package, installation, deployment or all-vendor acceptance result. Earlier ChatGPT web/Claude desktop card and file round trips and older restructuring tests apply only to their recorded releases. Unverified combinations, including ChatGPT desktop and Claude web, remain unverified. Use the candidate's `VALIDATION.json` and execution records for environment and preservation evidence.
 
-[Secret management (Korean)](docs/secret-management.ko.md) separates secret references from provider adapters. Its first backend is a private POSIX local store managed through a hidden-input operator CLI. Jev resolves a reference at startup; actual values stay out of chat, MCP results, and packages.
-
-Version **1.6.2** adds durable maintenance ownership and post-restart preservation comparison. Existing approval policies and model thresholds are preserved. See `VALIDATION.json` for the exact tested environments and preservation scope; a health check alone does not verify data preservation. Version 1.6.1 added approval/completion waits, assessment failure details, and bounded MCP inputs.
-
-| Area | Verified scope and remaining limits |
-| --- | --- |
-| ChatGPT web | Actual card approval, denial, and PC file upload/download round trips have been confirmed. |
-| Claude desktop app | Actual card approval, denial, and PC file upload/download round trips have been confirmed. |
-| ChatGPT desktop and Claude web | Full functionality has not been verified in these clients. |
-| ChatGPT `request-upload` | An actual file input reached `upload-source-not-configured` and returned the provider hostname. This observation does not establish provider retrieval, approval, or an SSH round trip. |
-| Remote Claude host file input | That test supplied `file_uuid` and an empty `download_url`, failing input validation; its sandbox HTTPS was also blocked by proxy CONNECT 403. This route is unsupported. The CLI and local stdio file tools are separate routes for Claude Code or any other agent with authorized local access. |
-| Restructuring validation | The non-ARM implementation passed two independent final reviews against Node 94/Linux Python 21 tests, browser regressions, amd64 installation, updates, rollback, Compose, and real SSH roundtrip evidence. The release `VALIDATION.json` records the scope of the 1.0.0 version-change checks. |
-
-The file-provider hostname allowlist starts empty. `BRIDGE_UPLOAD_SOURCE_HOSTS` accepts a comma-separated mix of exact hostnames and leading `*.domain` patterns, for example `files.example.test,*.downloads.example.test` (fictional). A pattern covers one or more subdomain labels at any depth, excludes the apex domain, and matches at a dot boundary. Bare `*`, other wildcard placements, URLs, IP addresses and ports are rejected. Choosing a wildcard means trusting every subdomain it covers; do not broadly allow a shared CDN without verifying that trust scope. Card approval defaults to `BRIDGE_UI_ENABLED=false`, and web administrator authentication defaults to `BRIDGE_ADMIN_AUTH_MODE=token`. Successful tests of an existing client flow do not establish that the new agent-upload path or another platform works.
+See [Windows target configuration](docs/windows-targets.ko.md) for PowerShell, files, Python and server CLI prerequisites. Hosting the bridge on Windows remains later scope. Jev is an auxiliary assessment provider for commands outside the preapproved list. [Secret management](docs/secret-management.ko.md) passes references rather than values in chat, MCP results or packages. Cards default to `BRIDGE_UI_ENABLED=false`; administrator authentication defaults to `BRIDGE_ADMIN_AUTH_MODE=token`.
 
 ## How automatic approval works
 
@@ -45,35 +32,33 @@ With only `ls` and `pwd` registered:
 
 ## Approval and file transfers
 
-Proven read-only inspections may run immediately. Automatic command and file approvals follow the server policy above; other requests run once after owner approval in a card or the website. Upload bytes reach the target only after automatic or owner approval is established.
-
-Agents provide detailed English `context` for evaluation and a faithful Korean `displayContext` for Korean administrators. The localized explanation is not sent to Jev. Commands and paths remain unchanged. Both explanations are caller claims, not execution authority.
-
-The main tools are listed below. The `ui-*` tools are card-only; approval tickets are not exposed in model responses.
+Server policy and valid owner approval authorize execution. Agents may supply detailed English `context` and a faithful Korean `displayContext`; these are caller claims, not authority. Acceptance, approval, remote completion and saving to the PC are separate states.
 
 | Tool | Behavior |
 | --- | --- |
-| `read-command` | Runs commands classified as read-only. |
-| `run-command` | Applies server policy for automatic approval or queues a request for owner approval. |
-| `get-request-status` and `show-approval` | Retrieve request status and display an approval/denial card. |
-| `show-file-transfer` | Displays a card for choosing a PC file to upload or saving a remote file. |
-| `request-download` | Automatically prepares a file or asks the owner under server policy. Device saving is separate. |
-| `request-upload` | Stages a ChatGPT/OpenAI file input with `download_url` and `file_id`, then queues an upload for approval. A Claude `file_uuid` alone cannot satisfy this input. |
-| `show-ui-probe` | Checks card and private-metadata delivery without running a command or file. |
+| `targets` | Inspect revisions, platforms, capabilities, file policy and limits. |
+| `submit` | Submit `command`, Python `source` or `download` using a stable `operationKey`. |
+| `observe`, `cancel` | Observe the same ID/key; request cancellation by existing ID. Read output only with `includeOutput:true`. |
+| `files` | The 2.0 contract for UUID `stat`, target `copy`/`move` and temporary-source `remove`. |
+| `artifact-begin/chunk/status/finish` | Stage already available small bytes bound to target, size and SHA-256, then submit through file approval policy. |
+| `artifact-read` | Read bounded base64 pages of a completed download snapshot. Use the packaged client for large PC files. |
+| `desktop-open/status/observe/input/close` | Manage real OS desktop leases, readiness, PNG frames, explicit input and close. |
 
-For PC uploads, choose a file in the card and set its destination path, overwrite flag, and sudo flag. The bridge fixes the received bytes' SHA-256 and these settings in the approval request. The new `request-upload` path uses the same approval process. It does not fetch a file until an administrator verifies the provider and allows its exact hostname or a leading `*.domain` pattern. See the [agent-upload guide](docs/agent-upload.en.md) for setup and client limits. Do not substitute login cookies, arbitrary URLs, or file bytes pasted into a conversation.
+A UUID upload confirms temporary storage, not placement on an SSH target. `copy` retains the source; `move` consumes it after confirmed publication. `remove` affects only that temporary UUID object. Placement retains approval, revision, path, OS-permission and TEST policies. Replies exclude internal staging paths; possession of a UUID is not authority. See the [public contract](docs/mcp-tools.ko.md).
 
-The single-file limit is 64 MiB, and the default staging budget is 512 MiB. Set `BRIDGE_TRANSFER_MAX_BYTES` to no more than 64 MiB and `BRIDGE_TRANSFER_BUDGET_BYTES` to at least the single-file limit. Directories, links, and device files are rejected. Send a folder as a ZIP file; the server does not automatically extract it or execute uploaded files. File snapshots and downloads do not mask their bytes. Download links expire after 10 minutes and are single-use; request a new link in the card if saving fails.
+The three `show-ui-probe`, `show-approval` and `show-file-transfer` tools are model-visible card openers with a rendering UI resource. Only the six `ui-*` tools are app-only, with no rendering resource and tickets in private metadata. Clients without cards can use public MCP and the administrator website. Legacy `read-command`, `run-command`, `request-upload` and setup names are not current public tools.
 
-For Linux targets, an overwrite is not reported as complete if the existing file's ownership, mode, or extended attributes cannot be preserved. New Linux files use mode 0600; sudo uploads are owned by root. Windows overwrites preserve the previous file's owner, DACL, mandatory integrity label, creation, access and modification timestamps; complete preservation of the remaining SACL audit settings, alternate data streams and other extended metadata is not guaranteed. See the [Windows transfer limits](docs/windows-targets.ko.md). Changes to the request, file, or server, expiry, and requests lost on restart require a new approval. Connection failures and operations with an uncertain publication result are not retried automatically.
+The single-file limit is 64 MiB and default staging budget is 512 MiB. `BRIDGE_TRANSFER_MAX_BYTES` must not exceed 64 MiB; `BRIDGE_TRANSFER_BUDGET_BYTES` must cover one maximum-sized file. Directories, links and device files are rejected. ZIP files are not automatically extracted and uploads are not automatically executed. Follow returned retention/expiry state. File bytes themselves are not redacted in transfer.
+
+Linux overwrites do not report completion unless existing ownership, mode and extended attributes can be preserved. New files use mode 0600; sudo uploads are root-owned. See [Windows transfer limits](docs/windows-targets.ko.md). Observation timeout or connection failure does not establish cancellation or non-execution. Inspect the original UUID, operationKey and request ID; never replay uncertain placement under a new key.
 
 ## Native installation and updates
 
 The previous release was validated for Ubuntu 22.04/24.04 on x86_64. The ARM64 installation path remains available, but validation is deferred to a later enhancement. An internet connection and an administrator terminal on the server are required. The runtime requires Node 24.2 or later within the 24.x series. Node 24 is installed in a dedicated path without replacing the system Node installation.
 
 ```sh
-tar -xzf ssh-approval-portal-1.8.0.tar.gz
-cd ssh-approval-portal-1.8.0
+tar -xzf ssh-approval-portal-2.0.0.tar.gz
+cd ssh-approval-portal-2.0.0
 sudo bash scripts/install.sh --admin-origin https://ssh-approve.example.com --grant-sudo-all
 ```
 
@@ -126,6 +111,8 @@ Compose updates support a limited configuration: the running bridge must support
 
 ## Verification and status
 
+These commands belong in authorized TEST/CI environments; they were not run for this documentation change. Final 2.0.0 client, package, installation and deployment results need their own pinned commit and execution evidence.
+
 ```sh
 npm ci --ignore-scripts
 npm run build:ui
@@ -140,7 +127,7 @@ Build the UI with its separate `ui` dependencies without upgrading the server SD
 
 Verify the release's `release-manifest.json` and `SHA256SUMS`. Packages exclude node_modules, actual configuration, tokens, private keys, and user sessions. Read the candidate's test records together with the verification limits above. Publishing and Cloudflare configuration changes are not performed automatically.
 
-Approval callbacks: use `wait-for-request` after showing an owner approval request to receive its actual decision without another user chat message. See [callback delivery and limits](docs/approval-callback.ko.md).
+Use `observe` with `waitMs` for public waits. `waitTimedOut` limits observation and does not authorize replay. The [older callback guide](docs/approval-callback.ko.md) retains historical tool names.
 
 The **Test server** checkbox in the important automatic-approval settings bypasses risk assessment and individual approval for that target's commands, Python source, CLI installation and file transfers. It overrides command denials and other automatic-approval switches and is off by default. Administrators decide which targets are test servers. Authentication, target binding, input/file validation, SSH account permissions and maintenance/concurrency limits remain enforced. Disabling it restores the existing policy.
 

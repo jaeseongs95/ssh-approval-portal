@@ -2,7 +2,7 @@
 
 [English](architecture.en.md) · [README](../README.ko.md)
 
-이 문서는 1.8 소스의 책임 경계와 공개 계약을 설명한다. 구현된 계약, 실제 시험 결과, 실제 클라이언트·운영 배포의 확인 범위는 구분한다. 기능이 존재한다는 사실만으로 릴리스 또는 배포 검증이 끝났다고 판단하지 않는다.
+이 문서는 2.0.0 후보 소스의 책임 경계와 공개 계약을 설명한다. 구현된 계약, 실제 시험 결과, 실제 클라이언트·운영 배포의 확인 범위는 구분한다. 기능이 존재한다는 사실만으로 릴리스 또는 배포 검증이 끝났다고 판단하지 않는다.
 
 ## 계층과 조립 지점
 
@@ -18,7 +18,7 @@ SSH vendor 내부 import는 `src/adapters/ssh/vendor.mjs`에 모으고 `ssh-mcp`
 
 ## 중립 도구와 승인 경계
 
-`src/adapters/mcp/public-contract.mjs`가 `contractVersion: "1.8"`의 입력·출력 스키마와 응답 검증을 소유한다. 모델용 기본 도구는 다음 9개다.
+`src/adapters/mcp/public-contract.mjs`가 `contractVersion: "2.0"`의 입력·출력 스키마와 응답 검증을 소유한다. 공개 도구와 2.0 UUID 파일 계약은 다음과 같다.
 
 | 도구 | 계약 |
 | --- | --- |
@@ -27,11 +27,12 @@ SSH vendor 내부 import는 `src/adapters/ssh/vendor.mjs`에 모으고 `ssh-mcp`
 | `observe` | 같은 ID 또는 키로 상태 조회, 요청한 경우에만 출력 페이지 반환 |
 | `cancel` | 같은 작업의 취소 요청; 반환 상태로 취소 완료 여부 확인 |
 | `artifact-begin`·`artifact-chunk`·`artifact-status`·`artifact-finish` | 이미 접근 권한이 있는 바이트를 크기·SHA-256·대상 revision에 묶어 업로드 준비·제출 |
+| `files` | UUID stat·대상 copy/move·임시 원본 remove; 최종 통합·검증은 별도 |
 | `artifact-read` | 완료된 다운로드의 검증된 snapshot을 제한된 base64 페이지로 읽기 |
 
-데스크톱 서비스가 조립되면 `desktop-open`, `desktop-observe`, `desktop-input`, `desktop-close` 4개를 추가 등록한다. 등록 여부와 별개로 대상 가용성은 capability와 현재 정책으로 확인한다. 기존 `show-*`·`ui-*` 도구는 소유자 카드의 app-only 동작이며 모델의 승인 경로가 아니다. 공개 스키마에 승인·다운로드 ticket이나 호스트 내부 객체를 넣지 않는다.
+데스크톱 서비스가 조립되면 `desktop-open`, `desktop-status`, `desktop-observe`, `desktop-input`, `desktop-close` 5개를 추가 등록한다. 등록 여부와 별개로 대상 가용성은 capability·준비 상태·현재 정책으로 확인한다. `show-*` 3개는 모델과 앱에 보이는 카드 열기 도구이며 렌더링 resource가 있다. 소유자용 `ui-*` 6개만 app 전용이며 렌더링 resource 없이 비공개 metadata를 사용한다. 공개 스키마에 승인·다운로드 ticket이나 호스트 내부 객체를 넣지 않는다.
 
-중립 도구 호출에 별도 로컬 CLI·stdio 서버·카드 설치는 필요하지 않다. 호출자는 업로드할 바이트를 이미 확보해야 하며 플랫폼 파일 참조가 자동으로 파일 바이트가 되지는 않는다. 플랫폼별 제한은 [에이전트 업로드 안내](agent-upload.ko.md)를 따른다. 관리자의 에이전트 CLI 설치·로그인·업데이트는 별도 사용 사례이며 중립 도구의 선행조건이 아니다.
+명령·관측·데스크톱 같은 원격 MCP 호출에 별도 로컬 서버나 카드는 필요하지 않다. PC 파일은 배포본의 `scripts/portal-files.mjs`가 owner 인증 HTTP로 직접 전송하고 UUID만 돌려준다. 기존 원격 MCP의 `files`가 UUID를 처리하므로 두 번째 로컬 stdio 서버는 선택 사항이다. 원격 서버는 PC 경로를 직접 읽지 않는다. 이미 확보한 소량 바이트용 `artifact-*`는 유지하지만 큰 파일을 모델 인자로 다시 쓰는 경로로 권장하지 않는다. [파일 클라이언트 안내](client-files.ko.md)를 따른다. 관리자의 에이전트 CLI 설치·로그인·업데이트는 별도 사용 사례다.
 
 서버 정책과 유효한 소유자 승인이 실행 권한을 결정한다. 요청 ID는 접수 증거이며 실행 성공 증거가 아니다. 같은 키와 같은 불변 입력은 같은 작업을 조회하고 충돌 입력은 거부한다. 관측의 대기 시간 만료나 연결 해제는 작업을 취소하지 않는다. 불명확한 결과를 새 키로 재제출하지 않는다. `terminating`은 실행 자원이 남은 상태이고 `unknown`은 확인이 필요한 결과다.
 
@@ -51,7 +52,12 @@ SSH registry가 인증된 연결의 재사용·호스트 키·ProxyJump를 소�
 
 `src/adapters/storage/artifacts.mjs`는 staging 바이트·예약량·manifest·완료·해제를 소유한다. 바이트와 manifest를 동기화하여 재시작 후 확인된 chunk만 복원하며, 확인되지 않은 꼬리는 되돌리고 metadata 없는 파일은 격리·진단한다. 영구 저장은 SSH 업로드 재실행 권한을 뜻하지 않는다. 업로드 승인은 파일명·크기·SHA-256·목적지·덮어쓰기·상승 권한·대상 revision에 묶인다.
 
-파일당 최대 64 MiB, 기본 staging 총량 512 MiB, 승인 대기 1시간, staging·다운로드 링크 기본 10분을 적용한다. command output은 별도 저장소의 보존 시각과 출력 참조를 따르며 기본 TTL은 1시간이다. 공개 출력 페이지는 정제된 adapter 결과이고 원격 stdout/stderr 전체 수집을 보장하지 않는다. 만료·삭제된 바이트를 명령 재실행으로 복원하지 않는다. 구형 이력 이전과 재배포·복구는 [1.8 배포 안내](deployment-180.ko.md)를 따른다.
+파일당 최대 64 MiB, 기본 staging 총량 512 MiB, 승인 대기 1시간, staging·다운로드 링크 기본 10분을 적용한다. command output은 별도 저장소의 보존 시각과 출력 참조를 따르며 기본 TTL은 1시간이다. 공개 출력 페이지는 정제된 adapter 결과이고 원격 stdout/stderr 전체 수집을 보장하지 않는다. 만료·삭제된 바이트를 명령 재실행으로 복원하지 않는다. 구형 이력 이전과 재배포·복구는 [배포·구형 이력 이전 안내](deployment-180.ko.md)를 따른다.
+
+
+2.0 UUID 경로는 owner API `POST /api/artifacts`로 수신을 예약하고 `PUT /api/artifacts/:uuid/chunks/:sequence`의 `application/octet-stream`과 `X-Chunk-SHA256`으로 바이트를 전송한다. `POST /api/artifacts/:uuid/complete`는 임시 저장 완료만 확인하고 `GET /api/artifacts/:uuid`는 공개 metadata를 읽는다. 내부 임시 경로를 응답에 넣지 않는다. owner 인증·Origin·만료 검사를 재사용하며 UUID 소지를 승인으로 취급하지 않는다.
+
+UUID 원본과 대상 배치용 artifact를 분리한다. 서버 내부 스트림으로 기존 target-bound upload artifact를 만들고 기존 승인·Transfers·원격 helper를 사용한다. copy는 원본을 유지하며 move는 성공한 publication의 영구 근거를 확인한 뒤 원본을 소비한다. unknown 배치는 재실행하거나 원본 삭제 성공으로 처리하지 않는다. UUID mapping·청크 ACK·요청 provenance는 기존 manifest/journal 복구 경계를 따르며 신규 서버·클라이언트의 최종 통합·재시작 회귀는 별도 근거가 필요하다.
 
 ## 실제 OS 데스크톱
 
@@ -73,6 +79,6 @@ SSH registry가 인증된 연결의 재사용·호스트 키·ProxyJump를 소�
 
 ## 검증 범위
 
-소스 경계 시험, 실제 SSH 실행, 실제 OS GUI, 관리자 브라우저, 플랫폼 MCP 클라이언트, 패키지·설치·배포는 각각 별도 근거가 필요하다. 명령과 환경은 [검증 계획](../test/PLAN.md)을 따른다. 제품 시험은 승인된 TEST 서버·CI에서 실행하고 이 작업의 브라우저 회귀는 사용자 지시에 따라 로컬 headless Chromium에서 실행했다.
+소스 경계 시험, 실제 SSH 실행, 실제 OS GUI, 관리자 브라우저, 플랫폼 MCP 클라이언트, 패키지·설치·배포는 각각 별도 근거가 필요하다. 명령과 환경은 [검증 계획](../test/PLAN.md)을 따른다. 제품 시험은 승인된 TEST 서버·CI에서 실행한다. 아래 브라우저 결과는 과거 작업의 기록이며 이번 2.0 문서 수정에서 제품 시험을 실행하지 않았다.
 
 2026-11-03 브라우저 검증은 기존 회귀의 중복 제거한 245개 사례와 신규 capacity·desktop 6개 사례를 여러 고정 commit·부분 실행으로 확인한 범위다. 단일 최종 SHA 전체 suite 통과를 뜻하지 않는다. 신규 6개는 실제 관리자 DOM 행동과 fixture API로 상속·CAS·응답 손실·입력 순번·닫기·로그아웃을 확인했으며 실제 VNC 서버·OS 입력의 증거가 아니다. 실제 CLI 공급자 설치·로그인·업데이트, Linux·Windows OS GUI, ChatGPT·Claude 카드·파일 입력, 외부 로그인, 실제 ARM 장비와 운영 배포는 해당 환경의 실행 기록으로 각각 판단해야 한다. 문서 갱신으로 미확인 범위를 완료로 바꾸지 않는다.
