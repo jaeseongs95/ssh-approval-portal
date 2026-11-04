@@ -5,6 +5,10 @@ export async function authorizeAdminRequest(req, { adminAccess, adminToken, admi
   let pathname;
   try { pathname = new URL(req.url, adminOrigin).pathname; } catch { return { allowed: false, status: 409, routeKind: 'api' }; }
   const method = req.method;
+  const artifactUuid = '[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}';
+  const artifactRead = new RegExp('^/api/artifacts/' + artifactUuid + '$').test(pathname) && method === 'GET';
+  const artifactWrite = method === 'POST' && (pathname === '/api/artifacts' || new RegExp('^/api/artifacts/' + artifactUuid + '/complete$').test(pathname)) ||
+    method === 'PUT' && new RegExp('^/api/artifacts/' + artifactUuid + '/chunks/(0|[1-9][0-9]*)$').test(pathname);
   const routeKind = ['/api/maintenance/reserve', '/api/maintenance/release', '/api/maintenance/status', '/api/maintenance/capabilities', '/api/maintenance/preservation/capture', '/api/maintenance/preservation/compare'].includes(pathname) ? 'maintenance'
     : method === 'GET' && pathname === '/api/session' ? 'session'
     : ['GET', 'HEAD'].includes(method) && /^\/downloads\/[a-f0-9]{48}\/[a-f0-9]{32}$/.test(pathname) ? 'download'
@@ -18,6 +22,12 @@ export async function authorizeAdminRequest(req, { adminAccess, adminToken, admi
     if(!principal)return deny(401);
     if(['api','download'].includes(routeKind)&&!['/api/session/start','/api/session/logout'].includes(pathname)&&!browserSessions?.authenticated(req,principal))return deny(401);
   } else if (routeKind === 'api' && !authenticated(req, adminToken)) return deny(401);
+  if (artifactRead || artifactWrite) {
+    if (req.headers.origin !== adminOrigin) return deny(403);
+    // A verified static administrator token represents one installation owner,
+    // not per-person isolation. Keep this identity stable across token rotation.
+    return { allowed: true, routeKind, principal: principal ?? { subject: 'portal-token-owner' } };
+  }
   if (['/api/agent-cli/history', '/api/history'].includes(pathname) && req.headers.origin && req.headers.origin !== adminOrigin) return deny(403);
   if (['api', 'maintenance'].includes(routeKind) &&
       !(method === 'GET' && (['/api/capacity', '/api/pending', '/api/requests', '/api/history', '/api/targets', '/api/command-policy', '/api/automation-metrics', '/api/environment','/api/agent-cli','/api/agent-cli/lookup','/api/agent-cli/history'].includes(pathname) || /^\/api\/[a-f0-9]{48}$/.test(pathname) || /^\/api\/files\/uploads\/[a-f0-9]{48}$/.test(pathname) || /^\/api\/outputs\/[a-f0-9]{48}$/.test(pathname) || /^\/api\/[a-f0-9]{48}\/source$/.test(pathname) || /^\/api\/agent-cli\/requests\/[a-f0-9]{48}$/.test(pathname))) &&
