@@ -188,3 +188,106 @@ test('closing a pending open keeps the physical resource reserved until its late
   resolveOpen(desktop); await rejected; await closing;
   assert.equal(desktop.closed, true); assert.equal(service.size(), 0);
 });
+
+
+test('GUI-AGENT an open request recovers one pending lease and keeps its original epoch', async t => {
+  const gate = Promise.withResolvers(); let opens = 0;
+  const { desktop } = fixture();
+  const { service } = fixture({ adapter: { open: () => { opens++; return gate.promise; } } });
+  t.after(() => service.closeAll());
+  const first = service.open({ ...binding, requestKey: 'recover-open' });
+  const recovered = service.open({ ...binding, epoch: 2, requestKey: 'recover-open' });
+  while (!opens) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(opens, 1);
+  await assert.rejects(service.open({ ...binding, targetId: 'other', requestKey: 'recover-open' }), error('DESKTOP_OPEN_CONFLICT'));
+  await assert.rejects(service.open({ ...binding, targetRevision: 'b'.repeat(64), requestKey: 'recover-open' }), error('DESKTOP_OPEN_CONFLICT'));
+  gate.resolve(desktop);
+  const a = await first, b = await recovered;
+  assert.equal(a.sessionId, b.sessionId); assert.equal(b.epoch, 1); assert.equal(opens, 1);
+  const identity = { ownerId: binding.ownerId, sessionId: a.sessionId, epoch: 1 };
+  await service.close(identity);
+  await assert.rejects(service.open({ ...binding, requestKey: 'recover-open' }), error('DESKTOP_CLOSED'));
+  assert.equal(opens, 1);
+});
+
+test('GUI-AGENT open recovery rechecks authority and isolates request keys by authority', async t => {
+  const { service, state } = fixture(); t.after(() => service.closeAll());
+  const first = await service.open({ ...binding, requestKey: 'authority-key' });
+  state.authorized = false;
+  await assert.rejects(service.open({ ...binding, requestKey: 'authority-key' }), error('DESKTOP_NOT_AUTHORIZED'));
+  state.authorized = true;
+  const other = await service.open({ ...binding, ownerId: 'owner-b', targetId: 'other', requestKey: 'authority-key' });
+  assert.notEqual(other.sessionId, first.sessionId);
+  await assert.rejects(service.open({ ...binding, requestKey: 'bad key' }), error('DESKTOP_INVALID_INPUT'));
+  await assert.rejects(service.open({ ...binding, requestKey: 'bad-final-newline\n' }), error('DESKTOP_INVALID_INPUT'));
+});
+
+test('GUI-AGENT failed opens keep their request key and never open another transport', async () => {
+  let opens = 0;
+  const { service } = fixture({ adapter: { open: async () => { opens++; throw Object.assign(Error('open failed'), { code: 'DESKTOP_TRANSPORT_CLOSED' }); } } });
+  await assert.rejects(service.open({ ...binding, requestKey: 'failed-open' }), error('DESKTOP_TRANSPORT_CLOSED'));
+  await assert.rejects(service.open({ ...binding, requestKey: 'failed-open' }), error('DESKTOP_CLOSED'));
+  assert.equal(opens, 1); assert.equal(service.size(), 0);
+});
+
+test('GUI-AGENT provider state is OS neutral and fences a replaced same-size session', async t => {
+  let readiness = desktopState({ state: 'desktop_ready', observedAt: 1000, generation: null, osSessionId: null, locked: null,
+    sessionRef: 'managed:session-a', resourceGeneration: 'a'.repeat(64), sessionBindingVerified: true,
+    displayBindingVerified: true, inputVerified: true, inputAllowed: true, ownerOnly: false, blockers: [] });
+  const { desktop, calls } = fixture(); desktop.readState = async () => readiness;
+  desktop.lifecycle = 'managed'; desktop.capabilities = { observe: true, pointer: true, key: true, text: true };
+  const { service } = fixture({ adapter: { open: async () => desktop }, readState: () => { throw Error('host diagnostic must not override provider state'); } });
+  t.after(() => service.closeAll());
+  const lease = await service.open(binding), identity = { ownerId: binding.ownerId, sessionId: lease.sessionId, epoch: binding.epoch };
+  assert.equal(lease.readiness.state, 'desktop_ready'); assert.equal(lease.lifecycle, 'managed'); assert.equal(lease.capabilities.text, true);
+  const frame = await service.observe(identity);
+  readiness = desktopState({ ...readiness, sessionRef: 'managed:session-b' });
+  await assert.rejects(service.input({ ...identity, frameId: frame.frameId, geometryRevision: frame.geometryRevision,
+    sequence: 1, requestKey: 'old-session', actions: [{ type: 'text', text: 'never-send' }] }), error('DESKTOP_STALE_FRAME'));
+  assert.equal(calls.length, 0);
+});
+
+test('GUI-AGENT status recovers only the latest non-private input receipt', async t => {
+  const { service } = fixture({ canViewProtected: () => true }); t.after(() => service.closeAll());
+  const lease = await service.open(binding), identity = { ownerId: binding.ownerId, sessionId: lease.sessionId, epoch: binding.epoch };
+  assert.equal((await service.status(identity)).lastInputReceipt, null);
+  const frame = await service.observe(identity);
+  const receipt = await service.input({ ...identity, frameId: frame.frameId, geometryRevision: frame.geometryRevision,
+    sequence: 1, requestKey: 'receipt-key', actions: [{ type: 'text', text: 'ordinary-text' }] });
+  const status = await service.status(identity);
+  assert.equal(status.nextInputSequence, 2); assert.deepEqual(status.lastInputReceipt, receipt);
+  status.lastInputReceipt.sequence = 999;
+  assert.equal((await service.status(identity)).lastInputReceipt.sequence, 1);
+  await service.authenticate({ ...identity, frameId: frame.frameId, geometryRevision: frame.geometryRevision,
+    sequence: 2, requestKey: 'private-key', action: 'credential', confirmed: true, value: 'SYNTHETIC-PRIVATE' });
+  const afterPrivate = await service.status(identity);
+  assert.equal(afterPrivate.nextInputSequence, 3); assert.equal(afterPrivate.lastInputReceipt, null);
+  assert.doesNotMatch(JSON.stringify(afterPrivate), /SYNTHETIC-PRIVATE|private-key|ordinary-text/);
+});
+
+test('GUI-AGENT provider capability refusals preserve the lease and dispatch no input', async t => {
+  const { desktop } = fixture(); desktop.capabilities = { observe: true, key: true, pointer: true, text: false };
+  const { service } = fixture({ adapter: { open: async () => desktop } }); t.after(() => service.closeAll());
+  const lease = await service.open(binding), identity = { ownerId: binding.ownerId, sessionId: lease.sessionId, epoch: binding.epoch };
+  const frame = await service.observe(identity);
+  await assert.rejects(service.input({ ...identity, frameId: frame.frameId, geometryRevision: frame.geometryRevision,
+    sequence: 1, requestKey: 'unsupported-text', actions: [{ type: 'text', text: 'not-supported' }] }), error('DESKTOP_INPUT_UNSUPPORTED'));
+  assert.equal((await service.status(identity)).nextInputSequence, 1); assert.equal(service.size(), 1);
+});
+
+test('GUI-AGENT cleanup distinguishes attached preservation, managed termination and uncertainty', async () => {
+  for (const scenario of [
+    { lifecycle: 'attached', close: async () => {}, expected: 'preserved' },
+    { lifecycle: 'managed', close: async () => ({ sessionState: 'terminated' }), expected: 'terminated' },
+    { lifecycle: 'managed', close: async () => {}, expected: 'unknown' },
+    { lifecycle: 'managed', close: async () => { throw Object.assign(Error('failed'), { code: 'DESKTOP_CLOSE_FAILED' }); }, expected: 'unknown', failure: true },
+  ]) {
+    const { desktop } = fixture(); desktop.lifecycle = scenario.lifecycle; desktop.close = scenario.close;
+    const { service } = fixture({ adapter: { open: async () => desktop } });
+    const lease = await service.open(binding);
+    const receipt = await service.close({ ownerId: binding.ownerId, sessionId: lease.sessionId, epoch: binding.epoch });
+    assert.equal(receipt.sessionState, scenario.expected); assert.equal(receipt.logout, false);
+    assert.equal(receipt.releaseSent, true); assert.equal(service.size(), 0);
+    assert.equal(receipt.cleanupError, scenario.failure ? 'DESKTOP_CLOSE_FAILED' : undefined);
+  }
+});

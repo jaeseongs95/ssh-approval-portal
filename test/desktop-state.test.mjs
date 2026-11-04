@@ -63,3 +63,15 @@ test('GUI-STATE public desktop status carries typed readiness and no screen pixe
   assert.equal(reply.success, true, reply.error?.message);
   assert.doesNotMatch(JSON.stringify(reply.data), /image\/png|password|credential/i);
 });
+
+
+test('GUI-STATE verified provider sessions do not require Windows integer session IDs', () => {
+  const ready = { ...transportDesktopState(100), state: 'desktop_ready', sessionRef: 'linux:display-17', resourceGeneration: 'a'.repeat(64),
+    sessionBindingVerified: true, displayBindingVerified: true, inputVerified: true, blockers: [] };
+  assert.equal(desktopState(ready).osSessionId, null);
+  assert.equal(desktopState(ready).locked, null);
+  for (const change of [{ sessionRef: null }, { resourceGeneration: null }, { sessionBindingVerified: false },
+    { displayBindingVerified: false }, { inputVerified: false }, { locked: true }, { sessionRef: '../not-opaque' }]) {
+    assert.throws(() => desktopState({ ...ready, ...change }), error => error.code === 'DESKTOP_INVALID_STATE');
+  }
+});

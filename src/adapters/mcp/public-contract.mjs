@@ -47,11 +47,14 @@ export const operationData = object({ id: identifier, operationKey: key.nullable
 const policy = object({ testServerConfigured: z.boolean(), testServerActive: z.boolean(), mode: z.enum(['configured-root', 'test-server-bypass', 'ssh-account-permissions']),
   allowedRoot: z.string().nullable(), allowedRootObservedAt: integer.nullable(), osPermissionsEnforced: z.literal(true),
   pathSafetyEnforced: z.literal(true), elevationRequiresExplicitRequest: z.literal(true) });
+const guiDescriptor = object({ configured: z.boolean(), backend: z.enum(['rfb', 'xvnc', 'rdp']).nullable(),
+  lifecycle: z.enum(['attached', 'managed']).nullable(), status: z.enum(['disabled', 'configured', 'backend_unavailable']),
+  reason: z.string().max(256).nullable(), actions: z.array(z.enum(['observe', 'pointer', 'key', 'text'])).max(4), requiresUserClient: z.literal(false) });
 const targetData = object({ targets: z.array(object({ id: target, displayName: z.string(), enabled: z.boolean(), isDefault: z.boolean(),
   revision: digest.nullable(), platform: z.enum(['linux', 'windows']), capabilities: object({
     commandShell: z.enum(['posix', 'windows-powershell-5.1']), fileTransfer: z.boolean(), elevatedFileTransfer: z.boolean(),
     pythonSource: z.boolean(), agentCli: z.boolean(), commandNameApproval: z.boolean(), desktop: z.boolean(),
-  }), filePolicy: policy.nullable() })), defaultTarget: target.nullable(),
+  }), gui: guiDescriptor.optional(), filePolicy: policy.nullable() })), defaultTarget: target.nullable(),
   limits: object({ commandBytes: integer, sourceBytes: integer, artifactBytes: integer, chunkBytes: integer, outputPageBytes: integer, maxWaitMs: integer }),
   approval: object({ ownerUrl: z.string().url(), agentSelfApproval: z.literal(false) }) });
 const transfer = object({ id: identifier, received: integer, sequence: integer, size: integer.max(MAX_BYTES), sha256: digest,
@@ -179,15 +182,17 @@ export function registerPublicTools(server, { operations, files, opaqueFiles, se
   const requiredOperations = () => { if (!operations) failure('OPERATIONS_UNAVAILABLE'); return operations; };
   register('targets', async () => {
     const result = await (targets?.listFilePolicies?.() ?? targets?.list()) ?? { targets: [], defaultTarget: null };
-    return { targets: result.targets.map(item => ({ id: item.id, displayName: item.displayName, enabled: item.enabled, isDefault: item.isDefault,
+    return { targets: await Promise.all(result.targets.map(async item => ({ id: item.id, displayName: item.displayName, enabled: item.enabled, isDefault: item.isDefault,
       revision: item.revision ?? null, platform: item.platform ?? 'linux', capabilities: { commandShell: item.platform === 'windows' ? 'windows-powershell-5.1' : 'posix',
         fileTransfer: item.capabilities?.fileTransfer === true, elevatedFileTransfer: item.capabilities?.elevatedFileTransfer === true,
         pythonSource: item.capabilities?.pythonSource === true, agentCli: item.capabilities?.agentCli === true,
-        commandNameApproval: item.capabilities?.commandNameApproval === true, desktop: item.capabilities?.desktop === true }, filePolicy: item.filePolicy ?? null })),
+        commandNameApproval: item.capabilities?.commandNameApproval === true, desktop: item.capabilities?.desktop === true },
+      ...(typeof desktop?.capabilities === 'function' ? { gui: await desktop.capabilities({ target: item.id, expectedTargetRevision: item.revision }) } : {}),
+      filePolicy: item.filePolicy ?? null }))),
       defaultTarget: result.defaultTarget, limits: { commandBytes: COMMAND_MAX_BYTES, sourceBytes: PYTHON_SOURCE_MAX_BYTES,
         artifactBytes: Math.min(settings.maxBytes ?? MAX_BYTES, MAX_BYTES), chunkBytes: CHUNK_BYTES, outputPageBytes: OUTPUT_PAGE_BYTES, maxWaitMs: 60000 },
       approval: { ownerUrl: settings.adminOrigin, agentSelfApproval: false } };
-  }, 'List registered target revisions, actual capabilities, file policy and limits. A cached allowedRoot is an observation, not current authority. No setup or client installation is required to call these tools.', true);
+  }, 'List registered target revisions, server capabilities, file policy and limits. GUI configured status advertises configuration, not an opened or verified desktop. Capability discovery does not create a GUI lease. A cached allowedRoot is an observation, not current authority. No setup or client installation is required to call these tools.', true);
   register('submit', async args => presentOperation(await requiredOperations().submit(validateSubmit(args))),
     'Submit one command, explicit Python source, or download under server policy. Use native JSON fields and a stable operationKey; preserve exact command/source bytes. The complete command or source is assessed when policy requires it; caller context in any language never grants authority. Approval stays with the owner. A returned ID means acceptance, not execution success. On uncertainty recover the same operationKey with observe; never submit a fresh key to replay.');
   register('observe', async (args, { signal }) => {
@@ -238,12 +243,16 @@ export function registerPublicTools(server, { operations, files, opaqueFiles, se
 const sessionId = z.string().uuid();
 const sessionIdentity = { sessionId, epoch: z.number().int().positive() };
 const desktopReadiness = object({ state: z.enum(['transport_ready', 'auth_required', 'desktop_ready', 'capture_unavailable']),
-  observedAt: integer, generation: digest.nullable(), osSessionId: z.number().int().positive().nullable(), locked: z.boolean().nullable(),
+  observedAt: integer, generation: digest.nullable(), sessionRef: z.string().regex(/^[A-Za-z0-9_.:-]{1,256}(?![\s\S])/).nullable().optional(),
+  resourceGeneration: digest.nullable().optional(), osSessionId: z.number().int().positive().nullable(), locked: z.boolean().nullable(),
   sessionBindingVerified: z.boolean(), displayBindingVerified: z.boolean(), inputVerified: z.boolean(), inputAllowed: z.boolean(), ownerOnly: z.boolean(),
   blockers: z.array(z.enum(['DESKTOP_AUTH_REQUIRED', 'DESKTOP_SESSION_BINDING_UNVERIFIED', 'DESKTOP_SESSION_QUERY_FAILED',
     'DESKTOP_SESSION_QUERY_UNSUPPORTED', 'DESKTOP_AUTH_BROKER_UNAVAILABLE', 'DESKTOP_CAPTURE_UNAVAILABLE'])).max(8) });
+const inputReceipt = object({ sessionId, sequence: z.number().int().positive(), requestKey: z.string(), state: z.literal('sent') });
+const desktopCapabilities = object({ observe: z.boolean().optional(), pointer: z.boolean().optional(), key: z.boolean().optional(), text: z.boolean().optional() });
 const sessionData = object({ ...sessionIdentity, targetId: target, targetRevision: digest, expiresAt: integer, idleExpiresAt: integer, kind: z.literal('desktop'),
-  readiness: desktopReadiness.optional() });
+  readiness: desktopReadiness.optional(), capabilities: desktopCapabilities.optional(), lifecycle: z.enum(['attached', 'managed']).optional(),
+  nextInputSequence: z.number().int().positive().optional(), lastInputReceipt: inputReceipt.nullable().optional() });
 const frameData = sessionData.extend({ frameId: z.string().min(1).max(96), width: z.number().int().positive(), height: z.number().int().positive(),
   geometryRevision: z.number().int().positive(), coordinateSpace: z.literal('physical-pixels'), nextInputSequence: z.number().int().positive(),
   mimeType: z.literal('image/png'), imageContentIndex: z.literal(1) });
@@ -253,28 +262,28 @@ const actions = z.discriminatedUnion('type', [
   object({ type: z.literal('text'), text: z.string().min(1).max(2048).refine(value => value.isWellFormed(), 'Well-formed text required') }),
 ]);
 Object.assign(publicInputSchemas, {
-  'desktop-open': object({ target, expectedTargetRevision: digest }),
+  'desktop-open': object({ target, expectedTargetRevision: digest, requestKey: z.string().regex(/^[A-Za-z0-9_-]{1,128}(?![\s\S])/).optional() }),
   'desktop-status': object(sessionIdentity),
   'desktop-observe': object(sessionIdentity),
   'desktop-input': object({ ...sessionIdentity, frameId: z.string().min(1).max(96), geometryRevision: z.number().int().positive(),
-    sequence: z.number().int().positive(), requestKey: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/), actions: z.array(actions).min(1).max(128) }),
+    sequence: z.number().int().positive(), requestKey: z.string().regex(/^[A-Za-z0-9_-]{1,128}(?![\s\S])/), actions: z.array(actions).min(1).max(128) }),
   'desktop-close': object(sessionIdentity),
 });
 Object.assign(publicOutputSchemas, {
   'desktop-open': responseSchema(sessionData), 'desktop-observe': responseSchema(frameData),
   'desktop-status': responseSchema(sessionData),
-  'desktop-input': responseSchema(object({ sessionId, sequence: z.number().int().positive(), requestKey: z.string(), state: z.literal('sent') })),
-  'desktop-close': responseSchema(object({ sessionId, closed: z.literal(true), releaseSent: z.boolean(), logout: z.literal(false), cleanupError: z.string().nullable() })),
+  'desktop-input': responseSchema(inputReceipt),
+  'desktop-close': responseSchema(object({ sessionId, closed: z.literal(true), releaseSent: z.boolean(), logout: z.literal(false), sessionState: z.enum(['terminated', 'preserved', 'unknown']).optional(), cleanupError: z.string().nullable() })),
 });
 function presentSession(value) {
   return { ...Object.fromEntries(['sessionId', 'epoch', 'targetId', 'targetRevision', 'expiresAt', 'idleExpiresAt', 'kind'].map(field => [field, value[field]])),
-    ...(value.readiness ? { readiness: value.readiness } : {}) };
+    ...Object.fromEntries(['readiness', 'capabilities', 'lifecycle', 'nextInputSequence', 'lastInputReceipt'].filter(field => value[field] !== undefined).map(field => [field, value[field]])) };
 }
 function registerDesktopTools(register, desktop) {
   register('desktop-open', async args => presentSession(await desktop.open(args)),
-    'Open the configured OS graphical transport under existing target and owner authority. A lease and RFB handshake do not prove desktop_ready. Inspect readiness; retain sessionId and epoch. A general Windows login screen may be observed. If account authentication is required, close the lease so the owner can use the portal one-time authentication input; do not request an RDP window or send credentials. Unverified WTS/display binding is diagnostic and does not disable an existing unlocked GUI.');
+    'Open an agent GUI lease within the target advertised server capabilities and existing authority. Use a stable requestKey to recover the same pending or opened lease after a lost reply; never reuse it for another target/revision or after closing. Retain sessionId and epoch. Observe actual image content, send explicit pointer/key/text actions, and observe the result. Inspect readiness and provider capabilities; transport_ready alone is not verified desktop_ready. Unsupported or unavailable server capabilities are typed failures; do not assume another display or client installation is required.');
   register('desktop-status', async args => presentSession(await desktop.status(args)),
-    'Read this lease’s GUI readiness without returning screen pixels. Distinguish transport_ready, auth_required and verified desktop_ready. SSH public-key authentication does not unlock Windows. Closing a blocked lease preserves the OS login session.');
+    'Read GUI readiness, provider capabilities, nextInputSequence and the latest non-private input receipt without screen pixels. Reconnect using the same sessionId and epoch, inspect status, then observe a fresh frame. Distinguish transport_ready, auth_required and verified desktop_ready. OS-specific diagnostics do not prove capture/input binding. Unknown input outcomes never authorize replay as a new request.');
   register('desktop-observe', async args => {
     const frame = await desktop.observe(args);
     if (frame.mimeType !== 'image/png' || typeof frame.data !== 'string' || !frame.data) failure('DESKTOP_INVALID_FRAME');
@@ -285,6 +294,6 @@ function registerDesktopTools(register, desktop) {
     'Send explicit key, pointer or text actions to the same session epoch and observed frame geometry. Bind a monotonically increasing sequence and stable requestKey. Identical latest input recovers its receipt without replay. Stale or conflicting input is refused; never automatically resend an uncertain input as a new key.');
   register('desktop-close', async args => {
     const result = await desktop.close(args);
-    return { sessionId: result.sessionId, closed: result.closed, releaseSent: result.releaseSent, logout: result.logout, cleanupError: result.cleanupError ?? null };
-  }, 'Close the desktop lease and release held keys/buttons and transport resources. This does not log out the OS session. Inspect releaseSent and cleanupError instead of assuming cleanup succeeded.');
+    return { sessionId: result.sessionId, closed: result.closed, releaseSent: result.releaseSent, logout: result.logout, ...(result.sessionState ? { sessionState: result.sessionState } : {}), cleanupError: result.cleanupError ?? null };
+  }, 'Close the GUI lease and release held keys/buttons and provider resources. Inspect releaseSent, cleanupError and sessionState: terminated, preserved or unknown. logout:false is not evidence of managed-resource cleanup. A closed open requestKey cannot create another lease.');
 }
