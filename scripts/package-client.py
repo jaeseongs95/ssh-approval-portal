@@ -12,7 +12,7 @@ import stat
 import tarfile
 import zipfile
 
-CLIENT_VERSION = '2.1.0'
+CLIENT_VERSION = '2.2.0'
 PREFIX = 'ssh-approval-portal-client-' + CLIENT_VERSION
 IMPORT = re.compile(r'''^\s*(?:import\s+(?:[^;]*?\s+from\s+)?|export\s+[^;]*?\s+from\s+)['"]([^'"]+)['"]''', re.MULTILINE)
 
@@ -24,7 +24,7 @@ def unsafe(path):
 def source_files(root):
     """Only statically imported in-repository modules/data; no directory crawling."""
     root = Path(root).resolve()
-    pending = ['scripts/portal-files.mjs']
+    pending = ['scripts/portal-files.mjs', 'scripts/portal-completion-hook.mjs']
     files = {}
     while pending:
         name = pending.pop()
@@ -64,7 +64,7 @@ def encoded(value):
 def package(root, output):
     root, output = Path(root).resolve(), Path(output).resolve()
     files = source_files(root)
-    for name in ['LICENSE', 'docs/client-files.ko.md']:
+    for name in ['LICENSE', 'docs/client-files.ko.md', 'hooks/codex.json', 'hooks/claude-code.json', 'hooks/antigravity.json', '.codex-plugin/plugin.json']:
         path = root / name
         if not path.is_file() or unsafe(path) or any(unsafe(root / p) for p in path.relative_to(root).parents):
             raise ValueError('Missing or unsafe client documentation: ' + name)

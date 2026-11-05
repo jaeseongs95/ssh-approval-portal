@@ -1,0 +1,33 @@
+{
+  "ssh-completion-inbox": {
+    "enabled": true,
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "node ./scripts/portal-completion-hook.mjs --host antigravity --event SessionStart",
+        "timeout": 10
+      }
+    ],
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "node ./scripts/portal-completion-hook.mjs --host antigravity --event PreInvocation",
+        "timeout": 10
+      }
+    ],
+    "PostInvocation": [
+      {
+        "type": "command",
+        "command": "node ./scripts/portal-completion-hook.mjs --host antigravity --event PostInvocation",
+        "timeout": 10
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "node ./scripts/portal-completion-hook.mjs --host antigravity --event Stop",
+        "timeout": 10
+      }
+    ]
+  }
+}

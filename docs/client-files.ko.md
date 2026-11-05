@@ -1,4 +1,36 @@
-# PC 파일 전송 클라이언트 2.1.0
+# PC 파일 전송 클라이언트 2.2.0
+
+## 완료 알림을 hook으로 받기
+
+기존 원격 MCP 연결은 그대로 사용합니다. 로컬 클라이언트가 owner HTTP로 요청 완료를 관찰하고, 완료 metadata를 로컬 SQLite 수신함에 먼저 저장합니다. 호스트를 깨우는 메시지는 `[ssh-mcp:completion:UUID]` 표식뿐입니다. 실제 본문은 같은 세션의 hook이 수신함에서 인수해 에이전트 문맥에 넣습니다. AGS 설치나 추가 MCP 연결은 필요하지 않습니다.
+
+배포본에는 `scripts/portal-completion-hook.mjs`와 호스트별 `hooks/*.json`이 포함됩니다. Codex용 `.codex-plugin/plugin.json`은 hook만 등록합니다. 호스트가 실행할 로컬 hook 정의를 신뢰·재적재해야 하며, 파일을 압축 해제한 것만으로 현재 세션에 적재됐다고 판단하지 않습니다. 기존 AGS·다른 hook·인증 설정을 덮어쓰지 마세요.
+
+각 호스트 hook을 등록한 다음 실제 `SessionStart` 또는 도구 경계에서 세션 결속을 만듭니다. `--session`은 그 호스트가 제공한 현재 세션 ID를 사용합니다. 다른 세션의 기록을 탐색해 ID를 찾거나 임의 세션을 대신 등록하지 않습니다.
+
+```bash
+node scripts/portal-files.mjs --origin https://YOUR-PORTAL watch REQUEST_ID --notify-hook --host codex --session EXACT_SESSION_ID --wake-executable /absolute/path/to/codex
+```
+
+이 명령은 호스트의 백그라운드 실행 기능으로 시작하고 에이전트는 다른 작업을 계속합니다. Claude Code는 `--host claude-code`, agy는 `--host antigravity`를 사용합니다. Claude socket/token과 agy project/LS 환경은 해당 호스트가 자식 프로세스에 제공한 현재 환경만 사용합니다. 다른 설정·인증 파일을 찾아 복사하지 않습니다.
+
+수신함 기본 위치는 Windows `%LOCALAPPDATA%/ssh-mcp-completion/completion.sqlite`, POSIX `$XDG_STATE_HOME/ssh-mcp-completion/completion.sqlite` 또는 `$HOME/.local/state/ssh-mcp-completion/completion.sqlite`입니다. `--inbox ABSOLUTE_DB`를 쓰면 hook과 watcher 모두 같은 경로를 지정해야 합니다. 인증·SSH 출력·파일 내용은 저장하지 않고 완료 metadata 13필드만 저장합니다. POSIX 전용 leaf는 0700, DB는 0600이며 Windows는 사용자 프로필의 기존 ACL 상속을 유지합니다. Windows ACL 독점성이나 같은 OS 계정 내부의 격리를 보장하지 않습니다.
+
+hook은 출력 후 자동 ACK하지 않습니다. 에이전트가 기록을 처리한 뒤 본문의 정확한 receipt·claim으로 다음 명령을 실행합니다. 다른 세션이나 오래된 claim의 ACK는 거절됩니다.
+
+```bash
+node scripts/portal-completion-hook.mjs ack --host codex --session EXACT_SESSION_ID --receipt RECEIPT_UUID --claim CLAIM_UUID
+```
+
+저장 완료·wake 요청·hook 인수·모델 수신·ACK·원격 업무 완료는 각각 다릅니다. wake 실패에도 기록은 남으며 다음 도구 경계·재개 hook에서 받을 수 있습니다. 중단·충돌로 ACK하지 못한 기록은 lease 뒤 다시 전달될 수 있습니다. 이를 원격 작업 재실행으로 해석하지 마세요. hook에는 원격 HTTP 대기·모델 호출·원격 명령 제출이 없습니다.
+
+| 호스트 | 본문 수신 경계 | 유휴 깨우기 전제 |
+| --- | --- | --- |
+| Codex | SessionStart, UserPromptSubmit, PostToolUse, Stop | 선택한 실행 파일 또는 공식 managed launcher의 `queue`; 살아 있는 같은 세션 필요 |
+| Claude Code | SessionStart, UserPromptSubmit, PostToolUse, Stop | 해당 프로세스의 messaging socket/token 필요 |
+| Antigravity/agy | SessionStart, PreInvocation, PostInvocation, Stop | 현재 project·agentapi·LS·CSRF 환경 및 project 일치 필요 |
+
+긴 단일 도구 호출 도중에는 다음 hook 경계까지 본문 주입이 늦을 수 있습니다. hook이 없는 ChatGPT 웹·일반 MCP 클라이언트에 로컬 hook 주입이나 자동 재개가 있다고 주장하지 않습니다. 기존 MCP의 즉시 상태 조회와 해당 호스트의 지원 경로를 사용합니다. 위 표는 구현 경계이며 실제 호스트 수용 여부는 해당 릴리스의 시험 근거에서 별도로 확인합니다. 구형 `--notify-codex ... --thread ...` 직접 메시지 옵션은 호환용이고 hook 옵션과 함께 쓰지 않습니다.
 
 이 클라이언트는 PC 파일을 직접 읽어 owner 인증 HTTPS로 서버의 임시 보관소에 올립니다. 완료되면 UUID 한 개만 반환합니다. 파일 바이트·base64·인증 토큰을 모델 인자나 대화에 넣지 않습니다. 이후 복사·이동 등은 기존 원격 MCP 연결에 UUID를 전달해 요청합니다. 원격 MCP 연결을 추가하지 않습니다.
 
@@ -82,6 +114,6 @@ Claude Code처럼 백그라운드 작업 완료를 자체적으로 통지하는 
 
 ## 배포 파일
 
-ssh-approval-portal-client-2.1.0.tar.gz와 같은 이름의.zip은 동일 클라이언트 소스를 담습니다. client-manifest.json은 포함 파일의 크기·SHA-256과 Node 요구사항을 기록합니다. SHA256SUMS-client-2.1.0은 두 압축 파일의 전체 해시입니다. 서버 설치 파일이나 인증 캐시는 포함하지 않습니다. 실행 진입점은 `scripts/portal-files.mjs`이며 명령은 `doctor`·`upload`·`status`·`watch`입니다. 별도 `scripts/portal-client.mjs`·`scripts/portal-file-mcp.mjs` 실행 스크립트는 이 client 자산에 포함하지 않습니다.
+ssh-approval-portal-client-2.2.0.tar.gz와 같은 이름의.zip은 동일 클라이언트 소스를 담습니다. client-manifest.json은 포함 파일의 크기·SHA-256과 Node 요구사항을 기록합니다. SHA256SUMS-client-2.2.0은 두 압축 파일의 전체 해시입니다. 서버 설치 파일이나 인증 캐시는 포함하지 않습니다. 실행 진입점은 `scripts/portal-files.mjs`이며 명령은 `doctor`·`upload`·`status`·`watch`입니다. 별도 `scripts/portal-client.mjs`·`scripts/portal-file-mcp.mjs` 실행 스크립트는 이 client 자산에 포함하지 않습니다.
 
 개발자는 python scripts/package-client.py --output 새출력폴더로 같은 진입점의 소스 의존 그래프를 묶습니다. 기존 결과물은 덮어쓰지 않습니다. 로컬 생성 허용과 제품 동작 시험은 구분하며, 동작 회귀와 압축 해제 사본의 실행 검사는 승인된 TEST 환경에서 수행합니다.
