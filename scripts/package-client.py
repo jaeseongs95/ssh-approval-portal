@@ -12,7 +12,7 @@ import stat
 import tarfile
 import zipfile
 
-CLIENT_VERSION = '2.2.0'
+CLIENT_VERSION = '2.2.1'
 PREFIX = 'ssh-approval-portal-client-' + CLIENT_VERSION
 IMPORT = re.compile(r'''^\s*(?:import\s+(?:[^;]*?\s+from\s+)?|export\s+[^;]*?\s+from\s+)['"]([^'"]+)['"]''', re.MULTILINE)
 
