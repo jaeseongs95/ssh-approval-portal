@@ -1,0 +1,11 @@
+격리된 background 완료 시험입니다. 아래 두 명령만 사용하세요. 실제 portal-files CLI를 합성 HTTP·자격으로 실행하며 네트워크·실제 인증·원격 명령·submit·승인·취소는 사용하지 않습니다. 파일을 열거나 설정을 바꾸지 마세요.
+
+1. 현재 호스트에 노출된 native 도구를 확인하세요. 명령을 background로 시작하고 완료를 자동 전달하는 도구가 있다면 그 기능으로 다음 명령을 정확히 한 번 시작하세요:
+   /opt/ssh-approval/node/bin/node test/fixtures/operation-watch-background.mjs watch
+   약 15초 뒤 stdout에 operation.finished JSON 한 줄을 반환합니다. stderr에는 operation.watch.started가 먼저 나옵니다. 해당 이벤트의 operation ID를 보존하세요.
+2. background 시작이 확인되고 아직 실행 중일 때 다음 독립 명령을 실행하세요:
+   /opt/ssh-approval/node/bin/node test/fixtures/operation-watch-background.mjs other
+3. 호스트가 background 완료를 직접 전달할 때 후속 처리를 진행하세요. 완료를 얻기 위해 프로세스를 반복 조회하거나 상태/출력 조회 도구를 부르거나 sleep/wait·다른 blocking 셸·추가 사용자 입력을 사용하지 마세요. 시작 확인을 완료로 주장하지 마세요.
+4. 실제 operation.finished JSON의 state completed를 받은 뒤에만 최종 답변을 정확히 FOLLOWUP_DONE, operation ID, completed를 공백으로 이어 작성하세요. terminal JSON을 받기 전에 이 최종 표지를 출력하지 마세요.
+
+사용 가능한 도구에 자동 background 완료 전달 기능이 없다면 BACKGROUND_UNSUPPORTED와 부족한 기능을 답하세요. background 전달을 흉내 내거나 반복 조회로 통과시키지 마세요.

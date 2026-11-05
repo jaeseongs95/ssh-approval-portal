@@ -82,8 +82,8 @@ test('inspect accepts a 2.0 patch candidate and refuses historical or unsupporte
   });
 });
 
-for (const existingParent of [false, true]) test(`umask077 staging permits real service imports with ${existingParent ? 'existing' : 'new'} public deployment parents`, { skip: !rootLinux }, async t => {
-  const f = await fixture(t); if (!f) return;
+for (const version of ['2.0.0', '2.1.0']) for (const existingParent of [false, true]) test(`umask077 ${version} staging permits real service imports with ${existingParent ? 'existing' : 'new'} public deployment parents`, { skip: !rootLinux }, async t => {
+  const f = await fixture(t, version); if (!f) return;
   const releases = join(f.plan.appRoot, 'releases');
   if (existingParent) {
     await mkdir(f.plan.appRoot); await chmod(f.plan.appRoot, 0o751);
