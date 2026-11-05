@@ -47,29 +47,6 @@ function runner(specs = [{}], inspect = () => {}) {
   return { run, calls, ready };
 }
 
-function socketHarness(mode = 'success') {
-  const socket = new EventEmitter();
-  const calls = [], writes = [];
-  let destroyed = 0;
-  socket.destroy = () => { destroyed++; };
-  socket.end = payload => {
-    writes.push(payload);
-    if (mode === 'end-throw') throw error('EPIPE');
-    if (mode === 'success') queueMicrotask(() => socket.emit('close', false));
-    if (mode === 'after-error') queueMicrotask(() => socket.emit('error', error('EPIPE')));
-  };
-  const connect = path => {
-    calls.push(path);
-    if (mode === 'throw') throw error('ENOENT');
-    queueMicrotask(() => {
-      if (mode === 'before-error') socket.emit('error', error('ECONNREFUSED'));
-      else if (mode !== 'never') socket.emit('connect');
-    });
-    return socket;
-  };
-  return { socket, connect, calls, writes, get destroyed() { return destroyed; } };
-}
-
 function bounds(options) {
   assert.equal(options.shell, false);
   assert.equal(options.windowsHide, true);
@@ -153,32 +130,23 @@ test('W04 Codex distinguishes spawn/no-active/uncertain failures without retrans
     unavailable('CODEX_QUEUE_SPAWN_FAILED'));
 });
 
-const claudeEnv = { CLAUDE_CODE_MESSAGING_SOCKET: 'current-session-socket', CLAUDE_CODE_MESSAGING_TOKEN: secret };
-test('W05 W10 Claude sends only current auth and exact user marker, then closes', async () => {
-  const h = socketHarness();
-  const result = await wakeCompletion({ host: 'claude-code', ...target, environment: claudeEnv, connect: h.connect, message: secret });
-  assert.deepEqual(result, { state: 'requested' });
-  assert.deepEqual(h.calls, ['current-session-socket']);
-  assert.deepEqual(h.writes, [JSON.stringify({ type: 'auth', token: secret }) + '\n' +
-    JSON.stringify({ type: 'user', message: { role: 'user', content: marker }, priority: 'next' }) + '\n']);
-  assert.equal(h.destroyed, 1);
+// NW11 replaces the obsolete private-socket success oracle with native-hook deferral.
+test('W05 NW11 Claude defers to its native hook without reading private env or dispatching', async () => {
+  const environment = {};
+  for (const name of ['CLAUDE_CODE_MESSAGING_SOCKET', 'CLAUDE_CODE_MESSAGING_TOKEN', 'UNRELATED_SECRET']) {
+    Object.defineProperty(environment, name, { enumerable: true, get() { assert.fail('must not read private env'); } });
+  }
+  const result = await wakeCompletion({ host: 'claude-code', ...target, environment,
+    run: () => assert.fail('no subprocess'), connect: () => assert.fail('no socket'), message: secret });
+  assert.deepEqual(result, { state: 'deferred', reasonCode: 'CLAUDE_NATIVE_HOOK_WAITING' });
   assert.equal(JSON.stringify(result).includes(secret), false);
 });
 
-test('W06 Claude missing env and pre/post-connect failures preserve uncertainty', async () => {
-  for (const environment of [{}, { CLAUDE_CODE_MESSAGING_SOCKET: 'only-socket' }, { CLAUDE_CODE_MESSAGING_TOKEN: secret }]) {
-    assert.deepEqual(await wakeCompletion({ host: 'claude-code', ...target, environment, connect: () => assert.fail('must not connect') }),
-      unavailable('CLAUDE_MESSAGING_ENV_MISSING'));
-  }
-  for (const mode of ['throw', 'before-error', 'after-error', 'end-throw']) {
-    const h = socketHarness(mode);
-    const result = await wakeCompletion({ host: 'claude-code', ...target, environment: claudeEnv, connect: h.connect });
-    assert.deepEqual(result, mode === 'throw' || mode === 'before-error' ? unavailable('CLAUDE_INBOX_CONNECT_FAILED') :
-      unknown('CLAUDE_INBOX_WRITE_UNCONFIRMED'));
-    assert.equal(h.calls.length, 1);
-    assert.equal(JSON.stringify(result).includes(secret), false);
-    assert.equal(h.destroyed, mode === 'throw' ? 0 : 1);
-  }
+test('W06 Claude requires no messaging environment and never reports requested delivery', async () => {
+  const result = await wakeCompletion({ host: 'claude-code', ...target, environment: {},
+    run: () => assert.fail('no process'), connect: () => assert.fail('no socket') });
+  assert.deepEqual(result, { state: 'deferred', reasonCode: 'CLAUDE_NATIVE_HOOK_WAITING' });
+  assert.notEqual(result.state, 'requested');
 });
 
 const agyEnv = executable => ({ ANTIGRAVITY_PROJECT_ID: 'project-A', ANTIGRAVITY_AGENTAPI_EXE: executable,
@@ -284,18 +252,4 @@ test('W11 missing subprocess callback has a strict deadline and one kill', async
   assert.deepEqual(await pending, unknown('CODEX_QUEUE_TIMEOUT'));
   assert.deepEqual(h.calls[0].child.kills, ['SIGKILL']);
   assert.equal(h.calls.length, 1);
-});
-
-test('W11 Claude without connect or close events times out and destroys once', async t => {
-  t.mock.timers.enable({ apis: ['setTimeout'] });
-  for (const mode of ['never', 'connected-never-close']) {
-    const h = socketHarness(mode);
-    const pending = wakeCompletion({ host: 'claude-code', ...target, environment: claudeEnv, connect: h.connect });
-    await Promise.resolve();
-    t.mock.timers.tick(5000);
-    assert.deepEqual(await pending, unknown('CLAUDE_INBOX_TIMEOUT'));
-    assert.equal(h.destroyed, 1);
-    h.socket.emit('close', false);
-    assert.equal(h.destroyed, 1);
-  }
 });

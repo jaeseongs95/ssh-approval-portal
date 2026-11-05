@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fork } from 'node:child_process';
+import { fork, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, readdir, readFile, rm, lstat, link, symlink, mkdir } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, writeFile, rm, lstat, link, symlink, mkdir } from 'node:fs/promises';
+import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openCompletionInbox } from '../src/adapters/cli/completion-inbox.mjs';
@@ -48,7 +49,23 @@ const ack = (inbox, binding, message) => inbox.acknowledge({ bindingId: binding.
 
 // IPC readiness is the start gate; the timer is a failure deadline, never a scheduling sleep.
 function worker(t, input) {
-  const child = fork(new URL('./fixtures/completion-inbox-worker.mjs', import.meta.url), [], {
+  // Reuse the existing process barrier/oracle; this inline branch adds no fixture runner.
+  const waiterSource = `import { openCompletionInbox } from ${JSON.stringify(new URL('../src/adapters/cli/completion-inbox.mjs', import.meta.url).href)};
+    let inbox, input;
+    process.on('message', message => {
+      try {
+        if (message.type === 'prepare') {
+          input = message.input; inbox = openCompletionInbox({filePath: input.filePath, now: () => input.now});
+          process.send({type: 'ready'});
+        } else if (message.type === 'go') {
+          const value = inbox.acquireWaiter({bindingId: input.bindingId, ownerId: input.ownerId});
+          process.send({type: 'result', value}, () => { inbox.close(); process.disconnect(); });
+        }
+      } catch (error) { process.send({type: 'error', code: error.code}, () => process.exit(1)); }
+    });`;
+  const child = input.action === 'waiter' ? spawn(process.execPath, ['--input-type=module', '--eval', waiterSource], {
+    stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
+  }) : fork(new URL('./fixtures/completion-inbox-worker.mjs', import.meta.url), [], {
     execArgv: [], stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
   });
   let stderr = '';
@@ -338,4 +355,155 @@ test('I19 all terminal states preserve failure and unknown metadata without rein
   const received = claim(f.inbox, f.binding);
   assert.equal(received.length, events.length);
   for (const row of received) assert.deepEqual(row.event, expected.get(row.receiptId));
+});
+
+// Native waiter cases were frozen before implementation in CLAUDE-NATIVE-WAITER-CASES.ko.md.
+// This is the schema1 DDL from the pre-waiter contract, not a schema2 database downgraded for the test.
+const schemaOne = `
+  CREATE TABLE completion_bindings (
+    binding_id TEXT PRIMARY KEY, host TEXT NOT NULL, session_id TEXT NOT NULL, UNIQUE(host, session_id)
+  ) STRICT;
+  CREATE TABLE completion_events (
+    sequence INTEGER PRIMARY KEY, receipt_id TEXT NOT NULL UNIQUE,
+    binding_id TEXT NOT NULL REFERENCES completion_bindings(binding_id),
+    origin TEXT NOT NULL, operation_id TEXT NOT NULL, revision TEXT NOT NULL, payload TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending', 'claimed', 'acknowledged')),
+    claim_token TEXT, lease_until INTEGER, attempt INTEGER NOT NULL DEFAULT 0 CHECK(attempt >= 0),
+    UNIQUE(binding_id, origin, operation_id, revision),
+    CHECK((state = 'pending' AND claim_token IS NULL AND lease_until IS NULL AND attempt = 0) OR
+      (state = 'claimed' AND claim_token IS NOT NULL AND lease_until IS NOT NULL AND attempt > 0) OR
+      (state = 'acknowledged' AND claim_token IS NOT NULL AND lease_until IS NULL AND attempt > 0))
+  ) STRICT;
+  CREATE INDEX completion_claims ON completion_events(binding_id, state, lease_until, sequence);
+  PRAGMA application_id = 1396919632; PRAGMA user_version = 1;
+`;
+
+async function legacyFixture(t) {
+  const root = await mkdtemp(join(tmpdir(), 'completion-v1-'));
+  const filePath = join(root, 'inbox.sqlite');
+  await writeFile(filePath, '', { mode: 0o600 });
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const db = new DatabaseSync(filePath);
+  const bindingId = randomUUID(), receipts = [];
+  try {
+    db.exec(schemaOne);
+    db.prepare('INSERT INTO completion_bindings VALUES (?, ?, ?)').run(bindingId, 'claude-code', sessionId);
+    for (const [index, state] of ['pending', 'claimed', 'acknowledged'].entries()) {
+      const event = completion(index + 1), receiptId = randomUUID();
+      const claimToken = state === 'pending' ? null : randomUUID();
+      db.prepare(`INSERT INTO completion_events(receipt_id, binding_id, origin, operation_id, revision, payload,
+        state, claim_token, lease_until, attempt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(receiptId, bindingId, origin, event.id, event.targetRevision, JSON.stringify(event), state,
+          claimToken, state === 'claimed' ? 30000 : null, state === 'pending' ? 0 : 1);
+      receipts.push({ receiptId, state, claimToken });
+    }
+    return { filePath, bindingId, receipts, before: db.prepare('SELECT * FROM completion_events ORDER BY sequence').all() };
+  } finally { db.close(); }
+}
+
+test('NW01 schema1 migration preserves exact event, claim, ACK and binding state and is repeatable', async t => {
+  const f = await legacyFixture(t);
+  for (let reopen = 0; reopen < 2; reopen++) {
+    const inbox = openCompletionInbox({ filePath: f.filePath, now: () => 1000 });
+    try {
+      assert.equal(inbox.findBinding({ host: 'claude-code', sessionId }).bindingId, f.bindingId);
+      assert.deepEqual(inbox.pending({ bindingId: f.bindingId }), { pending: 1, claimed: 1, acknowledged: 1 });
+      assert.deepEqual(inbox.acknowledge({ bindingId: f.bindingId, ...f.receipts[2] }), { acknowledged: true, duplicate: true });
+    } finally { inbox.close(); }
+    const db = new DatabaseSync(f.filePath);
+    try {
+      assert.equal(db.prepare('PRAGMA user_version').get().user_version, 2);
+      assert.deepEqual(db.prepare('SELECT * FROM completion_events ORDER BY sequence').all(), f.before);
+      assert.equal(db.prepare('SELECT count(*) AS n FROM completion_waiters').get().n, 1);
+    } finally { db.close(); }
+  }
+});
+
+test('NW01 failed migration keeps schema1 rows and can migrate after the obstacle is removed', async t => {
+  const f = await legacyFixture(t);
+  let db = new DatabaseSync(f.filePath);
+  try { db.exec('CREATE VIEW completion_waiters AS SELECT binding_id FROM completion_bindings'); }
+  finally { db.close(); }
+  assert.throws(() => openCompletionInbox({ filePath: f.filePath }), rejected);
+  db = new DatabaseSync(f.filePath);
+  try {
+    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 1);
+    assert.deepEqual(db.prepare('SELECT * FROM completion_events ORDER BY sequence').all(), f.before);
+    db.exec('DROP VIEW completion_waiters');
+  } finally { db.close(); }
+  const inbox = openCompletionInbox({ filePath: f.filePath });
+  try { assert.deepEqual(inbox.pending({ bindingId: f.bindingId }), { pending: 1, claimed: 1, acknowledged: 1 }); }
+  finally { inbox.close(); }
+});
+
+test('NW02 concurrent process acquisition has one winner per binding and independent sessions', async t => {
+  const f = await fixture(t);
+  const owners = Array.from({ length: 4 }, () => randomUUID());
+  const workers = owners.map(ownerId => worker(t, { filePath: f.filePath, bindingId: f.binding.bindingId,
+    now: 1000, action: 'waiter', ownerId }));
+  await Promise.all(workers.map(w => w.ready)); workers.forEach(w => w.go());
+  const results = await Promise.all(workers.map(w => w.result));
+  await Promise.all(workers.map(w => w.exited));
+  assert.equal(results.filter(result => result.acquired).length, 1);
+  const winner = results.findIndex(result => result.acquired);
+  const own = { bindingId: f.binding.bindingId, ownerId: owners[winner], generation: results[winner].generation };
+  assert.deepEqual(f.inbox.pollWaiter(own), { active: true, messages: [] });
+  const other = f.inbox.register({ host: 'claude-code', sessionId: otherSession });
+  assert.equal(f.inbox.acquireWaiter({ bindingId: other.bindingId, ownerId: randomUUID() }).acquired, true);
+});
+
+test('NW03 expired owner cannot poll renew or release a replacement generation', async t => {
+  const f = await fixture(t), ownerA = randomUUID(), ownerB = randomUUID();
+  const a = f.inbox.acquireWaiter({ bindingId: f.binding.bindingId, ownerId: ownerA });
+  const old = { bindingId: f.binding.bindingId, ownerId: ownerA, generation: a.generation };
+  f.setNow(31000);
+  const otherConnection = f.open();
+  const b = otherConnection.acquireWaiter({ bindingId: f.binding.bindingId, ownerId: ownerB });
+  assert.equal(b.acquired, true); assert.ok(b.generation > a.generation);
+  const receipt = enqueue(f.inbox, f.binding);
+  assert.deepEqual(f.inbox.pollWaiter({ ...old, heartbeat: true }), { active: false, messages: [] });
+  assert.deepEqual(f.inbox.releaseWaiter(old), { released: false });
+  const next = otherConnection.pollWaiter({ bindingId: f.binding.bindingId, ownerId: ownerB, generation: b.generation });
+  assert.equal(next.active, true); assert.equal(next.messages[0].receiptId, receipt.receiptId);
+});
+
+test('NW04 native poll and pendingOnly claims never redeliver expired claimed events', async t => {
+  const f = await fixture(t), ownerId = randomUUID();
+  enqueue(f.inbox, f.binding);
+  const [original] = claim(f.inbox, f.binding, { leaseMs: 100 });
+  f.setNow(1100);
+  const receipt = enqueue(f.inbox, f.binding, completion(2));
+  const acquired = f.inbox.acquireWaiter({ bindingId: f.binding.bindingId, ownerId });
+  const own = { bindingId: f.binding.bindingId, ownerId, generation: acquired.generation };
+  const native = f.inbox.pollWaiter(own);
+  assert.equal(native.messages.length, 1); assert.equal(native.messages[0].receiptId, receipt.receiptId);
+  assert.deepEqual(claim(f.inbox, f.binding, { pendingOnly: true }), []);
+  const [retry] = claim(f.inbox, f.binding);
+  assert.equal(retry.receiptId, original.receiptId); assert.equal(retry.attempt, 2);
+  assert.notEqual(retry.claimToken, original.claimToken);
+});
+
+test('NW07 SessionEnd invalidates ownership and rejects late arms until an actual SessionStart', async t => {
+  const f = await fixture(t), ownerId = randomUUID();
+  const acquired = f.inbox.acquireWaiter({ bindingId: f.binding.bindingId, ownerId });
+  const own = { bindingId: f.binding.bindingId, ownerId, generation: acquired.generation };
+  const receipt = enqueue(f.inbox, f.binding);
+  f.inbox.invalidateWaiter({ bindingId: f.binding.bindingId });
+  assert.deepEqual(f.inbox.pollWaiter({ ...own, heartbeat: true }), { active: false, messages: [] });
+  assert.equal(f.inbox.acquireWaiter({ bindingId: f.binding.bindingId, ownerId: randomUUID() }).acquired, false);
+  assert.deepEqual(pending(f.inbox, f.binding), { pending: 1, claimed: 0, acknowledged: 0 });
+  f.inbox.activateWaiter({ bindingId: f.binding.bindingId });
+  const nextOwner = randomUUID(), next = f.inbox.acquireWaiter({ bindingId: f.binding.bindingId, ownerId: nextOwner });
+  assert.equal(next.acquired, true); assert.ok(next.generation > acquired.generation);
+  assert.equal(f.inbox.pollWaiter({ bindingId: f.binding.bindingId, ownerId: nextOwner, generation: next.generation }).messages[0].receiptId, receipt.receiptId);
+});
+
+test('NW09 heartbeat extends only an unexpired owner and stale lease recovery is bounded', async t => {
+  const f = await fixture(t), ownerId = randomUUID();
+  const acquired = f.inbox.acquireWaiter({ bindingId: f.binding.bindingId, ownerId });
+  const own = { bindingId: f.binding.bindingId, ownerId, generation: acquired.generation };
+  f.setNow(11000); assert.deepEqual(f.inbox.pollWaiter({ ...own, heartbeat: true }), { active: true, messages: [] });
+  f.setNow(31000); assert.equal(f.inbox.acquireWaiter({ bindingId: f.binding.bindingId, ownerId: randomUUID() }).acquired, false);
+  f.setNow(41000); assert.deepEqual(f.inbox.pollWaiter({ ...own, heartbeat: true }), { active: false, messages: [] });
+  assert.equal(f.inbox.acquireWaiter({ bindingId: f.binding.bindingId, ownerId: randomUUID() }).acquired, true);
 });

@@ -43,9 +43,9 @@ async function fixture(t, register = true) {
     read(consume) { const selected = openCompletionInbox({ filePath: inboxPath }); try { return consume(selected); } finally { selected.close(); } } };
 }
 
-async function invoke(args, { result = event, credential, watcher, ...services } = {}) {
+async function invoke(args, { result = event, credential, watcher, environment = {}, ...services } = {}) {
   const out = capture(), err = capture();
-  const code = await main(args, out, err, credential ?? (() => 'synthetic.header.signature'), {},
+  const code = await main(args, out, err, credential ?? (() => 'synthetic.header.signature'), environment,
     () => assert.fail('not an upload'), undefined,
     watcher ?? (() => ({ async connect() {}, async watch() { return result; }, async close() {} })),
     () => assert.fail('not a direct Codex notification'), services);
@@ -176,4 +176,29 @@ test('H10 cleanup failure after commit preserves the receipt and does not attemp
   });
   assert.equal(result.state, 'queued'); assert.equal(result.receiptId, receiptId);
   assert.deepEqual(result.wake, { state: 'unknown', reasonCode: 'COMPLETION_INBOX_CLEANUP_UNKNOWN' });
+});
+
+// Pre-execution case NW11/H11: real Claude wake branch, durable queue and no private-env reads.
+test('H11 native Claude deferral is queue success without socket credentials or a receipt claim', async t => {
+  for (const state of ['completed', 'failed', 'unknown']) {
+    const f = await fixture(t);
+    const binding = f.read(inbox => inbox.register({ host: 'claude-code', sessionId }));
+    const environment = {};
+    for (const name of ['CLAUDE_CODE_MESSAGING_SOCKET', 'CLAUDE_CODE_MESSAGING_TOKEN']) {
+      Object.defineProperty(environment, name, { enumerable: true, get() { assert.fail('private messaging env must not be read'); } });
+    }
+    let credentialCalls = 0;
+    const result = await invoke(f.args.map(value => value === 'codex' ? 'claude-code' : value), {
+      environment, result: { ...event, state, failed: state !== 'completed' },
+      credential() { credentialCalls++; return 'synthetic.header.signature'; },
+    });
+    assert.equal(credentialCalls, 1, 'only the original owner watcher credential call');
+    assert.equal(result.code, state === 'completed' ? 0 : 1);
+    assert.equal(result.value.state, state); assert.equal(result.value.notification.state, 'queued');
+    assert.deepEqual(result.value.notification.wake, { state: 'deferred', reasonCode: 'CLAUDE_NATIVE_HOOK_WAITING' });
+    assert.equal(result.value.notification.automaticRetry, false);
+    assert.doesNotMatch(result.err, /COMPLETION_WAKE_UNCONFIRMED|COMPLETION_NOTIFICATION_FAILED/);
+    f.read(inbox => assert.deepEqual(inbox.pending({ bindingId: binding.bindingId }), { pending: 1, claimed: 0, acknowledged: 0 }));
+    f.read(inbox => assert.deepEqual(inbox.pending({ bindingId: f.binding.bindingId }), { pending: 0, claimed: 0, acknowledged: 0 }));
+  }
 });

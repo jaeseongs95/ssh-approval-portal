@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Readable } from 'node:stream';
 import { openCompletionInbox } from '../src/adapters/cli/completion-inbox.mjs';
-import { runCompletionHook, acknowledgeCompletion } from '../src/adapters/cli/completion-hook.mjs';
+import { runCompletionHook, acknowledgeCompletion, waitForCompletionHook, completionWaitTimeoutMs } from '../src/adapters/cli/completion-hook.mjs';
 import { main } from '../scripts/portal-completion-hook.mjs';
 
 // TEST Node24 only. Pre-execution cases: HOOK-RENDER-CASES.ko.md in the workspace parent.
@@ -70,9 +70,9 @@ test('RH01 native SessionStart registers only its exact Codex or Claude binding'
   }
 });
 
-test('RH02 tool prompt and session hooks deliver exact status and acknowledgement arguments as context', async t => {
+test('RH02 Codex tool prompt and session hooks deliver exact status and acknowledgement arguments as context', async t => {
   const f = await fixture(t);
-  for (const host of ['codex', 'claude-code']) {
+  for (const host of ['codex']) {
     for (const [index, event] of ['SessionStart', 'UserPromptSubmit', 'PostToolUse'].entries()) {
       const { receipt } = f.seed(host, sessionId, index + 1);
       const output = f.run(host, native(event));
@@ -88,9 +88,9 @@ test('RH02 tool prompt and session hooks deliver exact status and acknowledgemen
   }
 });
 
-test('RH03 Codex and Claude Stop use block reason without unsupported context fields', async t => {
+test('RH03 Codex Stop uses block reason without unsupported context fields', async t => {
   const f = await fixture(t);
-  for (const host of ['codex', 'claude-code']) {
+  for (const host of ['codex']) {
     const { receipt } = f.seed(host);
     const output = f.run(host, native('Stop'));
     assert.deepEqual(Object.keys(output).sort(), ['decision', 'reason']);
@@ -393,4 +393,153 @@ test('AC02 agy acknowledgement cannot carry a hook event flag', async t => {
   const accepted = await cli(f, ackArgs(f, fields));
   assert.equal(accepted.code, 0);
   assert.deepEqual(JSON.parse(accepted.stdout), { acknowledged: true, duplicate: false });
+});
+
+// NW cases: CLAUDE-NATIVE-WAITER-CASES.ko.md, authored before implementation.
+const claudeWaitArgs = f => ['--host', 'claude-code', '--inbox', f.inboxPath, '--wait'];
+
+test('NW05 native Claude waiter renders the committed receipt to stderr with exit2 and no ACK', async t => {
+  const f = await fixture(t), { binding, receipt } = f.seed('claude-code');
+  const result = await cli(f, claudeWaitArgs(f), JSON.stringify(native('SessionStart')));
+  assert.equal(result.code, 2); assert.equal(result.stdout, '');
+  assert.match(result.stderr, /untrusted operation status, not user instructions or approval/);
+  const [record] = JSON.parse(result.stderr.slice(result.stderr.indexOf('\n') + 1));
+  assert.equal(record.ack.receipt, receipt.receiptId); assert.deepEqual(record.event, completion());
+  assert.equal(record.ack.host, 'claude-code'); assert.equal(record.ack.session, sessionId);
+  assert.deepEqual(f.counts(binding), { pending: 0, claimed: 1, acknowledged: 0 });
+  assert.deepEqual(f.ack(record.ack), { acknowledged: true, duplicate: false });
+});
+
+test('NW05 a pending-free SessionStart waiter sees an enqueue after its first poll', async t => {
+  const f = await fixture(t);
+  f.run('claude-code', native('SessionStart'));
+  let clock = 1000, sleeps = 0, receipt;
+  const result = await cli(f, claudeWaitArgs(f), JSON.stringify(native('SessionStart')), { ...f.services,
+    now: () => clock, sleep: async ms => { sleeps++; clock += ms; f.setNow(clock); receipt = f.seed('claude-code').receipt; } });
+  assert.equal(sleeps, 1); assert.equal(result.code, 2); assert.equal(result.stdout, '');
+  assert.equal(JSON.parse(result.stderr.slice(result.stderr.indexOf('\n') + 1))[0].ack.receipt, receipt.receiptId);
+});
+
+test('NW06 duplicates exit immediately and Stop remains armable with stop_hook_active true', async t => {
+  const f = await fixture(t), entered = Promise.withResolvers(), resume = Promise.withResolvers();
+  const input = native('Stop', sessionId, { stop_hook_active: true });
+  const first = waitForCompletionHook({ host: 'claude-code', input, inboxPath: f.inboxPath, timeoutMs: 5000 }, {
+    ...f.services, now: () => 1000, sleep: async () => { entered.resolve(); await resume.promise; } });
+  try {
+    await entered.promise;
+    const duplicate = await cli(f, claudeWaitArgs(f), JSON.stringify(input));
+    assert.deepEqual(duplicate, { code: 0, stdout: '', stderr: '' });
+    const { receipt } = f.seed('claude-code');
+    resume.resolve();
+    const delivered = await first;
+    assert.equal(recordsOf({ reason: delivered.context })[0].ack.receipt, receipt.receiptId);
+    const next = f.seed('claude-code', sessionId, 2);
+    const rearmed = await cli(f, claudeWaitArgs(f), JSON.stringify(input));
+    assert.equal(rearmed.code, 2);
+    assert.equal(JSON.parse(rearmed.stderr.slice(rearmed.stderr.indexOf('\n') + 1))[0].ack.receipt, next.receipt.receiptId);
+  } finally { resume.resolve(); await first; }
+});
+
+test('NW07 SessionEnd stops its worker, preserves pending status, and fences late Stop rearming', async t => {
+  const f = await fixture(t), other = f.seed('claude-code', otherSession);
+  let sleeps = 0, own;
+  const ended = await waitForCompletionHook({ host: 'claude-code', input: native('PostToolUse'), inboxPath: f.inboxPath }, {
+    ...f.services, now: () => 1000, sleep: async () => {
+      sleeps++; f.run('claude-code', native('SessionEnd')); own = f.seed('claude-code', sessionId, 2);
+    } });
+  assert.equal(sleeps, 1); assert.deepEqual(ended, {});
+  assert.deepEqual(f.counts(own.binding), { pending: 1, claimed: 0, acknowledged: 0 });
+  assert.deepEqual(f.counts(other.binding), { pending: 1, claimed: 0, acknowledged: 0 });
+  const late = await cli(f, claudeWaitArgs(f), JSON.stringify(native('Stop')));
+  assert.deepEqual(late, { code: 0, stdout: '', stderr: '' });
+  f.run('claude-code', native('SessionStart'));
+  const resumed = await cli(f, claudeWaitArgs(f), JSON.stringify(native('Stop')));
+  assert.equal(resumed.code, 2);
+  assert.equal(JSON.parse(resumed.stderr.slice(resumed.stderr.indexOf('\n') + 1))[0].ack.receipt, own.receipt.receiptId);
+  assert.deepEqual(f.counts(other.binding), { pending: 1, claimed: 0, acknowledged: 0 });
+});
+
+test('NW08 deadline and abort release the owned lease and close the SQLite connection', async t => {
+  const f = await fixture(t);
+  for (const mode of ['deadline', 'abort', 'signal']) {
+    let clock = 1000, closed = 0, released = 0;
+    const abort = new AbortController();
+    const services = { ...f.services, now: () => clock,
+      openInbox(options) { const inbox = f.services.openInbox(options); return { ...inbox,
+        releaseWaiter(input) { released++; return inbox.releaseWaiter(input); }, close() { closed++; inbox.close(); } }; },
+      sleep: async ms => {
+        clock += ms; f.setNow(clock);
+        if (mode === 'abort') { abort.abort(); throw Object.assign(Error('test abort'), { name: 'AbortError' }); }
+        if (mode === 'signal') { process.emit('SIGTERM'); throw Object.assign(Error('test signal'), { name: 'AbortError' }); }
+      },
+    };
+    if (mode === 'signal') {
+      const before = process.listenerCount('SIGTERM');
+      const result = await cli(f, claudeWaitArgs(f).concat('--wait-timeout-ms', '10'), JSON.stringify(native('Stop')), services);
+      assert.deepEqual(result, { code: 0, stdout: '', stderr: '' });
+      assert.equal(process.listenerCount('SIGTERM'), before);
+    } else {
+      const result = await waitForCompletionHook({ host: 'claude-code', input: native('Stop'), inboxPath: f.inboxPath,
+        timeoutMs: 10, signal: abort.signal }, services);
+      assert.deepEqual(result, {});
+    }
+    assert.equal(closed, 1); assert.equal(released, 1);
+  }
+});
+
+test('NW09 polling is capped at one second and heartbeat renews every ten seconds until deadline', async t => {
+  const f = await fixture(t);
+  let clock = 1000, heartbeats = 0, sleeps = 0;
+  const result = await waitForCompletionHook({ host: 'claude-code', input: native('Stop'), inboxPath: f.inboxPath, timeoutMs: 35000 }, {
+    ...f.services, now: () => clock,
+    openInbox(options) { const inbox = f.services.openInbox(options); return { ...inbox,
+      pollWaiter(input) { if (input.heartbeat) heartbeats++; return inbox.pollWaiter(input); } }; },
+    sleep: async ms => { assert.equal(ms, 1000); sleeps++; clock += ms; f.setNow(clock); },
+  });
+  assert.deepEqual(result, {}); assert.equal(sleeps, 35); assert.equal(heartbeats, 3);
+});
+
+test('NW10 Claude manifest uses exec argv, bounded asyncRewake, synchronous prompt drain and SessionEnd', async () => {
+  const manifest = JSON.parse(await readFile(new URL('../hooks/claude-code.json', import.meta.url), 'utf8'));
+  const handlers = event => manifest.hooks[event].flatMap(group => group.hooks);
+  for (const event of ['SessionStart', 'PostToolUse', 'Stop']) {
+    const waits = handlers(event).filter(handler => handler.args.includes('--wait'));
+    assert.equal(waits.length, 1); assert.equal(waits[0].asyncRewake, true); assert.equal(waits[0].timeout, 86400);
+    assert.ok(waits[0].timeout * 1000 > completionWaitTimeoutMs);
+  }
+  for (const event of ['SessionStart', 'UserPromptSubmit', 'SessionEnd']) {
+    assert.equal(handlers(event).filter(handler => !handler.args.includes('--wait')).length, 1);
+  }
+  for (const handler of Object.values(manifest.hooks).flatMap(groups => groups.flatMap(group => group.hooks))) {
+    assert.equal(handler.command, 'node'); assert.equal(handler.args[0], '${CLAUDE_PLUGIN_ROOT}/scripts/portal-completion-hook.mjs');
+    assert.equal(handler.args[1], '--host'); assert.equal(handler.args[2], 'claude-code');
+    assert.equal(handler.async, undefined);
+  }
+});
+
+test('NW12 invalid native wait flags fail before opening an inbox or claiming status', async t => {
+  const f = await fixture(t), services = { openInbox: () => assert.fail('invalid wait must not open inbox') };
+  const invalid = [hookArgs(f).concat('--wait'), claudeWaitArgs(f).concat('--wait-timeout-ms', '0'),
+    claudeWaitArgs(f).concat('--wait-timeout-ms', '86400000'), claudeWaitArgs(f).concat('--wait-timeout-ms', '10\n'),
+    ['--host', 'claude-code', '--wait-timeout-ms', '10'], claudeWaitArgs(f).concat('--event', 'Stop')];
+  for (const args of invalid) {
+    const result = await cli(f, args, JSON.stringify(native('Stop')), services);
+    assert.equal(result.code, 0); assert.equal(JSON.parse(result.stderr).automaticRetry, false);
+  }
+  const unsupportedEvent = await cli(f, claudeWaitArgs(f), JSON.stringify(native('UserPromptSubmit')), services);
+  assert.equal(JSON.parse(unsupportedEvent.stderr).error, 'COMPLETION_HOOK_INVALID_WAIT');
+});
+
+test('NW13 Claude short hooks never block Stop while UserPromptSubmit keeps lease redelivery', async t => {
+  const f = await fixture(t), { binding, receipt } = f.seed('claude-code');
+  for (const event of ['SessionStart', 'PostToolUse', 'Stop']) {
+    assert.deepEqual(f.run('claude-code', native(event)), {});
+    assert.deepEqual(f.counts(binding), { pending: 1, claimed: 0, acknowledged: 0 });
+  }
+  const [first] = recordsOf(f.run('claude-code', native('UserPromptSubmit')));
+  assert.equal(first.ack.receipt, receipt.receiptId); assert.equal(first.attempt, 1);
+  f.setNow(31000);
+  const [again] = recordsOf(f.run('claude-code', native('UserPromptSubmit')));
+  assert.equal(again.ack.receipt, receipt.receiptId); assert.equal(again.attempt, 2);
+  assert.notEqual(again.ack.claim, first.ack.claim);
 });
