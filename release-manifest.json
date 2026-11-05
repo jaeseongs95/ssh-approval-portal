@@ -1,12 +1,22 @@
 {
-  "version": "2.0.0",
+  "version": "2.2.0",
   "status": "release",
   "runtime": "Node.js 24",
   "files": [
     {
+      "path": ".claude-plugin/plugin.json",
+      "size": 187,
+      "sha256": "6ae28f580dd3a36795f750a2b9ffdebaa7bd86cbe247ba6eb785108dc3623fcd"
+    },
+    {
+      "path": ".codex-plugin/plugin.json",
+      "size": 181,
+      "sha256": "41dd1dcc191d87de1c04c44af3262557dea778469d3948337f0dc54beff08656"
+    },
+    {
       "path": ".dockerignore",
-      "size": 485,
-      "sha256": "fe9dfe4497656a1a3834ded3b5d80f156c502615bf2aed375e6c3395935bf268"
+      "size": 511,
+      "sha256": "2c7995a7e87ba4ec84e206fdab19891ffaa8d673dfbe4e4b04ba7b76dbdd6cb4"
     },
     {
       "path": "LICENSE",
@@ -15,13 +25,13 @@
     },
     {
       "path": "README.ko.md",
-      "size": 22242,
-      "sha256": "19630893477998395c6cf8def9719bc3100363463d48d530645dda88aaeb0cf5"
+      "size": 21579,
+      "sha256": "b68f6b67518f9a3e40902db2a93d84d331b603716b62045ffbc84c9b25246ab9"
     },
     {
       "path": "README.md",
-      "size": 20253,
-      "sha256": "ec0a7621fecd7b2eeb24b0cda2c8dc3351a0cd6c9fdea470501d3fe0601bc6c3"
+      "size": 19593,
+      "sha256": "5abb21e4e7d136e9ab8be527dffa6be5a27e669b4a5a2fd1b1b7fe9043eefe1e"
     },
     {
       "path": "THIRD_PARTY_NOTICES.json",
@@ -51,7 +61,7 @@
     {
       "path": "config/docker.example.env",
       "size": 73,
-      "sha256": "aecd903710689fdabd5c4684e872388853bd655dea960e50792896291e6289dc"
+      "sha256": "a46bf82a240adbd5ba5344ffbd7f589d921ebf79a7bcb181121b48de4dffa626"
     },
     {
       "path": "config/settings-contract.json",
@@ -86,12 +96,12 @@
     {
       "path": "docker/Dockerfile",
       "size": 1935,
-      "sha256": "3b047f63fa7b6df2dd100744081e934f550ca16da9e371b7d0944d86ef6fb6b4"
+      "sha256": "993d25af94918f779a9773cefacf09e731305911240fd42f772c768f4c27d8b3"
     },
     {
       "path": "docker/compose.yaml",
       "size": 1128,
-      "sha256": "608f48a8cf3fc2fd229db38ba2a5deccad9ac0237051aed49b96ae9bdcea5740"
+      "sha256": "fcb60d2e7b97ca5aa4915906d038babb8521650be0589d7e15dfa8f5df98d288"
     },
     {
       "path": "docs/admin-login.en.md",
@@ -155,8 +165,8 @@
     },
     {
       "path": "docs/client-files.ko.md",
-      "size": 7829,
-      "sha256": "d72007e53d2f1457b530d8ad9e5a2f54f3ba775786d311562151df8829dc8157"
+      "size": 17419,
+      "sha256": "10eff221187ceb37d500a683d20a81e171bd21be54fe8b2aefcedc792d100c44"
     },
     {
       "path": "docs/command-automation.ko.md",
@@ -279,6 +289,21 @@
       "sha256": "4e6bac28577c6178cbb43e44ec87c17c9466fd42303b6b8c715bef02b956d6a0"
     },
     {
+      "path": "hooks/antigravity.json",
+      "size": 838,
+      "sha256": "8c60b9a32a196685d5f40e5e3a6799bcc1fd1ca6926163182c60c3919e98007b"
+    },
+    {
+      "path": "hooks/claude-code.json",
+      "size": 1393,
+      "sha256": "8cf89e07fb832d5041c2637a519f55564341d94970f6def871cc384cecd2b0ae"
+    },
+    {
+      "path": "hooks/codex.json",
+      "size": 1543,
+      "sha256": "303715b207c721a001ff311a689329db030108152bb834550d71246c5c4ea72d"
+    },
+    {
       "path": "native/freerdp-input/BUILD-RESULT.ko.md",
       "size": 5678,
       "sha256": "fa744b9f6c668b1e4be7cdecab2897b7f8aa04bdbc775b6e6bbd54bc1b08225b"
@@ -361,12 +386,12 @@
     {
       "path": "package-lock.json",
       "size": 100104,
-      "sha256": "908d7f69e881628f8a2b63e3ae70a6b6e4710e08ad2ff55ce5e438b6ca832d18"
+      "sha256": "ef496c8ad8729d51d193517d5590337af314bd8e695f56fd3fabbada7595dff2"
     },
     {
       "path": "package.json",
       "size": 860,
-      "sha256": "e9a59cdccd09aa84bccceb339b675cf02075850b928616aa27cc5394d94805da"
+      "sha256": "e51c404955d0198a6256668412cd53924718817cd7748fa5ad35a43fc01e93c9"
     },
     {
       "path": "scripts/admin-access-config.mjs",
@@ -470,8 +495,8 @@
     },
     {
       "path": "scripts/deploy180.mjs",
-      "size": 26163,
-      "sha256": "229688f2f3da8ca42496561756b1daf76d47b1add0b0c3200afaf51d9f0414ad"
+      "size": 26169,
+      "sha256": "64da7c912fabba42e09f9d5d826a27285e5a4f7b4d73e7456fc1ed45183a62fa"
     },
     {
       "path": "scripts/docker-secrets.py",
@@ -575,8 +600,8 @@
     },
     {
       "path": "scripts/package-client.py",
-      "size": 5953,
-      "sha256": "b21579db026d3b12809cfab92dc5fd94dd47e2f7aa77a9cb3596c68831c25e23"
+      "size": 6122,
+      "sha256": "50620aaad4a85ff296b1524c95ea6e2c2347f86848af33ebe055ebfd9daa0cad"
     },
     {
       "path": "scripts/package-release.py",
@@ -585,13 +610,18 @@
     },
     {
       "path": "scripts/package.py",
-      "size": 6772,
-      "sha256": "0fdc7d740b66f8d694428030aef1b332b523e6d9e8248e3d6f73b78bf9a88080"
+      "size": 6931,
+      "sha256": "5969360775504121f3a3cdc3476911613687ee58de91cf7d1011d75578fe47ce"
     },
     {
       "path": "scripts/portal-client.mjs",
       "size": 9254,
       "sha256": "ad5e8c57a797d24c9ee7021016b25d88bd7b84328273c044e09df258eba6fe23"
+    },
+    {
+      "path": "scripts/portal-completion-hook.mjs",
+      "size": 4722,
+      "sha256": "f665fb3a1a2bf033fc7e5e1df49d8fb6c367b618d51ad94544415e5ba7e19658"
     },
     {
       "path": "scripts/portal-file-mcp.mjs",
@@ -600,8 +630,8 @@
     },
     {
       "path": "scripts/portal-files.mjs",
-      "size": 5277,
-      "sha256": "14bb0e983282d040ae90253da305b89b9b8ac044344dddd622493bca9ebea831"
+      "size": 10624,
+      "sha256": "25b72181bd50b1133b8f1666fa0bbec6175cfeb704cdbc6ba555946cdedd1b1f"
     },
     {
       "path": "scripts/portal.py",
@@ -709,6 +739,36 @@
       "sha256": "a05a9a01b4e6d4ee5d091620cdeb7d603f03239d8cdf58fdb7f31a3c6ab62fc3"
     },
     {
+      "path": "src/adapters/cli/codex-completion.mjs",
+      "size": 2132,
+      "sha256": "ae9f9cf383193af03458030b08833f2470b9b835b1d0486be98e60835c88dd74"
+    },
+    {
+      "path": "src/adapters/cli/completion-delivery.mjs",
+      "size": 2823,
+      "sha256": "1bbf428b6c6558d66c41916726c77e944ad538ed74a6eeeddc272eeb9392bed0"
+    },
+    {
+      "path": "src/adapters/cli/completion-event.mjs",
+      "size": 1861,
+      "sha256": "62fe6b6c93ccb2e68a03170bc92d2da0ac98c785d7e7032e9246f44368d1ac6e"
+    },
+    {
+      "path": "src/adapters/cli/completion-hook.mjs",
+      "size": 7929,
+      "sha256": "a777e85b7b53e65756d1b35cde0a8c4b637ffe28bc6ef8bc0deaa00929665a48"
+    },
+    {
+      "path": "src/adapters/cli/completion-inbox.mjs",
+      "size": 18214,
+      "sha256": "daa68bed9a798e150a4ae16f90d861ca41ac61175c8fdafcc9a08f64e2a2faf6"
+    },
+    {
+      "path": "src/adapters/cli/completion-wake.mjs",
+      "size": 5867,
+      "sha256": "431d5224f6ec8e3bea2d6a9465cefe6afc32c6497ac523f76c2a724beb757ab6"
+    },
+    {
       "path": "src/adapters/cli/doctor.mjs",
       "size": 4097,
       "sha256": "0dbc36ffdac873fb7e898321bb3a630b5389e4ea2e1d3e0e33ce6e85d236af16"
@@ -729,9 +789,14 @@
       "sha256": "055ab95076e6fa2b6be1ece0b621856a89425c60b7ca6bd065d00c77ea422073"
     },
     {
+      "path": "src/adapters/cli/operation-watcher.mjs",
+      "size": 4321,
+      "sha256": "68cf8553eb2134fa4c84b9b42824e2deb0c6722866ddee561ab6ebacdd74c49f"
+    },
+    {
       "path": "src/adapters/cli/owner-http-session.mjs",
-      "size": 4666,
-      "sha256": "d099883495a0cc7b416e2e1c13b5f535535d7875fa929448bb2589aaa1718b76"
+      "size": 4750,
+      "sha256": "2718e7d0c164b777891b18f6f2257ad72456066af80b66ffc482300137d3a043"
     },
     {
       "path": "src/adapters/cli/portal-client.mjs",
@@ -825,8 +890,8 @@
     },
     {
       "path": "src/adapters/http/protocol.mjs",
-      "size": 24097,
-      "sha256": "c76d9b69302019b49a7400824f37e5e6b35193419ed14ea3751670f79d31ee71"
+      "size": 25829,
+      "sha256": "d12f865f4a8ef124e6a7f75b771c4375f96eac551b1a8e81b3dad5d852da38c0"
     },
     {
       "path": "src/adapters/mcp/client-setup.mjs",
@@ -835,13 +900,13 @@
     },
     {
       "path": "src/adapters/mcp/public-contract.mjs",
-      "size": 32710,
-      "sha256": "e5f7b893803e706963d660ea43cadf6d410fd27ada3408698bd7ccca36913c04"
+      "size": 33033,
+      "sha256": "e2a1fb7dca4909e5db8f7d8e61e38ff7fd5c264ff2a2fbb51f688ffe9731cc63"
     },
     {
       "path": "src/adapters/mcp/server.mjs",
-      "size": 8969,
-      "sha256": "361aefc936bae87f0d8175cf9b1c42983d9e5a49b184d957e3df10113bb9aa46"
+      "size": 9510,
+      "sha256": "f5e5e446bf5ed9d6c9f9cb80bc28c43ac7b39dec0b94da44fefdcee0feba95d7"
     },
     {
       "path": "src/adapters/presentation/capabilities.mjs",
@@ -1075,8 +1140,8 @@
     },
     {
       "path": "src/application/operations.mjs",
-      "size": 6462,
-      "sha256": "8d29c1df31b02be9bf71523297adf29430568a05061b6bfdb4d8c066e90a8629"
+      "size": 6572,
+      "sha256": "9c3a09b987eaff4dc41062c96bcbb0744d42177171baac1e6606c03ac49803ec"
     },
     {
       "path": "src/application/request-admission.mjs",
@@ -1504,6 +1569,11 @@
       "sha256": "efa3ba5d3f8b51011218b346de5842d204f6fa3314d41f7d162b6bbb91c88b34"
     },
     {
+      "path": "test/codex-completion.test.mjs",
+      "size": 6565,
+      "sha256": "1c593036203156aabf92152cb882503fc76fb7bf5a5008380b2511e54d3a51e3"
+    },
+    {
       "path": "test/command-automation.test.mjs",
       "size": 58664,
       "sha256": "b9ecb172a3c9353ee61329808486750dbaec9891175140f568a4ad3d1fd0a870"
@@ -1552,6 +1622,21 @@
       "path": "test/command-state-startup.test.mjs",
       "size": 3837,
       "sha256": "9bdb097fb52ff9d19f3047dbbea145e8a33c33e4f55d87d6bb105722cd227f1e"
+    },
+    {
+      "path": "test/completion-hook.test.mjs",
+      "size": 32003,
+      "sha256": "b6f00ad7fabe0ef8e30b8eb4f1de5382745e636639998302fb1782f530371491"
+    },
+    {
+      "path": "test/completion-inbox.test.mjs",
+      "size": 29433,
+      "sha256": "20e6dd9bb322f412d192887e7a8286019af385f34472af3f29ce29d2267aed6b"
+    },
+    {
+      "path": "test/completion-wake.test.mjs",
+      "size": 13688,
+      "sha256": "2b267af769bb79509a54699df5740cdea2cfb4e6cb5c88bc5046d40c47d50aa2"
     },
     {
       "path": "test/compose-driver.Dockerfile",
@@ -1650,8 +1735,8 @@
     },
     {
       "path": "test/deploy180-release-permissions.test.mjs",
-      "size": 11607,
-      "sha256": "83a28eeb95965c5b9c65b46036bf23be01201035ea0234c13e455067a558a38a"
+      "size": 11719,
+      "sha256": "b02a6f882b4c2e63c3b2829d8bee3f41d31e5fae262541acd81d35bd42bc70f9"
     },
     {
       "path": "test/desktop-http.test.mjs",
@@ -1794,6 +1879,11 @@
       "sha256": "421a21d7e77af5e326a7c6f25ede1865939500c3980143a99ee9a82c9299dd88"
     },
     {
+      "path": "test/fixtures/completion-inbox-worker.mjs",
+      "size": 1138,
+      "sha256": "be2d0ff6bc975d825c32b89e8416dc64fb845e2d090b04e2cf731dcc39d1ab00"
+    },
+    {
       "path": "test/fixtures/jev-input-factor-corpus.json",
       "size": 19062,
       "sha256": "73fa5bb8cb72a1c482f413863521d66433a7eae79e2a8999ed40136b5192c257"
@@ -1802,6 +1892,16 @@
       "path": "test/fixtures/jev-shadow-corpus.json",
       "size": 1600,
       "sha256": "8a6a1273ca929384843bd1d556da6d2532cf8c55fe2fe086df3967c406a38a21"
+    },
+    {
+      "path": "test/fixtures/operation-watch-background-oracle.mjs",
+      "size": 6047,
+      "sha256": "dacc38e03ef1abb0fe7b4212df06ae56931049b668d292a6e08bbab429a401fa"
+    },
+    {
+      "path": "test/fixtures/operation-watch-background.mjs",
+      "size": 3150,
+      "sha256": "40130eed9162634c7220039bbb6261187e2a0a8658d30fbe94aa738e693f0945"
     },
     {
       "path": "test/fixtures/safety-corpus.json",
@@ -1915,8 +2015,8 @@
     },
     {
       "path": "test/mcp-contracts.test.mjs",
-      "size": 28792,
-      "sha256": "632145087fd9c4eba46675e10a545eee1e25aff5cf01dcaaab83446b6b1e1e94"
+      "size": 30609,
+      "sha256": "6605ef3047cc7274c4e5cd38cfcaf2d35052549b29b109e465512eb87425b640"
     },
     {
       "path": "test/mcp-input-limits.test.mjs",
@@ -2000,8 +2100,8 @@
     },
     {
       "path": "test/opaque-files-client.test.mjs",
-      "size": 21640,
-      "sha256": "08b1b4830b925a7d3fce735febe92107788bda8e67811f3abf9092c77607af4f"
+      "size": 21785,
+      "sha256": "dbb9b870e49f602ed22d58be0747acedb8624d7a670818ad12e8ef7a806a2866"
     },
     {
       "path": "test/opaque-files.test.mjs",
@@ -2034,9 +2134,19 @@
       "sha256": "6f23ddccd5a024f1ac60ee98a9231ae8423cd64e3bbe6d81829038d95cdfa4c5"
     },
     {
+      "path": "test/operation-watch-cli.test.mjs",
+      "size": 5952,
+      "sha256": "df71903c790f3d36e15f274bbe6b11481f8296d6f926994653c584f2bdb29714"
+    },
+    {
+      "path": "test/operation-watcher.test.mjs",
+      "size": 10182,
+      "sha256": "3182d9932b74e59c0595f64cd1ad0039b379e5137ef923df5718e2b90339c229"
+    },
+    {
       "path": "test/operations-180.test.mjs",
-      "size": 11863,
-      "sha256": "01cf8fd27e43e025f7129dfbb48488effdd087bfac24cb59f4a74d8ed599c5d9"
+      "size": 12649,
+      "sha256": "1da2088eafa530c142a1a3b581a116c209b270f9a8f979cdaffb0b43362e8f9d"
     },
     {
       "path": "test/portal-client-bound-files.test.mjs",
@@ -2097,6 +2207,11 @@
       "path": "test/portal-file-mcp.fixture.mjs",
       "size": 1679,
       "sha256": "36a663dc3fae0c92f38b9bee580802defb49dca439b78c3576b39a1e454c8263"
+    },
+    {
+      "path": "test/portal-files-hook.test.mjs",
+      "size": 14314,
+      "sha256": "f49cd8a29587ec4ff75ba41950fa4b429ef017f194abbc79f31e2f82c9a6d57a"
     },
     {
       "path": "test/preservation-baseline.test.mjs",
