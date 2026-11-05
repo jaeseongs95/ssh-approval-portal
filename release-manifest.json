@@ -1,5 +1,5 @@
 {
-  "version": "2.2.0",
+  "version": "2.2.1",
   "status": "release",
   "runtime": "Node.js 24",
   "files": [
@@ -26,12 +26,12 @@
     {
       "path": "README.ko.md",
       "size": 21579,
-      "sha256": "b68f6b67518f9a3e40902db2a93d84d331b603716b62045ffbc84c9b25246ab9"
+      "sha256": "bda1f43b131f438516309f21ae10068d9d4d96e6ac2d69fe9c02fcb7f6becb96"
     },
     {
       "path": "README.md",
       "size": 19593,
-      "sha256": "5abb21e4e7d136e9ab8be527dffa6be5a27e669b4a5a2fd1b1b7fe9043eefe1e"
+      "sha256": "1a612ed04b97bcabfa50f3e9d861760c80d791b716aba0f4306374bde5ba4389"
     },
     {
       "path": "THIRD_PARTY_NOTICES.json",
@@ -96,12 +96,12 @@
     {
       "path": "docker/Dockerfile",
       "size": 1935,
-      "sha256": "993d25af94918f779a9773cefacf09e731305911240fd42f772c768f4c27d8b3"
+      "sha256": "aa429dd3ae7b374ae3af2aeaaaa9f7bd03e9db19986a9fab948a11c0bf35ebf6"
     },
     {
       "path": "docker/compose.yaml",
       "size": 1128,
-      "sha256": "fcb60d2e7b97ca5aa4915906d038babb8521650be0589d7e15dfa8f5df98d288"
+      "sha256": "f2ee524f880d89c1fa8bc1f35f976e38c5f20f18026c34000de4dfb3fe837f8d"
     },
     {
       "path": "docs/admin-login.en.md",
@@ -166,7 +166,7 @@
     {
       "path": "docs/client-files.ko.md",
       "size": 17419,
-      "sha256": "10eff221187ceb37d500a683d20a81e171bd21be54fe8b2aefcedc792d100c44"
+      "sha256": "c2ebabbe593c32cc10c12b7c7f5af2e441941e8d000af341fd9339e8f82c5e89"
     },
     {
       "path": "docs/command-automation.ko.md",
@@ -386,12 +386,12 @@
     {
       "path": "package-lock.json",
       "size": 100104,
-      "sha256": "ef496c8ad8729d51d193517d5590337af314bd8e695f56fd3fabbada7595dff2"
+      "sha256": "b3c28826e3512a692707d7fed773173f66d922ff4e873641989244e898a4d096"
     },
     {
       "path": "package.json",
       "size": 860,
-      "sha256": "e51c404955d0198a6256668412cd53924718817cd7748fa5ad35a43fc01e93c9"
+      "sha256": "a38eb79336f364d59e297962311dd31eed0b960767520281e650972303d82adc"
     },
     {
       "path": "scripts/admin-access-config.mjs",
@@ -495,8 +495,8 @@
     },
     {
       "path": "scripts/deploy180.mjs",
-      "size": 26169,
-      "sha256": "64da7c912fabba42e09f9d5d826a27285e5a4f7b4d73e7456fc1ed45183a62fa"
+      "size": 26167,
+      "sha256": "b971ef998e1853b69d6675e104285014fa991bf0cfae5494770d607178cd3376"
     },
     {
       "path": "scripts/docker-secrets.py",
@@ -601,7 +601,7 @@
     {
       "path": "scripts/package-client.py",
       "size": 6122,
-      "sha256": "50620aaad4a85ff296b1524c95ea6e2c2347f86848af33ebe055ebfd9daa0cad"
+      "sha256": "f583bfc1cdc411a56ac52c9f25ded999e97e1bae2c9c38e80f32fb43ea613079"
     },
     {
       "path": "scripts/package-release.py",
@@ -631,7 +631,7 @@
     {
       "path": "scripts/portal-files.mjs",
       "size": 10624,
-      "sha256": "25b72181bd50b1133b8f1666fa0bbec6175cfeb704cdbc6ba555946cdedd1b1f"
+      "sha256": "5119eca276e600df2caf4304aa9d500e429615e5ab00859f49a012ab7eb4a354"
     },
     {
       "path": "scripts/portal.py",
@@ -1735,8 +1735,8 @@
     },
     {
       "path": "test/deploy180-release-permissions.test.mjs",
-      "size": 11719,
-      "sha256": "b02a6f882b4c2e63c3b2829d8bee3f41d31e5fae262541acd81d35bd42bc70f9"
+      "size": 17196,
+      "sha256": "ed29ba1bd9ec76e35e3c6e766fb87504ea73b6f05217155e9cc9f7c9154b8f2d"
     },
     {
       "path": "test/desktop-http.test.mjs",
