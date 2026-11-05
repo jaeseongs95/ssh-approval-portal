@@ -126,7 +126,7 @@ Choose a writable destination on the selected target; Windows paths such as `C:/
 
 The remote MCP server cannot read a PC path by itself. An agent needs a host with permitted local process/file access to run this client; otherwise the user runs it or uses a supported host file UI. File bytes travel directly from the client to HTTPS rather than being transcribed by the model.
 
-The standalone client provides **`doctor`, `upload` and `status` only**. It has no download/save command. Server downloads use `submit(kind=download)` and `artifact-read`; saving to the PC requires permitted client code or host UI, followed by a size/hash check. Low-level `artifact-*` tools are available for code that already has the bytes. The per-file ceiling is 64 MiB and the default shared staging budget is 512 MiB. See the [file client guide (Korean)](docs/client-files.ko.md) for configuration, authentication and uncertain transfers.
+The standalone client provides **`doctor`, `upload`, `status` and `watch`**. It has no download/save command. Server downloads use `submit(kind=download)` and `artifact-read`; saving to the PC requires permitted client code or host UI, followed by a size/hash check. Low-level `artifact-*` tools are available for code that already has the bytes. The per-file ceiling is 64 MiB and the default shared staging budget is 512 MiB. See the [file client guide (Korean)](docs/client-files.ko.md) for configuration, authentication and uncertain transfers.
 
 <a id="server"></a>
 ## Install and connect a bridge
