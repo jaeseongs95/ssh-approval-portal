@@ -23,12 +23,12 @@ export function createOwnerHttpSession({ origin, accessToken, signal, timeoutMs 
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 600_000) throw fail('INVALID_DEADLINE');
   const deadline = AbortSignal.any([AbortSignal.timeout(timeoutMs), signal].filter(Boolean));
   let cookie, connected = false, connectAttempted = false, retired = false;
-  async function request(path, { method = 'GET', body, headers = {} } = {}) {
+  async function request(path, { method = 'GET', body, headers = {}, signal: requestSignal } = {}) {
     if (retired) throw fail('CLIENT_CLOSED');
     const url = new URL(path, origin);
     if (url.origin !== origin || url.username || url.password || url.hash) throw fail('UNTRUSTED_PORTAL_URL');
     try {
-      const response = await send(url.href, { method, redirect: 'error', signal: deadline,
+      const response = await send(url.href, { method, redirect: 'error', signal: requestSignal ? AbortSignal.any([deadline, requestSignal]) : deadline,
         headers: { ...headers, 'cf-access-token': accessToken, Origin: origin, ...(cookie ? { Cookie: cookie } : {}) },
         ...(body === undefined ? {} : { body }) });
       if (!response.ok) {

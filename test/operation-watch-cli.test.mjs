@@ -1,0 +1,62 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { main } from '../scripts/portal-files.mjs';
+
+const id = 'a'.repeat(48), origin = 'https://owner.example.test';
+const args = ['--origin', origin, '--cloudflared', process.execPath, 'watch', id];
+const event = { event: 'operation.finished', id, state: 'completed', failed: false, auditFailure: false };
+const capture = () => { let text = ''; return { write(value) { text += value; }, get text() { return text; } }; };
+
+test('watch CLI accepts an already completed operation without creating an upload', async () => {
+  const out = capture(), err = capture();
+  const code = await main(args, out, err, () => 'synthetic.header.signature', {}, () => assert.fail('not an upload'), undefined,
+    () => ({ async connect() {}, async watch() { return event; }, async close() {} }));
+  assert.equal(code, 0); assert.deepEqual(JSON.parse(out.text), event);
+});
+
+test('watch CLI waits outside model input and emits one final event; old upload client is not used', { timeout: 5000 }, async () => {
+  const out = capture(), err = capture(), entered = Promise.withResolvers(), done = Promise.withResolvers();
+  let connected = false, closed = 0, observed;
+  const pending = main(args, out, err, () => 'synthetic.header.signature', {}, () => assert.fail('not an upload'), undefined,
+    options => { observed = options; return {
+      async connect() { connected = true; },
+      async watch(requestId) { assert.equal(requestId, id); entered.resolve(); await done.promise; return event; },
+      async close() { closed++; },
+    }; });
+  try {
+    await entered.promise;
+    assert.equal(connected, true); assert.equal(out.text, '');
+    assert.equal(await Promise.resolve('independent work'), 'independent work');
+    done.resolve(); assert.equal(await pending, 0);
+    assert.deepEqual(JSON.parse(out.text), event); assert.equal(out.text.trim().split('\n').length, 1);
+    assert.equal(JSON.parse(err.text).event, 'operation.watch.started');
+    assert.equal(observed.origin, origin); assert.equal(observed.timeoutMs, 600000); assert.equal(closed, 1);
+  } finally { done.resolve(); }
+});
+
+test('watch CLI preserves failed and uncertain terminal states with exit 1 and no replay', async () => {
+  for (const state of ['failed', 'denied', 'cancelled', 'expired', 'unknown']) {
+    const out = capture(), err = capture(); let closed = 0, reads = 0;
+    const code = await main(args, out, err, () => 'synthetic.header.signature', {}, undefined, undefined,
+      () => ({ async connect() {}, async watch() { reads++; return { ...event, state, failed: true }; }, async close() { closed++; } }));
+    assert.equal(code, 1); assert.equal(JSON.parse(out.text).state, state); assert.equal(reads, 1); assert.equal(closed, 1);
+  }
+});
+
+test('watch CLI rejects malformed identifiers and deadlines before credentials or owner connection', async () => {
+  for (const argv of [args.slice(0, -1).concat(id + '\n'), args.concat('--timeout-ms', '600001'), args.concat('--timeout-ms', '100\n')]) {
+    const out = capture(), err = capture();
+    const code = await main(argv, out, err, () => assert.fail('credential must not be read'), {}, undefined, undefined,
+      () => assert.fail('no owner connection'));
+    assert.equal(code, 1); assert.equal(out.text, ''); assert.match(JSON.parse(err.text).error, /^INVALID_/);
+  }
+});
+
+test('watch CLI read failure retains the original ID and closes its session', async () => {
+  const out = capture(), err = capture(); let closed = 0;
+  const code = await main(args, out, err, () => 'synthetic.header.signature', {}, undefined, undefined,
+    () => ({ async connect() {}, async watch() { throw Object.assign(Error('private not printed'), { code: 'OWNER_REAUTH_REQUIRED' }); }, async close() { closed++; } }));
+  assert.equal(code, 1); assert.equal(out.text, ''); assert.equal(closed, 1);
+  const refusal = JSON.parse(err.text.trim().split('\n').at(-1));
+  assert.deepEqual(refusal, { error: 'OWNER_REAUTH_REQUIRED', requestId: id }); assert.doesNotMatch(err.text, /private not printed|synthetic/);
+});

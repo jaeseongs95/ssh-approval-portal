@@ -65,6 +65,8 @@ export function createOperations({ targets, queue, commands, files, journal, sch
       if (record.targetRevision !== target.revision) fail('TARGET_REVISION_CONFLICT');
       const initialVersion = record.version;
       if (waitMs > 0 && !terminal.has(record.state)) record = await scheduler.observe(record.id, { timeoutMs: waitMs, signal, afterVersion: initialVersion });
+      target.verify();
+      if (record.targetRevision !== target.revision) fail('TARGET_REVISION_CONFLICT');
       const job = view(record), response = { job, waitTimedOut: waitMs > 0 && record.version === initialVersion && !terminal.has(record.state) };
       if (includeOutput) {
         const outputId = record.outputRef?.outputId ?? job.result?.output?.id;

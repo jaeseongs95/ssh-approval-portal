@@ -8,26 +8,33 @@ import { diagnoseClient } from '../src/adapters/cli/doctor.mjs';
 import { validateLocalPath } from '../src/adapters/cli/local-files.mjs';
 import { validateOrigin } from '../src/adapters/config/settings.mjs';
 import { safePortalErrorCode } from '../src/adapters/cli/owner-http-session.mjs';
+import { createOperationWatcher } from '../src/adapters/cli/operation-watcher.mjs';
 
-const usage = 'SSH Approval Portal file client2.0.0 (Node.js24.2+ within major24)\n' +
+const usage = 'SSH Approval Portal file client2.1.0 (Node.js24.2+ within major24)\n' +
   'node scripts/portal-files.mjs --origin HTTPS_ORIGIN [--cloudflared EXISTING_ABSOLUTE_PATH] doctor\n' +
   'node scripts/portal-files.mjs --origin HTTPS_ORIGIN [--cloudflared EXISTING_ABSOLUTE_PATH] upload --file ABSOLUTE_FILE --operation-key STABLE_KEY\n' +
   'node scripts/portal-files.mjs --origin HTTPS_ORIGIN [--cloudflared EXISTING_ABSOLUTE_PATH] status UUID\n' +
+  'node scripts/portal-files.mjs --origin HTTPS_ORIGIN [--cloudflared EXISTING_ABSOLUTE_PATH] watch REQUEST_ID [--timeout-ms 600000]\n' +
+  'Launch watch using the host background-process facility, continue independent work, and consume its one terminal event. Stopping watch never cancels or replays SSH. No automatic host wake is guaranteed without host support.\n' +
   'Upload sends PC bytes directly over owner-authenticated HTTP. Success stdout is only {"uuid":"..."}. No automatic login, install, retry, approval or SSH destination selection.\n';
 
 export async function main(argv = process.argv.slice(2), output = process.stdout, errorOutput = process.stderr,
-  runCredential = execFileSync, environment = process.env, openClient = createOpaqueFilesClient, diagnose = diagnoseClient) {
-  let client, result, command, failed = false;
+  runCredential = execFileSync, environment = process.env, openClient = createOpaqueFilesClient, diagnose = diagnoseClient, openWatcher = createOperationWatcher) {
+  let client, result, command, requestId, failed = false;
   try {
     const { values, positionals } = parseArgs({ args: argv, allowPositionals: true, options: {
-      help: { type: 'boolean' }, origin: { type: 'string' }, cloudflared: { type: 'string' }, file: { type: 'string' }, 'operation-key': { type: 'string' },
+      help: { type: 'boolean' }, origin: { type: 'string' }, cloudflared: { type: 'string' }, file: { type: 'string' }, 'operation-key': { type: 'string' }, 'timeout-ms': { type: 'string' },
     } });
     if (values.help === true && argv.length === 1) { output.write(usage); return 0; }
     command = positionals[0];
-    if (values.help || !values.origin || !['doctor', 'upload', 'status'].includes(command) ||
-        positionals.length !== (command === 'status' ? 2 : 1) ||
+    if (command === 'watch') requestId = positionals[1];
+    if (values.help || !values.origin || !['doctor', 'upload', 'status', 'watch'].includes(command) ||
+        positionals.length !== (['status', 'watch'].includes(command) ? 2 : 1) ||
         (command === 'upload' ? !values.file || !values['operation-key'] : values.file !== undefined || values['operation-key'] !== undefined)) throw Object.assign(Error(), { code: 'INVALID_ARGUMENTS' });
     validateOrigin(values.origin);
+    if (values['timeout-ms'] !== undefined && (command !== 'watch' || !/^[1-9][0-9]{0,5}(?![\s\S])/.test(values['timeout-ms']) || Number(values['timeout-ms']) > 600000))
+      throw Object.assign(Error(), { code: 'INVALID_DEADLINE' });
+    if (command === 'watch' && !/^[a-f0-9]{48}(?![\s\S])/.test(positionals[1])) throw Object.assign(Error(), { code: 'INVALID_REQUEST_ID' });
     if (values.cloudflared !== undefined) validateLocalPath(values.cloudflared);
     if (command === 'status' && !opaqueUuidValid(positionals[1])) throw Object.assign(Error(), { code: 'INVALID_ARTIFACT_UUID' });
     if (command === 'upload') {
@@ -36,7 +43,7 @@ export async function main(argv = process.argv.slice(2), output = process.stdout
     }
     if (command === 'doctor') {
       result = await diagnose({ origin: values.origin, cloudflared: values.cloudflared, env: environment, runCredential });
-      if (result.state === 'ready') result.next = 'Use portal-files upload --file ABSOLUTE_FILE --operation-key STABLE_KEY. Keep the completed UUID for the existing remote MCP connection; uncertain uploads must be observed by the same UUID, without creating a replacement.';
+      if (result.state === 'ready') result.next = 'Use portal-files upload --file ABSOLUTE_FILE --operation-key STABLE_KEY. Keep the UUID for the existing remote MCP connection. For an operation ID from MCP submit, launch portal-files watch REQUEST_ID through the host background-process facility, continue independent work, and consume its completion. If background completion is unsupported, do not claim automatic host resumption. Preserve IDs and keys after unknown outcomes; never create replacements.';
       output.write(JSON.stringify(result) + '\n');
       return result.state === 'ready' ? 0 : 1;
     }
@@ -44,15 +51,20 @@ export async function main(argv = process.argv.slice(2), output = process.stdout
     if (major !== 24 || minor < 2) throw Object.assign(Error(), { code: 'UNSUPPORTED_NODE_VERSION' });
     const helper = await resolveCloudflared({ explicit: values.cloudflared, env: environment });
     const token = cachedAccessToken(helper.path, values.origin, runCredential);
-    client = openClient({ origin: values.origin, accessToken: token });
+    client = command === 'watch' ? openWatcher({ origin: values.origin, accessToken: token, timeoutMs: Number(values['timeout-ms'] ?? 600000) })
+      : openClient({ origin: values.origin, accessToken: token });
     await client.connect();
-    result = command === 'status' ? await client.status(positionals[1]) : await client.upload(values.file, values['operation-key'],
+    if (command === 'watch') {
+      errorOutput.write(JSON.stringify({ event: 'operation.watch.started', id: positionals[1], timeoutMs: Number(values['timeout-ms'] ?? 600000) }) + '\n');
+      result = await client.watch(positionals[1]);
+    } else result = command === 'status' ? await client.status(positionals[1]) : await client.upload(values.file, values['operation-key'],
       progress => errorOutput.write(JSON.stringify({ uuid: progress.uuid, phase: 'staging' }) + '\n'));
     if (command === 'upload' && (!result || !opaqueUuidValid(result.uuid) || Object.keys(result).length !== 1)) throw Object.assign(Error(), { code: 'INVALID_ARTIFACT_RESPONSE' });
   } catch (error) {
     failed = true;
     const record = { error: /^[A-Z_]{3,64}$/.test(error.code ?? '') ? error.code : 'CLI_REQUEST_FAILED' };
     if (safePortalErrorCode(error.serverCode)) record.serverCode = error.serverCode;
+    if (command === 'watch' && typeof requestId === 'string' && /^[a-f0-9]{48}(?![\s\S])/.test(requestId)) record.requestId = requestId;
     if (opaqueUuidValid(error.uuid)) record.uuid = error.uuid;
     if (['snapshot', 'begin', 'chunks', 'complete'].includes(error.phase)) record.phase = error.phase;
     if (error.progress) for (const field of ['state', 'received', 'sequence']) record[field] = error.progress[field];
@@ -63,6 +75,7 @@ export async function main(argv = process.argv.slice(2), output = process.stdout
   }
   if (failed) return 1;
   output.write(JSON.stringify(result) + '\n');
+  if (command === 'watch') return result.state === 'completed' && result.failed !== true && !result.auditFailure ? 0 : 1;
   return 0;
 }
 

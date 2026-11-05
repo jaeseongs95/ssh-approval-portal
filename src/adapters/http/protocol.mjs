@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { authenticated } from '../security/tickets.mjs';
 import { createMcpAdapter } from '../mcp/server.mjs';
+import { presentOperation } from '../mcp/public-contract.mjs';
 import { createCapabilities } from '../presentation/capabilities.mjs';
 import { presentJob } from '../presentation/results.mjs';
 import { BASELINE_PRESERVATION_CONTRACT } from '../storage/preservation-verification.mjs';
@@ -239,6 +240,28 @@ export function createProtocolAdapters({ queue, commands, files, opaqueFiles, st
       }
       if (req.method === 'GET' && url.pathname === '/api/pending') return json(res, 200, visible(queue.list()).map(presentJob));
       if (req.method === 'GET' && url.pathname === '/api/requests') return json(res, 200, visible(queue.listAll()).map(presentJob));
+      const observed = /^\/api\/([a-f0-9]{48})$/.exec(url.pathname);
+      if (req.method === 'GET' && observed && url.searchParams.get('observe') === '1') {
+        if (url.searchParams.size > 2 || url.searchParams.getAll('observe').length !== 1 || url.searchParams.getAll('waitMs').length > 1 ||
+            [...url.searchParams.keys()].some(key => !['observe', 'waitMs'].includes(key)) ||
+            !/^(0|[1-9][0-9]{0,4})(?![\s\S])/.test(url.searchParams.get('waitMs') ?? '0') || Number(url.searchParams.get('waitMs') ?? 0) > 60000)
+          return json(res, 400, { error: 'INVALID_OPERATION_OBSERVER' });
+        if (!operations) return json(res, 503, { error: 'OPERATION_OBSERVATION_UNAVAILABLE' });
+        try {
+          const waitMs = Number(url.searchParams.get('waitMs') ?? 0);
+          if (waitMs) lease.detach();
+          const result = await operations.observe({ id: observed[1], waitMs }, { signal: scope.signal });
+          // Long observation never extends a principal/session's authority.
+          const current = await authorize();
+          if (!current.allowed) return json(res, current.status ?? 401, { error: 'OWNER_REAUTH_REQUIRED' });
+          return json(res, 200, { contractVersion: '2.0', ok: true, data: presentOperation(result), error: null });
+        } catch (error) {
+          if (error instanceof RequestAdmissionError) throw error;
+          const code = ['OPERATION_NOT_FOUND', 'TARGET_REVISION_CONFLICT', 'OPERATION_OBSERVER_CAPACITY'].includes(error.code)
+            ? error.code : 'OPERATION_OBSERVATION_FAILED';
+          return json(res, code === 'OPERATION_NOT_FOUND' ? 404 : 409, { error: code });
+        }
+      }
       const single = /^\/api\/([a-f0-9]{48})$/.exec(url.pathname);
       if (req.method === 'GET' && single) { const job = queue.get(single[1]); return json(res, 200, job ? presentJob(job) : { error: 'Unknown request' }); }
       if (url.pathname === '/api/maintenance/preservation/capture') { preservation.capture(req.headers['x-maintenance-owner']); return json(res, 200, { captured: true, ownership: 'durable-v1' }); }
