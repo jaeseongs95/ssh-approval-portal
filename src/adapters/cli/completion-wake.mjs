@@ -1,5 +1,4 @@
 import { execFile } from 'node:child_process';
-import net from 'node:net';
 import { stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { validateLocalPath } from './local-files.mjs';
@@ -70,41 +69,6 @@ async function wakeCodex({ executable, environment, sessionId, marker, run }) {
   return processFailure(result, 'CODEX_QUEUE') ?? requested();
 }
 
-function wakeClaude({ environment, marker, connect }) {
-  const socketPath = environment.CLAUDE_CODE_MESSAGING_SOCKET;
-  const token = environment.CLAUDE_CODE_MESSAGING_TOKEN;
-  if (typeof socketPath !== 'string' || !socketPath || typeof token !== 'string' || !token) {
-    return unavailable('CLAUDE_MESSAGING_ENV_MISSING');
-  }
-  return new Promise(resolve => {
-    let socket, connected = false, wrote = false, settled = false;
-    const finish = result => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve(result);
-      try { socket?.destroy(); } catch { /* The outcome is already fixed. */ }
-    };
-    const failure = () => connected || wrote ? unknown('CLAUDE_INBOX_WRITE_UNCONFIRMED') : unavailable('CLAUDE_INBOX_CONNECT_FAILED');
-    const timer = setTimeout(() => finish(unknown('CLAUDE_INBOX_TIMEOUT')), 5000);
-    try {
-      socket = connect(socketPath);
-      socket.once('error', () => finish(failure()));
-      socket.once('close', hadError => finish(!hadError && wrote ? requested() : failure()));
-      socket.once('connect', () => {
-        if (settled) return;
-        connected = true;
-        try {
-          wrote = true;
-          socket.end(`${JSON.stringify({ type: 'auth', token })}\n${JSON.stringify({
-            type: 'user', message: { role: 'user', content: marker }, priority: 'next',
-          })}\n`);
-        } catch { finish(unknown('CLAUDE_INBOX_WRITE_UNCONFIRMED')); }
-      });
-    } catch { finish(unavailable('CLAUDE_INBOX_CONNECT_FAILED')); }
-  });
-}
-
 async function wakeAntigravity({ executable, environment, sessionId, marker, run }) {
   const projectId = environment.ANTIGRAVITY_PROJECT_ID;
   if (typeof projectId !== 'string' || !projectId.trim()) return unavailable('ANTIGRAVITY_PROJECT_ID_MISSING');
@@ -128,14 +92,15 @@ async function wakeAntigravity({ executable, environment, sessionId, marker, run
 }
 
 /** Send only an opaque marker after inbox commit. Never retries; requested is not host/model receipt. */
-export async function wakeCompletion({ host, sessionId, receiptId, executable, environment = process.env, run = execFile, connect = net.createConnection }) {
+export async function wakeCompletion({ host, sessionId, receiptId, executable, environment = process.env, run = execFile }) {
   if (typeof sessionId !== 'string' || !uuid.test(sessionId) || typeof receiptId !== 'string' || !uuid.test(receiptId)) {
     return unavailable('INVALID_WAKE_TARGET');
   }
   if (!environment || typeof environment !== 'object' || Array.isArray(environment)) return unavailable('INVALID_WAKE_ENVIRONMENT');
-  const input = { sessionId, marker: `[ssh-mcp:completion:${receiptId}]`, executable, environment: { ...environment }, run, connect };
+  // The native asyncRewake waiter observes SQLite. No private socket, credential, or dispatch is consulted here.
+  if (host === 'claude-code') return { state: 'deferred', reasonCode: 'CLAUDE_NATIVE_HOOK_WAITING' };
+  const input = { sessionId, marker: `[ssh-mcp:completion:${receiptId}]`, executable, environment: { ...environment }, run };
   if (host === 'codex') return wakeCodex(input);
-  if (host === 'claude-code') return wakeClaude(input);
   if (host === 'antigravity' || host === 'agy') return wakeAntigravity(input);
   return unavailable('HOST_WAKE_UNSUPPORTED');
 }

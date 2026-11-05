@@ -115,7 +115,7 @@ export function openCompletionInbox(options = {}) {
       if (app !== applicationId && (app !== 0 || version !== 0 || db.prepare("SELECT 1 FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' LIMIT 1").get())) {
         throw fail('COMPLETION_INBOX_SCHEMA_MISMATCH');
       }
-      if (app === applicationId && version !== 1) throw fail('COMPLETION_INBOX_SCHEMA_MISMATCH');
+      if (app === applicationId && ![1, 2].includes(version)) throw fail('COMPLETION_INBOX_SCHEMA_MISMATCH');
       if (app === 0) {
         db.exec(`
           CREATE TABLE completion_bindings (
@@ -135,6 +135,20 @@ export function openCompletionInbox(options = {}) {
           ) STRICT;
           CREATE INDEX completion_claims ON completion_events(binding_id, state, lease_until, sequence);
           PRAGMA application_id = ${applicationId}; PRAGMA user_version = 1;
+        `);
+      }
+      if (version < 2) {
+        db.exec(`
+          CREATE TABLE completion_waiters (
+            binding_id TEXT PRIMARY KEY REFERENCES completion_bindings(binding_id),
+            owner_id TEXT, generation INTEGER NOT NULL DEFAULT 0 CHECK(generation >= 0),
+            lease_until INTEGER NOT NULL DEFAULT 0 CHECK(lease_until >= 0),
+            ended INTEGER NOT NULL DEFAULT 0 CHECK(ended IN (0, 1)),
+            CHECK((owner_id IS NULL AND lease_until = 0) OR (owner_id IS NOT NULL AND lease_until > 0)),
+            CHECK(ended = 0 OR owner_id IS NULL)
+          ) STRICT;
+          INSERT INTO completion_waiters(binding_id) SELECT binding_id FROM completion_bindings;
+          PRAGMA user_version = 2;
         `);
       }
       db.exec('COMMIT');
@@ -163,6 +177,33 @@ export function openCompletionInbox(options = {}) {
     identifier(bindingId);
     if (!db.prepare('SELECT 1 FROM completion_bindings WHERE binding_id = ?').get(bindingId)) throw fail('COMPLETION_INBOX_BINDING_NOT_FOUND');
   }
+  function timeWithLease(leaseMs) {
+    const time = now();
+    if (!Number.isSafeInteger(leaseMs) || leaseMs < 1 || leaseMs > 600000 ||
+        !Number.isSafeInteger(time) || time < 0 || !Number.isSafeInteger(time + leaseMs)) throw fail('COMPLETION_INBOX_INVALID_INPUT');
+    return time;
+  }
+  function claimMessages(bindingId, { limit = 8, leaseMs = 30000, pendingOnly = false } = {}) {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100 || typeof pendingOnly !== 'boolean') throw fail('COMPLETION_INBOX_INVALID_INPUT');
+    const time = timeWithLease(leaseMs);
+    const rows = db.prepare(`SELECT receipt_id, origin, payload, attempt FROM completion_events WHERE binding_id = ? AND
+      ${pendingOnly ? "state = 'pending'" : "(state = 'pending' OR (state = 'claimed' AND lease_until <= ?))"} ORDER BY sequence LIMIT ?`)
+      .all(...(pendingOnly ? [bindingId, limit] : [bindingId, time, limit]));
+    return rows.map(row => {
+      if (!Number.isSafeInteger(row.attempt + 1)) throw fail('COMPLETION_INBOX_CORRUPT');
+      const claimToken = randomUUID();
+      const event = projectCompletionEvent(JSON.parse(row.payload));
+      db.prepare("UPDATE completion_events SET state = 'claimed', claim_token = ?, lease_until = ?, attempt = attempt + 1 WHERE receipt_id = ? AND binding_id = ?")
+        .run(claimToken, time + leaseMs, row.receipt_id, bindingId);
+      return { receiptId: row.receipt_id, claimToken, attempt: row.attempt + 1, origin: row.origin, event };
+    });
+  }
+  function waiterInput(input) {
+    const { bindingId, ownerId, generation } = argumentsObject(input);
+    identifier(bindingId); identifier(ownerId);
+    if (!Number.isSafeInteger(generation) || generation < 1) throw fail('COMPLETION_INBOX_INVALID_INPUT');
+    return { bindingId, ownerId, generation };
+  }
   const registration = row => row ? { bindingId: row.binding_id, host: row.host, sessionId: row.session_id } : null;
   return Object.freeze({
     register(input) {
@@ -170,7 +211,9 @@ export function openCompletionInbox(options = {}) {
         const { host, sessionId } = session(input);
         return transaction(() => {
           db.prepare('INSERT INTO completion_bindings(binding_id, host, session_id) VALUES (?, ?, ?) ON CONFLICT(host, session_id) DO NOTHING').run(randomUUID(), host, sessionId);
-          return registration(db.prepare('SELECT * FROM completion_bindings WHERE host = ? AND session_id = ?').get(host, sessionId));
+          const registered = registration(db.prepare('SELECT * FROM completion_bindings WHERE host = ? AND session_id = ?').get(host, sessionId));
+          db.prepare('INSERT INTO completion_waiters(binding_id) VALUES (?) ON CONFLICT(binding_id) DO NOTHING').run(registered.bindingId);
+          return registered;
         });
       });
     },
@@ -203,26 +246,59 @@ export function openCompletionInbox(options = {}) {
     },
     claim(input = {}) {
       return call(() => {
-        const { bindingId, limit = 8, leaseMs = 30000 } = argumentsObject(input);
-        if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100 || !Number.isSafeInteger(leaseMs) || leaseMs < 1 || leaseMs > 600000) {
-          throw fail('COMPLETION_INBOX_INVALID_INPUT');
-        }
+        const { bindingId, ...options } = argumentsObject(input);
         return transaction(() => {
           binding(bindingId);
-          const time = now();
-          if (!Number.isSafeInteger(time) || time < 0 || !Number.isSafeInteger(time + leaseMs)) throw fail('COMPLETION_INBOX_INVALID_INPUT');
-          const rows = db.prepare("SELECT receipt_id, origin, payload, attempt FROM completion_events WHERE binding_id = ? AND (state = 'pending' OR (state = 'claimed' AND lease_until <= ?)) ORDER BY sequence LIMIT ?")
-            .all(bindingId, time, limit);
-          return rows.map(row => {
-            if (!Number.isSafeInteger(row.attempt + 1)) throw fail('COMPLETION_INBOX_CORRUPT');
-            const claimToken = randomUUID();
-            const event = projectCompletionEvent(JSON.parse(row.payload));
-            db.prepare("UPDATE completion_events SET state = 'claimed', claim_token = ?, lease_until = ?, attempt = attempt + 1 WHERE receipt_id = ? AND binding_id = ?")
-              .run(claimToken, time + leaseMs, row.receipt_id, bindingId);
-            return { receiptId: row.receipt_id, claimToken, attempt: row.attempt + 1, origin: row.origin, event };
-          });
+          return claimMessages(bindingId, options);
         });
       });
+    },
+    activateWaiter(input = {}) {
+      return call(() => transaction(() => {
+        const { bindingId } = argumentsObject(input); binding(bindingId);
+        db.prepare('UPDATE completion_waiters SET ended = 0 WHERE binding_id = ?').run(bindingId);
+        return { active: true };
+      }));
+    },
+    invalidateWaiter(input = {}) {
+      return call(() => transaction(() => {
+        const { bindingId } = argumentsObject(input); binding(bindingId);
+        db.prepare('UPDATE completion_waiters SET ended = 1, owner_id = NULL, lease_until = 0 WHERE binding_id = ?').run(bindingId);
+        return { invalidated: true };
+      }));
+    },
+    acquireWaiter(input = {}) {
+      return call(() => transaction(() => {
+        const { bindingId, ownerId, leaseMs = 30000 } = argumentsObject(input);
+        binding(bindingId); identifier(ownerId);
+        const time = timeWithLease(leaseMs);
+        const row = db.prepare(`UPDATE completion_waiters SET owner_id = ?, lease_until = ?, generation = generation + 1
+          WHERE binding_id = ? AND ended = 0 AND (owner_id IS NULL OR lease_until <= ?) AND generation < 9007199254740991 RETURNING generation`)
+          .get(ownerId, time + leaseMs, bindingId, time);
+        return row ? { acquired: true, generation: row.generation } : { acquired: false };
+      }));
+    },
+    pollWaiter(input = {}) {
+      return call(() => transaction(() => {
+        const { bindingId, ownerId, generation } = waiterInput(input);
+        const { heartbeat = false, leaseMs = 30000 } = input;
+        if (typeof heartbeat !== 'boolean') throw fail('COMPLETION_INBOX_INVALID_INPUT');
+        const time = timeWithLease(leaseMs);
+        const row = db.prepare('SELECT 1 FROM completion_waiters WHERE binding_id = ? AND owner_id = ? AND generation = ? AND ended = 0 AND lease_until > ?')
+          .get(bindingId, ownerId, generation, time);
+        if (!row) return { active: false, messages: [] };
+        if (heartbeat) db.prepare('UPDATE completion_waiters SET lease_until = ? WHERE binding_id = ? AND owner_id = ? AND generation = ?')
+          .run(time + leaseMs, bindingId, ownerId, generation);
+        return { active: true, messages: claimMessages(bindingId, { pendingOnly: true }) };
+      }));
+    },
+    releaseWaiter(input = {}) {
+      return call(() => transaction(() => {
+        const { bindingId, ownerId, generation } = waiterInput(input);
+        const result = db.prepare('UPDATE completion_waiters SET owner_id = NULL, lease_until = 0 WHERE binding_id = ? AND owner_id = ? AND generation = ?')
+          .run(bindingId, ownerId, generation);
+        return { released: result.changes === 1 };
+      }));
     },
     acknowledge(input = {}) {
       return call(() => {

@@ -78,7 +78,7 @@ export async function main(argv = process.argv.slice(2), output = process.stdout
       if (completionTarget) {
         try {
           const notification = await deliverCompletion({ target: completionTarget, origin: values.origin, event: result, environment }, deliveryServices);
-          notificationFailed = notification.wake.state !== 'requested';
+          notificationFailed = !['requested', 'deferred'].includes(notification.wake.state);
           result = { ...result, notification };
           if (notificationFailed) errorOutput.write(JSON.stringify({ error: 'COMPLETION_WAKE_UNCONFIRMED', requestId,
             receiptId: notification.receiptId, wakeState: notification.wake.state }) + '\n');

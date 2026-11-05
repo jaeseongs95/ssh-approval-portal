@@ -1,49 +1,21 @@
 {
-  "description": "SSH completion inbox; metadata only, explicit handling ACK.",
+  "description": "SSH completion inbox; bounded Claude native asyncRewake, metadata only, explicit handling ACK.",
   "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/portal-completion-hook.mjs\" --host claude-code",
-            "timeout": 10
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/portal-completion-hook.mjs\" --host claude-code",
-            "timeout": 10
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/portal-completion-hook.mjs\" --host claude-code",
-            "timeout": 10
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/portal-completion-hook.mjs\" --host claude-code",
-            "timeout": 10
-          }
-        ]
-      }
-    ]
+    "SessionStart": [{ "hooks": [
+      { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/portal-completion-hook.mjs", "--host", "claude-code"], "timeout": 10 },
+      { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/portal-completion-hook.mjs", "--host", "claude-code", "--wait"], "asyncRewake": true, "timeout": 86400 }
+    ] }],
+    "UserPromptSubmit": [{ "hooks": [
+      { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/portal-completion-hook.mjs", "--host", "claude-code"], "timeout": 10 }
+    ] }],
+    "PostToolUse": [{ "hooks": [
+      { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/portal-completion-hook.mjs", "--host", "claude-code", "--wait"], "asyncRewake": true, "timeout": 86400 }
+    ] }],
+    "Stop": [{ "hooks": [
+      { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/portal-completion-hook.mjs", "--host", "claude-code", "--wait"], "asyncRewake": true, "timeout": 86400 }
+    ] }],
+    "SessionEnd": [{ "hooks": [
+      { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/portal-completion-hook.mjs", "--host", "claude-code"], "timeout": 10 }
+    ] }]
   }
 }

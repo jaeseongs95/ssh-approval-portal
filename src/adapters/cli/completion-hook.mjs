@@ -1,6 +1,8 @@
 import { openCompletionInbox } from './completion-inbox.mjs';
 import { defaultCompletionInboxPath } from './completion-delivery.mjs';
 import { fileURLToPath } from 'node:url';
+import { randomUUID } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 
 const hosts = new Set(['codex', 'claude-code', 'antigravity']);
 const events = new Set(['SessionStart', 'UserPromptSubmit', 'PostToolUse', 'Stop']);
@@ -11,7 +13,8 @@ export function completionHookInput(host, input) {
   if (!hosts.has(host)) throw fail('COMPLETION_HOOK_UNSUPPORTED_HOST');
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw fail('COMPLETION_HOOK_INVALID_INPUT');
   const event = input.hook_event_name;
-  if (!(host === 'antigravity' ? ['SessionStart', 'PreInvocation', 'PostInvocation', 'Stop'].includes(event) : events.has(event)))
+  if (!(host === 'antigravity' ? ['SessionStart', 'PreInvocation', 'PostInvocation', 'Stop'].includes(event) :
+    events.has(event) || (host === 'claude-code' && event === 'SessionEnd')))
     throw fail('COMPLETION_HOOK_UNSUPPORTED_EVENT');
   const sessionId = host === 'antigravity' ? (input.conversationId || input.session_id) : input.session_id;
   if (host === 'antigravity' && input.conversationId && input.session_id && input.conversationId !== input.session_id)
@@ -49,13 +52,61 @@ export function renderCompletionHookOutput({ host, event }, context) {
 export function runCompletionHook({ host, input, inboxPath, environment = process.env }, { openInbox = openCompletionInbox } = {}) {
   const observation = completionHookInput(host, input);
   // A continued Stop must not produce another loop or acquire receipts it cannot display.
-  if (observation.event === 'Stop' && observation.stopActive) return {};
+  if (host !== 'claude-code' && observation.event === 'Stop' && observation.stopActive) return {};
   const inbox = openInbox({ filePath: inboxPath ?? defaultCompletionInboxPath(environment) });
   try {
+    if (host === 'claude-code' && observation.event === 'SessionEnd') {
+      const existing = inbox.findBinding({ host, sessionId: observation.sessionId });
+      if (existing) inbox.invalidateWaiter({ bindingId: existing.bindingId });
+      return {};
+    }
     const binding = inbox.register({ host, sessionId: observation.sessionId });
+    if (host === 'claude-code' && observation.event !== 'UserPromptSubmit') {
+      if (observation.event === 'SessionStart') inbox.activateWaiter({ bindingId: binding.bindingId });
+      return {};
+    }
     const messages = inbox.claim({ bindingId: binding.bindingId });
     return messages.length ? renderCompletionHookOutput(observation, renderCompletionContext({ ...observation, inboxPath }, messages)) : {};
   } finally { inbox.close(); }
+}
+
+export const completionWaitTimeoutMs = 86340000;
+
+/** Claude owns this bounded asyncRewake process. A claimed receipt is never automatically re-woken. */
+export async function waitForCompletionHook({ host, input, inboxPath, environment = process.env,
+  timeoutMs = completionWaitTimeoutMs, signal },
+  { openInbox = openCompletionInbox, now = () => performance.now(), sleep = (ms, abortSignal) => delay(ms, undefined, { signal: abortSignal }) } = {}) {
+  const observation = completionHookInput(host, input);
+  if (host !== 'claude-code' || !['SessionStart', 'PostToolUse', 'Stop'].includes(observation.event) ||
+      !Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > completionWaitTimeoutMs) throw fail('COMPLETION_HOOK_INVALID_WAIT');
+  if (signal?.aborted) return {};
+  const selectedPath = inboxPath ?? defaultCompletionInboxPath(environment);
+  const inbox = openInbox({ filePath: selectedPath });
+  const ownerId = randomUUID();
+  let ownership;
+  try {
+    const binding = inbox.register({ host, sessionId: observation.sessionId });
+    const acquired = inbox.acquireWaiter({ bindingId: binding.bindingId, ownerId });
+    if (!acquired.acquired) return {};
+    ownership = { bindingId: binding.bindingId, ownerId, generation: acquired.generation };
+    const deadline = now() + timeoutMs;
+    let heartbeatAt = now() + 10000;
+    while (!signal?.aborted && now() < deadline) {
+      const heartbeat = now() >= heartbeatAt;
+      const polled = inbox.pollWaiter({ ...ownership, heartbeat });
+      if (!polled.active) return {};
+      if (polled.messages.length) return { context: renderCompletionContext({ ...observation, inboxPath: selectedPath }, polled.messages) };
+      if (heartbeat) heartbeatAt = now() + 10000;
+      await sleep(Math.min(1000, Math.max(0, deadline - now())), signal);
+    }
+    return {};
+  } catch (error) {
+    if (signal?.aborted && error?.name === 'AbortError') return {};
+    throw error;
+  } finally {
+    try { if (ownership) inbox.releaseWaiter(ownership); }
+    finally { inbox.close(); }
+  }
 }
 
 export function acknowledgeCompletion({ host, sessionId, receiptId, claimToken, inboxPath, environment = process.env }, { openInbox = openCompletionInbox } = {}) {
