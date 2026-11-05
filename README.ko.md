@@ -1,6 +1,6 @@
 # SSH Approval Portal 2.2.0
 
-완료 hook은 로컬 수신함 저장 → 호스트 깨우기 → 도구 경계 본문 주입 → 처리 ACK로 동작합니다. [클라이언트 hook 안내](docs/client-files.ko.md)를 참고하세요. 실제 자동 수신은 해당 호스트의 hook·wake 지원이 필요합니다.
+완료 hook은 로컬 수신함에 저장한 상태를 호스트의 네이티브 훅으로 에이전트에 전달하고, 별도로 처리 ACK를 받습니다. Claude Code는 백그라운드 `asyncRewake` 훅을 사용합니다. 호스트별 지원·재적재·유휴 수신 제한은 [클라이언트 hook 안내](docs/client-files.ko.md)를 참고하세요.
 
 
 [English](README.md) · [v2.2.0 다운로드](https://github.com/jaeseongs95/ssh-approval-portal/releases/tag/v2.2.0) · [아키텍처](docs/architecture.ko.md) · [MCP 도구 계약](docs/mcp-tools.ko.md)

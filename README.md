@@ -1,6 +1,6 @@
 # SSH Approval Portal 2.2.0
 
-Completion hooks: the local client commits status to its durable inbox before sending a wake marker. Host hooks inject the body at tool boundaries; handling ACK is separate. See the [client hook guide](docs/client-files.ko.md). Actual host support requires its hook/wake runtime.
+Completion hooks: the local client saves status in a durable inbox. Native host hooks deliver it to the agent, with a separate handling ACK; Claude Code uses its background `asyncRewake` hook. See the [client hook guide](docs/client-files.ko.md) for host support, reload requirements and idle limits.
 
 
 [한국어](README.ko.md) · [Download v2.2.0](https://github.com/jaeseongs95/ssh-approval-portal/releases/tag/v2.2.0) · [Architecture](docs/architecture.en.md) · [MCP contract (Korean)](docs/mcp-tools.ko.md)

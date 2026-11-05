@@ -2,7 +2,7 @@
 
 ## 완료 알림을 hook으로 받기
 
-기존 원격 MCP 연결은 그대로 사용합니다. 로컬 클라이언트가 owner HTTP로 요청 완료를 관찰하고, 완료 metadata를 로컬 SQLite 수신함에 먼저 저장합니다. 호스트를 깨우는 메시지는 `[ssh-mcp:completion:UUID]` 표식뿐입니다. 실제 본문은 같은 세션의 hook이 수신함에서 인수해 에이전트 문맥에 넣습니다. AGS 설치나 추가 MCP 연결은 필요하지 않습니다.
+기존 원격 MCP 연결은 그대로 사용합니다. 로컬 클라이언트가 owner HTTP로 요청 완료를 관찰하고, 완료 metadata를 로컬 SQLite 수신함에 먼저 저장합니다. 같은 세션의 네이티브 hook이 본문을 인수해 에이전트 문맥에 넣습니다. Codex·agy의 별도 깨우기는 `[ssh-mcp:completion:UUID]` 표식만 보냅니다. Claude Code는 공식 `asyncRewake` 백그라운드 hook이 새 본문을 stderr에 출력하고 exit 2로 종료해 유휴 세션을 깨웁니다. AGS 설치나 추가 MCP 연결은 필요하지 않습니다.
 
 배포본에는 `scripts/portal-completion-hook.mjs`와 호스트별 `hooks/*.json`이 포함됩니다. Codex용 `.codex-plugin/plugin.json`은 hook만 등록합니다. 호스트가 실행할 로컬 hook 정의를 신뢰·재적재해야 하며, 파일을 압축 해제한 것만으로 현재 세션에 적재됐다고 판단하지 않습니다. 기존 AGS·다른 hook·인증 설정을 덮어쓰지 마세요.
 
@@ -12,7 +12,11 @@
 node scripts/portal-files.mjs --origin https://YOUR-PORTAL watch REQUEST_ID --notify-hook --host codex --session EXACT_SESSION_ID --wake-executable /absolute/path/to/codex
 ```
 
-이 명령은 호스트의 백그라운드 실행 기능으로 시작하고 에이전트는 다른 작업을 계속합니다. Claude Code는 `--host claude-code`, agy는 `--host antigravity`를 사용합니다. Claude socket/token과 agy project/LS 환경은 해당 호스트가 자식 프로세스에 제공한 현재 환경만 사용합니다. 다른 설정·인증 파일을 찾아 복사하지 않습니다.
+이 명령은 호스트의 백그라운드 실행 기능으로 시작하고 에이전트는 다른 작업을 계속합니다. Claude Code는 `--host claude-code`, agy는 `--host antigravity`를 사용합니다. Claude socket/token을 읽거나 복사하지 않습니다. agy의 project/LS 환경은 해당 호스트가 자식 프로세스에 제공한 현재 환경만 사용합니다. 다른 설정·인증 파일을 찾아 복사하지 않습니다.
+
+Claude Code는 같은 client 폴더를 `claude --plugin-dir /absolute/path/to/client`로 해당 실행에 적재할 수 있습니다. `.claude-plugin/plugin.json`은 hook만 등록합니다. `SessionStart`는 짧게 세션을 등록하고 별도의 `asyncRewake` 대기를 시작합니다. `PostToolUse`·`Stop`에서도 대기를 준비하되, SQLite의 세션별 lease로 살아 있는 대기 프로세스는 하나만 유지합니다. `SessionEnd`는 대기를 무효화하고 미처리 metadata는 보존합니다.
+
+이 백그라운드 hook은 원격 HTTP나 모델을 기다리지 않고 로컬 수신함만 확인합니다. 네이티브 hook timeout은 86,400초, 내부 대기는 86,340,000ms로 유한합니다. 대기가 만료된 뒤 아무 호스트 이벤트도 없는 유휴 상태까지 자동 수신을 보장하지 않습니다. 다음 시작·도구 실행·턴 종료에서 다시 준비됩니다. `--wait-timeout-ms`로 더 짧은 대기 시간을 지정할 수 있습니다. host가 `asyncRewake`를 지원하고 세션을 유지해야 하며, 종료된 `claude -p` 실행은 다시 깨울 수 없습니다.
 
 수신함 기본 위치는 Windows `%LOCALAPPDATA%/ssh-mcp-completion/completion.sqlite`, POSIX `$XDG_STATE_HOME/ssh-mcp-completion/completion.sqlite` 또는 `$HOME/.local/state/ssh-mcp-completion/completion.sqlite`입니다. `--inbox ABSOLUTE_DB`를 쓰면 hook과 watcher 모두 같은 경로를 지정해야 합니다. 인증·SSH 출력·파일 내용은 저장하지 않고 완료 metadata 13필드만 저장합니다. POSIX 전용 leaf는 0700, DB는 0600이며 Windows는 사용자 프로필의 기존 ACL 상속을 유지합니다. Windows ACL 독점성이나 같은 OS 계정 내부의 격리를 보장하지 않습니다.
 
@@ -22,12 +26,12 @@ hook은 출력 후 자동 ACK하지 않습니다. 에이전트가 기록을 처�
 node scripts/portal-completion-hook.mjs ack --host codex --session EXACT_SESSION_ID --receipt RECEIPT_UUID --claim CLAIM_UUID
 ```
 
-저장 완료·wake 요청·hook 인수·모델 수신·ACK·원격 업무 완료는 각각 다릅니다. wake 실패에도 기록은 남으며 다음 도구 경계·재개 hook에서 받을 수 있습니다. 중단·충돌로 ACK하지 못한 기록은 lease 뒤 다시 전달될 수 있습니다. 이를 원격 작업 재실행으로 해석하지 마세요. hook에는 원격 HTTP 대기·모델 호출·원격 명령 제출이 없습니다.
+저장 완료·wake 요청·hook 인수·모델 수신·ACK·원격 업무 완료는 각각 다릅니다. Claude의 `notification.wake.state=deferred`는 네이티브 hook이 수신함에서 처리할 예정이라는 뜻이며, 실제 모델 수신을 확인한 값이 아닙니다. 성공한 watch와 수신함 저장의 exit 0 역시 모델 수신을 보장하지 않습니다. wake 실패에도 기록은 남습니다. 중단·충돌로 ACK하지 못한 기록은 lease 뒤 다음 사용자 입력·재개 hook에서 다시 전달될 수 있습니다. Claude의 백그라운드 대기는 새 pending만 인수하므로, 같은 미ACK 건으로 계속 자동 재개하지 않습니다. 이를 원격 작업 재실행으로 해석하지 마세요. hook에는 원격 HTTP 대기·모델 호출·원격 명령 제출이 없습니다.
 
 | 호스트 | 본문 수신 경계 | 유휴 깨우기 전제 |
 | --- | --- | --- |
 | Codex | SessionStart, UserPromptSubmit, PostToolUse, Stop | 선택한 실행 파일 또는 공식 managed launcher의 `queue`; 살아 있는 같은 세션 필요 |
-| Claude Code | SessionStart, UserPromptSubmit, PostToolUse, Stop | 해당 프로세스의 messaging socket/token 필요 |
+| Claude Code | UserPromptSubmit 및 native asyncRewake 본문 | asyncRewake 지원·실행 중인 같은 세션·활성 대기 hook 필요 |
 | Antigravity/agy | SessionStart, PreInvocation, PostInvocation, Stop | 현재 project·agentapi·LS·CSRF 환경 및 project 일치 필요 |
 
 긴 단일 도구 호출 도중에는 다음 hook 경계까지 본문 주입이 늦을 수 있습니다. hook이 없는 ChatGPT 웹·일반 MCP 클라이언트에 로컬 hook 주입이나 자동 재개가 있다고 주장하지 않습니다. 기존 MCP의 즉시 상태 조회와 해당 호스트의 지원 경로를 사용합니다. 위 표는 구현 경계이며 실제 호스트 수용 여부는 해당 릴리스의 시험 근거에서 별도로 확인합니다. 구형 `--notify-codex ... --thread ...` 직접 메시지 옵션은 호환용이고 hook 옵션과 함께 쓰지 않습니다.
