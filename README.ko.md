@@ -1,144 +1,254 @@
 # SSH Approval Portal 2.0.0
 
-[English](README.md) · [연결·도구 계약](docs/mcp-tools.ko.md) · [관리자 로그인](docs/admin-login.ko.md) · [파일 전송 클라이언트](docs/client-files.ko.md) · [구조와 호환성](docs/architecture.ko.md)
+[English](README.md) · [v2.0.0 다운로드](https://github.com/jaeseongs95/ssh-approval-portal/releases/tag/v2.0.0) · [아키텍처](docs/architecture.ko.md) · [MCP 도구 계약](docs/mcp-tools.ko.md)
 
-SSH 명령·파일 전송·OS 데스크톱을 기존 서버 정책과 소유자 승인으로 처리하는 표준 MCP 서버입니다. 특정 AI 벤더나 에이전트 SDK에 종속되지 않습니다. `targets`로 대상 revision·플랫폼·기능·파일 정책을 확인하고 `submit`·`observe`로 같은 작업을 제출·관측합니다. MCP Apps 카드는 선택 사항이며 중계기 하나에 SSH 대상을 최대 32개 등록합니다. [도구 계약](docs/mcp-tools.ko.md)과 [대상 설정](docs/multi-targets.ko.md)을 참고하세요.
+SSH 명령 실행, 파일 전송, 실제 OS 데스크톱 조작을 제공하는 벤더 독립 MCP 서버입니다. 에이전트는 공통 도구 계약을 사용하며, 서버 정책·소유자 결정·대상 계정의 권한에 따라 작업을 실행합니다.
 
-2.0.0 개발 범위에는 배포본에 포함하는 `scripts/portal-files.mjs`가 들어갑니다. 로컬 CLI가 owner 인증으로 PC 파일을 직접 HTTP 전송하고 성공 시 `{"uuid":"..."}`만 출력합니다. 파일 본문을 모델 인자나 대화로 옮기지 않습니다. 에이전트는 기존 원격 MCP 연결에서 `files`에 UUID를 넘겨 상태 조회·복사·이동·임시 원본 제거를 요청합니다. 두 번째 로컬 stdio MCP 서버는 선택 사항입니다. 원격 서버가 PC 경로를 직접 읽을 수는 없습니다. 현재 standalone 클라이언트의 명령은 `doctor`·`upload`·`status`이며 PC 다운로드 저장 명령은 없습니다. 자세한 인증·사용법은 [파일 클라이언트 안내](docs/client-files.ko.md)를 따릅니다.
+- Linux 셸 명령, Windows PowerShell 명령, 명시적으로 제출한 Python 원문을 실행합니다.
+- PC 파일을 모델 문맥 밖에서 업로드하고, UUID로 SSH 대상에 배치합니다.
+- 백엔드와 접근 정책을 구성한 Linux·Windows GUI 데스크톱을 에이전트 도구로 관측하고 조작합니다.
+- 관리자 웹에서 승인, 이력, 대상별 정책, 실행 용량을 관리합니다.
 
-새 UUID 서버·클라이언트 경로는 2.0.0 통합 개발 대상입니다. 계약 설명은 최종 후보의 전체 시험·패키지·설치·배포 또는 모든 벤더/에이전트에서의 실동작 완료를 뜻하지 않습니다. 과거 ChatGPT 웹·Claude 데스크톱의 카드/파일 왕복과 구버전 구조 변경 시험은 해당 릴리스의 기록 범위에 한정됩니다. ChatGPT 데스크톱·Claude 웹 등 확인되지 않은 조합을 완료로 확대하지 않습니다. 실제 환경과 보존 근거는 해당 후보의 `VALIDATION.json` 및 실행 기록으로 판단합니다.
+## 시작점 고르기
 
-Windows SSH 대상의 PowerShell·파일·Python·서버 CLI는 [Windows 대상 등록](docs/windows-targets.ko.md)을 참고하세요. 기능별 사전 준비가 필요하며 중계기의 Windows 호스팅은 후속 범위입니다. Jev는 사전승인 목록 밖의 명령을 평가하는 보조 공급자입니다. [시크릿 관리](docs/secret-management.ko.md)는 실제 값을 채팅·MCP 응답·패키지에 넣지 않고 참조로 연결합니다. 카드 기본값은 `BRIDGE_UI_ENABLED=false`, 관리자 인증 기본값은 `BRIDGE_ADMIN_AUTH_MODE=token`입니다.
+| 현재 상황 | 시작할 곳 | 확인할 결과 |
+| --- | --- | --- |
+| 관리자가 제공한 MCP 연결이 이미 있음 | [첫 명령 실행](#agent) | 실제 대상 ID·revision·capability |
+| 이 PC의 파일을 올려야 함 | [PC 파일 클라이언트](#files) | 기존 Node/cloudflared·관리자 Access 인증, 이후 ready UUID |
+| 새 중계기를 설치해야 함 | [서버 설치·연결](#server) | 로컬 서비스 건강 상태·보호된 HTTPS·실제 MCP 응답 |
+| 에이전트가 그래픽 데스크톱을 사용해야 함 | [GUI 설정](#gui) | 백엔드 준비와 현재 TEST 정책·비밀 설정 조건 |
 
-## 자동승인은 어떻게 동작하나요?
+## 구성과 지원 환경
 
-**반복해서 쓰는 명령은 미리 승인하고, 처음 쓰는 명령은 AI의 도움을 받아 승인 요청을 줄입니다.** 설정은 서버별로 적용합니다.
-
-1. **사용자가 명령을 등록합니다.** `ls`, `pwd`처럼 명령 이름을 고르고, 위험도 안내를 읽은 뒤 **OK → 저장**합니다. 옵션과 인자는 등록하지 않습니다.
-2. **전체 명령줄을 확인합니다.** 실행되는 명령 이름이 **모두 등록돼 있으면 Jev 호출과 추가 승인 없이 실행**합니다. 하나라도 미등록이거나 명령을 확실히 구분할 수 없으면, 전체 명령줄과 작업 상황을 Jev로 보냅니다.
-3. **Jev 평가로 자동승인할지 결정합니다.** ‘Jev·다른 모델을 통한 자동승인 허용’과 정보 전송이 켜져 있고, 평가가 ‘낮은 위험’이며 점수가 저장한 기준 이상일 때만 자동 실행합니다. 기준 미달·판단 불가·평가 실패 등 나머지는 사용자에게 승인을 요청합니다.
-4. **사용자 확인이 필요한 요청은 승인 후 실행합니다.** 대기시간은 1시간입니다. 자동으로 처리된 요청은 이력에 **자동승인**으로 표시합니다.
-
-예를 들어 `ls`와 `pwd`만 등록했다면:
-
-| 요청한 명령 | 처리 |
-| --- | --- |
-| `pwd && ls -la` | 두 명령 모두 등록됨 → Jev 없이 바로 실행 |
-| `pwd && uptime` | `uptime`이 미등록 → 전체 명령줄을 Jev로 평가한 뒤 자동승인 또는 사용자 승인 |
-
-**명령 이름을 승인하면 그 명령의 옵션·인자까지 허용합니다.** 인자를 검사하는 제한 규칙이 아니므로 등록 전에 위험도를 확인하세요. 금지 명령은 사전승인보다 우선합니다. AI를 통한 자동승인을 꺼도 등록된 명령의 자동 실행은 유지됩니다. Jev 점수는 실제 사고 확률이나 안전 보증이 아닙니다.
-
-**파일 업로드·다운로드·sudo는 중요 자동승인 설정에서 따로 선택합니다.** 새 일반 파일 업로드만 자동화할 수 있고 덮어쓰기·sudo 업로드는 개별 승인을 받습니다. sudo 명령은 별도 허용이 켜져야 위 흐름에 들어가며, sudo 다운로드는 다운로드·sudo 허용이 모두 필요합니다. 파일 내용은 Jev가 검사하지 않습니다. 다운로드 ‘준비 완료’ 후 PC 저장은 별도로 진행합니다. 어떤 설정도 SSH 계정의 실제 권한을 늘리지는 않습니다.
-
-## 승인과 파일 전송
-
-서버 정책과 유효한 소유자 승인이 실행 권한을 결정합니다. 에이전트는 영어 `context`와 같은 의미의 한국어 `displayContext`를 제공할 수 있습니다. 설명은 호출자의 주장이며 실행 권한을 대신하지 않습니다. 접수·승인·원격 완료·PC 저장은 서로 다른 상태입니다.
-
-| 도구 | 동작 |
-| --- | --- |
-| `targets` | 대상 revision·플랫폼·capability·파일 정책·한도를 조회합니다. |
-| `submit` | 안정된 `operationKey`로 `command`, Python `source`, `download`를 제출합니다. |
-| `observe`·`cancel` | 상태는 같은 ID/키로 조회하고 취소는 기존 ID로 요청합니다. 출력은 `includeOutput:true`일 때만 읽습니다. |
-| `files` | UUID의 `stat`, 대상 배치 `copy`/`move`, 임시 원본 `remove`를 처리하는 2.0 계약입니다. |
-| `artifact-begin/chunk/status/finish` | 이미 확보한 작은 바이트를 대상·크기·SHA-256에 고정해 준비하고 파일 승인 정책으로 제출합니다. |
-| `artifact-read` | 완료된 다운로드 snapshot의 제한된 base64 페이지를 읽습니다. 큰 PC 파일은 패키지 클라이언트로 전송합니다. |
-| `desktop-open/status/observe/input/close` | 실제 OS 데스크톱 lease·준비 상태·PNG 프레임·입력·종료를 처리합니다. |
-
-UUID 업로드는 임시 저장 완료이며 대상 서버 배치 완료가 아닙니다. `copy`는 임시 원본을 유지하고 `move`는 publication 확정 뒤 원본을 소비합니다. `remove`는 해당 임시 UUID 객체만 제거합니다. 배치에는 기존 승인·대상 revision·경로 검증·OS 권한·TEST 정책이 적용됩니다. 내부 임시 경로는 모델에 반환하지 않으며 UUID 소지만으로 권한을 부여하지 않습니다. [공개 계약](docs/mcp-tools.ko.md)을 참고하세요.
-
-`show-ui-probe`, `show-approval`, `show-file-transfer` 3개는 모델에도 보이는 선택적 카드 열기 도구이며 UI resource를 렌더링합니다. `ui-*` 6개만 app 전용이며 렌더링 resource 없이 비공개 metadata에 티켓을 전달합니다. 카드가 없는 클라이언트도 공개 MCP와 관리자 웹을 사용할 수 있습니다. 구버전 `read-command`·`run-command`·`request-upload`·setup 도구는 현재 공개 도구명이 아닙니다.
-
-파일당 최대 64 MiB, 기본 임시 저장 총량은 512 MiB입니다. `BRIDGE_TRANSFER_MAX_BYTES`는 64 MiB 이하, `BRIDGE_TRANSFER_BUDGET_BYTES`는 단일 파일 한도 이상이어야 합니다. 디렉터리·링크·장치 파일은 거부하며 ZIP 자동 해제나 파일 자동 실행은 하지 않습니다. UUID·전송·다운로드는 반환된 만료·보존 상태를 따릅니다. 파일 바이트를 마스킹하는 전송은 아닙니다.
-
-Linux 덮어쓰기는 기존 소유권·모드·확장 속성을 보존할 수 없으면 완료로 보고하지 않습니다. 새 파일은 mode 0600이며 sudo 업로드는 root 소유입니다. Windows의 보존 범위는 [Windows 전송 제약](docs/windows-targets.ko.md)을 따릅니다. 관측 timeout이나 연결 실패는 취소·미실행을 뜻하지 않습니다. 원래 UUID·operationKey·request ID를 조회하고 불명확한 배치를 새 키로 재실행하지 않습니다.
-
-## 서버·클라이언트 배포 자산 생성
-
-소스에서 서버와 모델 밖 파일 전송 클라이언트를 함께 묶으려면 아직 존재하지 않는 새 절대 출력 디렉터리를 지정합니다.
-
-```sh
-npm run package:release -- --output /absolute/new/portal-2.0.0-release
+```text
+에이전트 / MCP 호스트 ── MCP ──> Linux 중계기 ── SSH ──> Linux / Windows 대상
+PC 파일 클라이언트 ── HTTPS ──> UUID 임시 보관 ── files copy/move ──> 대상
+소유자 브라우저 ── HTTPS ──> 승인·설정·이력
 ```
 
-서버 `ssh-approval-portal-2.0.0.tar.gz`·`.zip`과 클라이언트 `ssh-approval-portal-client-2.0.0.tar.gz`·`.zip`의 4개 자산 및 네 자산을 함께 나열한 `SHA256SUMS`를 만듭니다. 기존 출력 디렉터리는 거절하며 이전 배포본을 덮어쓰지 않습니다. 클라이언트 실행에는 별도의 기존 Node.js `>=24.2.0 <25`와 신뢰하는 `cloudflared` 실행 파일·owner 로그인 캐시가 필요하며 이 런타임·인증값은 클라이언트 자산에 포함하지 않습니다. PC 클라이언트의 origin은 Access 모드가 구성된 관리자 HTTPS 사이트입니다. 기본 관리자 token 모드나 MCP bearer로 대체하지 않으며 클라이언트가 설정·로그인을 자동 변경하지 않습니다. 기존 원격 MCP 연결을 그대로 쓰고 두 번째 로컬 MCP 서버는 선택 사항입니다. 이 명령 설명은 패키징 실행·시험·배포 완료를 뜻하지 않습니다.
+| 구성 요소 | 현재 지원 범위 |
+| --- | --- |
+| 중계기 호스트 | 네이티브 Ubuntu 22.04/24.04, Node.js >=24.2.0 및 <25. 설치기가 전용 Node 실행 환경을 준비합니다. Windows 중계기 호스팅은 지원하지 않습니다. |
+| SSH 대상 | Linux와 Windows OpenSSH. Windows는 [대상·도우미 설정](docs/windows-targets.ko.md)이 필요합니다. 중계기 하나에 대상을 최대 32개 등록합니다. |
+| PC 파일 클라이언트 | 별도 포터블 압축 배포본. 기존 Node.js >=24.2.0 및 <25, 신뢰하는 `cloudflared`, 소유자 인증이 필요합니다. npm·전역 설치나 두 번째 MCP 연결은 필요 없습니다. |
+| 그래픽 데스크톱 | 관리형 Linux X11, Linux 중계기를 통한 Windows RDP, 구성한 RFB. GUI 실행 환경의 지원 범위는 일반 SSH보다 좁습니다. [GUI 설정](#gui)을 확인하세요. |
+| MCP Apps 카드 | 호스트별 선택적 UI입니다. 카드가 없는 클라이언트는 공통 MCP 도구와 관리자 웹을 사용합니다. |
 
-## 네이티브 설치와 업데이트
+네이티브 설치기에는 ARM64 경로가 있지만 실제 ARM64 하드웨어 수용 검증은 확정하지 않았습니다. 동봉한 Windows GUI 중계 실행 환경은 Ubuntu 24.04 x86_64용이며, Ubuntu 22.04·ARM64 호환성을 포괄하는 의미가 아닙니다.
 
-이전 릴리스는 Ubuntu 22.04/24.04 x86_64에서 검증했습니다. ARM64 설치 경로는 남아 있지만 검증은 후속 고도화로 보류했습니다. 인터넷 연결과 서버 관리자 터미널이 필요합니다. 런타임은 Node 24.2 이상, 25 미만을 요구합니다. Node 24는 전용 경로에 설치하며 시스템 Node를 교체하지 않습니다.
+공통 계약은 벤더에 종속되지 않지만 모든 웹·데스크톱·CLI 호스트의 파일·UI 기능이 같다는 뜻은 아닙니다. `targets`와 실제 클라이언트 응답으로 확인하세요. 자세한 연결 방식은 [에이전트 클라이언트 안내](docs/agent-clients.ko.md)에 있습니다.
+
+<a id="agent"></a>
+## 첫 명령 실행
+
+관리자가 제공한 MCP 엔드포인트에 연결한 뒤 다음 순서로 사용합니다.
+
+1. `targets({})`를 호출해 활성 대상을 고르고 `revision`과 capability를 읽습니다.
+2. 안정된 `operationKey`로 `submit`을 호출합니다. 아래 자리표시자는 실제 대상과 revision으로 바꿉니다.
+3. 응답의 `data.id`를 보관하고, 결과가 확인될 때까지 같은 ID를 `observe`합니다.
+
+`submit` 예시입니다. `hostname`은 Linux와 Windows에서 모두 사용할 수 있습니다.
+
+```json
+{
+  "kind": "command",
+  "operationKey": "readme-hostname-0001",
+  "target": "<target-id>",
+  "expectedTargetRevision": "<revision-from-targets>",
+  "command": "hostname"
+}
+```
+
+`observe`의 ID는 실제 응답 값으로 바꿉니다.
+
+```json
+{
+  "id": "<request-id>",
+  "waitMs": 25000,
+  "includeOutput": true
+}
+```
+
+`pending`은 소유자 승인 대기, `queued`는 실행 자리 대기입니다. 관측 시간이 끝나도 실행을 취소하지 않습니다. 원래 ID나 작업 키로 관측을 이어가며, 결과가 불명확하다는 이유로 새 키를 만들어 제출하지 않습니다.
+
+명령은 여러 줄 원문을 보존하고 대상의 기본 셸을 사용합니다. `kind:"source"`는 Python 원문, `kind:"download"`는 파일 스냅샷을 별도로 요청합니다. 해당 종류의 필드만 사용하세요. 명령 요청에서는 `elevate:false`도 포함해 `elevate` 필드 자체를 생략해야 합니다. `context`와 `displayContext`는 선택적 설명이며 인증이나 언어 요건이 아닙니다.
+
+출력은 `includeOutput:true`로 명시해서 읽고 필요한 경우 페이지를 이어 읽습니다. 현재 공개 API는 실행 중 raw 출력을 스트리밍하지 않습니다. 상태·출력 페이지·실행 제한 시간·취소의 정확한 필드는 [도구 계약](docs/mcp-tools.ko.md)을 따릅니다.
+
+<a id="files"></a>
+## 파일 본문을 모델 문맥에 넣지 않고 PC에서 업로드
+
+[릴리스](https://github.com/jaeseongs95/ssh-approval-portal/releases/tag/v2.0.0)에서 `ssh-approval-portal-client-2.0.0.zip` 또는 `.tar.gz`를 내려받아 압축을 풉니다. 압축을 푼 폴더에서 진입 파일을 실행합니다. 포터블 클라이언트이므로 파일을 고정 위치에 두면 되며, 전역 실행 명령을 자동으로 등록하지 않습니다.
+
+현재 클라이언트는 **Access 모드**로 구성한 관리자 HTTPS origin, 신뢰하는 기존 `cloudflared`, 소유자 로그인 캐시가 필요합니다. MCP 연결 인증이나 서버의 기본 관리자 token 모드로 대신할 수 없습니다.
+
+PowerShell 예시입니다. origin과 파일 경로는 실제 값으로 바꿉니다.
+
+```powershell
+$portalFiles = @(
+  'scripts/portal-files.mjs',
+  '--origin', 'https://approve.example.com',
+  '--cloudflared', 'C:/tools/cloudflared.exe'
+)
+node @portalFiles doctor
+node @portalFiles upload --file 'C:/work/package.tar.gz' --operation-key 'package-upload-0001'
+```
+
+`doctor`는 기존 실행 환경·인증·연결을 진단합니다. 로그인, 파일 업로드, 승인, SSH 명령 실행을 하지 않습니다. 업로드가 성공하면 JSON 객체 하나를 출력합니다.
+
+```json
+{"uuid":"12345678-1234-4234-8234-123456789abc"}
+```
+
+UUID는 서버의 임시 객체를 가리키며, 공개 파일 경로나 대상 배치 완료를 뜻하지 않습니다. **기존 원격 MCP 연결**에서 `files`를 호출해 배치를 요청합니다.
+
+```json
+{
+  "action": "copy",
+  "uuid": "<uuid-from-upload>",
+  "operationKey": "package-placement-0001",
+  "target": "<target-id>",
+  "expectedTargetRevision": "<revision-from-targets>",
+  "remotePath": "/home/mcpops/package.tar.gz"
+}
+```
+
+선택한 대상에서 쓰기 가능한 목적지를 지정합니다. Windows의 `C:/upload/package.tar.gz` 같은 경로도 같은 계약을 사용합니다. 응답에 `data.request.id`가 있으면 그 ID를 관측합니다. 접수 결과가 불명확하면 다음 행동 전에 같은 UUID의 상태와 작업을 확인합니다.
+
+| 동작 | 의미 |
+| --- | --- |
+| `files stat` | UUID metadata와 배치 작업을 조회합니다. |
+| `files copy` | 선택한 대상에 파일을 배치하고 임시 원본을 유지합니다. |
+| `files move` | 파일을 배치하고 publication 확정 뒤 임시 원본을 소비합니다. |
+| `files remove` | 임시 UUID 원본만 제거하며, 이미 배치한 대상 파일은 유지합니다. |
+
+원격 MCP 서버가 PC 경로를 직접 읽을 수는 없습니다. 에이전트가 클라이언트를 실행하려면 호스트의 로컬 실행·파일 접근 권한이 필요합니다. 그런 기능이 없으면 사용자가 클라이언트를 실행하거나 호스트의 지원 파일 UI를 사용합니다. 파일 바이트는 모델이 옮겨 적지 않고 클라이언트에서 HTTPS로 직접 전송합니다.
+
+standalone 클라이언트는 **`doctor`·`upload`·`status`만** 제공합니다. 다운로드·save 명령은 없습니다. 서버 다운로드는 `submit(kind=download)`와 `artifact-read`를 사용하며, PC 저장은 허용된 클라이언트 코드나 호스트 UI에서 수행한 뒤 크기·해시를 확인해야 합니다. 이미 바이트에 접근할 수 있는 코드에는 저수준 `artifact-*` 도구도 제공합니다. 파일당 상한은 64 MiB, 대상들이 공유하는 기본 임시 저장 예산은 512 MiB입니다. 설정·인증·결과 불명 처리는 [파일 클라이언트 안내](docs/client-files.ko.md)를 참고하세요.
+
+<a id="server"></a>
+## 중계기 설치·연결
+
+기존 서버 상태에 맞는 경로를 고릅니다.
+
+| 서버 상태 | 진행 경로 |
+| --- | --- |
+| 기존 설치가 없는 새 서버 | 아래 신규 설치 예시를 사용합니다. |
+| 실행 중인 관리형 설치이며 영속 유지보수를 지원함 | [설치·갱신 안내](docs/install-workflow.ko.md)의 지원되는 업데이트·유지보수 절차를 따릅니다. |
+| 중지된 기존 설치, 지원하지 않는 구형 배치, 2.0 이력 전환 | 먼저 상태를 확인하고 이전을 계획합니다. [배포·이전·복구](docs/deployment-180.ko.md)를 따르며 신규 설치를 복구로 취급하지 않습니다. |
+
+### 신규 네이티브 설치
+
+Python 3, 인터넷 연결, 관리자 터미널을 갖춘 Ubuntu 22.04/24.04 서버를 준비합니다. [릴리스](https://github.com/jaeseongs95/ssh-approval-portal/releases/tag/v2.0.0)에서 서버 압축 파일과 `SHA256SUMS`를 내려받고, 해당 서버에서 실행합니다.
 
 ```sh
+sha256sum --check --ignore-missing SHA256SUMS
 tar -xzf ssh-approval-portal-2.0.0.tar.gz
 cd ssh-approval-portal-2.0.0
-sudo bash scripts/install.sh --admin-origin https://ssh-approve.example.com --grant-sudo-all
+python3 scripts/portal.py install --admin-origin https://approve.example.com --dry-run
+sudo python3 scripts/portal.py install --admin-origin https://approve.example.com
+sudo python3 scripts/portal.py status
 ```
 
-`--grant-sudo-all`은 `mcpops`에 비밀번호 없는 전체 sudo 권한을 부여합니다. 이 권한은 승인 중계기뿐 아니라 해당 SSH 계정의 다른 세션에도 적용됩니다. 옵션을 생략하면 일반 계정 권한으로 동작합니다. 기존 sudo 설정은 재작성하거나 삭제하지 않습니다.
+`--dry-run`은 실행할 명령을 표시하며, 설치 준비 검사나 실제 설치가 아닙니다. 실제 설치기는 전용 Node 24 실행 환경과 로컬 서비스를 준비합니다. **설치만으로 외부 HTTPS 경로·인증 공급자 설정·MCP 로그인을 완료하지는 않습니다.**
 
-기존 서버는 유지보수와 복구 절차를 확인한 뒤 새 패키지에서 `sudo bash scripts/install.sh`를 실행합니다. 기존 설정·토큰·SSH 키를 보존하며, UI 서명 키가 없는 설치에는 첫 업데이트 때 추가합니다. 영속 유지보수를 적용하지 않는 이전 버전으로는 자동 복구하지 않습니다. 구버전에서 처음 전환할 때는 별도로 검증된 오프라인 절차가 필요합니다.
+기본 예시는 전체 sudo 권한을 부여하지 않습니다. 선택 옵션 `--grant-sudo-all`은 `mcpops` 계정의 다른 세션까지 포함해 비밀번호 없는 전체 sudo를 부여하므로 해당 권한이 필요할 때만 선택합니다.
 
-기존 unit의 사용자 변경은 보존합니다. 관리 중인 ExecStart 패턴과 다르면 자동으로 덮어쓰지 않습니다. 원본 `ssh-mcp.service`는 설치하지 않습니다.
+Linux Docker Compose 배포는 별도 [준비 스크립트](scripts/prepare-docker.sh), [Compose 설정](docker/compose.yaml), [유지보수 절차](docs/maintenance-test-and-recovery.ko.md)를 사용합니다. 같은 포트·저장소에 네이티브 서비스와 Compose 서비스를 동시에 실행하지 마세요.
 
-유지보수 예약에는 소유자 토큰이 필요하며, 해당 규약을 따르는 경로의 새 작업을 차단합니다. 실행·대기 요청이나 미완성 업로드가 있으면 예약을 거부합니다. 설치가 중단되거나 결과가 불명확하면 보호된 소유자 파일을 보존하고 실제 상태를 확인한 뒤 복구하세요. 예약을 무조건 해제하지 않습니다. 규약을 따르지 않는 root 작업과 구버전은 이 보호를 우회할 수 있습니다. [유지보수 검증·복구 안내](docs/maintenance-test-and-recovery.ko.md)를 참고하세요.
+### HTTPS·인증·대상 연결
 
-## 연결과 카드 확인
+기본 로컬 엔드포인트는 MCP `http://127.0.0.1:39124/mcp`, 관리자 `http://127.0.0.1:39125`입니다. 보호된 HTTPS 경로로 연결하고, 소유자 접근과 MCP upstream 자격을 따로 구성합니다. [설치·연결 안내](docs/install-workflow.ko.md) 또는 [Cloudflare 없는 HTTPS](docs/non-cloudflare-https.ko.md)를 따르세요.
 
-- MCP는 기본 localhost 39124의 `/mcp`, 웹 관리자는 기본 localhost 39125에서 제공합니다. 보호된 설정의 `BRIDGE_MCP_PORT`·`BRIDGE_ADMIN_PORT`로 1–65535 범위의 포트를 지정할 수 있으며 유지보수·시작 검사는 같은 값을 사용합니다.
-- HTTPS 도메인은 Cloudflare Tunnel 등으로 연결합니다. Cloudflare Portal의 upstream Bearer에는 `BRIDGE_MCP_TOKEN`을 연결하고 본인 전용 접근 정책을 유지합니다. 관리자 토큰은 upstream에 연결하지 않습니다.
-- `BRIDGE_ADMIN_ORIGIN`은 웹 관리자 HTTPS origin과 문자 그대로 일치해야 합니다. 소문자 hostname의 정규 HTTPS origin만 허용하며 경로·끝 슬래시·query·fragment·사용자 정보는 넣지 않습니다. 다른 SSH 서버를 쓰려면 설정의 읽기·쓰기 프로필을 같은 서버·계정으로 지정하고 공개 호스트 키를 검증해 고정합니다. 파일 helper와 비공개 원격 임시 저장 경로도 해당 서버에 준비해야 합니다.
-- Portal 일반 도구 모드의 server ID는 `ssh-approval-bridge`를 유지합니다. 도구 alias를 바꾸면 `BRIDGE_UI_TOOL_PREFIX`와 UI 도구 매핑을 점검하세요. ChatGPT에서는 도구를 새로고침하고 Claude에는 같은 본인 전용 Portal URL을 연결합니다.
-- `show-ui-probe`를 호출해 카드에는 비공개 표식이 보이고 모델 응답·컨텍스트에는 나타나지 않는지 확인합니다. 각 클라이언트의 UI resource, `_meta`와 app-only 도구 전달도 확인해야 합니다.
-- `BRIDGE_UI_ENABLED=false`가 기본값입니다. 사용할 환경의 시험과 독립 감사를 마친 뒤 root env에서 true로 바꾸고 서비스를 재시작합니다. 확인하지 않은 플랫폼에 카드 승인을 활성화하지 마세요.
-- 관리자 시크릿은 `/etc/ssh-mcp-approval-bridge.env`에 모드 0600으로 저장합니다. 값은 채팅이나 명령 출력으로 보내지 마세요. 실제 키·토큰은 패키지에 포함하지 않습니다.
+| 인증 경계 | 인증하는 대상 |
+| --- | --- |
+| MCP 연결 | MCP를 호출하는 클라이언트입니다. PC 파일 접근 권한을 만들지 않습니다. |
+| 관리자 웹 | 요청·설정을 검토하는 소유자입니다. 기본값은 token 모드이며 Access/OIDC는 별도로 구성합니다. |
+| SSH 대상 | 원격 계정과 고정한 호스트 키입니다. 해당 계정의 실제 OS 권한을 따릅니다. |
+| Windows GUI 자격 | RDP 백엔드의 GUI 로그온입니다. SSH 공개키로 대신할 수 없습니다. |
 
-## 웹 관리자와 로그인
+각 대상의 호스트 키를 검증·고정한 뒤 사용합니다. 대상 ID·revision 결속·프로필 설정은 [다중 대상 설정](docs/multi-targets.ko.md)을 참고하되, 호출에는 [2.0 도구 계약](docs/mcp-tools.ko.md)의 `targets`·`submit`·`observe`를 사용합니다.
 
-웹 화면은 대기 요청, 처리 이력과 실행 결과를 보여 줍니다. 연결 후 화면이 보이는 동안 10초마다 갱신하며 수동 조회와 승인·거부 뒤에는 바로 갱신합니다. 승인 접수가 끝나면 화면 조작을 바로 풀고, 서버의 실행 완료·실패는 이후 조회로 표시합니다. 접수는 실행 성공을 뜻하지 않습니다. 관리자 표시 언어는 자동 감지·한국어·영어 중 선택하며 이 브라우저에만 저장합니다. 승인 이력은 보관 중인 요청에서 생성일 기준으로 기간·검색어·상태·대상 서버를 함께 검색합니다. 기간은 브라우저 현지시간의 시작일·종료일을 모두 포함하며, 비워 두면 전체 보관 기간을 조회합니다.
+에이전트 호스트에서 MCP URL을 연결하고 도구 목록을 새로고침한 뒤 `targets`로 확인합니다. 카드는 선택 기능이며 기본값은 `BRIDGE_UI_ENABLED=false`입니다. 켰을 때의 렌더링은 호스트의 MCP Apps 지원에 달려 있고, app 전용 `ui-*` 동작은 독립 위젯이 아닙니다. 브라우저 세션은 [관리자 로그인 안내](docs/admin-login.ko.md)를 따릅니다. 관리자 로그아웃은 현재 관리자 세션을 끝내며 MCP 인증을 유지합니다.
 
-기본값은 관리자 토큰 인증입니다. Cloudflare·Google·GitHub 로그인은 Cloudflare Access를 통한 **웹 관리자 로그인**이며 SSH 로그인이나 MCP 연결 인증을 대신하지 않습니다. 제공자 설정과 실제 로그인을 시험한 뒤 Access 모드를 명시적으로 활성화합니다. 자세한 설정·접근 제한·복구 절차는 [관리자 로그인 안내](docs/admin-login.ko.md)를 확인하세요.
+<a id="gui"></a>
+## 에이전트가 사용하는 그래픽 데스크톱
 
-로그아웃하면 자동 조회를 멈추고 표시 중인 요청을 비웁니다. Access 모드에서는 Cloudflare Access에서 로그아웃하고, 토큰 모드에서는 현재 탭에 입력한 토큰을 지웁니다. 서버 토큰을 폐기하거나 이미 실행 중인 작업을 취소하지는 않습니다.
+GUI 도구는 실제 OS 화면을 조작합니다. 에이전트가 lease를 열고 PNG 프레임을 관측한 뒤 해당 프레임에 결속된 텍스트·키·포인터 입력을 보내고, 결과를 다시 관측한 후 lease를 닫습니다.
 
-## Docker Compose 배포
-
-운영 대상은 Ubuntu 22.04/24.04의 Docker Engine과 Compose v2입니다. 중계기는 비 root 사용자, 읽기 전용 root filesystem과 capability 제거 설정으로 실행합니다. SSH 계정·sudo·파일 helper는 대상 서버에 준비하며 컨테이너에 `--privileged`나 Docker socket을 주지 않습니다. `scripts/prepare-docker.sh`도 공유 `scripts/ensure-node-runtime.sh`로 호스트의 `/opt/ssh-approval/node`에 Node 24 런타임을 준비하며 시스템 Node를 교체하지 않습니다.
-
-```sh
-# 위의 새 출력 디렉터리 패키징은 한 번만 실행합니다.
-mkdir -p dist
-cp /absolute/new/portal-2.0.0-release/ssh-approval-portal-2.0.0.tar.gz dist/
-sudo bash scripts/prepare-docker.sh --admin-origin https://ssh-approve.example.com --grant-sudo-all
-sudo docker compose --env-file /etc/ssh-approval-portal/compose.env -f docker/compose.yaml build
-sudo docker compose --env-file /etc/ssh-approval-portal/compose.env -f docker/compose.yaml up -d --wait
+```text
+targets → desktop-open → desktop-status / desktop-observe
+        → desktop-input → desktop-observe → desktop-close
 ```
 
-현재 서버를 Compose로 옮길 때는 요청을 정리하고 `ssh-approval-bridge.service`를 먼저 중지하세요. helper 버전이 다르면 검증된 네이티브 업데이트를 먼저 적용합니다. 새 Compose 서비스가 정상 상태임을 확인한 뒤 기존 네이티브 unit의 자동 시작을 해제합니다. 같은 서버에서 두 방식에 같은 포트를 지정해 동시에 실행하면 충돌합니다. 기본 포트는 39124/39125입니다. 원본 `ssh-mcp.service`는 어느 방식에서도 설치하지 않습니다.
+서버에는 백엔드의 필수 구성요소와 대상 설정이 필요합니다. **현재 에이전트 GUI 접근에는 해당 대상의 활성 TEST 정책과 서버 측 TEST 비밀 설정도 필요합니다.** `desktop.enabled`만 켜서는 사용할 수 없으며 관리자 GUI 접근은 별도 권한 경로를 사용합니다. GUI를 쓰기 위해 운영 대상의 TEST 우회를 켜지 마세요.
 
-미리 빌드한 이미지는 릴리스 자산의 `VALIDATION.json`에서 실제 태그와 아키텍처를 먼저 확인하세요. `sudo docker load -i IMAGE.tar`로 불러온 뒤 `/etc/ssh-approval-portal/compose.env`의 `BRIDGE_IMAGE`를 그 태그로 맞추고, 위의 Compose 시작 명령에 `--no-build`를 추가해 실행합니다. 이미지에는 Node 24.21.0과 버전을 고정한 의존성 및 UI가 포함됩니다. amd64·arm64 이미지를 구분하세요. ARM64 에뮬레이션 시험은 실제 ARM 하드웨어 시험을 대신하지 않습니다.
+- **Linux:** 관리형 백엔드가 SSH 계정으로 전용 Xvnc/Openbox/xterm X11 세션을 만듭니다. 기존 Wayland 화면을 공유하는 기능은 아닙니다.
+- **Windows:** Linux 중계기가 고정한 SSH를 통해 전용 FreeRDP 실행 환경을 Windows RDP 서비스에 연결합니다. 비밀 참조로 저장한 GUI 로그온 자격이 필요하며, 사람의 세션에 영향을 주지 않도록 전용 계정을 사용합니다. 동봉한 네이티브 실행 환경은 Ubuntu 24.04 x86_64를 지원합니다.
+- **기존 RFB:** 의도적으로 구성한 신뢰된 세션만 공유하며, OS 세션을 자동으로 생성하거나 잠금을 해제하지 않습니다.
 
-토큰은 Compose 환경변수가 아니라 `/run/secrets/bridge_config` 파일로 전달합니다. 호스트 원본은 `/etc/ssh-approval-portal/docker-secrets.env`이며 서비스 계정만 읽을 수 있습니다. SSH 키·설정은 읽기 전용으로, audit와 전송 임시 저장은 별도 쓰기 경로로 마운트합니다. Linux host network로 기존 localhost SSH·Cloudflare 터널 경로를 유지합니다.
+사용자가 PC의 RDP 창을 계속 열거나 에이전트의 데스크톱을 수동으로 유지할 필요는 **없습니다**. 백엔드 준비·transport 연결·인증된 사용 가능 화면은 서로 다른 상태입니다. 보고된 상태를 확인하고 입력 결과를 관측하세요. lease 종료는 Windows 로그아웃이 아닙니다. 자세한 내용은 [GUI 설정](docs/desktop.ko.md)과 [인증 상태](docs/desktop-auth-state.ko.md)를 따릅니다.
 
-Compose 갱신은 제한된 구성에서 지원합니다. 실행 중인 중계기가 영속 유지보수를 지원하고, 현재·후보 이미지의 독립 검증된 ID가 보호된 신뢰 디렉터리에 등록돼 있어야 하며, 기본 호스트 bind 저장소와 실행 조건이 일치해야 합니다. 갱신기는 유지보수를 예약하고 새 컨테이너 시작 후 보존 비교를 통과한 경우에만 해제합니다. 실패하거나 결과가 불명확하면 예약과 소유자 파일을 보존하며 구버전으로 자동 복구하지 않습니다. 구버전 전환·Compose override·사용자 지정 저장소에는 별도 검증된 절차가 필요합니다. 정확한 조건과 복구 방법은 [유지보수 검증·복구 안내](docs/maintenance-test-and-recovery.ko.md)를 참고하세요. 이미지·전송 임시 저장과 시크릿을 `docker compose down -v`로 무조건 삭제하지 마세요.
+<a id="policy"></a>
+## 승인·실행 용량·TEST 모드
 
-## 검증과 상태 확인
+정책은 대상별로 평가합니다. 사전승인한 명령 이름은 옵션·인자까지 허용하며 금지 규칙이 우선합니다. 전체 명령을 정책으로 허용할 수 없으면, 설정한 모델 평가를 통해 자동 실행 또는 소유자 승인 요청을 판단할 수 있습니다. 모델 평가는 선택 사항이며 명시적인 정보 전송 설정이 필요하고 전송 파일 본문은 검사하지 않습니다.
 
-다음은 허용된 TEST·CI 환경의 서버 검증 절차이며 이번 문서 수정에서 실행한 결과가 아닙니다. 2.0.0 최종 후보의 실제 클라이언트·패키지·설치·배포는 고정 commit과 실행 근거로 별도 확인합니다.
+업로드·다운로드·sudo 자동승인은 각각 선택합니다. UUID, 작업 설명, 승인 허용 설정으로 원격 계정의 실제 OS 권한을 늘리지는 않습니다.
+
+관리자 페이지에서 전체·대상별 **대기열 크기**와 **동시 실행 수**를 설정합니다. 최초 기본값은 중계기의 사용 가능한 CPU 수 `N`을 기준으로 대기열 `N × 10`, 동시 실행 `N`입니다. 저장한 관리자 설정은 유지합니다. SSH 실행 대기와 HTTP 접수 대기는 별개이며, `queued`는 추가 승인 요청이 아닙니다.
+
+TEST 우회는 기본적으로 꺼져 있습니다. 전용 서버 비밀과 현재 대상·정책 결속이 유효하면 금지 명령·개별 자동승인 설정에 관계없이 심사·개별 승인·설정된 허용 루트 소속 제한을 우회합니다. 인증·경로 안전성 검사·실제 OS 권한·자원 한도는 유지합니다. ACL 변경, 자격 생성, UAC 우회를 수행하지 않으며 TEST를 끄면 대상의 일반 정책을 다시 적용합니다.
+
+<a id="upgrade"></a>
+## 이전·문제 해결
+
+2.0은 1.x 공개 도구 계약을 교체합니다. 캐시된 MCP 도구 정의를 새로고침하고 구버전 `list-targets`·`run-command`·`wait-for-request` 대신 `targets`·`submit`·`observe`를 사용합니다.
+
+기존 이력은 [배포 안내](docs/deployment-180.ko.md)의 배치 구조·무결성·용량 검사 조건에 따라 이전할 수 있습니다. 원본·보관 증거를 유지하고 결과 불명인 과거 요청을 재실행하거나 만료된 출력을 재생성하지 않습니다. `deploy180.mjs`는 유지한 스크립트 이름이며 제품 버전이 아닙니다. 복구는 명시적으로 수행합니다. 실패나 결과 불명만으로 DB를 복원하거나 무작정 재시도하지 않습니다.
+
+| 증상 | 다음 확인 |
+| --- | --- |
+| 구형 도구·`INVALID_ARGUMENT`·오래된 출력 스키마 | MCP 도구 목록을 새로고침하고 현재 계약과 비교합니다. |
+| `OPERATION_INPUT_CONFLICT` | 제출 종류별 허용 필드를 확인합니다. 명령에서는 `elevate`를 생략합니다. |
+| 승인 대기 또는 `queued` | 기존 요청을 확인하고 필요한 승인만 진행하며 같은 ID를 관측합니다. |
+| 연결 종료·실행 기한 초과·결과 불명 | 원래 ID/키와 `execution` metadata를 확인하고 대체 작업을 새로 만들지 않습니다. |
+| PC 클라이언트 인증 실패 | 관리자 origin과 신뢰하는 cloudflared 경로로 `doctor`를 실행하며 MCP 로그인과 구분합니다. |
+| GUI 미준비·인증 필요 | 입력 전에 `desktop-status`와 백엔드 준비 조건을 확인합니다. |
+
+<a id="docs"></a>
+## 상세 문서
+
+| 주제 | 안내 |
+| --- | --- |
+| 공개 계약·에이전트 클라이언트 | [도구 계약](docs/mcp-tools.ko.md) · [클라이언트 기능](docs/agent-clients.ko.md) |
+| PC 파일 업로드 | [클라이언트 배포본·UUID 파일](docs/client-files.ko.md) |
+| 설치·복구 | [설치·갱신](docs/install-workflow.ko.md) · [이전·복구](docs/deployment-180.ko.md) |
+| 관리자 인증 | [한국어](docs/admin-login.ko.md) · [English](docs/admin-login.en.md) |
+| 대상 설정 | [다중 대상](docs/multi-targets.ko.md) · [Windows](docs/windows-targets.ko.md) |
+| 그래픽 데스크톱 | [설정](docs/desktop.ko.md) · [인증 상태](docs/desktop-auth-state.ko.md) |
+| 비밀·Cloudflare 없는 연결 | [비밀 참조](docs/secret-management.ko.md) · [HTTPS](docs/non-cloudflare-https.ko.md) |
+| 설계·검증 | [아키텍처](docs/architecture.ko.md) · [시험 계획](test/PLAN.md) · [로컬 브라우저 시험](docs/browser-testing.ko.md) |
+
+일부 상세 문서는 버전별 과거 실행 기록을 보존합니다. 해당 기록은 고정한 환경의 근거이며 이후 릴리스의 포괄적 수용 결과가 아닙니다. v2.0.0은 정식 게시됐지만 호스트·GUI·파일 저장·아키텍처의 개별 조합은 각각의 실행 근거로 확인해야 합니다.
+
+## 개발·패키징
+
+개발할 때는 소스 작업 사본을 사용하며, 배포본 사용자가 패키지를 직접 빌드할 필요는 없습니다. 서버 시험은 프로젝트가 허용한 TEST/CI 환경에서, 브라우저 회귀는 안내에 따라 로컬 PC에서 실행합니다.
 
 ```sh
 npm ci --ignore-scripts
 npm run build:ui
 npm test
 python3 test/test_helper.py
-sudo bash scripts/status.sh
 ```
 
-브라우저 회귀는 로컬 PC의 격리 작업 사본에서 [브라우저 검사 안내](docs/browser-testing.ko.md)에 따라 실행합니다. 서버 제품 시험과 실행 위치를 구분합니다.
+서버·클라이언트 압축 파일을 만들 때는 아직 존재하지 않는 **새 절대 출력 디렉터리**를 지정합니다.
 
-UI는 별도 `ui` 의존성으로 빌드하며 서버 SDK를 업그레이드하지 않습니다. UI와 웹의 모듈을 바꾸면 `npm run build:ui`로 배포 자산을 다시 만듭니다. 계층 경계·호환성·향후 시험 기준은 [구조 안내](docs/architecture.ko.md)와 [검증 계획](test/PLAN.md)에 정리했습니다. `test/docker-tests.ps1`은 합성 데이터로 격리된 Ubuntu 컨테이너를 생성·정리합니다. 실제 클라이언트의 카드·파일 저장, 플랫폼 파일 입력과 실제 ARM 하드웨어 시험은 각각 수행한 근거가 있을 때만 완료로 기록합니다.
+```sh
+npm run package:release -- --output /absolute/new/portal-2.0.0-release
+```
 
-릴리스의 `release-manifest.json`과 `SHA256SUMS`를 검증하세요. 패키지에는 node_modules, 실제 설정, 토큰, 개인키와 사용자 세션을 넣지 않습니다. 현재 후보의 시험 기록과 위 검증 범위를 함께 확인하세요. 공개 게시와 Cloudflare 설정 변경은 자동으로 수행하지 않습니다.
+패키징은 서버·클라이언트의 `.tar.gz`·`.zip`과 체크섬을 만듭니다. Node.js·cloudflared·인증 정보·사용자 세션은 포함하지 않습니다. 소스·fixture·실제 호스트·클라이언트 UI·배포 검사는 서로 다른 근거입니다. 명령이 있다는 이유만으로 시험이 통과했다고 판단하지 않습니다. 공개한 자산은 고정하고 사용 전에 릴리스 체크섬과 대조하세요.
 
-공개 대기는 `observe`의 `waitMs`를 사용합니다. `waitTimedOut`는 관측 제한 시간이며 재제출을 허용하지 않습니다. [구버전 승인 대기 안내](docs/approval-callback.ko.md)의 도구명은 과거 기록입니다.
-
-관리자 설정의 중요 자동승인 설정에서 **테스트 서버**를 켜면 해당 대상의 명령·Python 코드·CLI 설치·파일 전송은 위험 심사와 개별 승인을 건너뜁니다. 금지 명령과 다른 자동승인 허용 설정보다 우선하며 기본값은 꺼짐입니다. 테스트 서버 지정은 관리자가 판단합니다. 관리자 인증, 대상 결속, 입력·파일 검증, SSH 계정 권한과 유지보수·동시 실행 제한은 유지됩니다. 해제하면 기존 설정이 다시 적용됩니다.
-
-테스트 서버 우회에는 기존 시크릿 저장소의 별도 값과 서버 전용 `BRIDGE_TEST_SERVER_SECRET_REF=secret://local-file/test-server` 설정이 함께 필요합니다. 값은 운영자가 기존 TTY 숨김 입력 등록 CLI로 넣는 64자리 소문자 16진수이며, 운영 포털에는 등록하지 않습니다. 참조 설정은 관리자 ENV 편집 화면/API에서 변경할 수 없습니다. 값은 UI/API/MCP·로그에 노출하지 않고, 등록·저장·실행 직전에 기존 resolver로 다시 읽습니다. 참조/값이 없거나 형식·조회가 실패하면 활성화 저장과 우회 실행을 거부합니다.
+[MIT 라이선스](LICENSE).

@@ -1,146 +1,254 @@
 # SSH Approval Portal 2.0.0
 
-[한국어](README.ko.md) · [Connection and tool contract](docs/mcp-tools.ko.md) · [Administrator sign-in](docs/admin-login.en.md) · [File client guide (Korean)](docs/client-files.ko.md) · [Architecture](docs/architecture.en.md)
+[한국어](README.ko.md) · [Download v2.0.0](https://github.com/jaeseongs95/ssh-approval-portal/releases/tag/v2.0.0) · [Architecture](docs/architecture.en.md) · [MCP contract (Korean)](docs/mcp-tools.ko.md)
 
-A standard MCP server for SSH commands, file transfers and OS desktops under existing server policy and owner approval. Its public contract is independent of AI vendors and agent SDKs. Start with `targets` to inspect revisions, platforms, capabilities and file policy; use `submit` and `observe` for the same operation. MCP Apps cards are optional. One bridge supports up to 32 registered SSH targets. See the [tool contract](docs/mcp-tools.ko.md) and [target configuration](docs/multi-targets.ko.md).
+Run SSH commands, transfer files and operate real OS desktops through a vendor-neutral MCP server. Agents use a common tool contract; server policy, owner decisions and the target account's permissions govern execution.
 
-The 2.0.0 scope includes the packaged `scripts/portal-files.mjs` client. The local CLI reads PC bytes and sends them over owner-authenticated HTTP, printing only `{"uuid":"..."}` on upload success. File bodies do not pass through model arguments or conversation text. Through the existing remote MCP connection, an agent supplies that UUID to `files` for status, copy, move or removal of the temporary source. A second local stdio server is optional. A remote server cannot directly read a PC path. The current standalone client provides `doctor`, `upload` and `status`; it has no command to save downloads to the PC. Follow the [file client guide](docs/client-files.ko.md) for authentication and usage.
+- Run Linux shell commands, Windows PowerShell commands and explicitly submitted Python source.
+- Upload PC files outside the model context, then use a UUID to place them on an SSH target.
+- Observe and control Linux or Windows GUI desktops through agent tools, when the backend and access policy are configured.
+- Manage approvals, history, per-target policy and execution capacity in the administrator website.
 
-The UUID server/client path is part of 2.0.0 integration work. Contract descriptions do not establish a final full-suite, package, installation, deployment or all-vendor acceptance result. Earlier ChatGPT web/Claude desktop card and file round trips and older restructuring tests apply only to their recorded releases. Unverified combinations, including ChatGPT desktop and Claude web, remain unverified. Use the candidate's `VALIDATION.json` and execution records for environment and preservation evidence.
+## Start here
 
-See [Windows target configuration](docs/windows-targets.ko.md) for PowerShell, files, Python and server CLI prerequisites. Hosting the bridge on Windows remains later scope. Jev is an auxiliary assessment provider for commands outside the preapproved list. [Secret management](docs/secret-management.ko.md) passes references rather than values in chat, MCP results or packages. Cards default to `BRIDGE_UI_ENABLED=false`; administrator authentication defaults to `BRIDGE_ADMIN_AUTH_MODE=token`.
+| Your situation | First step | What to confirm |
+| --- | --- | --- |
+| An administrator has already provided your MCP connection | [Run your first command](#agent) | Actual target ID, revision and capabilities |
+| You need to upload a file from this PC | [Use the PC file client](#files) | Existing Node/cloudflared, administrator Access authentication, then a ready UUID |
+| You are setting up a new bridge | [Install and connect](#server) | Local service health, protected HTTPS endpoints and an actual MCP response |
+| An agent needs a graphical desktop | [Configure GUI access](#gui) | Backend prerequisites and the current TEST policy/secret requirement |
 
-## How automatic approval works
+## Components and supported environments
 
-**Preapprove recurring commands, and use AI to review commands outside that list.** Settings apply to each server separately.
-
-1. **Register command names.** Choose names such as `ls` and `pwd`, read the risk feedback, then confirm **OK → Save**. Do not enter options or arguments.
-2. **Check the complete command line.** If **every executable name is preapproved, run without Jev or another approval**. If any name is missing or the syntax cannot be resolved, send the complete command line and task context to Jev.
-3. **Apply the model gate.** Model-based automatic approval and external disclosure must be enabled. The assessment must classify the command as low risk and meet the saved low-risk score threshold. Other outcomes—including insufficient context, a low score or evaluation failure—require owner approval.
-4. **Ask the owner when needed.** Pending requests expire after one hour. History labels automatically admitted requests as **Automatic approval**.
-
-With only `ls` and `pwd` registered:
-
-| Request | Result |
-| --- | --- |
-| `pwd && ls -la` | Both names are registered → run without Jev |
-| `pwd && uptime` | `uptime` is unregistered → evaluate the entire line, then approve automatically or ask the owner |
-
-**Approving a command name permits its options and arguments too.** This is not an argument restriction; review the capabilities before registration. Denied names take priority. Disabling model-based approval leaves preapproved-command bypass active. Model scores are not measured incident probabilities or safety guarantees.
-
-**Uploads, downloads and sudo have separate important settings.** Only new ordinary uploads can be automatic; overwrites and elevated uploads still need individual approval. Sudo commands need the sudo opt-in before entering the flow above; elevated downloads need both download and sudo opt-ins. Jev does not inspect file contents. A prepared download must still be saved to the device. No option expands the SSH account's actual permissions.
-
-## Approval and file transfers
-
-Server policy and valid owner approval authorize execution. Agents may supply detailed English `context` and a faithful Korean `displayContext`; these are caller claims, not authority. Acceptance, approval, remote completion and saving to the PC are separate states.
-
-| Tool | Behavior |
-| --- | --- |
-| `targets` | Inspect revisions, platforms, capabilities, file policy and limits. |
-| `submit` | Submit `command`, Python `source` or `download` using a stable `operationKey`. |
-| `observe`, `cancel` | Observe the same ID/key; request cancellation by existing ID. Read output only with `includeOutput:true`. |
-| `files` | The 2.0 contract for UUID `stat`, target `copy`/`move` and temporary-source `remove`. |
-| `artifact-begin/chunk/status/finish` | Stage already available small bytes bound to target, size and SHA-256, then submit through file approval policy. |
-| `artifact-read` | Read bounded base64 pages of a completed download snapshot. Use the packaged client for large PC files. |
-| `desktop-open/status/observe/input/close` | Manage real OS desktop leases, readiness, PNG frames, explicit input and close. |
-
-A UUID upload confirms temporary storage, not placement on an SSH target. `copy` retains the source; `move` consumes it after confirmed publication. `remove` affects only that temporary UUID object. Placement retains approval, revision, path, OS-permission and TEST policies. Replies exclude internal staging paths; possession of a UUID is not authority. See the [public contract](docs/mcp-tools.ko.md).
-
-The three `show-ui-probe`, `show-approval` and `show-file-transfer` tools are model-visible card openers with a rendering UI resource. Only the six `ui-*` tools are app-only, with no rendering resource and tickets in private metadata. Clients without cards can use public MCP and the administrator website. Legacy `read-command`, `run-command`, `request-upload` and setup names are not current public tools.
-
-The single-file limit is 64 MiB and default staging budget is 512 MiB. `BRIDGE_TRANSFER_MAX_BYTES` must not exceed 64 MiB; `BRIDGE_TRANSFER_BUDGET_BYTES` must cover one maximum-sized file. Directories, links and device files are rejected. ZIP files are not automatically extracted and uploads are not automatically executed. Follow returned retention/expiry state. File bytes themselves are not redacted in transfer.
-
-Linux overwrites do not report completion unless existing ownership, mode and extended attributes can be preserved. New files use mode 0600; sudo uploads are root-owned. See [Windows transfer limits](docs/windows-targets.ko.md). Observation timeout or connection failure does not establish cancellation or non-execution. Inspect the original UUID, operationKey and request ID; never replay uncertain placement under a new key.
-
-## Build server and client release assets
-
-From source, package the server and model-external file client together into a new absolute output directory that does not exist yet.
-
-```sh
-npm run package:release -- --output /absolute/new/portal-2.0.0-release
+```text
+Agent / MCP host ── MCP ──> Linux bridge ── SSH ──> Linux / Windows targets
+PC file client ── HTTPS ──> UUID staging ── files copy/move ──> target
+Owner browser ── HTTPS ──> approvals, settings and history
 ```
 
-This produces four assets: server `ssh-approval-portal-2.0.0.tar.gz`/`.zip` and client `ssh-approval-portal-client-2.0.0.tar.gz`/`.zip`, plus one `SHA256SUMS` covering all four. Existing output directories are refused. The client requires separately available Node.js `>=24.2.0 <25`, a trusted existing `cloudflared` executable and the owner's login cache; those runtimes and credentials are not bundled in client assets. The PC client origin must be an administrator HTTPS site already configured for Access mode. The default administrator token mode and MCP bearer are not substitutes; the client does not change settings or log in automatically. Reuse the existing remote MCP connection; a second local MCP server is optional. These instructions do not establish a completed packaging, test or deployment result.
+| Component | Current scope |
+| --- | --- |
+| Bridge host | Native Ubuntu 22.04/24.04; Node.js >=24.2.0 and <25. The installer prepares its dedicated Node runtime. Windows bridge hosting is not supported. |
+| SSH targets | Linux and Windows OpenSSH. Windows needs the target/helper setup described in the [Windows guide (Korean)](docs/windows-targets.ko.md). One bridge supports up to 32 registered targets. |
+| PC file client | A separate, portable client archive. Existing Node.js >=24.2.0 and <25, trusted `cloudflared` and owner authentication are required. No npm/global installation or second MCP connection is required. |
+| Graphical desktops | Managed Linux X11, Windows RDP through the Linux relay, or configured RFB. GUI runtime support is narrower than general SSH support; see [GUI access](#gui). |
+| MCP Apps cards | Optional host-specific UI. The common MCP tools and administrator website remain the path for clients without cards. |
 
-## Native installation and updates
+The native installer has an ARM64 path, but physical ARM64 acceptance is not established. The bundled Windows GUI relay runtime targets Ubuntu 24.04 x86_64; it is not a general Ubuntu 22.04/ARM64 compatibility claim.
 
-The previous release was validated for Ubuntu 22.04/24.04 on x86_64. The ARM64 installation path remains available, but validation is deferred to a later enhancement. An internet connection and an administrator terminal on the server are required. The runtime requires Node 24.2 or later within the 24.x series. Node 24 is installed in a dedicated path without replacing the system Node installation.
+The contract is vendor-neutral, not a promise that every web, desktop and CLI host implements the same file or UI capabilities. Check `targets` and the actual client response. See [agent clients (Korean)](docs/agent-clients.ko.md).
+
+<a id="agent"></a>
+## Run your first command
+
+After connecting to the MCP endpoint supplied by the administrator:
+
+1. Call `targets({})` and select an enabled target. Read its `revision` and capabilities.
+2. Call `submit` with a stable `operationKey`. Replace placeholders below with the actual target and revision.
+3. Keep the returned `data.id`; call `observe` on that ID until the outcome is known.
+
+`submit` example; `hostname` works on both Linux and Windows:
+
+```json
+{
+  "kind": "command",
+  "operationKey": "readme-hostname-0001",
+  "target": "<target-id>",
+  "expectedTargetRevision": "<revision-from-targets>",
+  "command": "hostname"
+}
+```
+
+`observe` example; replace the ID with the returned value:
+
+```json
+{
+  "id": "<request-id>",
+  "waitMs": 25000,
+  "includeOutput": true
+}
+```
+
+`pending` means owner approval is needed; `queued` means the request is waiting for execution capacity. A timeout while observing does not cancel execution. Continue observing the original ID or operation key; an uncertain result is not a reason to submit a new key.
+
+Commands preserve multiline text and use the target's native shell. `kind:"source"` submits Python separately; `kind:"download"` requests a file snapshot. Use only the fields for that kind: a command request must omit `elevate`, including `elevate:false`. `context` and `displayContext` are optional descriptions, not authentication or language requirements.
+
+Output is read explicitly with `includeOutput:true` and paginated when needed. The current public API does not stream raw output while a command is running. Refer to the [tool contract (Korean)](docs/mcp-tools.ko.md) for states, output pages, execution deadlines and cancellation.
+
+<a id="files"></a>
+## Upload a PC file without putting bytes in the model context
+
+Download and extract `ssh-approval-portal-client-2.0.0.zip` or `.tar.gz` from the [release](https://github.com/jaeseongs95/ssh-approval-portal/releases/tag/v2.0.0). Run the entry point from that extracted folder. This is a portable client: copying its files to a stable location is enough; a global command is not installed automatically.
+
+The current client requires an administrator HTTPS origin configured for **Access** mode, an existing trusted `cloudflared` executable and the owner's login cache. MCP authentication and the server's default administrator token mode do not substitute for this authentication.
+
+PowerShell example; replace the origin and paths:
+
+```powershell
+$portalFiles = @(
+  'scripts/portal-files.mjs',
+  '--origin', 'https://approve.example.com',
+  '--cloudflared', 'C:/tools/cloudflared.exe'
+)
+node @portalFiles doctor
+node @portalFiles upload --file 'C:/work/package.tar.gz' --operation-key 'package-upload-0001'
+```
+
+`doctor` diagnoses the existing runtime, authentication and connection. It does not log in, upload a file, approve a request or execute SSH commands. Upload success prints one JSON object:
+
+```json
+{"uuid":"12345678-1234-4234-8234-123456789abc"}
+```
+
+The UUID identifies a temporary server object, not a public filesystem path or completed target placement. Through the **existing remote MCP connection**, call `files` to place it:
+
+```json
+{
+  "action": "copy",
+  "uuid": "<uuid-from-upload>",
+  "operationKey": "package-placement-0001",
+  "target": "<target-id>",
+  "expectedTargetRevision": "<revision-from-targets>",
+  "remotePath": "/home/mcpops/package.tar.gz"
+}
+```
+
+Choose a writable destination on the selected target; Windows paths such as `C:/upload/package.tar.gz` use the same contract. Observe `data.request.id` when returned. If admission is uncertain, inspect the same UUID's status and operations before taking further action.
+
+| Action | Meaning |
+| --- | --- |
+| `files stat` | Inspect UUID metadata and placement operations. |
+| `files copy` | Place a file on the selected target and keep the temporary source. |
+| `files move` | Place the file, then consume the source after confirmed publication. |
+| `files remove` | Remove the temporary UUID source; already placed target files remain. |
+
+The remote MCP server cannot read a PC path by itself. An agent needs a host with permitted local process/file access to run this client; otherwise the user runs it or uses a supported host file UI. File bytes travel directly from the client to HTTPS rather than being transcribed by the model.
+
+The standalone client provides **`doctor`, `upload` and `status` only**. It has no download/save command. Server downloads use `submit(kind=download)` and `artifact-read`; saving to the PC requires permitted client code or host UI, followed by a size/hash check. Low-level `artifact-*` tools are available for code that already has the bytes. The per-file ceiling is 64 MiB and the default shared staging budget is 512 MiB. See the [file client guide (Korean)](docs/client-files.ko.md) for configuration, authentication and uncertain transfers.
+
+<a id="server"></a>
+## Install and connect a bridge
+
+Choose the path that matches the existing server:
+
+| Server state | Path |
+| --- | --- |
+| New server without an existing installation | Use the fresh-install example below. |
+| Running managed installation with durable maintenance support | Use the supported update/maintenance procedure in the [lifecycle guide (Korean)](docs/install-workflow.ko.md). |
+| Stopped existing installation, unsupported legacy layout or a 2.0 history transition | Inspect and plan the transition first; use [deployment, migration and recovery (Korean)](docs/deployment-180.ko.md). Do not treat a fresh install as recovery. |
+
+### Fresh native installation
+
+Prepare an Ubuntu 22.04/24.04 server with Python 3, internet access and an administrator terminal. Download the server archive and `SHA256SUMS` from the [release](https://github.com/jaeseongs95/ssh-approval-portal/releases/tag/v2.0.0), then run on that server:
 
 ```sh
+sha256sum --check --ignore-missing SHA256SUMS
 tar -xzf ssh-approval-portal-2.0.0.tar.gz
 cd ssh-approval-portal-2.0.0
-sudo bash scripts/install.sh --admin-origin https://ssh-approve.example.com --grant-sudo-all
+python3 scripts/portal.py install --admin-origin https://approve.example.com --dry-run
+sudo python3 scripts/portal.py install --admin-origin https://approve.example.com
+sudo python3 scripts/portal.py status
 ```
 
-`--grant-sudo-all` grants `mcpops` unrestricted passwordless sudo. This applies to other sessions using that SSH account as well as the approval bridge. Omit the option to use ordinary account permissions. Existing sudo configuration is neither rewritten nor removed.
+`--dry-run` displays the commands that would run; it is not a readiness check or an installation. The actual installer prepares a dedicated Node 24 runtime and local service. **Installation does not complete external HTTPS routing, identity-provider configuration or MCP login.**
 
-For an existing server, use `sudo bash scripts/install.sh` from the new package after checking the maintenance and recovery procedure. Existing settings, tokens, and SSH keys are preserved; the first update adds a UI signing key if the installation has none. The installer does not automatically roll back to a version that cannot enforce durable maintenance. First upgrades from older versions need a separate verified offline procedure.
+The default example does not grant unrestricted sudo. The optional `--grant-sudo-all` grants the `mcpops` account passwordless full sudo, including its other sessions; select it only when that authority is intended.
 
-User changes to an existing unit are preserved. An ExecStart outside the managed pattern is not overwritten automatically. The original `ssh-mcp.service` is not installed.
+For Linux Docker Compose deployment, use the separate [preparation script](scripts/prepare-docker.sh), [Compose configuration](docker/compose.yaml) and [maintenance procedure (Korean)](docs/maintenance-test-and-recovery.ko.md). Do not run native and Compose services against the same ports and storage simultaneously.
 
-Maintenance reservation requires an owner token and blocks new work on cooperating paths. Running or pending requests and incomplete uploads prevent reservation. If the installer is interrupted or the result is unknown, retain its protected owner file and inspect the actual state before recovery; do not blindly release the reservation. Non-cooperating root processes and older versions can bypass this protection. See [maintenance testing and recovery](docs/maintenance-test-and-recovery.ko.md).
+### Connect HTTPS, authentication and targets
 
-## Connection and card checks
+The default local endpoints are MCP `http://127.0.0.1:39124/mcp` and administrator `http://127.0.0.1:39125`. Publish them through protected HTTPS routing. Configure owner access and the MCP upstream credential separately; use [installation and connection (Korean)](docs/install-workflow.ko.md) or [HTTPS without Cloudflare (Korean)](docs/non-cloudflare-https.ko.md).
 
-- MCP defaults to localhost port 39124 at `/mcp`; the web administrator interface defaults to localhost port 39125. Set `BRIDGE_MCP_PORT` and `BRIDGE_ADMIN_PORT` in the protected configuration to ports from 1–65535. Maintenance and startup checks use those same values.
-- Connect HTTPS domains through Cloudflare Tunnel or an equivalent service. Bind `BRIDGE_MCP_TOKEN` to the Cloudflare Portal upstream Bearer credential and keep an owner-only access policy. Do not bind the administrator token to the upstream.
-- 여러 SSH 대상 등록·고정 기본 대상·승인 결속과 전역 한도는 [다중 대상 설정](docs/multi-targets.ko.md)을 참고하세요.
-- `BRIDGE_DISPLAY_NAME`과 `BRIDGE_TARGET_DISPLAY_NAME`은 관리자 탭·화면과 승인·결과 카드에 표시할 중계기 및 SSH 대상 이름입니다. 생략하면 공개 관리자 호스트명과 `SSH`를 사용합니다. 앞뒤 공백을 제거하며, 최대 80 UTF-16 코드 단위이고 제어·서식 문자는 허용하지 않습니다. 인증 전에도 표시될 수 있으므로 비밀·계정·키 경로를 넣지 마세요. 이름은 실행 대상이나 승인 권한을 바꾸지 않습니다.
-- `BRIDGE_ADMIN_ORIGIN` must exactly match the canonical HTTPS administrator origin, with a lowercase hostname and no path, trailing slash, query, fragment, or user information. To use another SSH server, configure both read and write profiles for the same server and account, verify and pin its public host key, and prepare the file helper and private remote staging directory on that target.
-- Keep the server ID `ssh-approval-bridge` in the Portal's ordinary tool mode. If tool aliases change, check `BRIDGE_UI_TOOL_PREFIX` and the UI tool mapping. Refresh the tools in ChatGPT and connect Claude to the same owner-only Portal URL.
-- Call `show-ui-probe`. Confirm that the private marker appears in the card but not in model responses or context. Check each client's UI resource, `_meta`, and app-only tool delivery as well.
-- `BRIDGE_UI_ENABLED=false` is the default. Complete the intended environment's tests and an independent audit before changing the root environment setting to true and restarting the service. Do not enable card approval on an unverified platform.
-- Administrator secrets are stored in `/etc/ssh-mcp-approval-bridge.env` with mode 0600. Do not send their values to chat or command output. Actual keys and tokens are not included in the package.
+| Boundary | What it authenticates |
+| --- | --- |
+| MCP connection | The client calling the MCP server; it does not grant access to PC files. |
+| Administrator website | The owner reviewing requests/settings. Token mode is the default; Access/OIDC setup is separate. |
+| SSH target | The configured remote account and pinned host key; its actual OS permissions apply. |
+| Windows GUI credentials | GUI logon for the RDP backend; an SSH public key does not replace them. |
 
-## Web administrator interface and sign-in
+Register and pin each target's host key before use. Target IDs, revision binding and profile configuration are described in [target configuration (Korean)](docs/multi-targets.ko.md); use the current `targets`/`submit`/`observe` names in the [2.0 tool contract (Korean)](docs/mcp-tools.ko.md).
 
-The website displays pending requests, history, and execution results. After connecting, it refreshes every 10 seconds while the page is visible. Manual refreshes and approval/denial actions refresh immediately. Approval acceptance immediately releases the page controls; subsequent reads show execution completion or failure. Acceptance does not mean successful execution. Display language can be automatic, Korean or English and is saved only in this browser. Search retained approval history by request creation date, text, status and target together. Date ranges include both calendar dates in the browser’s local time; blank dates show the full retained period.
+Connect the MCP URL in your agent host, refresh its tool list and verify `targets`. Cards are optional and disabled by default with `BRIDGE_UI_ENABLED=false`. If enabled, their rendering depends on the host's MCP Apps support; app-only `ui-*` actions are not standalone widgets. See [administrator sign-in](docs/admin-login.en.md) for browser sessions. Signing out there ends the current administrator session and preserves MCP authentication.
 
-Administrator-token authentication is the default. Cloudflare, Google, and GitHub sign-in are **web administrator sign-in through Cloudflare Access**; they do not replace SSH login or MCP connection authentication. Configure and test the providers and actual sign-in before explicitly enabling Access mode. See the [administrator sign-in guide](docs/admin-login.en.md) for setup, access restrictions, and recovery.
+<a id="gui"></a>
+## Agent-operated graphical desktops
 
-Signing out stops automatic refresh and clears the displayed requests. Access mode signs out through Cloudflare Access; token mode clears the token entered in the current tab. It does not revoke server tokens or cancel an operation that is already running.
+GUI tools operate a real OS screen, not a browser terminal. The agent opens a lease, observes a PNG frame, sends explicit text/key/pointer input tied to that frame, observes the result, then closes the lease:
 
-## Docker Compose deployment
-
-The deployment target is Docker Engine with Compose v2 on Ubuntu 22.04/24.04. The bridge runs as a non-root user with a read-only root filesystem and dropped capabilities. Prepare the SSH account, sudo permissions, and file helper on the target server. Do not grant the container `--privileged` or access to the Docker socket. `scripts/prepare-docker.sh` also uses the shared `scripts/ensure-node-runtime.sh` to prepare a host Node 24 runtime in `/opt/ssh-approval/node` without replacing the system Node installation.
-
-```sh
-# Generate the assets above once; do not reuse their output directory.
-mkdir -p dist
-cp /absolute/new/portal-2.0.0-release/ssh-approval-portal-2.0.0.tar.gz dist/
-sudo bash scripts/prepare-docker.sh --admin-origin https://ssh-approve.example.com --grant-sudo-all
-sudo docker compose --env-file /etc/ssh-approval-portal/compose.env -f docker/compose.yaml build
-sudo docker compose --env-file /etc/ssh-approval-portal/compose.env -f docker/compose.yaml up -d --wait
+```text
+targets → desktop-open → desktop-status / desktop-observe
+        → desktop-input → desktop-observe → desktop-close
 ```
 
-To migrate an existing server to Compose, finish requests and stop `ssh-approval-bridge.service` first. Apply the verified native updater first if the installed helper differs. Check that the new Compose service is healthy before disabling automatic startup of the old native unit. Running both deployments on the same server with the same configured ports causes a conflict. The defaults are 39124/39125. Neither deployment installs the original `ssh-mcp.service`.
+The server must have the backend prerequisites and target configuration. **Current agent GUI access also requires the target's active TEST policy and server-side TEST secret.** Enabling `desktop.enabled` alone is insufficient; administrator GUI access has a different authorization path. Do not enable TEST bypass on production just to obtain GUI access.
 
-For prebuilt images, check the actual tag and architecture in the release asset's `VALIDATION.json` first. Load the archive with `sudo docker load -i IMAGE.tar`, set `BRIDGE_IMAGE` in `/etc/ssh-approval-portal/compose.env` to that tag, and add `--no-build` to the Compose startup command above. Images include Node 24.21.0, locked dependencies, and the UI. Choose the correct amd64 or arm64 image. ARM64 emulation tests do not replace tests on physical ARM hardware.
+- **Linux:** the managed backend creates a dedicated Xvnc/Openbox/xterm X11 session under the SSH account. It is not sharing an existing Wayland screen.
+- **Windows:** the Linux relay connects its private FreeRDP runtime through pinned SSH to the Windows RDP service. GUI logon credentials stored through a secret reference are required; use a dedicated account to avoid interfering with human sessions. The bundled native runtime supports Ubuntu 24.04 x86_64.
+- **Existing RFB:** share only a deliberately configured trusted session; this does not automatically create or unlock OS sessions.
 
-Tokens are provided through `/run/secrets/bridge_config`, not Compose environment variables. The host source is `/etc/ssh-approval-portal/docker-secrets.env`, readable only by the service account. SSH keys and configuration are mounted read-only; audit data and transfer staging use separate writable mounts. Linux host networking preserves the existing localhost SSH and Cloudflare Tunnel paths.
+The user does **not** need to keep a PC RDP window open or maintain the agent's desktop manually. Backend availability, transport connection and an authenticated usable desktop are distinct states. Use the reported state and observe the result of input. Closing a lease is not Windows logout. See [GUI setup (Korean)](docs/desktop.ko.md) and [authentication state (Korean)](docs/desktop-auth-state.ko.md).
 
-Compose updates support a limited configuration: the running bridge must support durable maintenance, both images must have independently verified identities registered in the protected trust directory, and the default host bind storage and runtime constraints must match. The updater reserves maintenance, compares preservation after the new container starts, and releases only after confirmation. Failure or an unknown result retains the reservation and owner file; it does not automatically roll back to an older image. Legacy upgrades, Compose overrides and custom storage need a separately verified procedure. See [maintenance testing and recovery](docs/maintenance-test-and-recovery.ko.md) for exact constraints and recovery. Do not indiscriminately remove images, transfer staging, or secrets with `docker compose down -v`.
+<a id="policy"></a>
+## Approvals, capacity and TEST mode
 
-## Verification and status
+Policy is evaluated per target. Preapproved command names permit their options and arguments; deny rules take priority. If a whole command cannot be admitted by policy, configured model assessment may help decide whether to execute automatically or request owner approval. Model assessment is optional, requires explicit disclosure settings and does not inspect transferred file bodies.
 
-These server verification commands belong in authorized TEST/CI environments; they were not run for this documentation change. Final 2.0.0 client, package, installation and deployment results need their own pinned commit and execution evidence.
+Upload, download and sudo automatic approval are separate choices. A UUID, task description or enabled approval switch does not expand the remote account's OS permissions.
+
+The administrator page configures global and per-target **queue capacity** and **concurrent execution**. Initial defaults use the bridge's available CPU count `N`: queue capacity `N × 10`, concurrent execution `N`. Stored administrator settings are retained. Execution waiting is separate from HTTP admission waiting; `queued` is not another approval request.
+
+TEST bypass is off by default. When its dedicated server secret and current target/policy binding are valid, it bypasses assessment, individual approval and the configured allowed-root membership restriction, regardless of command denials and individual automatic-approval switches. Authentication, path-safety checks, actual OS permissions and resource limits remain. It does not change ACLs, create credentials or bypass UAC. Disabling TEST restores the target's regular policy.
+
+<a id="upgrade"></a>
+## Upgrade and troubleshoot
+
+2.0 replaces the 1.x public tool contract. Refresh cached MCP tool definitions; use `targets`, `submit` and `observe` instead of legacy `list-targets`, `run-command` and `wait-for-request`.
+
+Existing history migration is supported through the [deployment guide (Korean)](docs/deployment-180.ko.md), subject to its layout, integrity and capacity checks. It preserves source/archive evidence, does not replay uncertain historical requests and does not recreate expired output. `deploy180.mjs` is the retained script name, not the product version. Recovery is explicit; a failed or uncertain deployment is not permission to restore a database or retry blindly.
+
+| Symptom | Next step |
+| --- | --- |
+| Old tools, `INVALID_ARGUMENT`, or a stale output schema | Refresh the MCP tool list and compare with the current contract. |
+| `OPERATION_INPUT_CONFLICT` | Check the fields allowed for the submitted kind; omit `elevate` for commands. |
+| Approval needed or `queued` | Inspect the existing request; approve only when required and observe the same ID. |
+| Lost connection, deadline or unknown outcome | Inspect the original ID/key and `execution` metadata; do not invent a replacement operation. |
+| PC client authentication failure | Run `doctor` with the administrator origin and trusted cloudflared path; distinguish it from MCP login. |
+| GUI unavailable or authentication required | Read `desktop-status` and backend prerequisites before sending input. |
+
+<a id="docs"></a>
+## Documentation
+
+| Topic | Guide |
+| --- | --- |
+| Public contract and agent clients | [Tools (Korean)](docs/mcp-tools.ko.md) · [Client capabilities (Korean)](docs/agent-clients.ko.md) |
+| PC file uploads | [Client package and UUID files (Korean)](docs/client-files.ko.md) |
+| Installation and recovery | [Lifecycle (Korean)](docs/install-workflow.ko.md) · [Migration/recovery (Korean)](docs/deployment-180.ko.md) |
+| Administrator authentication | [English](docs/admin-login.en.md) · [한국어](docs/admin-login.ko.md) |
+| Target setup | [Multiple targets (Korean)](docs/multi-targets.ko.md) · [Windows (Korean)](docs/windows-targets.ko.md) |
+| Graphical desktops | [Setup (Korean)](docs/desktop.ko.md) · [Authentication state (Korean)](docs/desktop-auth-state.ko.md) |
+| Secrets and non-Cloudflare routing | [Secret references (Korean)](docs/secret-management.ko.md) · [HTTPS (Korean)](docs/non-cloudflare-https.ko.md) |
+| Design and verification | [Architecture](docs/architecture.en.md) · [Test plan (Korean)](test/PLAN.md) · [Local browser testing (Korean)](docs/browser-testing.ko.md) |
+
+Some detailed guides retain versioned historical execution records. Those records describe their pinned environments, not universal acceptance of later releases. Regular v2.0.0 is published; specific host, GUI, file-save and architecture combinations still need their own evidence.
+
+## Development and packaging
+
+Use a source checkout for development; release users do not need to build packages. Server tests belong in the project's authorized TEST/CI environment. Run browser regressions on the local PC as described in the browser guide.
 
 ```sh
 npm ci --ignore-scripts
 npm run build:ui
 npm test
 python3 test/test_helper.py
-sudo bash scripts/status.sh
 ```
 
-Run browser regressions in an isolated checkout on the local PC using the [browser testing guide](docs/browser-testing.ko.md). Keep this separate from server product tests.
+To generate server/client archives in a **new** absolute output directory:
 
-Build the UI with its separate `ui` dependencies without upgrading the server SDK. Rebuild distributable assets with `npm run build:ui` after changing UI or web modules. See the [architecture guide](docs/architecture.en.md) and [verification plan](test/PLAN.md) for boundaries, compatibility, and future test requirements. `test/docker-tests.ps1` creates and cleans up isolated Ubuntu containers with synthetic data. Record actual client card/file-save tests, platform file-input tests, and physical ARM hardware tests as complete only when each has its own execution evidence.
+```sh
+npm run package:release -- --output /absolute/new/portal-2.0.0-release
+```
 
-Verify the release's `release-manifest.json` and `SHA256SUMS`. Packages exclude node_modules, actual configuration, tokens, private keys, and user sessions. Read the candidate's test records together with the verification limits above. Publishing and Cloudflare configuration changes are not performed automatically.
+Packaging produces server and client `.tar.gz`/`.zip` assets and checksums. Node.js, cloudflared, credentials and user sessions are not bundled. Source, fixture, live-host, client UI and deployment checks establish different things; an available command is not evidence that a test has passed. Keep published assets immutable and compare the release checksums before use.
 
-Use `observe` with `waitMs` for public waits. `waitTimedOut` limits observation and does not authorize replay. The [older callback guide](docs/approval-callback.ko.md) retains historical tool names.
-
-The **Test server** checkbox in the important automatic-approval settings bypasses risk assessment and individual approval for that target's commands, Python source, CLI installation and file transfers. It overrides command denials and other automatic-approval switches and is off by default. Administrators decide which targets are test servers. Authentication, target binding, input/file validation, SSH account permissions and maintenance/concurrency limits remain enforced. Disabling it restores the existing policy.
-
-Test bypass additionally requires a dedicated value in the existing secret store and server-only `BRIDGE_TEST_SERVER_SECRET_REF=secret://local-file/test-server`. The operator provisions a 64-character lowercase hexadecimal value through the existing hidden-input TTY registration CLI, only on the test portal. This reference cannot be edited through the administrator ENV UI/API. The value is never returned to UI/API/MCP or logs; the existing resolver rechecks it before policy review, save and execution. Missing, malformed or unreadable references/values reject activation and bypass execution.
+[MIT license](LICENSE).
