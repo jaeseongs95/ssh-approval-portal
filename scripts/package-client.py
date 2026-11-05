@@ -64,7 +64,7 @@ def encoded(value):
 def package(root, output):
     root, output = Path(root).resolve(), Path(output).resolve()
     files = source_files(root)
-    for name in ['LICENSE', 'docs/client-files.ko.md', 'hooks/codex.json', 'hooks/claude-code.json', 'hooks/antigravity.json', '.codex-plugin/plugin.json']:
+    for name in ['LICENSE', 'docs/client-files.ko.md', 'hooks/codex.json', 'hooks/claude-code.json', 'hooks/antigravity.json', '.codex-plugin/plugin.json', '.claude-plugin/plugin.json']:
         path = root / name
         if not path.is_file() or unsafe(path) or any(unsafe(root / p) for p in path.relative_to(root).parents):
             raise ValueError('Missing or unsafe client documentation: ' + name)
