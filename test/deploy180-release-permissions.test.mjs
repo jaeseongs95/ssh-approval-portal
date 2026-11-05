@@ -70,12 +70,13 @@ function stagePrivate(f, stage = 'stage') {
   { encoding: 'utf8', timeout: 30000 });
 }
 
-test('inspect accepts a 2.0 patch candidate and refuses historical or unsupported candidate versions before writing deployment state', { skip: !rootLinux }, async t => {
-  for (const version of ['2.0.3', '1.8.0', '2.1.0', '2.0.0-beta.1']) await t.test(version, async t => {
+test('inspect accepts supported 2.0 and 2.1 candidates and refuses historical or unsupported versions before writing deployment state', { skip: !rootLinux }, async t => {
+  for (const version of ['2.0.3', '2.1.0', '1.8.0', '2.2.0', '2.0.0-beta.1']) await t.test(version, async t => {
     const f = await fixture(t, version); if (!f) return;
     const result = stagePrivate(f, 'inspect'), receipt = JSON.parse(result.stdout);
-    assert.equal(result.status, version === '2.0.3' ? 0 : 1, result.stdout + result.stderr);
-    if (version === '2.0.3') assert.equal(receipt.version, version);
+    const supported = ['2.0.3', '2.1.0'].includes(version);
+    assert.equal(result.status, supported ? 0 : 1, result.stdout + result.stderr);
+    if (supported) assert.equal(receipt.version, version);
     else assert.equal(receipt.code, 'UNSUPPORTED_DEPLOY_VERSION');
     await assert.rejects(lstat(f.plan.appRoot), { code: 'ENOENT' });
     await assert.rejects(lstat(join(f.root, 'stop-called')), { code: 'ENOENT' });
