@@ -105,10 +105,10 @@ function wakeClaude({ environment, marker, connect }) {
   });
 }
 
-async function wakeAntigravity({ environment, sessionId, marker, run }) {
+async function wakeAntigravity({ executable, environment, sessionId, marker, run }) {
   const projectId = environment.ANTIGRAVITY_PROJECT_ID;
   if (typeof projectId !== 'string' || !projectId.trim()) return unavailable('ANTIGRAVITY_PROJECT_ID_MISSING');
-  const command = environment.ANTIGRAVITY_AGENTAPI_EXE;
+  const command = executable ?? environment.ANTIGRAVITY_AGENTAPI_EXE;
   if (!(await existingExecutable(command))) return unavailable('ANTIGRAVITY_AGENTAPI_UNAVAILABLE');
   if (!environment.ANTIGRAVITY_LS_ADDRESS || !environment.ANTIGRAVITY_CSRF_TOKEN) {
     return unavailable('ANTIGRAVITY_LS_CONNECTION_MISSING');

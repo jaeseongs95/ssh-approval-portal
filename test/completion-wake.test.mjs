@@ -200,6 +200,33 @@ test('W07 agy verifies exact project before sending exact marker', async t => {
   }
 });
 
+// W07b predeclared regression: explicit absolute file wins over absent/different env EXE.
+// Procedure: inject matching metadata then send; assert both commands select that file.
+// Reject invalid explicit files and mismatched projects without fallback/send. Actual: NOT_RUN.
+test('W07b agy honors an explicit executable while preserving preflight and project checks', async t => {
+  const { root, executable } = await fixture(t);
+  for (const envExecutable of [undefined, join(root, 'different-env-executable')]) {
+    const environment = agyEnv(envExecutable), h = runner([{ stdout: meta('project-A') }, {}]);
+    delete environment.ANTIGRAVITY_AGENTAPI_EXE;
+    if (envExecutable !== undefined) environment.ANTIGRAVITY_AGENTAPI_EXE = envExecutable;
+    assert.deepEqual(await wakeCompletion({ host: 'antigravity', ...target, executable, environment, run: h.run }), { state: 'requested' });
+    assert.equal(h.calls.length, 2);
+    assert.deepEqual(h.calls.map(call => call.file), [executable, executable]);
+    assert.deepEqual(h.calls[0].args, ['agentapi', 'get-conversation-metadata', sessionId]);
+    assert.deepEqual(h.calls[1].args, ['agentapi', 'send-message', sessionId, marker]);
+  }
+  const never = () => assert.fail('invalid explicit executable must not fall back to env');
+  for (const selected of ['agentapi', root, join(root, 'missing-explicit')]) {
+    assert.deepEqual(await wakeCompletion({ host: 'antigravity', ...target, executable: selected, environment: agyEnv(executable), run: never }),
+      unavailable('ANTIGRAVITY_AGENTAPI_UNAVAILABLE'));
+  }
+  const environment = agyEnv(undefined), h = runner([{ stdout: meta('project-B') }]);
+  delete environment.ANTIGRAVITY_AGENTAPI_EXE;
+  assert.deepEqual(await wakeCompletion({ host: 'antigravity', ...target, executable, environment, run: h.run }),
+    unavailable('ANTIGRAVITY_PROJECT_MISMATCH'));
+  assert.equal(h.calls.length, 1);
+});
+
 test('W08 agy requires current env without executable/auth discovery', async t => {
   const { executable } = await fixture(t);
   for (const [key, reason] of [['ANTIGRAVITY_PROJECT_ID', 'ANTIGRAVITY_PROJECT_ID_MISSING'],
