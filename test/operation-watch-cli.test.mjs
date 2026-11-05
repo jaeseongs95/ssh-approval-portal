@@ -60,3 +60,31 @@ test('watch CLI read failure retains the original ID and closes its session', as
   const refusal = JSON.parse(err.text.trim().split('\n').at(-1));
   assert.deepEqual(refusal, { error: 'OWNER_REAUTH_REQUIRED', requestId: id }); assert.doesNotMatch(err.text, /private not printed|synthetic/);
 });
+
+test('opt-in completion notification runs once after terminal status and keeps failures separate from SSH', async () => {
+  for (const notificationFails of [false, true]) {
+    const out = capture(), err = capture(); let terminal = false, notifications = 0;
+    const argv = [...args, '--notify-codex', process.execPath, '--thread', '12345678-1234-4234-8234-123456789abc'];
+    const code = await main(argv, out, err, () => 'synthetic.header.signature', {}, undefined, undefined,
+      () => ({ async connect() {}, async watch() { terminal = true; return event; }, async close() {} }),
+      async options => {
+        notifications++; assert.equal(terminal, true); assert.deepEqual(options.event, event);
+        if (notificationFails) throw Error('private notifier output');
+        return { state: 'queued', messageId: '12345678-1234-4234-8234-123456789abc', resumption: 'requested' };
+      });
+    assert.equal(notifications, 1); assert.equal(code, notificationFails ? 1 : 0);
+    const value = JSON.parse(out.text); assert.equal(value.state, 'completed');
+    assert.equal(value.notification.state, notificationFails ? 'unknown' : 'queued');
+    assert.doesNotMatch(err.text, /private notifier output/);
+    if (notificationFails) assert.match(err.text, /COMPLETION_NOTIFICATION_FAILED/);
+  }
+});
+
+test('completion routing requires an explicit executable and exact thread before authentication', async () => {
+  for (const extra of [['--thread', '12345678-1234-4234-8234-123456789abc'], ['--notify-codex', process.execPath],
+    ['--notify-codex', process.execPath, '--thread', 'wrong-thread']]) {
+    const out = capture(), err = capture();
+    assert.equal(await main([...args, ...extra], out, err, () => assert.fail('no credential access')), 1);
+    assert.equal(out.text, ''); assert.match(err.text, /INVALID_(?:CODEX_)?COMPLETION_TARGET/);
+  }
+});

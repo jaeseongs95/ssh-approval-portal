@@ -70,6 +70,16 @@ node @portalFiles watch 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' --tim
 
 관찰 제한시간은 기본 600,000ms이며 `--timeout-ms`로 1~600,000ms를 지정할 수 있습니다. 실행 자체의 시간 제한과 다릅니다. `completed`이며 실패·감사 오류가 없으면 exit 0, 실패·거부·만료·취소·결과 불명은 exit 1입니다. 인증 만료·연결 유실·관찰 만료도 원래 ID를 보존한 채 exit 1로 종료합니다. watcher를 멈춰도 SSH 작업은 취소되지 않습니다. 다시 확인할 때는 같은 ID를 사용하며 새 작업 키를 만들지 않습니다.
 
+Codex에서 백그라운드 프로세스의 완료 통지를 지원하지 않는 실행 경로라면, 설치된 Codex 실행 파일의 절대경로와 **현재 자신의 세션 UUID**를 명시해 선택적으로 전달할 수 있습니다.
+
+```powershell
+node scripts/portal-files.mjs --origin https://ssh-test-approve.jaeseong.dev --cloudflared C:\tools\cloudflared.exe watch REQUEST_ID --notify-codex C:\tools\codex.exe --thread CURRENT_SESSION_UUID
+```
+
+이 옵션도 호스트의 백그라운드 실행으로 시작합니다. 클라이언트는 완료 메타데이터만 `codex queue --thread ... --resume`으로 한 번 전달합니다. `notification.state=queued`는 큐 접수이며, 에이전트의 수신·처리 완료를 뜻하지 않습니다. `resumption=requested`도 재개 요청만 뜻합니다. 살아 있는 Codex 호스트가 없거나 경고가 발생하면 자동 재개를 보장하지 않습니다. 전달 실패는 원래 SSH 결과와 구분해 `COMPLETION_NOTIFICATION_FAILED`로 보고하며 자동 재전송하지 않습니다. 다른 세션 UUID로 보내지 마세요.
+
+Claude Code처럼 백그라운드 작업 완료를 자체적으로 통지하는 호스트는 공통 `watch` 명령의 stdout을 그 기능으로 받으면 됩니다. 호스트별 동작을 확인하기 전에는 자동 재개를 가정하지 않습니다. 파일 업로드와 기본 관찰 기능에는 Codex가 필요하지 않습니다.
+
 ## 배포 파일
 
 ssh-approval-portal-client-2.1.0.tar.gz와 같은 이름의.zip은 동일 클라이언트 소스를 담습니다. client-manifest.json은 포함 파일의 크기·SHA-256과 Node 요구사항을 기록합니다. SHA256SUMS-client-2.1.0은 두 압축 파일의 전체 해시입니다. 서버 설치 파일이나 인증 캐시는 포함하지 않습니다. 실행 진입점은 `scripts/portal-files.mjs`이며 명령은 `doctor`·`upload`·`status`·`watch`입니다. 별도 `scripts/portal-client.mjs`·`scripts/portal-file-mcp.mjs` 실행 스크립트는 이 client 자산에 포함하지 않습니다.

@@ -9,21 +9,23 @@ import { validateLocalPath } from '../src/adapters/cli/local-files.mjs';
 import { validateOrigin } from '../src/adapters/config/settings.mjs';
 import { safePortalErrorCode } from '../src/adapters/cli/owner-http-session.mjs';
 import { createOperationWatcher } from '../src/adapters/cli/operation-watcher.mjs';
+import { notifyCodexCompletion, validateCodexCompletionTarget } from '../src/adapters/cli/codex-completion.mjs';
 
 const usage = 'SSH Approval Portal file client2.1.0 (Node.js24.2+ within major24)\n' +
   'node scripts/portal-files.mjs --origin HTTPS_ORIGIN [--cloudflared EXISTING_ABSOLUTE_PATH] doctor\n' +
   'node scripts/portal-files.mjs --origin HTTPS_ORIGIN [--cloudflared EXISTING_ABSOLUTE_PATH] upload --file ABSOLUTE_FILE --operation-key STABLE_KEY\n' +
   'node scripts/portal-files.mjs --origin HTTPS_ORIGIN [--cloudflared EXISTING_ABSOLUTE_PATH] status UUID\n' +
-  'node scripts/portal-files.mjs --origin HTTPS_ORIGIN [--cloudflared EXISTING_ABSOLUTE_PATH] watch REQUEST_ID [--timeout-ms 600000]\n' +
+  'node scripts/portal-files.mjs --origin HTTPS_ORIGIN [--cloudflared EXISTING_ABSOLUTE_PATH] watch REQUEST_ID [--timeout-ms 600000] [--notify-codex ABSOLUTE_EXECUTABLE --thread EXACT_SESSION_UUID]\n' +
   'Launch watch using the host background-process facility, continue independent work, and consume its one terminal event. Stopping watch never cancels or replays SSH. No automatic host wake is guaranteed without host support.\n' +
   'Upload sends PC bytes directly over owner-authenticated HTTP. Success stdout is only {"uuid":"..."}. No automatic login, install, retry, approval or SSH destination selection.\n';
 
 export async function main(argv = process.argv.slice(2), output = process.stdout, errorOutput = process.stderr,
-  runCredential = execFileSync, environment = process.env, openClient = createOpaqueFilesClient, diagnose = diagnoseClient, openWatcher = createOperationWatcher) {
-  let client, result, command, requestId, failed = false;
+  runCredential = execFileSync, environment = process.env, openClient = createOpaqueFilesClient, diagnose = diagnoseClient, openWatcher = createOperationWatcher, notify = notifyCodexCompletion) {
+  let client, result, command, requestId, failed = false, notificationFailed = false;
   try {
     const { values, positionals } = parseArgs({ args: argv, allowPositionals: true, options: {
       help: { type: 'boolean' }, origin: { type: 'string' }, cloudflared: { type: 'string' }, file: { type: 'string' }, 'operation-key': { type: 'string' }, 'timeout-ms': { type: 'string' },
+      'notify-codex': { type: 'string' }, thread: { type: 'string' },
     } });
     if (values.help === true && argv.length === 1) { output.write(usage); return 0; }
     command = positionals[0];
@@ -35,6 +37,10 @@ export async function main(argv = process.argv.slice(2), output = process.stdout
     if (values['timeout-ms'] !== undefined && (command !== 'watch' || !/^[1-9][0-9]{0,5}(?![\s\S])/.test(values['timeout-ms']) || Number(values['timeout-ms']) > 600000))
       throw Object.assign(Error(), { code: 'INVALID_DEADLINE' });
     if (command === 'watch' && !/^[a-f0-9]{48}(?![\s\S])/.test(positionals[1])) throw Object.assign(Error(), { code: 'INVALID_REQUEST_ID' });
+    if (values['notify-codex'] !== undefined || values.thread !== undefined) {
+      if (command !== 'watch' || !values['notify-codex'] || !values.thread) throw Object.assign(Error(), { code: 'INVALID_COMPLETION_TARGET' });
+      await validateCodexCompletionTarget({ executable: values['notify-codex'], threadId: values.thread });
+    }
     if (values.cloudflared !== undefined) validateLocalPath(values.cloudflared);
     if (command === 'status' && !opaqueUuidValid(positionals[1])) throw Object.assign(Error(), { code: 'INVALID_ARTIFACT_UUID' });
     if (command === 'upload') {
@@ -57,6 +63,14 @@ export async function main(argv = process.argv.slice(2), output = process.stdout
     if (command === 'watch') {
       errorOutput.write(JSON.stringify({ event: 'operation.watch.started', id: positionals[1], timeoutMs: Number(values['timeout-ms'] ?? 600000) }) + '\n');
       result = await client.watch(positionals[1]);
+      if (values['notify-codex']) {
+        try { result = { ...result, notification: await notify({ executable: values['notify-codex'], threadId: values.thread, event: result }) }; }
+        catch {
+          notificationFailed = true;
+          result = { ...result, notification: { state: 'unknown', automaticRetry: false } };
+          errorOutput.write(JSON.stringify({ error: 'COMPLETION_NOTIFICATION_FAILED', requestId }) + '\n');
+        }
+      }
     } else result = command === 'status' ? await client.status(positionals[1]) : await client.upload(values.file, values['operation-key'],
       progress => errorOutput.write(JSON.stringify({ uuid: progress.uuid, phase: 'staging' }) + '\n'));
     if (command === 'upload' && (!result || !opaqueUuidValid(result.uuid) || Object.keys(result).length !== 1)) throw Object.assign(Error(), { code: 'INVALID_ARTIFACT_RESPONSE' });
@@ -75,7 +89,7 @@ export async function main(argv = process.argv.slice(2), output = process.stdout
   }
   if (failed) return 1;
   output.write(JSON.stringify(result) + '\n');
-  if (command === 'watch') return result.state === 'completed' && result.failed !== true && !result.auditFailure ? 0 : 1;
+  if (command === 'watch') return !notificationFailed && result.state === 'completed' && result.failed !== true && !result.auditFailure ? 0 : 1;
   return 0;
 }
 
