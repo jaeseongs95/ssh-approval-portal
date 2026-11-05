@@ -47,6 +47,8 @@ export function createOperationWatcher(options) {
       } catch (error) {
         if (controller.signal.aborted) throw fail('WATCH_STOPPED', id);
         if (session.signal.aborted) throw fail(options?.signal?.aborted ? 'WATCH_STOPPED' : 'WATCH_TIMEOUT', id);
+        // The watcher endpoint has a closed refusal vocabulary. Do not expose arbitrary server text.
+        if (!['OPERATION_NOT_FOUND', 'TARGET_REVISION_CONFLICT', 'OPERATION_OBSERVER_CAPACITY', 'OPERATION_OBSERVATION_FAILED', 'INVALID_OPERATION_OBSERVER'].includes(error.serverCode)) delete error.serverCode;
         throw Object.assign(error, { requestId: id });
       } finally { active = false; }
     },
