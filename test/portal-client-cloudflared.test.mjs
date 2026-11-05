@@ -40,7 +40,7 @@ async function invoke(args, { token = credential, failure, input = [], mode = ['
     return token;
   };
   const code = await main(['--origin', origin, ...mode, ...args], Readable.from(input),
-    { write: text => { stdout += text; } }, { write: text => { stderr += text; } }, execute);
+    { write: text => { stdout += text; } }, { write: text => { stderr += text; } }, execute, {});
   return { code, stdout, stderr, executions };
 }
 
@@ -109,7 +109,8 @@ test('helper failures suppress raw stdout stderr and never retry or reach the po
     const failure = Object.assign(new Error('vendor message ' + credential), { code, stdout: credential, stderr: credential });
     const r = await invoke(['targets'], { failure });
     assert.equal(r.code, 1);
-    assert.deepEqual(JSON.parse(r.stderr), { error: 'ACCESS_CREDENTIAL_UNAVAILABLE' }, 'helper failure must remain public and stop');
+    const expected = { ETIMEDOUT: 'ACCESS_CREDENTIAL_TIMEOUT', ENOENT: 'CLOUDFLARED_NOT_FOUND', ENOBUFS: 'ACCESS_CREDENTIAL_TOO_LARGE' }[code];
+    assert.deepEqual(JSON.parse(r.stderr), { error: expected }, 'helper failure must remain public, distinguish its stage and stop');
     assert.equal(r.executions.length, 1); assert.equal(r.stdout, '');
     assert.equal(r.stderr.includes(credential), false);
   }

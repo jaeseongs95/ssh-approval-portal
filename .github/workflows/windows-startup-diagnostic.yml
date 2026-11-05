@@ -1,0 +1,138 @@
+name: Windows startup serial and parallel diagnosis
+
+on:
+  push:
+    branches: [fix/upload-capability-20261103]
+    paths: [.github/workflows/windows-startup-diagnostic.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  startup:
+    name: Windows cold runner / ${{ matrix.mode }}
+    runs-on: windows-2025
+    timeout-minutes: 10
+    continue-on-error: false
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - mode: serial
+            concurrency: 1
+          - mode: parallel
+            concurrency: 2
+    env:
+      SOLID_PYTHON: 'C:\hostedtoolcache\windows\Python\3.12.10\x64\python.exe'
+      DIAGNOSTIC_MODE: ${{ matrix.mode }}
+      TEST_CONCURRENCY: ${{ matrix.concurrency }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.21.0'
+      - run: npm ci --ignore-scripts
+      - name: Run two unchanged original tests with bounded public resource samples
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $evidence = Join-Path $env:RUNNER_TEMP ('windows-startup-' + $env:DIAGNOSTIC_MODE)
+          New-Item -ItemType Directory -Path $evidence | Out-Null
+          $utf8 = [Text.UTF8Encoding]::new($false)
+          $node = @(Get-Command node.exe -CommandType Application -ErrorAction Stop)[0].Source
+          $nodeVersion = & $node --version
+          if ($LASTEXITCODE -ne 0 -or $nodeVersion -cne 'v24.21.0') { throw 'Diagnostic requires Node v24.21.0' }
+          if (-not $IsWindows -or $env:GITHUB_ACTIONS -cne 'true') { throw 'Original tests require Windows GitHub Actions; refusing skipped diagnosis' }
+          if (-not (Test-Path -LiteralPath $env:SOLID_PYTHON -PathType Leaf)) { throw 'Fixed Python 3.12.10 executable unavailable; refusing skipped diagnosis' }
+          $powershell = @(Get-Command powershell.exe -CommandType Application -ErrorAction Stop)[0].Source
+          $expectedPowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+          if ([IO.Path]::GetFullPath($powershell) -ine [IO.Path]::GetFullPath($expectedPowerShell)) { throw 'Original tests require the system Windows PowerShell 5.1 path' }
+          # Do not start Python or PowerShell 5.1 to prewarm either test.
+          # The selected direct-process test uses SOLID_PYTHON and its own temp
+          # working directory; AGS_WINDOWS_SSH_FIXTURE is only read by an excluded test.
+          $selected = @(
+            @{ path = 'test/windows-command-line.test.mjs'; name = 'WIN-EOF 실제 0바이트 쓰기는 건너뛰고 뒤따르는 바이트와 파이프 종료를 구분한다' },
+            @{ path = 'test/windows-python-source.test.mjs'; name = 'Windows PowerShell 5.1 forwards source bytes and literal arguments without BOM or newline transformation' }
+          )
+          foreach ($test in $selected) {
+            $text = [IO.File]::ReadAllText((Join-Path $env:GITHUB_WORKSPACE $test.path))
+            if ([regex]::Matches($text, [regex]::Escape("test('" + $test.name + "'")).Count -ne 1) { throw ('Fixed original test missing or ambiguous: ' + $test.path) }
+          }
+          $pattern = '^(?:WIN-EOF 실제 0바이트 쓰기는 건너뛰고 뒤따르는 바이트와 파이프 종료를 구분한다|Windows PowerShell 5\.1 forwards source bytes and literal arguments without BOM or newline transformation)$'
+          $argv = @('--test', '--test-reporter=tap', ('--test-concurrency=' + $env:TEST_CONCURRENCY), ('--test-name-pattern=' + $pattern)) + @($selected | ForEach-Object { $_.path })
+          $receipt = [ordered]@{
+            commit = $env:GITHUB_SHA; mode = $env:DIAGNOSTIC_MODE; node = $node; nodeVersion = $nodeVersion
+            python = $env:SOLID_PYTHON; powershell = $powershell; argv = $argv
+            imageOS = $env:ImageOS; imageVersion = $env:ImageVersion; processorCount = [Environment]::ProcessorCount
+            inputs = @($selected | ForEach-Object { @{ path = $_.path; sha256 = (Get-FileHash -LiteralPath $_.path -Algorithm SHA256).Hash.ToLowerInvariant() } })
+            startedAt = [DateTime]::UtcNow.ToString('o'); finishedAt = $null; exitCode = $null; harnessStopped = $false
+            limitation = 'Two fresh hosted VMs differ in host load and caches. Serial runs EOF before Python, while parallel overlaps two files only, not the full original CI load. Resource sampling adds overhead. Success does not replace earlier full-CI failures or establish a production fix.'
+          }
+          $receiptPath = Join-Path $evidence 'receipt.json'
+          [IO.File]::WriteAllText($receiptPath, ($receipt | ConvertTo-Json -Depth 8), $utf8)
+          $start = [Diagnostics.ProcessStartInfo]::new()
+          $start.FileName = $node
+          $start.WorkingDirectory = $env:GITHUB_WORKSPACE
+          $start.UseShellExecute = $false
+          $start.CreateNoWindow = $true
+          $start.RedirectStandardOutput = $true
+          $start.RedirectStandardError = $true
+          $start.StandardOutputEncoding = $utf8
+          $start.StandardErrorEncoding = $utf8
+          foreach ($argument in $argv) { $start.ArgumentList.Add($argument) }
+          $process = [Diagnostics.Process]::new()
+          $process.StartInfo = $start
+          if (-not $process.Start()) { throw 'Node original-test process did not start' }
+          $stdout = $process.StandardOutput.ReadToEndAsync()
+          $stderr = $process.StandardError.ReadToEndAsync()
+          $watch = [Diagnostics.Stopwatch]::StartNew()
+          try {
+            do {
+              $sampleStart = [DateTime]::UtcNow
+              $os = Get-CimInstance -ClassName Win32_OperatingSystem -Property TotalVisibleMemorySize,FreePhysicalMemory
+              $samples = @(Get-Process -Name node,powershell,python,MsMpEng -ErrorAction SilentlyContinue | ForEach-Object {
+                $cpu = $null; $workingSet = $null
+                try { $cpu = $_.CPU; $workingSet = $_.WorkingSet64 } catch { }
+                @{ name = $_.ProcessName; pid = $_.Id; cpuSeconds = $cpu; workingSetBytes = $workingSet }
+              })
+              $sample = @{ utc = $sampleStart.ToString('o'); elapsedMs = $watch.ElapsedMilliseconds
+                osTotalMemoryKiB = $os.TotalVisibleMemorySize; osFreeMemoryKiB = $os.FreePhysicalMemory
+                processes = $samples; samplingMs = ([DateTime]::UtcNow - $sampleStart).TotalMilliseconds }
+              [IO.File]::AppendAllText((Join-Path $evidence 'resources.jsonl'), (($sample | ConvertTo-Json -Depth 5 -Compress) + "`n"), $utf8)
+              if ($watch.Elapsed.TotalSeconds -ge 240 -and -not $process.HasExited) {
+                $receipt.harnessStopped = $true
+                $process.Kill($true)
+              }
+              if (-not $process.HasExited) { Start-Sleep -Milliseconds 1000 }
+            } while (-not $process.HasExited)
+            $process.WaitForExit()
+            $receipt.exitCode = $process.ExitCode
+          } finally {
+            if (-not $process.HasExited) { $receipt.harnessStopped = $true; $process.Kill($true); $process.WaitForExit() }
+            $out = $stdout.GetAwaiter().GetResult()
+            $err = $stderr.GetAwaiter().GetResult()
+            [IO.File]::WriteAllText((Join-Path $evidence 'original-tests.tap'), $out, $utf8)
+            [IO.File]::WriteAllText((Join-Path $evidence 'original-tests.stderr'), $err, $utf8)
+            $receipt.finishedAt = [DateTime]::UtcNow.ToString('o')
+            if ($null -eq $receipt.exitCode) { $receipt.exitCode = $process.ExitCode }
+            [IO.File]::WriteAllText($receiptPath, ($receipt | ConvertTo-Json -Depth 8), $utf8)
+            $process.Dispose()
+          }
+          [Console]::Out.Write($out)
+          [Console]::Error.Write($err)
+          if ($receipt.harnessStopped) { throw 'Diagnostic harness deadline exceeded; original result remains failed' }
+          if ($out -notmatch '(?m)^# tests 2\r?$' -or $out -notmatch '(?m)^# skipped 0\r?$') { throw 'Expected exactly two original tests with zero skips' }
+          exit $receipt.exitCode
+      - name: Preserve original failures and A/B evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: windows-startup-${{ matrix.mode }}-${{ github.sha }}
+          path: ${{ runner.temp }}/windows-startup-${{ matrix.mode }}
+          if-no-files-found: error
+          retention-days: 14

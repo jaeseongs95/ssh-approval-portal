@@ -1,5 +1,6 @@
 const calls = [], waiting = new Map();
 const contexts = [];
+const jobs = new Map();
 let held = '';
 const job = { id: 'old-A', kind: 'command', state: 'completed', command: 'fixture A', target: 'fixture', expiresAt: Date.now() + 60000 };
 async function call(name, args, namespace) {
@@ -9,7 +10,7 @@ async function call(name, args, namespace) {
   if (name === 'show-file-transfer') return { _meta: { sshApproval: { bootstrapTicket: 'synthetic-bootstrap' } } };
   if (name === 'ui-upload-begin') return { structuredContent: { transferId: 'synthetic-upload' }, _meta: { sshApproval: { uploadTicket: 'synthetic-ticket' } } };
   if (name === 'ui-upload-finish') return { structuredContent: job, _meta: { sshApproval: {} } };
-  if (name === 'show-approval') return { _meta: { sshApproval: { viewTicket: 'synthetic-view' } } };
+  if (name === 'show-approval') return { structuredContent: jobs.get(args.id), _meta: { sshApproval: { uiEnabled: true, namespace: 'fixture_', approvalTicket: 'synthetic-cancel-ticket', viewTicket: 'synthetic-view' } } };
   if (name === 'ui-download-link') return { _meta: { sshApproval: { downloadUrl:'https://fixture.test/file?ticket=synthetic-download-ticket',fileName:'fixture.txt' } } };
   if (name === 'ui-read-command-output') return { structuredContent: { outputId: args.outputId, offsetBytes: args.offsetBytes, nextOffset: args.offsetBytes + 20, totalBytes: 20, eof: true }, _meta: { sshOutput: { text: 'EXPLICIT_OUTPUT_SENTINEL' } } };
   return {};
@@ -40,7 +41,8 @@ if (source.startsWith('import { App }')) {
   });
   view.initialize(controller.openWeb); receive = controller.receive;
 }
-window.fixture = { calls, contexts, hold: name => { held = name; }, release: name => { held = ''; waiting.get(name)?.(); }, receive,
+const receiveCard = result => { if (result.structuredContent?.id) jobs.set(result.structuredContent.id, result.structuredContent); receive(result); };
+window.fixture = { calls, contexts, hold: name => { held = name; }, release: name => { held = ''; waiting.get(name)?.(); }, receive: receiveCard,
   transfer: (path, target) => receive({ structuredContent: { transfer: { ...(target ? {target} : {}), direction: 'upload', remotePath: path, elevate: false, overwrite: false } },
     _meta: { sshApproval: { ...(target ? {targetId:target,targetRevision:target+'-v1',targetDisplayName:target+' 이름',targets:['alpha','beta'].map(id=>({id,displayName:id+' 이름',enabled:true}))} : {}), uiEnabled: true, namespace: 'fixture_', maxBytes: 67108864, chunkBytes: 2, bootstrapTicket: 'synthetic-bootstrap' } } }),
 };

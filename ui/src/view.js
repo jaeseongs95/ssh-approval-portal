@@ -1,6 +1,6 @@
 import { renderDecision, recordedApprovalMode, requestContext } from './decision.js';
 export function createCardView({ document, i18n }) {
-  const { t, korean, locale, states } = i18n;
+  const { t, korean, locale, states, formatNumber, formatDate } = i18n;
   const el = id => document.getElementById(id);
   let buttons = [];
   function text(parent, tag, value, className = '') {
@@ -34,21 +34,22 @@ export function createCardView({ document, i18n }) {
       text(info, 'p', `${t('설정 revision')} · ${job.targetRevision}`);
       text(info, 'p', `${t('호스트 키')} · ${job.hostKey}`);
     }
-    text(info, 'p', `${t('승인 만료')} ${new Date(job.expiresAt).toLocaleString(locale)}`);
+    text(info, 'p', `${t('승인 만료')} ${formatDate(job.expiresAt)}`);
     text(el('details'), 'p', t(job.kind === 'command' ? '실행할 명령' : '파일 전송 내용'), 'section-label');
     if (job.kind === 'command') text(el('details'), 'pre', job.command);
     else {
       const op = job.operation, result = job.result?.structuredContent;
+      const windows = meta.targets?.find(target => target.id === job.targetId)?.platform === 'windows' || /^[A-Za-z]:[\\/]/.test(op.remotePath);
       const list = text(el('details'), 'dl', '', 'operation-fields');
       for (const [label, value] of [
         ['방향', t(job.kind === 'upload' ? 'PC → 서버' : '서버 → PC')],
-        ['파일명', op.fileName ?? result?.fileName ?? op.remotePath.split('/').pop()],
+        ['파일명', op.fileName ?? result?.fileName ?? op.remotePath.split(/[\\/]/).pop()],
         ['서버 경로', op.remotePath], ['크기', op.size ?? result?.size], ['SHA-256', op.sha256 ?? result?.sha256],
-        ['sudo 사용', t(op.elevate ? '예' : '아니요')], ...(job.kind === 'upload' ? [['덮어쓰기', t(op.overwrite ? '예' : '아니요')]] : []),
+        [windows ? '관리자 토큰 확인' : 'sudo 사용', t(op.elevate ? '예' : '아니요')], ...(job.kind === 'upload' ? [['덮어쓰기', t(op.overwrite ? '예' : '아니요')]] : []),
       ]) {
         if (value === undefined) continue;
         text(list, 'dt', t(label));
-        text(list, 'dd', label === '크기' ? `${value.toLocaleString(locale)} ${t('바이트')}` : value, label === 'SHA-256' ? 'hash' : '');
+        text(list, 'dd', label === '크기' ? `${formatNumber(value)} ${t('바이트')}` : value, label === 'SHA-256' ? 'hash' : '');
       }
     }
     if (job.kind === 'command' && requestContext(job, korean)) { const context = text(el('details'), 'details', ''); text(context, 'summary', korean ? '요청자가 제공한 작업 설명' : 'Caller-provided context'); text(context, 'p', requestContext(job, korean)); }
@@ -65,6 +66,10 @@ export function createCardView({ document, i18n }) {
     }
     if (job.result?.isError && job.kind !== 'command') text(el('details'), 'pre', job.result.content?.map(x => x.text ?? '').join('\n') ?? t('파일 전송에 실패했습니다.'));
     if (job.auditError) text(el('details'), 'p', job.auditError);
+    if (job.state === 'queued') {
+      text(el('details'), 'p', korean ? '승인이 완료되어 실행 순서를 기다리고 있습니다. 다시 승인하거나 요청하지 마세요.' : 'Approval is complete and this request is waiting for its execution turn. Do not approve or submit it again.');
+      button(korean ? '실행 취소' : 'Cancel execution', () => actions.decide('deny'), !meta.uiEnabled || !meta.approvalTicket);
+    }
     if (job.state === 'pending') for (const action of ['approve', 'deny']) button(t(action === 'approve' ? '승인·실행' : '거부'), () => actions.decide(action), !meta.uiEnabled || !meta.approvalTicket);
     if (job.kind === 'download' && job.state === 'completed') {
       status(korean ? '서버 파일 준비 완료' : 'Server file ready', job.state);
@@ -74,6 +79,8 @@ export function createCardView({ document, i18n }) {
   }
   function transfer(seed, meta, submit, selectTarget) {
     clear(); identity(meta); status(t(seed.direction === 'upload' ? '파일 업로드 준비' : '파일 다운로드 준비'));
+    const selected = meta.targets?.find(target => target.id === seed.target);
+    const windows = selected?.platform === 'windows' || /^[A-Za-z]:[\\/]/.test(seed.remotePath);
     if (seed.target && meta.targets) {
       const label = text(el('details'), 'label', t('대상 서버'));
       const select = document.createElement('select'); select.ariaLabel = t('대상 서버');
@@ -83,7 +90,9 @@ export function createCardView({ document, i18n }) {
     const label = text(el('details'), 'label', t('서버의 절대 파일 경로'));
     const path = document.createElement('input'); path.type = 'text'; path.value = seed.remotePath; label.append(path);
     const elevated = document.createElement('input'); elevated.type = 'checkbox'; elevated.checked = seed.elevate;
-    const elevationLabel = text(el('details'), 'label', t(' sudo로 전송')); elevationLabel.prepend(elevated);
+    elevated.disabled = selected?.capabilities?.elevatedFileTransfer === false;
+    const elevationLabel = text(el('details'), 'label', t(windows ? ' 관리자 토큰으로 전송' : ' sudo로 전송')); elevationLabel.prepend(elevated);
+    if (windows) text(el('details'), 'p', korean ? '권한 상승 전송은 현재 SSH 연결의 관리자 토큰을 확인합니다. 새 자격을 얻거나 사용자 계정 컨트롤을 우회하지 않습니다.' : 'Elevated transfers verify the administrator token of the current SSH connection. They do not acquire credentials or bypass UAC.');
     let overwrite, fileInput;
     if (seed.direction === 'upload') {
       fileInput = document.createElement('input'); fileInput.type = 'file'; el('details').append(fileInput);

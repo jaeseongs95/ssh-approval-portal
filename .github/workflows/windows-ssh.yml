@@ -1,0 +1,120 @@
+name: Windows SSH integration
+
+on:
+  workflow_dispatch:
+    inputs:
+      package_smoke:
+        description: '일반 회귀와 분리해 고정 공식 CLI 패키지만 실제 설치하는 전용 시험'
+        type: boolean
+        default: false
+  push:
+    branches: [feat/windows-ssh-targets-20261101, feat/windows-full-support-20261101, fix/agent-portability-20261102, fix/multiline-commands-20261102, fix/agent-file-discovery-20261102, fix/upload-capability-20261103]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-ssh-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  writer-sensitivity:
+    name: Windows writer regression sensitivity
+    runs-on: windows-2025
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Inherit-only writer regression detects the previous helper
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $isolated = Join-Path $env:RUNNER_TEMP ('writer-inherit-only-' + [Guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Path $isolated | Out-Null
+          $candidate = Join-Path $env:RUNNER_TEMP ('writer-candidate-' + [Guid]::NewGuid().ToString('N') + '.tar')
+          $previous = Join-Path $env:RUNNER_TEMP ('writer-previous-' + [Guid]::NewGuid().ToString('N') + '.tar')
+          git archive --format=tar -o $candidate HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'candidate archive failed' }
+          tar -xf $candidate -C $isolated
+          if ($LASTEXITCODE -ne 0) { throw 'candidate extraction failed' }
+          git archive --format=tar -o $previous e01652dbb827a1dd5d5d0a85eea0ffcc5d25ef72 scripts/windows-file-native.cs
+          if ($LASTEXITCODE -ne 0) { throw 'previous native archive failed' }
+          tar -xf $previous -C $isolated
+          if ($LASTEXITCODE -ne 0) { throw 'previous native extraction failed' }
+          $redLog = Join-Path $env:RUNNER_TEMP 'writer-inherit-only-red.log'
+          Push-Location $isolated
+          try {
+            & powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File test/windows-file-helper.tests.ps1 -PowerShellExe powershell.exe -WriterInheritOnlyOnly *> $redLog
+            $redExit = $LASTEXITCODE
+          } finally { Pop-Location }
+          Get-Content -LiteralPath $redLog
+          Write-Output "WRITER_INHERIT_ONLY_RED_EXIT=$redExit"
+          if ($redExit -ne 1 -or !(Select-String -LiteralPath $redLog -SimpleMatch 'WRITER-ACL-01 inherit-only Creator Owner permits publish' -Quiet)) { throw 'previous helper did not fail the inherit-only publish oracle' }
+          & powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File test/windows-file-helper.tests.ps1 -PowerShellExe powershell.exe -WriterInheritOnlyOnly
+          if ($LASTEXITCODE -ne 0) { throw 'candidate inherit-only regression failed' }
+          Get-FileHash scripts/windows-file-native.cs,test/windows-file-helper.tests.ps1 -Algorithm SHA256
+  windows-ssh:
+    name: ${{ inputs.package_smoke && '공식 CLI 설치 전용' || 'Windows SSH와 Python 회귀' }}
+    runs-on: windows-2025
+    timeout-minutes: ${{ inputs.package_smoke && 40 || 20 }}
+    env:
+      AGS_WINDOWS_CLI_PACKAGE_SMOKE: ${{ inputs.package_smoke && '1' || '0' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.21.0'
+      - run: npm ci --ignore-scripts
+        id: dependencies
+      - name: Provider-neutral MCP and CLI path contracts
+        run: node --test test/cli-platform-paths.test.mjs test/mcp-contracts.test.mjs test/portal-client-discovery.test.mjs test/portal-client-cloudflared.test.mjs test/remote-mcp-upload.test.mjs test/test-mode-file-path-policy.test.mjs test/test-mode-file-policy-application.test.mjs
+      - name: Local agent-selected file transport on Windows
+        run: node --test test/agent-file-forwarder.test.mjs test/agent-file-mcp-process.test.mjs test/portal-file-forwarder.test.mjs
+      - name: Windows 조상 경로 권한 읽기 진단
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $paths = @('C:\', $env:ProgramData, 'D:\', 'D:\a', $env:RUNNER_TEMP) | Select-Object -Unique
+          foreach ($path in $paths) {
+            if (-not (Test-Path -LiteralPath $path -PathType Container)) { continue }
+            $acl = Get-Acl -LiteralPath $path
+            $rules = foreach ($rule in $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
+              @{
+                sid = $rule.IdentityReference.Value
+                mask = [long]$rule.FileSystemRights
+                rights = $rule.FileSystemRights.ToString()
+                access = $rule.AccessControlType.ToString()
+                inheritance = $rule.InheritanceFlags.ToString()
+                propagation = $rule.PropagationFlags.ToString()
+                inherited = $rule.IsInherited
+              }
+            }
+            @{
+              path = $path
+              owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
+              rules = @($rules)
+            } | ConvertTo-Json -Depth 5 -Compress
+          }
+      - name: Windows 경로와 명령 회귀 시험
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        shell: pwsh
+        run: node --test --test-concurrency=1 test/windows-target.test.mjs test/windows-command-line.test.mjs test/windows-file-contracts.test.mjs test/windows-agent-cli.test.mjs test/windows-agent-cli-helper.test.mjs test/windows-dispatch-binding.test.mjs test/retained-history.test.mjs test/multiline-commands.test.mjs
+      - name: Windows PowerShell 파일 보조프로그램 시험
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        shell: pwsh
+        run: ./test/windows-file-helper.tests.ps1 -PowerShellExe powershell.exe
+      - name: PowerShell 7 파일 보조프로그램 시험
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        shell: pwsh
+        run: ./test/windows-file-helper.tests.ps1 -PowerShellExe pwsh.exe
+      - name: ${{ inputs.package_smoke && '격리 SSH 공식 CLI 설치 전용 시험' || '실제 Windows OpenSSH와 파일 왕복·Python 회귀' }}
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        shell: pwsh
+        run: ./test/windows-ssh-ci.ps1

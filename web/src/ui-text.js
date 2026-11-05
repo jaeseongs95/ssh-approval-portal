@@ -1,5 +1,20 @@
+import { messageCatalog, translate } from './locale.js';
 /** UI-owned strings only. Never apply this catalog to commands, output or user input. */
-const english = {
+export const uiCatalogs = messageCatalog({
+  '이 대상에서는 지원하지 않습니다.':'Unsupported on this target.',
+  'Windows PowerShell 5.1 대상입니다. 일반 명령·파일 전송·명령 이름 정책·서버 CLI를 지원합니다. Python 코드 실행에는 관리자가 등록한 실행 파일이 필요합니다. 권한 상승은 기존 관리자 연결 토큰만 사용합니다.':'Windows PowerShell 5.1 target. General commands, file transfers, name policies and server CLI are supported. Python source execution requires an administrator-configured executable. Elevated operations use only the existing administrator connection token.',
+  'Windows는 명시 실행 파일·모듈 한정 명령·절대 실행 경로를 등록합니다. 이름은 대소문자를 구분하지 않으며 변수·동적 구문은 전체 명령 평가로 보냅니다.':'Register explicit executables, module-qualified commands or absolute executable paths on Windows. Names are case-insensitive; variables and dynamic syntax require whole-command assessment.',
+  'Windows 실행 파일 이름, 모듈 한정 명령 또는 절대 실행 경로만 입력하세요. 옵션은 제외합니다.':'Enter only a Windows executable name, module-qualified command or absolute executable path, without arguments.',
+  '번째 줄: Windows 실행 파일 이름, 모듈 한정 명령 또는 절대 실행 경로만 입력하세요.':' line: enter only a Windows executable name, module-qualified command or absolute executable path.',
+  '예: whoami.exe, Microsoft.PowerShell.Management\\Get-Location, C:\\Tools\\tool.exe. 이름은 UTF-8 512바이트까지이며 대소문자를 구분하지 않습니다.':'Examples: whoami.exe, Microsoft.PowerShell.Management\\Get-Location, C:\\Tools\\tool.exe. Names allow up to 512 UTF-8 bytes and are case-insensitive.',
+  '리터럴 구문으로 확인된 실행 이름이 모두 등록돼야 이름 사전승인이 적용됩니다. 변수·동적 구문·별칭은 전체 명령 평가로 보냅니다. 등록은 인자를 제한하지 않으며 대소문자를 구분하지 않습니다.':'Name preapproval requires every executable in literal syntax to be registered. Variables, dynamic syntax and aliases require whole-command assessment. Registration does not constrain arguments and is case-insensitive.',
+  '관리자 권한 작업 자동승인 허용':'Allow automatic approval of administrator operations',
+  'Windows의 권한 상승 작업은 현재 SSH 연결에 실제 관리자 토큰이 있어야 실행됩니다. 계정 변경이나 사용자 계정 컨트롤 우회로 권한을 얻지 않습니다. 자동승인을 켜도 기존 토큰 권한을 넘지 않습니다.':'Elevated Windows operations require an actual administrator token on the current SSH connection. No account change or UAC bypass obtains privileges. Automatic approval does not expand the existing token.',
+  '관리자가 이 대상의 Python 실행 파일 절대 경로를 등록해야 사용할 수 있습니다.':'An administrator must configure an absolute Python executable path for this target.',
+  '이 대상은 명령 이름 사전승인을 지원하지 않습니다. 일반 명령의 모델 평가 또는 소유자 승인 정책을 사용하세요.':'Command-name preapproval is unavailable on this target. Use model assessment or owner approval for general commands.',
+  '정보 전송을 허용하지 않아 모델 평가에 따른 자동 실행은 작동하지 않습니다. 개별 소유자 승인이 필요합니다.':'Model-based automatic execution is unavailable because information disclosure is disabled. Individual owner approval is required.',
+  '대상의 파일 전송 제한과 SSH 계정 권한 안에서 새 파일을 개별 승인 없이 저장합니다. 설정·인증·자동 실행 파일 생성에도 영향을 줍니다. 덮어쓰기·권한 상승 전송은 계속 승인받으며 파일 내용은 Jev가 검사하지 않습니다.':'Create new files within target transfer limits and SSH account permissions without individual approval. This can create configuration, credential or autorun files. Overwrite and elevated transfers still need approval; Jev does not inspect file contents.',
+  '허용 · 대상의 파일 전송 제한과 SSH 계정 권한 안에서 새 파일 저장 · 설정/인증/자동 실행 파일도 포함 · Jev 내용 검사 없음 · 덮어쓰기/sudo 제외':'Allowed · create files within target transfer limits and SSH permissions · includes configuration/credential/autorun files · no Jev content inspection · excludes overwrite/sudo',
   ' · 테스트용 시크릿 미등록 · 활성화 불가':' · Test-server secret not registered · cannot enable',
   '테스트 서버':'Test server',
   '테스트 서버: ':'Test server: ',
@@ -217,10 +232,34 @@ const english = {
   '파일·로그·연결 정보에 민감한 내용이 포함되거나 많은 자원을 사용할 수 있습니다.':'Files, logs or connection data may contain sensitive information or use substantial resources.',
   '인자에 따라 파일·권한·서비스·네트워크 설정을 바꾸거나 데이터를 외부로 전송할 수 있습니다.':'Arguments may change files, permissions, services or network settings, or send data externally.',
   '입력·스크립트·환경에 따라 다른 명령이나 임의 코드를 실행할 수 있습니다.':'Input, scripts or environment may execute other commands or arbitrary code.',
-};
+  '편집 대상 서버':'Server editing target',
+  '서버 선택':'Choose a server',
+  '편집할 서버를 선택해 주세요. 서버 선택 전에는 정책 입력·검토·저장을 할 수 없습니다.':'Choose a server to edit. Policy inputs, review and save remain unavailable until a server is selected.',
+  '서버 선택 전 · 초안 없음':'No server selected · no draft',
+  '권한·TEST':'Permissions · TEST',
+  '현재 적용 정책을 아직 확인하지 못했습니다.':'The applied policy has not been checked yet.',
+  '저장 결과 미확인 · TEST를 포함한 현재 적용값을 먼저 조회해 주세요.':'Save outcome unconfirmed · read the applied settings, including TEST, first.',
+  '현재 정책 조회 실패 · 마지막 저장값은 최신이 아닐 수 있습니다. TEST 적용 여부를 다시 확인해 주세요.':'Policy lookup failed · the last saved values may be stale. Check whether TEST applies again.',
+  ' · 마지막 조회 기준 TEST 적용: 위험 심사·개별 승인을 생략합니다. 아래 개별 설정은 TEST 해제 후 적용할 저장값과 초안입니다.':' · TEST applied at the last check: risk assessment and individual approval are bypassed. Individual settings below are saved values and drafts for when TEST is disabled.',
+  ' · TEST 저장됨 · 연결 정보 또는 테스트용 시크릿 가용성을 확인하지 못해 현재 적용을 확정하지 않습니다.':' · TEST is saved, but its current effect is unconfirmed because the target binding or test secret availability is unverified.',
+  ' · 마지막 조회 기준 TEST 사용 안 함 · 저장된 개별 승인 정책을 적용합니다.':' · TEST was off at the last check · saved individual approval policies apply.',
+  ' · 저장된 정책 없음 · 화면의 기본 선택은 아직 적용되지 않은 초안입니다.':' · No saved policy · the displayed defaults are an unapplied draft.',
+  ' TEST 활성화 초안은 아직 적용되지 않았습니다.':' The draft enabling TEST is not applied yet.',
+  ' TEST 해제 초안은 아직 적용되지 않았습니다.':' The draft disabling TEST is not applied yet.',
+  '이번 저장의 전체 영향 대상: ':'All targets affected by this save: ',
+  '변경·정책 삭제 함께 저장':'Save changes and policy removals together',
+  '선택 서버의 정책을 삭제합니다. 이 서버의 다른 초안 변경은 함께 적용하지 않습니다.':'The selected server policy will be removed. Other draft edits for this server will not be applied.',
+  ' · 현재 연결 정보 없음':' · Current target binding unavailable',
+  '처리·결과 미확인·초안 충돌로 서버를 전환하지 못했습니다. 현재 편집 대상을 유지합니다.':'Server switch refused while processing, awaiting reconciliation or resolving a draft conflict. The current editing target is preserved.',
+  '인증과 접근':'Authentication and access',
+  '평가와 자동승인':'Assessment and automatic approval',
+  '연결과 서버':'Connections and servers',
+  '실행과 기타 설정':'Execution and other settings',
+  '등록된 모든 서버의 연결과 요청에 영향을 주는 설정입니다. 서버별 정책과 별개이며, 저장한 환경은 서비스 재시작 후 적용됩니다.':'These settings affect connections and requests for all registered servers. They are separate from per-server policy, and saved environment settings apply after the service restarts.',
+});
 
 export function uiText(value, document = globalThis.document) {
-  return document?.documentElement.lang.startsWith('ko') ? value : english[value] ?? value;
+  return translate(uiCatalogs, document?.documentElement?.lang ?? 'en', value);
 }
 
 // Only server-generated registration warnings use this composition; never caller context.

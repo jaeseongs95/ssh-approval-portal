@@ -95,7 +95,7 @@ async function fixture(t, { commandOutcome } = {}) {
         const bytes = remote.get(op.remotePath); assert.ok(bytes); staged.set(op.id, Buffer.from(bytes)); effects.push('download');
         return { exitCode: 0, stdout: JSON.stringify({ size: bytes.length, sha256: hash(bytes) }) };
       }
-      assert.equal(op.action, 'cleanup'); staged.delete(op.id); return { exitCode: 0, stdout: '{}' };
+      assert.equal(op.action, 'cleanup'); staged.delete(op.id); return { exitCode: 0, stdout: '{"cleaned":true}' };
     },
   }) };
   await new Promise(resolve => app.adminHttp.listen(0, '127.0.0.1', resolve));

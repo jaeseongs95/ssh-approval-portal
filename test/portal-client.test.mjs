@@ -8,6 +8,7 @@ import { createHash } from 'node:crypto';
 import { generateKeyPair, SignJWT, createLocalJWKSet, exportJWK } from 'jose';
 import { createApplication } from '../app.mjs';
 import { createPortalClient } from '../src/adapters/cli/portal-client.mjs';
+import { createCapabilities } from '../src/adapters/presentation/capabilities.mjs';
 import { CHUNK_BYTES } from '../src/contracts/ports.mjs';
 import { main } from '../scripts/portal-client.mjs';
 
@@ -41,7 +42,7 @@ async function fixture(t) {
         staged.set(op.id, Buffer.from(bytes)); effects.push({ kind: 'download', path: op.remotePath });
         return { exitCode: 0, stdout: JSON.stringify({ size: bytes.length, sha256: hash(bytes) }) };
       }
-      assert.equal(op.action, 'cleanup'); staged.delete(op.id); return { exitCode: 0, stdout: '{}' };
+      assert.equal(op.action, 'cleanup'); staged.delete(op.id); return { exitCode: 0, stdout: '{"cleaned":true}' };
     },
   }) };
   await new Promise(resolve => app.adminHttp.listen(0, '127.0.0.1', resolve));
@@ -86,6 +87,16 @@ test('owner CLI moves exact multi-chunk and empty bytes only after explicit appr
   const local = join(f.root, 'saved.bin');
   await assert.rejects(c.save(down.id, local), { code: 'DOWNLOAD_NOT_READY' }); assert.equal(f.effects.length, 1);
   await c.decide(down.id, 'approve', true); assert.equal(f.effects.length, 2);
+  const completed = f.app.queue.get(down.id), artifact = f.app.store.get(completed.result.data.artifactId);
+  assert.equal(Object.hasOwn(artifact, 'targetId'), false, 'legacy unbound artifact retains its original metadata');
+  let ticketIssues = 0;
+  const caps = createCapabilities({ queue: f.app.queue, store: f.app.store, targets: f.app.targets,
+    signer: { issue() { ticketIssues++; return 'fixture-ticket'; } }, settings: { adminOrigin: f.origin } });
+  assert.ok(new URL(caps.downloadLink(completed)).pathname.startsWith('/downloads/' + artifact.id + '/'));
+  for (const mismatch of [{ targetId: 'another' }, { targetRevision: 'f'.repeat(64) }]) {
+    assert.throws(() => caps.downloadLink({ ...completed, ...mismatch }), /Download belongs to another target/);
+  }
+  assert.equal(ticketIssues, 1, 'mismatched target or revision must not issue any ticket');
   assert.equal((await c.save(down.id, local)).state, 'saved'); assert.deepEqual(await readFile(local), bytes);
   await assert.rejects(c.save(down.id, local), { code: 'EEXIST' }); assert.deepEqual(await readFile(local), bytes); assert.equal(f.effects.length, 2);
   await writeFile(source, Buffer.alloc(0));
@@ -128,6 +139,56 @@ test('owner file boundary rejects malformed fields/chunks/targets and reuses the
   const first = await f.raw(path + '/finish', {}, headers); assert.equal((await first.json()).state, 'pending');
   const second = await f.raw(path + '/finish', {}, headers); assert.equal(second.status, 409);
   assert.equal(f.app.queue.listAll().length, 1); assert.equal(f.effects.length, 0);
+});
+
+test('legacy finish refuses duplicate, missing, ambiguous and mismatched submission bindings without a new request', async t => {
+  const f = await fixture(t), client = f.client(); await client.connect();
+  const source = join(f.root, 'submission.bin'), bytes = Buffer.from('bound'); await writeFile(source, bytes);
+  const job = await client.upload(source, { remotePath: '/tmp/submission.bin' });
+  const runtime = f.app.targets.select('default'), id = job.operation.artifactId, internal = runtime.queue.jobs.get(job.id), operation = internal.operation;
+  await assert.rejects(runtime.files.finishUpload(id), /already submitted/);
+  internal.operation = Object.freeze({ ...operation, fileTargetId: 'another', fileTargetRevision: 'a'.repeat(64) });
+  await assert.rejects(runtime.files.finishUpload(id), /does not match original/);
+  internal.operation = operation;
+  const targetId = internal.targetId; internal.targetId = 'another';
+  await assert.rejects(runtime.files.finishUpload(id), /does not match original/);
+  internal.targetId = targetId;
+  const duplicateId = 'f'.repeat(48); runtime.queue.jobs.set(duplicateId, { ...internal, id: duplicateId });
+  await assert.rejects(runtime.files.finishUpload(id), /Ambiguous upload request/);
+  runtime.queue.jobs.delete(duplicateId);
+  assert.equal(f.app.queue.listAll().length, 1); assert.deepEqual(f.effects, []);
+  assert.deepEqual(await readFile(join(f.root, 'store', id + '.part')), bytes);
+  const orphan = await runtime.files.beginUpload({ fileName: 'missing.bin', remotePath: '/tmp/missing.bin', size: bytes.length, sha256: hash(bytes) });
+  await runtime.files.appendUpload({ id: orphan.id, sequence: 0, bytes }); await runtime.store.finish(orphan.id);
+  runtime.store.recordSubmission(orphan.id, 'e'.repeat(48));
+  await assert.rejects(runtime.files.finishUpload(orphan.id), /Original upload request unavailable; do not replay/);
+  assert.equal(f.app.queue.listAll().length, 1); assert.deepEqual(f.effects, []);
+  assert.deepEqual(await readFile(join(f.root, 'store', orphan.id + '.part')), bytes);
+});
+
+test('concurrent legacy finishes crossing the storage await submit exactly one approval and one remote effect', async t => {
+  const f = await fixture(t), runtime = f.app.targets.select('default'), bytes = Buffer.from('race');
+  const artifact = await runtime.files.beginUpload({ fileName: 'race.bin', remotePath: '/tmp/race.bin', size: bytes.length, sha256: hash(bytes) });
+  await runtime.files.appendUpload({ id: artifact.id, sequence: 0, bytes });
+  const finish = runtime.store.finish.bind(runtime.store), submit = runtime.queue.submitOperation.bind(runtime.queue);
+  await finish(artifact.id); // Both callers may observe the same verified, unsubmitted snapshot.
+  let release, finishes = 0, submissions = 0;
+  const barrier = new Promise(resolve => { release = resolve; });
+  runtime.store.finish = async id => {
+    const snapshot = await finish(id);
+    if (++finishes === 2) release();
+    await barrier; return snapshot;
+  };
+  runtime.queue.submitOperation = (...args) => { submissions++; return submit(...args); };
+  const results = await Promise.allSettled([runtime.files.finishUpload(artifact.id), runtime.files.finishUpload(artifact.id)]);
+  assert.equal(finishes, 2); assert.equal(submissions, 1);
+  assert.deepEqual(results.map(result => result.status).sort(), ['fulfilled', 'rejected']);
+  const accepted = results.find(result => result.status === 'fulfilled').value;
+  assert.match(results.find(result => result.status === 'rejected').reason.message, /already submitted/);
+  assert.equal(f.app.queue.listAll().length, 1); assert.deepEqual(f.effects, []);
+  assert.equal((await runtime.queue.approve(accepted.id)).state, 'completed');
+  assert.deepEqual(f.effects, [{ kind: 'upload', path: '/tmp/race.bin' }]);
+  assert.deepEqual(f.remote.get('/tmp/race.bin'), bytes);
 });
 
 test('lost finish and approval ACKs return known handles without a repeated POST or remote effect', async t => {

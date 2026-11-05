@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { openRequest, selectServer } from './admin-ui.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, readFile } from 'node:fs/promises';
 import { join, dirname, resolve } from 'node:path';
@@ -14,7 +15,7 @@ async function fixture(run, {width=390,locale='ko-KR',names=['pwd'],history=fals
     await new Promise(r=>app.adminHttp.listen(0,'127.0.0.1',r));const origin='http://127.0.0.1:'+app.adminHttp.address().port;
     const api=async(path,body)=>{const r=await fetch(origin+path,{method:body?'POST':'GET',headers:{Authorization:'Bearer fixture-owner',Origin:'https://owner.test','Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});assert.equal(r.status,200,await r.clone().text());return r.json();};
     const initial=await api('/api/command-policy'),binding=initial.bindings.find(b=>b.targetId==='alpha');
-    const rule={...binding,commands:names,deniedCommands:['rm'],externalDisclosure:false,modelExecution:false,automaticSudo:false,automaticUploads:false,automaticDownloads:false,sourceExecutionContract:null,fallback:null,thresholds:{jev:{model:'jev-1.14.0',questionVersion:'ssh-command-risk-v4',basis:'safety-probability-v1',minLowRisk:.7,validationRef:'user-choice:fixture'}}};delete rule.displayName;delete rule.enabled;
+    const rule={targetId:binding.targetId,targetRevision:binding.targetRevision,profile:binding.profile,commands:names,deniedCommands:['rm'],externalDisclosure:false,modelExecution:false,automaticSudo:false,automaticUploads:false,automaticDownloads:false,sourceExecutionContract:null,fallback:null,thresholds:{jev:{model:'jev-1.14.0',questionVersion:'ssh-command-risk-v4',basis:'safety-probability-v1',minLowRisk:.7,validationRef:'user-choice:fixture'}}};
     const proposal={expectedRevision:initial.revision,policy:{targets:[rule]}};const reviewed=await api('/api/command-policy/review',proposal);await api('/api/command-policy',{...proposal,reviewToken:reviewed.reviewToken,acknowledged:true});
     const completed=(command='pwd && ls')=>{const job=app.queue.submitOperation({kind:'command',command},'privileged','alpha');const stored=app.queue.jobs.get(job.id);stored.state='completed';stored.finishedAt=Date.now();return stored;};
     const job=history?completed(historyCommand):null;
@@ -34,7 +35,7 @@ async function fixture(run, {width=390,locale='ko-KR',names=['pwd'],history=fals
     });
     const page=await context.newPage();page.setDefaultTimeout(8000);page.on('pageerror',e=>errors.push(e.message));
     const ready=async()=>{await page.waitForFunction(expected=>document.querySelector('.command-bulk textarea')?.value===expected,names.join('\n'));};
-    const open=async(path='/settings')=>{await page.goto(origin+path);await page.locator('#token').fill('fixture-owner');await page.locator('#load').click();await ready();if(path==='/settings'){await page.locator('#command-policy .settings-tabs [role=tab]').first().click();const bulk=page.locator('.command-bulk');if(!await bulk.evaluate(n=>n.open))await bulk.locator('summary').click();}};
+    const open=async(path='/settings')=>{await page.goto(origin+path);await page.locator('#token').fill('fixture-owner');await page.locator('#load').click();await page.locator('#server-target option[value=alpha]').waitFor({state:'attached'});if(path==='/settings'){await selectServer(page,'alpha');await ready();await page.locator('#command-policy .settings-tabs [role=tab]').first().click();const bulk=page.locator('.command-bulk');if(!await bulk.evaluate(n=>n.open))await bulk.locator('summary').click();}};
     const importer=page.locator('.command-import'),source=importer.locator('textarea');
     const paste=async command=>{await page.getByRole('button',{name:locale.startsWith('ko')?'명령줄 붙여넣기':'Paste a command line',exact:true}).click();await source.fill(command);await importer.getByRole('button',{name:locale.startsWith('ko')?'명령 이름 추출':'Extract command names',exact:true}).click();};
     const holdNext=()=>{let release,started;const promise=new Promise(r=>{release=r;}),began=new Promise(r=>{started=r;});releases.push(release);hold={promise,started};return{release,began};};
@@ -63,38 +64,44 @@ test('unsupported/stale source never stages partial names or posts',async()=>fix
 test('name limit rejects a whole selected batch and scope changes clear the private command',async()=>fixture(async f=>{
   await f.open();await f.paste('newone && newtwo');
   await f.importer.getByRole('button',{name:'전체 선택',exact:true}).click();await f.importer.getByRole('button',{name:'선택한 이름을 초안에 추가',exact:true}).click();assert.equal((await f.page.locator('.command-bulk textarea').first().inputValue()).split('\n').length,128);assert.equal(f.posts.length,0);
-  await f.page.locator('#important-settings select').first().selectOption('beta');assert.equal(await f.source.inputValue(),'');assert.equal(await f.importer.evaluate(n=>n.open),false);
+  await f.page.locator('#server-target').first().selectOption('beta');assert.equal(await f.source.inputValue(),'');assert.equal(await f.importer.evaluate(n=>n.open),false);
 },{names:Array.from({length:128},(_,i)=>'c'+i)}));
 test('history completed command opens matching target with no selected names or policy post',async()=>fixture(async f=>{
-  await f.open('/history');await f.page.locator('[data-request-id="'+f.job.id+'"]>summary').click();await f.page.getByRole('button',{name:'이력의 명령 이름 등록',exact:true}).click();await f.page.waitForFunction(()=>document.querySelector('.command-import textarea')?.value.includes('PRIVATE_COMMAND_CANARY'));
+  await f.open('/history');await openRequest(f.page, f.job.id);await f.page.getByRole('button',{name:'이력의 명령 이름 등록',exact:true}).click();await f.page.waitForFunction(()=>document.querySelector('.command-import textarea')?.value.includes('PRIVATE_COMMAND_CANARY'));
   assert.equal(new URL(f.page.url()).pathname,'/settings');assert.equal(await f.importer.locator('input:checked').count(),0);assert.equal(f.posts.length,0);assert.deepEqual(f.counters(),{executions:0,modelCalls:0});
 },{history:true}));
 for(const field of ['targetRevision','profile'])test('history mismatched '+field+' cannot prefill a new policy',async()=>fixture(async f=>{
-  f.job[field]='stale';await f.open('/history');await f.page.locator('[data-request-id="'+f.job.id+'"]>summary').click();const read=f.page.waitForResponse(r=>r.url().endsWith('/api/command-policy')&&r.request().method()==='GET');await f.page.getByRole('button',{name:'이력의 명령 이름 등록',exact:true}).click();await read;await f.page.waitForFunction(()=>!document.querySelector('#command-policy button.primary[type=button]').disabled);assert.equal(await f.source.inputValue(),'');assert.equal(await f.page.getByText('이력의 연결 정보가 현재 정책 대상과 다릅니다. 현재 설정을 확인해 주세요.',{exact:true}).isVisible(),true);assert.equal(f.posts.length,0);
+  f.job[field]='stale';await f.open('/history');await openRequest(f.page, f.job.id);assert.equal(await f.page.getByRole('button',{name:'이력의 명령 이름 등록',exact:true}).isDisabled(),true);assert.match(await f.page.locator('#request-detail-target').textContent(),/기록 당시와 다름/);assert.equal(await f.source.inputValue(),'');assert.equal(f.posts.length,0);
 },{history:true}));
 
 test('history without a binding has a disabled import button',async()=>fixture(async f=>{
-  delete f.job.targetRevision;await f.open('/history');await f.page.locator('[data-request-id="'+f.job.id+'"]>summary').click();assert.equal(await f.page.getByRole('button',{name:'이력의 명령 이름 등록',exact:true}).isDisabled(),true);assert.equal(f.posts.length,0);
+  delete f.job.targetRevision;await f.open('/history');await openRequest(f.page, f.job.id);assert.equal(await f.page.getByRole('button',{name:'이력의 명령 이름 등록',exact:true}).isDisabled(),true);assert.equal(f.posts.length,0);
 },{history:true}));
 
 for(const state of ['pending','running'])test(state+' command does not offer history registration',async()=>fixture(async f=>{
-  f.job.state=state;delete f.job.finishedAt;await f.open('/');const card=f.page.locator('[data-request-id="'+f.job.id+'"]');await card.waitFor();assert.equal(await card.getByRole('button',{name:'이력의 명령 이름 등록',exact:true}).count(),0);assert.equal(f.posts.length,0);
+  const original={state:f.job.state,finishedAt:f.job.finishedAt};
+  try {
+    f.job.state=state;delete f.job.finishedAt;await f.open('/');const card=f.page.locator('[data-request-id="'+f.job.id+'"]');await card.waitFor();assert.equal(await card.getByRole('button',{name:'이력의 명령 이름 등록',exact:true}).count(),0);assert.equal(f.posts.length,0);
+  } finally {
+    // Display-only state must not make teardown drain a synthetic, undispatched operation.
+    Object.assign(f.job,original);
+  }
 },{history:true}));
 
 test('non-command history does not offer command registration',async()=>fixture(async f=>{
-  f.job.operation=Object.freeze({kind:'download',remotePath:'/tmp/synthetic',elevate:false});f.job.state='failed';await f.open('/history');await f.page.locator('[data-request-id="'+f.job.id+'"]>summary').click();assert.equal(await f.page.getByRole('button',{name:'이력의 명령 이름 등록',exact:true}).count(),0);assert.equal(f.posts.length,0);
+  f.job.operation=Object.freeze({kind:'download',remotePath:'/tmp/synthetic',elevate:false});f.job.state='failed';await f.open('/history');await openRequest(f.page, f.job.id);assert.equal(await f.page.getByRole('button',{name:'이력의 명령 이름 등록',exact:true}).count(),0);assert.equal(f.posts.length,0);
 },{history:true}));
 
 test('submitted source history does not register its executor as a command name',async()=>fixture(async f=>{
-  f.job.operation=Object.freeze({...f.job.operation,sourceContract:'python-source-v1',sourceBytes:8,sourceSha256:'a'.repeat(64),sourceCwd:'/tmp',sourceArgvJson:'[]',sourceElevate:false});await f.open('/history');await f.page.locator('[data-request-id="'+f.job.id+'"]>summary').click();assert.equal(await f.page.getByRole('button',{name:'이력의 명령 이름 등록',exact:true}).count(),0);assert.equal(f.posts.length,0);
+  f.job.operation=Object.freeze({...f.job.operation,sourceContract:'python-source-v1',sourceBytes:8,sourceSha256:'a'.repeat(64),sourceCwd:'/tmp',sourceArgvJson:'[]',sourceElevate:false});await f.open('/history');await openRequest(f.page, f.job.id);assert.equal(await f.page.getByRole('button',{name:'이력의 명령 이름 등록',exact:true}).count(),0);assert.equal(f.posts.length,0);
 },{history:true}));
 
 test('logout clears a pasted command and a delayed history import cannot restore it',async()=>fixture(async f=>{
-  await f.open('/history');await f.page.locator('[data-request-id="'+f.job.id+'"]>summary').click();const gate=f.holdNext();await f.page.getByRole('button',{name:'이력의 명령 이름 등록',exact:true}).click();await gate.began;
+  await f.open('/history');await openRequest(f.page, f.job.id);const gate=f.holdNext();await f.page.getByRole('button',{name:'이력의 명령 이름 등록',exact:true}).click();await gate.began;
   await f.page.evaluate(()=>{document.querySelector('#logout').click();});gate.release();await f.page.waitForURL(url=>url.pathname==='/');assert.equal(await f.source.inputValue(),'');assert.equal(f.posts.length,0);assert.deepEqual(f.counters(),{executions:0,modelCalls:0});
 },{history:true}));
 test('history navigation while binding reload is pending discards late prefill',async()=>fixture(async f=>{
-  await f.open('/history');await f.page.locator('[data-request-id="'+f.job.id+'"]>summary').click();const gate=f.holdNext();await f.page.getByRole('button',{name:'이력의 명령 이름 등록',exact:true}).click();await gate.began;await f.page.locator('[data-page-link][href="/history"]').click();const done=f.page.waitForResponse(r=>r.url().endsWith('/api/command-policy')&&r.request().method()==='GET');gate.release();await done;await f.page.waitForFunction(()=>!document.querySelector('#command-policy button.primary[type=button]').disabled);assert.equal(new URL(f.page.url()).pathname,'/history');assert.equal(await f.source.inputValue(),'');assert.equal(f.posts.length,0);
+  await f.open('/history');await openRequest(f.page, f.job.id);const gate=f.holdNext();await f.page.getByRole('button',{name:'이력의 명령 이름 등록',exact:true}).click();await gate.began;await f.page.locator('[data-page-link][href="/history"]').click();const done=f.page.waitForResponse(r=>r.url().endsWith('/api/command-policy')&&r.request().method()==='GET');gate.release();await done;await f.page.waitForFunction(()=>!document.querySelector('.policy-toolbar button').disabled);assert.equal(new URL(f.page.url()).pathname,'/history');assert.equal(await f.source.inputValue(),'');assert.equal(f.posts.length,0);
 },{history:true}));
 
 test('failed policy reload clears private import at request start and keeps it cleared after failure',async()=>fixture(async f=>{
@@ -121,7 +128,7 @@ for(const width of [320,1440])test('LIMIT-BROWSER full 32KiB paste retains tail 
 
 test('LIMIT-HISTORY full 32KiB command imports from completed history without truncation or save',async()=>fixture(async f=>{
  const command='ls '+' '.repeat(32768-3-6)+' && id';
- await f.open('/history');await f.page.locator('[data-request-id="'+f.job.id+'"]>summary').click();
+ await f.open('/history');await openRequest(f.page, f.job.id);
  await f.page.getByRole('button',{name:'이력의 명령 이름 등록',exact:true}).click();
  await f.page.waitForFunction(expected=>document.querySelector('.command-import textarea')?.value===expected,command,{timeout:3000});
  assert.equal(await f.source.inputValue(),command);assert.equal(await f.importer.getByRole('checkbox',{name:'id',exact:true}).count(),1);

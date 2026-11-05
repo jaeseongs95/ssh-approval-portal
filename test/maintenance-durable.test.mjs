@@ -1,12 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { createMaintenanceState } from '../src/adapters/storage/maintenance-state.mjs';
 import { createApplication } from '../app.mjs';
+import { CommandOutputs } from '../src/adapters/storage/command-output.mjs';
 
 const owner = 'a'.repeat(64), other = 'b'.repeat(64), origin = 'https://example.test';
 const env = { BRIDGE_MCP_TOKEN:'test-mcp', BRIDGE_ADMIN_TOKEN:'test-admin', BRIDGE_ADMIN_ORIGIN:origin, BRIDGE_UI_TICKET_KEY:'b'.repeat(64), BRIDGE_UI_ENABLED:'true' };
@@ -16,6 +17,24 @@ const open = root => createApplication({ transferRoot:root, env, uiHtml:'',
 const listen = app => new Promise(resolve => app.adminHttp.listen(0, '127.0.0.1', resolve));
 const post = (app, action, token=owner, extra={}) => fetch(`http://127.0.0.1:${app.adminHttp.address().port}/api/maintenance/${action}`, {
   method:'POST', headers:{Authorization:'Bearer test-admin', Origin:origin, 'X-Maintenance-Owner':token, ...extra} });
+
+test('MAINT-OUTPUT unreadable maintenance or cleanup guard fails before expired bytes are deleted', async t => {
+  const root=await mkdtemp(join(tmpdir(),'ssh-maint-unreadable-'));
+  let failedGuard=false;
+  let outputs=new CommandOutputs(root,{now:()=>100,ttl:50,canReap:()=>{if(failedGuard)throw Error('maintenance unavailable');return true;}});
+  try {
+    const ref=outputs.finish(outputs.reserve({executionId:'1'.repeat(48)}),{failed:false,texts:['retain on failed initialization']}).output;
+    const path=join(root,'command-outputs',ref.id+'.out'),bytes=await readFile(path);
+    failedGuard=true;
+    assert.throws(()=>outputs.reap(),/maintenance unavailable/);
+    assert.deepEqual(await readFile(path),bytes);
+    outputs.close();outputs=undefined;
+    await writeFile(join(root,'maintenance.sqlite'),'invalid sqlite',{mode:0o600});
+    t.mock.method(Date,'now',()=>151);
+    await assert.rejects(()=>open(root));
+    assert.deepEqual(await readFile(path),bytes,'failed durable reservation initialization cannot run output cleanup');
+  } finally {outputs?.close();await rm(root,{recursive:true,force:true});}
+});
 
 test('reservation is owner-bound across replacement and preservation comparison requires a new instance', async () => {
   const root = await mkdtemp(join(tmpdir(), 'ssh-durable-maint-')); let first, second;

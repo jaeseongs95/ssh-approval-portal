@@ -51,14 +51,21 @@ test('download flag validation and exact feedback confirmation prevent unreviewe
   const job=f.download();assert.equal(job.state,'pending');f.app.queue.deny(job.id);assert.equal(f.effects.length,0);
 }));
 
-test('busy, stale target and audit failure cannot trigger or later retry an automatic download',async()=>{
+test('automatic download queues behind busy execution but stale target and audit failure still refuse',async()=>{
   await fixture(async f=>{
     await f.set(true);let release;const gate=new Promise(r=>release=r),runtime=f.app.targets.select('alpha'),execute=runtime.transfers.download;
     runtime.transfers.download=async op=>{await gate;return execute(op);};
-    const first=f.download(),second=f.download();assert.equal(second.state,'pending');release();await f.finish(first);assert.equal(f.app.queue.get(second.id).state,'pending');f.app.queue.deny(second.id);
-    f.profiles.get('alpha-read').host='changed.test';const stale=f.download();assert.equal(stale.state,'pending');f.app.queue.deny(stale.id);assert.equal(f.effects.length,1);
+    try{const first=f.download(),second=f.download();assert.equal(second.state,'queued');assert.equal(second.approvalMode,'automatic');assert.equal(f.effects.length,0);release();await f.finish(first);await f.finish(second);assert.equal(f.app.queue.get(second.id).state,'completed');assert.equal(f.effects.length,2);}finally{release();}
+    f.profiles.get('alpha-read').host='changed.test';const stale=f.download();assert.equal(stale.state,'pending');f.app.queue.deny(stale.id);assert.equal(f.effects.length,2);
   });
-  await fixture(async f=>{await f.set(true);const job=f.download();assert.equal(job.state,'pending');assert.equal(job.approvalMode,undefined);assert.equal(f.effects.length,0);f.app.queue.deny(job.id);},{failAudit:true});
+  await fixture(async f=>{
+    await f.set(true);const job=f.download();assert.equal(job.state,'queued');assert.equal(job.approvalMode,'automatic');assert.equal(f.effects.length,0);
+    assert.throws(()=>f.app.targets.select('alpha').queue.startDownload(job.id),/not pending/);
+    const failed=await f.finish(job);assert.equal(failed.state,'failed');assert.equal(failed.targetId,'alpha');
+    assert.equal(failed.decision.dispatchFailure,'not_dispatched');assert.equal(failed.decision.dispatchFailureReason,'audit_failed');assert.equal(failed.decision.dispatchFailureStage,'start_audit');
+    assert.equal(failed.result.execution.remoteState,'not_dispatched');assert.equal(f.effects.length,0);
+    assert.throws(()=>f.app.targets.select('alpha').queue.startDownload(job.id),/not pending/);await f.finish(job);assert.equal(f.effects.length,0);
+  },{failAudit:true});
 });
 
 test('global automation OFF still permits owner-approved downloads, never policy execution',async()=>fixture(async f=>{
@@ -85,8 +92,9 @@ test('test server bypass covers elevated downloads without other flags and never
 }));
 
 
-test('test server download slot rejection is terminal rather than owner pending',async()=>fixture(async f=>{
- await f.set(false,false,'alpha',{testServer:true});const q=f.app.targets.select('alpha').queue,busy=q.externalBusy;q.externalBusy=()=>true;
- const job=f.download(true);assert.equal(job.state,'failed');assert.equal(job.decision.dispatchFailure,'not_dispatched');
- q.externalBusy=busy;assert.throws(()=>q.start(job.id),/not pending/);assert.equal(f.effects.length,0);
+test('test server download waits behind an active transfer without falling back to owner approval',async()=>fixture(async f=>{
+ await f.set(false,false,'alpha',{testServer:true});const runtime=f.app.targets.select('alpha'),execute=runtime.transfers.download;
+ const held=Promise.withResolvers();runtime.transfers.download=async op=>{await held.promise;return execute(op);};
+ try{const first=f.download(true),job=f.download(true);assert.equal(job.state,'queued');assert.equal(job.approvalMode,'automatic');assert.equal(job.decision.reasonCode,'test_server_bypass');assert.equal(job.decision.dispatchFailure,undefined);assert.equal(f.effects.length,0);
+ held.resolve();await f.finish(first);await f.finish(job);assert.equal(f.app.queue.get(job.id).state,'completed');assert.equal(f.effects.length,2);}finally{held.resolve();}
 }));

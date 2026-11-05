@@ -6,11 +6,27 @@ import { tmpdir } from 'node:os';
 import { Readable } from 'node:stream';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { ApprovalQueue } from '../src/domain/approval-queue.mjs';
+import { ApprovalQueue, settledOutcome } from './support/approval-runtime.mjs';
 import { Artifacts } from '../src/adapters/storage/artifacts.mjs';
 import { createFileService } from '../src/application/files.mjs';
 
 const root = dirname(fileURLToPath(new URL('../package.json', import.meta.url)));
+// Lease identities and idempotent operation digests use native cryptographic primitives.
+const applicationCrypto = new Set(['desktop.mjs', 'operations.mjs', 'opaque-files.mjs'].map(name => resolve(root, 'src', 'application', name)));
+function importSpecifiers(text) {
+  // 문자열·주석을 먼저 소비하고 import 구문에 속한 모듈 이름만 추출한다.
+  const syntax = /\/\/[^\r\n]*|\/\*[\s\S]*?\*\/|"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|`(?:\\[\s\S]|[^`\\$]|\$(?!\{))*`|(?<![\w$.])import\b\s*(?:\(\s*|(?:[^"'`;]*?\bfrom\s*)?)(?<quote>['"])(?<specifier>[^'"\r\n]+)\k<quote>/g;
+  return [...text.matchAll(syntax)].flatMap(match => match.groups?.specifier ? [match.groups.specifier] : []);
+}
+function assertInwardImports(area, file, text) {
+  for (const specifier of importSpecifiers(text)) {
+    if (specifier === 'node:crypto' && (area === 'domain' || (area === 'application' && applicationCrypto.has(resolve(file))))) continue;
+    assert.ok(specifier.startsWith('.'), `${area} must not import infrastructure ${specifier}`);
+    const target = resolve(dirname(file), specifier);
+    const allowed = ['contracts', 'domain', ...(area === 'application' ? ['application'] : [])];
+    assert.ok(allowed.some(folder => target.startsWith(resolve(root, 'src', folder) + (process.platform === 'win32' ? '\\' : '/'))), 'An inward layer imports an outward adapter');
+  }
+}
 async function files(path) {
   const found = [];
   for (const item of await readdir(path, { withFileTypes: true })) {
@@ -22,16 +38,33 @@ async function files(path) {
 test('ARCH-01 domain/application dependencies point inward and never expose host DTOs or store writes', async () => {
   for (const area of ['domain', 'application']) for (const file of await files(join(root, 'src', area))) {
     const text = await readFile(file, 'utf8');
-    const imports = [...text.matchAll(/(?:from\s*|import\s*\()\s*['"]([^'"]+)['"]/g)].map(match => match[1]);
-    for (const specifier of imports) {
-      if (area === 'domain' && specifier === 'node:crypto') continue;
-      assert.ok(specifier.startsWith('.'), `${area} must not import infrastructure ${specifier}`);
-      const target = resolve(dirname(file), specifier);
-      const allowed = ['contracts', 'domain', ...(area === 'application' ? ['application'] : [])];
-      assert.ok(allowed.some(folder => target.startsWith(resolve(root, 'src', folder) + (process.platform === 'win32' ? '\\' : '/'))), 'An inward layer imports an outward adapter');
-    }
+    assertInwardImports(area, file, text);
     assert.doesNotMatch(text, /\b(?:structuredContent|_meta|download_url|file_id|statusCode)\b/, 'Transport DTO leaked into an inward layer');
     assert.doesNotMatch(text, /\bstore\.(?:items|reserved|pinned|state)\b/, 'Application observes or mutates store internals');
+  }
+});
+test('ARCH-IMPORT 일반 from 문자열은 무시하고 실제 정적·동적 외부 의존은 거절한다', () => {
+  const source = [
+    "const keys = ['from', 'to', 'target'];",
+    "const label = \"import fake from 'node:fs'\";",
+    "// import ignored from 'node:os';",
+    "/* import('node:path'); */",
+    "import value from '../domain/validation.mjs';",
+    "import { first, second as renamed } from '../contracts/ports.mjs';",
+    "import * as domain from '../domain/agent-cli.mjs';",
+    "import '../application/history.mjs';",
+    "const lazy = import('../application/files.mjs');",
+  ].join('\n');
+  assert.deepEqual(importSpecifiers(source), ['../domain/validation.mjs', '../contracts/ports.mjs', '../domain/agent-cli.mjs', '../application/history.mjs', '../application/files.mjs']);
+  const file = join(root, 'src', 'application', 'synthetic.mjs');
+  assert.doesNotThrow(() => assertInwardImports('application', file, source));
+  for (const allowedFile of applicationCrypto) assert.doesNotThrow(() => assertInwardImports('application', allowedFile, "import { createHash } from 'node:crypto';"));
+  assert.throws(() => assertInwardImports('application', file, "import { createHash } from 'node:crypto';"), /must not import infrastructure node:crypto/);
+  for (const text of ["import fs from 'node:fs';", "await import('node:fs');", "import 'node:fs';", "const value = `${await import('node:fs')}`;"]) {
+    assert.throws(() => assertInwardImports('application', file, text), /must not import infrastructure node:fs/);
+  }
+  for (const text of ["import { value } from '../adapters/synthetic.mjs';", "await import('../adapters/synthetic.mjs');"]) {
+    assert.throws(() => assertInwardImports('application', file, text), /An inward layer imports an outward adapter/);
   }
 });
 test('PORT-01 stream and async-iterator FileSource substitutes preserve approval and byte contracts', async () => {
@@ -42,7 +75,7 @@ test('PORT-01 stream and async-iterator FileSource substitutes preserve approval
     try {
       const store = new Artifacts(directory, { maxBytes: 16, budget: 32 }); await store.init();
       let service, executions = 0, closes = 0;
-      const queue = new ApprovalQueue({ classify: () => ({ class: 'safe' }), profile: 'fixture-write', target: 'fixture-target', executeOperation: async () => { executions++; return { failed: false, texts: ['done'] }; }, onTerminal: job => service.onTerminal(job) });
+      const queue = new ApprovalQueue({ classify: () => ({ class: 'safe' }), profile: 'fixture-write', target: 'fixture-target', executeOperation: async () => { executions++; return settledOutcome({ failed: false, texts: ['done'] }); }, onTerminal: job => service.onTerminal(job) });
       service = createFileService({ store, queue, transfers: {} });
       const source = { inspect: () => ({ allowed: true, sourceHost: 'files.example.test' }), open: async () => ({
         stream: kind === 'readable-stream' ? Readable.from([payload]) : (async function* () { yield payload.subarray(0, 2); yield payload.subarray(2); })(),

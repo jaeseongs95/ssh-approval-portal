@@ -3,68 +3,91 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { ApprovalQueue } from '../src/domain/approval-queue.mjs';
+import { ApprovalQueue, settledOutcome } from './support/approval-runtime.mjs';
 import { createCommandService } from '../src/application/commands.mjs';
 import { createLifecycleService } from '../src/application/lifecycle.mjs';
 import { createAudit } from '../src/adapters/audit/jsonl.mjs';
 
-const outcome = { failed: false, texts: ['ok'] };
+const outcome = settledOutcome({ failed: false, texts: ['ok'] });
 const classify = command => ({ class: command.startsWith('cat ') ? 'read-only' : 'privileged' });
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
-function commandFixture({ executeCommand = async () => outcome, audit = () => {}, now } = {}) {
-  let commands;
-  const queue = new ApprovalQueue({ profile: 'writer', target: 'host', classify, audit, now,
-    executeOperation: async () => outcome, externalBusy: () => commands?.busy() ?? false });
-  commands = createCommandService({ queue, classify, executeCommand, audit, target: 'host', readProfile: 'reader' });
+function commandFixture({ executeCommand = async () => outcome, executeOperation = async () => outcome, audit = () => {}, now } = {}) {
+  const queue = new ApprovalQueue({ profile: 'writer', readProfile: 'reader', target: 'host', classify, audit, now,
+    executeOperation: (operation, id, options) => operation.readOnly
+      ? executeCommand('reader', operation.command, options) : executeOperation(operation, id, options) });
+  const commands = createCommandService({ queue, classify });
   return { queue, commands };
 }
 
-test('AP-02 read rejection records failure, hides transport text, and releases the shared execution claim', async () => {
-  const events = [], gate = deferred();
-  const { queue, commands } = commandFixture({ audit: event => events.push(event), executeCommand: async profile => {
-    assert.equal(profile, 'reader'); await gate.promise; throw Error('SECRET-TRANSPORT-CONTENT');
-  } });
+test('AP-02 a failed read hides transport text and releases the shared scheduler slot for queued work', async () => {
+  const events = [], gate = deferred(), started = deferred(), effects = [];
+  const { queue, commands } = commandFixture({ audit: event => events.push(event), executeCommand: async (profile, command) => {
+    assert.equal(profile, 'reader'); effects.push(command);
+    if (command === 'cat /tmp/a') { started.resolve(); await gate.promise; throw Error('SECRET-TRANSPORT-CONTENT'); }
+    return outcome;
+  }, executeOperation: async operation => { effects.push(operation.command); return outcome; } });
   const read = commands.read('cat /tmp/a');
-  assert.equal(commands.busy(), true); assert.equal(queue.busy(), true);
-  const job = queue.submit('sudo id'); assert.throws(() => queue.start(job.id), /already executing/);
-  await assert.rejects(commands.read('cat /tmp/b'), /another operation/);
-  gate.resolve();
-  await assert.rejects(read, error => {
-    assert.match(error.message, /Operation failed/); assert.equal(error.message.includes('SECRET'), false); return true;
+  const failedRead = assert.rejects(read, error => {
+    assert.equal(error.code, 'READ_COMMAND_EXECUTION_UNKNOWN'); assert.equal(error.message.includes('SECRET'), false); return true;
   });
-  assert.deepEqual(events.map(event => event.action), ['read-started', 'submitted', 'read-failed']);
+  await started.promise;
+  assert.equal(commands.busy(), true); assert.equal(queue.busy(), true);
+  const job = queue.submit('sudo id'); assert.equal(queue.start(job.id).state, 'queued');
+  const nextRead = commands.read('cat /tmp/b');
+  try { assert.deepEqual(effects, ['cat /tmp/a']); assert.equal(queue.scheduler.snapshot().queued, 2); }
+  finally { gate.resolve(); }
+  await failedRead;
+  assert.equal((await queue.wait(job.id)).state, 'completed');
+  assert.deepEqual(await nextRead, outcome);
+  assert.equal(events.filter(event => event.action === 'unknown').length, 1);
+  assert.equal(events.filter(event => event.action === 'completed').length, 2);
+  assert.equal(JSON.stringify(events).includes('SECRET'), false);
   assert.equal(commands.busy(), false); assert.equal(queue.busy(), false);
-  queue.start(job.id); assert.equal((await queue.wait(job.id)).state, 'completed');
+  assert.deepEqual(effects, ['cat /tmp/a', 'sudo id', 'cat /tmp/b']);
 });
 
-test('read audit failures preserve fail-closed admission and release the claim after terminal audit errors', async () => {
-  for (const failedAction of ['read-started', 'read-completed', 'read-failed']) {
+test('read audit failures preserve fail-closed admission and durable outcomes after terminal audit errors', async () => {
+  for (const failedAction of ['execution-queued', 'policy-execution-started', 'completed', 'unknown']) {
     let executions = 0; const events = [];
-    const { commands } = commandFixture({ audit: event => { events.push(event.action); if (event.action === failedAction) throw Error('audit unavailable'); },
-      executeCommand: async () => { executions++; if (failedAction === 'read-failed') throw Error('transport unavailable'); return outcome; } });
-    await assert.rejects(commands.read('cat /tmp/a'), /audit unavailable/);
-    assert.equal(executions, failedAction === 'read-started' ? 0 : 1);
+    const { commands, queue } = commandFixture({ audit: event => { events.push(event.action); if (event.action === failedAction) throw Error('audit unavailable'); },
+      executeCommand: async () => { executions++; if (failedAction === 'unknown') throw Error('transport unavailable'); return outcome; } });
+    if (['execution-queued', 'unknown'].includes(failedAction)) {
+      await assert.rejects(commands.read('cat /tmp/a'), error => {
+        assert.equal(error.code, failedAction === 'execution-queued' ? 'READ_COMMAND_NOT_STARTED' : 'READ_COMMAND_EXECUTION_UNKNOWN');
+        assert.equal(error.message.includes('audit unavailable'), false); return true;
+      });
+    } else {
+      const result = await commands.read('cat /tmp/a');
+      if (failedAction === 'policy-execution-started') { assert.equal(result.failed, true); assert.equal(result.execution.remoteState, 'not_dispatched'); }
+      else assert.deepEqual(result, outcome);
+    }
+    assert.equal(executions, ['execution-queued', 'policy-execution-started'].includes(failedAction) ? 0 : 1);
     assert.equal(commands.busy(), false);
-    assert.equal(events.at(-1), failedAction);
+    assert.equal(queue.scheduler.snapshot().active, 0);
+    if (['completed', 'unknown'].includes(failedAction)) assert.match(queue.listAll()[0].auditError, /must not be retried/);
+    assert.ok(events.includes(failedAction));
   }
 });
 
-test('command routing keeps neutral outcomes separate from jobs and applies the shared operation lock', async () => {
+test('command routing returns durable jobs for reads and owner approvals and shares the scheduler', async () => {
   const { queue, commands } = commandFixture();
-  assert.deepEqual(await commands.run('cat /tmp/a'), { type: 'immediate', outcome });
+  const read = await commands.run('cat /tmp/a');
+  assert.equal(read.type, 'job'); assert.equal(read.job.profile, 'reader'); assert.equal(read.job.operation.readOnly, true);
+  assert.deepEqual((await queue.wait(read.job.id)).result, outcome);
   const request = await commands.run('sudo id');
   assert.equal(request.type, 'job'); assert.equal(request.job.state, 'pending');
   assert.equal(request.job.profile, 'writer'); assert.equal(request.job.result, undefined);
   queue.start(request.job.id);
-  await assert.rejects(commands.read('cat /tmp/a'), /another operation/);
+  const queuedRead = commands.read('cat /tmp/a');
   await queue.wait(request.job.id);
+  assert.deepEqual(await queuedRead, outcome);
   queue.reserveMaintenance();
   await assert.rejects(commands.run('cat /tmp/a'), /Maintenance/);
   await assert.rejects(commands.run('sudo id'), /Maintenance/);
-  const failedOutcome = { failed: true, texts: ['Command returned a nonzero exit status'] }, events = [];
+  const failedOutcome = settledOutcome({ failed: true, texts: ['Command returned a nonzero exit status'] }), events = [];
   const failed = commandFixture({ executeCommand: async () => failedOutcome, audit: event => events.push(event.action) });
-  assert.equal(await failed.commands.read('cat /tmp/missing'), failedOutcome);
-  assert.deepEqual(events, ['read-started', 'read-failed']);
+  assert.deepEqual(await failed.commands.read('cat /tmp/missing'), failedOutcome);
+  assert.deepEqual(events, ['submitted', 'execution-queued', 'policy-execution-started', 'failed']);
 });
 
 test('AP-01 expiry audit failure cannot resurrect a request and notifies terminal ownership once', () => {
@@ -73,7 +96,9 @@ test('AP-01 expiry audit failure cannot resurrect a request and notifies termina
     audit: event => { if (event.action === 'expired') throw Error('audit unavailable'); },
     executeOperation: async () => { executions++; return outcome; }, onTerminal: () => terminals++ });
   const job = queue.submit('sudo id'); now = job.expiresAt;
-  assert.throws(() => queue.listAll(), /audit unavailable/);
+  assert.equal(queue.listAll()[0].state, 'expired');
+  assert.match(queue.get(job.id).auditError, /must not be retried/);
+  assert.equal(queue.operationStore.get(job.id).state, 'expired');
   assert.equal(queue.get(job.id).state, 'expired');
   assert.throws(() => queue.start(job.id), /not pending/);
   assert.deepEqual(queue.list(), []); assert.equal(terminals, 1); assert.equal(executions, 0);
@@ -87,7 +112,7 @@ test('completion audit failure preserves the completed operation and prevents re
   const job = queue.submit('sudo id');
   const result = await queue.approve(job.id);
   assert.equal(result.state, 'completed'); assert.match(result.auditError, /must not be retried/);
-  assert.equal(result.result, outcome); assert.equal(queue.busy(), false);
+  assert.deepEqual(result.result, outcome); assert.equal(queue.busy(), false);
   await assert.rejects(queue.approve(job.id), /not pending/); assert.equal(executions, 1);
 });
 

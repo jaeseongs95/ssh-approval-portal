@@ -1,126 +1,283 @@
 import metadata from '../package.json' with { type: 'json' };
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import Ajv from 'ajv';
+import Ajv2020 from 'ajv/dist/2020.js';
+import addFormats from 'ajv-formats';
 import { createProtocolAdapters } from '../src/adapters/http/protocol.mjs';
 import { Tickets } from '../src/adapters/security/tickets.mjs';
 import { authorizeAdminRequest } from '../src/adapters/security/admin-policy.mjs';
+import { callerContext } from '../src/domain/execution-context.mjs';
 
-const identifier = 'a'.repeat(48);
-
-test('actual MCP HTTP preserves 5 KiB and 32 KiB commands with path-only context in both input forms', async () => {
-  const f = await fixture(), seen = [];
-  f.commands.run = async (...args) => { seen.push(args); return { type: 'job', job: f.pending }; };
-  try {
-    for (const size of [5025, 32768]) {
-      const command = 'printf ' + 'x'.repeat(size - 7);
-      assert.equal(Buffer.byteLength(command), size);
-      const input = { command, context: 'Check metadata for .env, /etc/shadow, /home/operator/.ssh/id_ed25519 and /secrets/service; no file contents supplied.', displayContext: '.env 및 /etc/shadow, /home/operator/.ssh/id_ed25519, /secrets/service 경로의 메타데이터만 확인합니다.' };
-      for (const args of [input, { command: 'ssh-request-v1:' + JSON.stringify(input) }]) {
-        const result = await f.call('run-command', args);
-        assert.equal(result.isError, undefined, JSON.stringify(result));
-        assert.deepEqual(seen.at(-1), [command, undefined, undefined, input.context, input.displayContext]);
-      }
-    }
-    assert.equal(seen.length, 4);
-  } finally { await f.close(); }
-});
-
-test('actual MCP HTTP refuses secret or invalid descriptions with safe context codes and no dispatch', async () => {
-  const f = await fixture(); let calls = 0;
-  f.commands.run = async () => { calls++; return { type: 'job', job: f.pending }; };
-  try {
-    const cases = [
-      ['password=synthetic-private-marker', 'COMMAND_CONTEXT_CONTAINS_SECRET'],
-      ['Bearer synthetic-private-marker', 'COMMAND_CONTEXT_CONTAINS_SECRET'],
-      ['-----BEGIN PRIVATE KEY-----\nsynthetic-private-marker', 'COMMAND_CONTEXT_CONTAINS_SECRET'],
-      ['a'.repeat(8193), 'COMMAND_CONTEXT_TOO_LARGE'],
-      ['synthetic-private-marker\0invalid', 'INVALID_COMMAND_CONTEXT'],
-    ];
-    for (const field of ['context', 'displayContext']) {
-      for (const [value, code] of cases) {
-        const input = { command: 'printf fixture', context: 'Fixture metadata inspection', [field]: value };
-        for (const args of [input, { command: 'ssh-request-v1:' + JSON.stringify(input) }]) {
-          const result = await f.call('run-command', args);
-          assert.equal(result.isError, true);
-          // Top-level oversize fields are rejected by the published JSON schema;
-          // envelopes reach callerContext and therefore carry its safe error code.
-          if (value.length <= 8192 || args !== input) assert.ok(result.content.some(item => item.type === 'text' && item.text.includes(code)), JSON.stringify(result));
-          assert.equal(JSON.stringify(result).includes(value), false);
-          assert.doesNotMatch(JSON.stringify(result), /synthetic-private-marker/);
-        }
-      }
-    }
-    assert.equal(calls, 0);
-    f.commands.run = async () => { throw Error('untrusted-error synthetic-private-marker COMMAND_CONTEXT_CONTAINS_SECRET'); };
-    const unknown = await f.call('run-command', { command: 'printf fixture' });
-    assert.equal(unknown.isError, true);
-    assert.match(unknown.content[0].text, /Request refused or failed/);
-    assert.doesNotMatch(JSON.stringify(unknown), /synthetic-private-marker|COMMAND_CONTEXT_CONTAINS_SECRET/);
-  } finally { await f.close(); }
-});
+// Contract 1.8 replaces legacy setup and command envelopes. Retain their HTTP,
+// strict-schema, exact-byte, context, redaction, cardless, paging and private UI coverage.
+const identifier = 'a'.repeat(48), revision = 'b'.repeat(64), operationKey = 'contract-fixture-key-180';
+const publicNames = ['targets', 'submit', 'observe', 'cancel', 'files', 'artifact-begin', 'artifact-chunk', 'artifact-status', 'artifact-finish', 'artifact-read'];
 const settings = { mcpToken: 'contract-mcp', adminToken: 'contract-admin', adminOrigin: 'https://example.test', uiEnabled: true, prefix: 'ssh-approval-bridge_', maxBytes: 64 };
-const job = () => ({ id: identifier, kind: 'command', operation: { kind: 'command', command: 'sudo id' }, command: 'sudo id',
+const job = () => ({ id: identifier, operationKey, kind: 'command', operation: { kind: 'command', command: 'sudo id' }, command: 'sudo id',
   profile: 'aws-local', commandClass: 'privileged', target: 'fixture@localhost:22', state: 'pending', createdAt: 10, expiresAt: Date.now() + 600_000 });
 
 async function fixture(overrides = {}) {
-  const calls = { append: [], imports: [] }, pending = job();
+  const calls = { submit: [], observe: [], cancel: [], append: [], imports: [] }, pending = job();
   const queue = { maintenance: false, subject: () => 'frozen-job', get: id => id === identifier ? pending : null,
     submit: () => pending, start: () => ({ ...pending, state: 'running' }), deny: () => ({ ...pending, state: 'denied' }),
-    approve: async () => ({ ...pending, state: 'completed', result: { failed: false, texts: ['finished'], data: { preserved: true } } }),
-    list: () => [pending], listAll: () => [pending] };
+    approve: async () => ({ ...pending, state: 'completed', result: { failed: false, texts: ['finished'], data: { preserved: true } } }), list: () => [pending], listAll: () => [pending] };
   const commands = { read: async () => ({ failed: false, texts: ['fixture-output'] }), run: async () => ({ type: 'job', job: pending }) };
+  const operations = {
+    async submit(input) { callerContext(input.context); callerContext(input.displayContext); calls.submit.push(input); return pending; },
+    async observe(input) { calls.observe.push(input); return pending; },
+    async cancel(input) { calls.cancel.push(input); return { ...pending, state: 'cancelled' }; },
+  };
   const files = { requestUpload: async args => { calls.imports.push(args); return { type: 'source-unavailable', sourceHost: 'files.example.test' }; },
     requestDownload: () => pending, beginUpload: async () => ({ id: identifier, expiresAt: Date.now() + 600_000 }),
-    appendUpload: async args => { calls.append.push(args); return { sequence: args.sequence + 1, received: args.bytes.length }; }, finishUpload: async () => pending };
+    appendUpload: async args => { calls.append.push(args); return { sequence: args.sequence + 1, received: args.bytes.length }; }, finishUpload: async () => pending,
+    beginAgentUpload: async () => ({ id: identifier, received: 0, sequence: 0, size: 3, sha256: 'd'.repeat(64), expiresAt: Date.now() + 600_000, targetId: 'default', targetRevision: revision }),
+    appendAgentUpload: async args => { calls.append.push(args); return { sequence: args.sequence + 1, received: args.bytes.length }; }, agentUploadStatus: () => ({ state: 'submitted', job: pending }), finishAgentUpload: async () => pending };
   const lifecycle = { snapshot: () => ({ busy: false, pending: 1, maintenance: false }), reserve() {}, release() {} };
-  const source = { inspect: () => ({ allowed: false, sourceHost: 'files.example.test' }), open: async () => assert.fail('unconfigured source must not open') };
-  const adapters = createProtocolAdapters({ queue, commands, files, lifecycle, store: { subject: () => 'frozen-upload' }, settings,
-    signer: new Tickets('b'.repeat(64)), adminAccess: { mode: 'token' }, authorizeAdminRequest,
-    uiHtml: '<html>fixture</html>', webHtml: '<html data-auth-mode="token"></html>', webJs: 'fixture', bindFileSource: () => source, ...overrides });
+  const source = { inspect: () => ({ allowed: false, sourceHost: 'files.example.test' }), open: async () => assert.fail('No source dispatch') };
+  const adapters = createProtocolAdapters({ queue, commands, operations, files, lifecycle, store: { subject: () => 'frozen-upload' }, settings,
+    signer: new Tickets('b'.repeat(64)), adminAccess: { mode: 'token' }, authorizeAdminRequest, uiHtml: '<html>fixture</html>',
+    webHtml: '<html data-auth-mode="token"></html>', webJs: 'fixture', bindFileSource: () => source, ...overrides });
   await new Promise(resolve => adapters.mcpHttp.listen(0, '127.0.0.1', resolve));
   await new Promise(resolve => adapters.adminHttp.listen(0, '127.0.0.1', resolve));
   const mcpBase = `http://127.0.0.1:${adapters.mcpHttp.address().port}`, adminBase = `http://127.0.0.1:${adapters.adminHttp.address().port}`;
   const client = new Client({ name: 'contract-client', version: '1' });
-  // SDK schema compilation shares this fixture's event loop and can outlast HTTP idle sockets.
-  // Use fresh connections for these RPC contract checks; production HTTP settings stay unchanged.
   await client.connect(new StreamableHTTPClientTransport(new URL(mcpBase + '/mcp'), { requestInit: { headers: { Authorization: 'Bearer contract-mcp', Connection: 'close' } } }));
-  return { client, calls, commands, pending, source, adapters, mcpBase, adminBase,
-    call: (name, args = {}) => client.callTool({ name, arguments: args }),
+  return { client, calls, commands, operations, pending, files, adapters, mcpBase, adminBase, call: (name, args = {}) => client.callTool({ name, arguments: args }),
     async close() { await client.close(); await Promise.all([adapters.mcpHttp, adapters.adminHttp].map(server => new Promise(resolve => server.close(resolve)))); } };
 }
 
-test('MCP contract families preserve tool names, JSON text, private capabilities and legacy error variants', async () => {
+test('MCP initialization distinguishes remote calls from model-external local file transfer', async () => {
   const f = await fixture();
   try {
-    const { tools } = await f.client.listTools();
-    assert.deepEqual(tools.map(tool => tool.name), ['list-targets', 'read-command', 'run-command', 'run-python-source', 'request-safe-command', 'get-request-status', 'wait-for-request', 'assess-request-risk', 'request-upload', 'show-ui-probe', 'show-approval', 'show-file-transfer', 'request-download', 'ui-decide-request', 'ui-upload-begin', 'ui-upload-chunk', 'ui-upload-finish', 'ui-download-link', 'read-command-output', 'ui-read-command-output']);
-    for (const tool of tools) assert.equal(tool.outputSchema.type, 'object', tool.name);
-    const upload = tools.find(tool => tool.name === 'request-upload');
-    assert.deepEqual(upload._meta['openai/fileParams'], ['file']); assert.match(upload.description, /only that host contract/);
-    assert.deepEqual(tools.find(tool => tool.name === 'ui-upload-chunk')._meta.ui.visibility, ['app']);
-    assert.ok(tools.find(tool => tool.name === 'show-approval').outputSchema.required.includes('id'));
-    const immediate = await f.call('read-command', { command: 'id' });
-    assert.equal(JSON.stringify(immediate).includes('fixture-output'), false); assert.deepEqual(immediate.structuredContent, { state: 'completed', kind: 'command', output: { state: 'unavailable' } });
-    const result = await f.call('run-command', { command: 'sudo id' });
-    assert.deepEqual(JSON.parse(result.content[0].text), result.structuredContent); assert.equal(result.structuredContent.id, identifier);
-    const card = await f.call('show-approval', { id: identifier });
-    assert.ok(card._meta.sshApproval.approvalTicket); assert.equal(JSON.stringify([card.content, card.structuredContent]).includes('Ticket'), false);
-    const missing = await f.call('get-request-status', { id: 'c'.repeat(48) });
-    assert.equal(missing.isError, undefined); assert.deepEqual(missing.structuredContent, { error: 'Unknown request; server may have restarted' });
-    const unavailable = await f.call('request-upload', { file: { download_url: 'https://files.example.test/private?signature=SECRET', file_id: 'PRIVATE-ID' }, remotePath: '/tmp/input.bin' });
-    assert.equal(unavailable.isError, true); assert.equal(unavailable.structuredContent.error, 'upload-source-not-configured');
-    assert.equal(JSON.stringify(unavailable).includes('SECRET'), false); assert.equal(f.calls.imports[0].source, f.source);
-    assert.equal('download_url' in f.calls.imports[0], false); assert.equal('file_id' in f.calls.imports[0], false);
-    const invalid = await f.call('request-upload', { file: { download_url: '', file_uuid: 'opaque' }, remotePath: '/tmp/input.bin' });
-    assert.equal(invalid.isError, true); assert.match(invalid.content[0].text, /-32602/); assert.equal(f.calls.imports.length, 1);
-    f.commands.run = async () => ({ type: 'job', job: {} });
-    const malformed = await f.call('run-command', { command: 'id' });
-    assert.equal(malformed.isError, true); assert.match(malformed.content[0].text, /Request refused or failed/);
+    const guidance = f.client.getInstructions();
+    assert.match(guidance, /Contract 2\.0/);
+    assert.match(guidance, /portal-files client reads and transmits bytes outside the model and returns a UUID/);
+    assert.match(guidance, /One remote MCP connection is sufficient/);
+    assert.match(guidance, /remote server cannot read a path on the caller computer/);
+    assert.match(guidance, /Do not transcribe large file bytes into model tool arguments/);
+    assert.match(guidance, /second local MCP server is optional/);
+    assert.doesNotMatch(guidance, /No local CLI, stdio server, client setup or UI is required/);
+    assert.equal(f.client.getServerVersion().version, metadata.version);
   } finally { await f.close(); }
 });
 
+test('actual MCP files projects UUID metadata and observes the original queued placement', async () => {
+  const uuid = '12345678-1234-4234-8234-123456789abc';
+  const placement = { operationKey, action: 'copy', requestId: identifier, state: 'queued', internalPath: '/private/never-disclose' };
+  const metadata = { uuid, state: 'ready', fileName: 'sample.bin', size: 3, sha256: 'd'.repeat(64),
+    expiresAt: Date.now() + 600000, received: 3, sequence: 1, operations: [placement], internalPath: '/private/never-disclose' };
+  const copies = [];
+  const f = await fixture({ opaqueFiles: {
+    stat: async () => metadata,
+    copy: async (input, options) => { copies.push({ input, options }); return { uuid, requestId: identifier, state: 'queued' }; },
+  } });
+  try {
+    const descriptor = (await f.client.listTools()).tools.find(tool => tool.name === 'files');
+    const ajv = new Ajv({ strict: false }); addFormats(ajv); const validate = ajv.compile(descriptor.outputSchema);
+    const stat = await f.call('files', { action: 'stat', uuid });
+    assert.equal(validate(stat.structuredContent), true, JSON.stringify(validate.errors));
+    assert.equal(stat.structuredContent.data.file.uuid, uuid); assert.equal(stat.structuredContent.data.request, null);
+    assert.doesNotMatch(JSON.stringify(stat), /private\/never-disclose|internalPath/);
+    const input = { action: 'copy', uuid, operationKey, target: 'default', expectedTargetRevision: revision, remotePath: '/home/operator/sample.bin' };
+    const copied = await f.call('files', input);
+    assert.equal(validate(copied.structuredContent), true, JSON.stringify(validate.errors));
+    assert.equal(copied.structuredContent.data.request.id, identifier);
+    assert.equal(copies.length, 1); assert.deepEqual(copies[0].input, Object.fromEntries(Object.entries(input).filter(([name]) => name !== 'action')));
+    assert.ok(copies[0].options.signal instanceof AbortSignal);
+    assert.deepEqual(f.calls.observe, [{ id: identifier }]);
+    for (const bad of [{ action: 'stat', uuid, target: 'default' }, { action: 'copy', uuid, operationKey }, { action: 'stat', uuid: 'a'.repeat(48) }]) {
+      const rejected = await f.call('files', bad); assert.equal(rejected.isError, true);
+    }
+    for (const suffix of ['\n', '\r', '\r\n']) {
+      for (const bad of [{ action: 'stat', uuid: uuid + suffix }, { ...input, operationKey: operationKey + suffix }]) {
+        const rejected = await f.call('files', bad); assert.equal(rejected.isError, true);
+      }
+    }
+    assert.equal(copies.length, 1);
+  } finally { await f.close(); }
+});
+
+test('MCP files retains unconfirmed admission in UUID status without inventing an observable job', async () => {
+  const uuid = '12345678-1234-4234-8234-123456789abc';
+  const f = await fixture({ opaqueFiles: {
+    move: async () => ({ uuid, requestId: identifier, state: 'admission-unconfirmed' }),
+    stat: async () => ({ uuid, state: 'consuming', fileName: 'sample.bin', size: 3, sha256: 'd'.repeat(64), expiresAt: Date.now() + 600000,
+      received: 3, sequence: 1, operations: [{ operationKey, action: 'move', requestId: identifier, state: 'admission-unconfirmed' }] }),
+  } });
+  try {
+    const result = await f.call('files', { action: 'move', uuid, operationKey, target: 'default', expectedTargetRevision: revision, remotePath: '/home/operator/sample.bin' });
+    assert.equal(result.isError, undefined); assert.equal(result.structuredContent.data.request, null);
+    assert.equal(result.structuredContent.data.file.operations[0].state, 'admission-unconfirmed');
+    assert.equal(f.calls.observe.length, 0);
+  } finally { await f.close(); }
+});
+
+test('actual MCP HTTP preserves 5 KiB and 32 KiB native commands plus bilingual path-only context', async () => {
+  const f = await fixture(); try {
+    for (const size of [5025, 32768]) {
+      const command = 'printf ' + 'x'.repeat(size - 7), input = { kind: 'command', operationKey, command,
+        context: 'Check metadata for .env, /etc/shadow, /home/operator/.ssh/id_ed25519 and /secrets/service; no file contents supplied.', displayContext: '.env 및 /etc/shadow 경로 메타데이터만 확인합니다.' };
+      const result = await f.call('submit', input); assert.equal(result.isError, undefined, JSON.stringify(result));
+      assert.deepEqual(f.calls.submit.at(-1), input); assert.equal(Buffer.byteLength(f.calls.submit.at(-1).command), size);
+      assert.equal(result.structuredContent.data.id, identifier); assert.doesNotMatch(JSON.stringify(result), /id_ed25519|shadow|printf/);
+    }
+    const detailed = { kind: 'command', operationKey, command: 'printf fixture', context: 'a'.repeat(8192), displayContext: '가'.repeat(8192) };
+    assert.equal((await f.call('submit', detailed)).isError, undefined);
+    assert.deepEqual(f.calls.submit.at(-1), detailed);
+    assert.equal(f.calls.submit.length, 3);
+  } finally { await f.close(); }
+});
+
+test('actual MCP HTTP refuses invalid or secret descriptions without dispatch or secret reflection', async () => {
+  const f = await fixture(); try {
+    for (const field of ['context', 'displayContext']) for (const value of ['password=synthetic-private-marker', 'Bearer synthetic-private-marker', '-----BEGIN PRIVATE KEY-----\nsynthetic-private-marker', 'a'.repeat(8193), 'synthetic-private-marker\0invalid', false]) {
+      const result = await f.call('submit', { kind: 'command', operationKey, command: 'printf fixture', [field]: value });
+      assert.equal(result.isError, true); assert.doesNotMatch(JSON.stringify(result), /synthetic-private-marker/);
+    }
+    assert.equal(f.calls.submit.length, 0); f.operations.submit = async () => { throw Error('untrusted-error synthetic-private-marker'); };
+    const result = await f.call('submit', { kind: 'command', operationKey, command: 'printf fixture' });
+    assert.equal(result.structuredContent.error.code, 'REQUEST_REFUSED'); assert.doesNotMatch(JSON.stringify(result), /synthetic-private-marker/);
+  } finally { await f.close(); }
+});
+
+// UI contract oracle: OpenAI Plugins reference _meta.ui.visibility defaults to ['model', 'app'];
+// show-* launches cards from the model, while privileged ui-* actions remain app-only.
+// TEST red/green: run this unchanged test against the baseline and fixed server.mjs in isolated copies.
+test('public MCP surface exposes operation and card tools while owner UI actions stay app-only', async () => {
+  const f = await fixture(); try {
+    const tools = (await f.client.listTools()).tools, modelTools = tools.filter(tool => !tool._meta?.ui?.visibility || tool._meta.ui.visibility.includes('model'));
+    const showNames = ['show-ui-probe', 'show-approval', 'show-file-transfer'];
+    assert.deepEqual(modelTools.filter(tool => !tool.name.startsWith('desktop-')).map(tool => tool.name), [...publicNames, ...showNames]);
+    const desktopNames = modelTools.filter(tool => tool.name.startsWith('desktop-')).map(tool => tool.name);
+    if (desktopNames.length) assert.deepEqual(desktopNames, ['desktop-open', 'desktop-status', 'desktop-observe', 'desktop-input', 'desktop-close']);
+    const privateTools = tools.filter(tool => tool.name.startsWith('ui-'));
+    assert.deepEqual(privateTools.map(tool => tool.name), ['ui-decide-request', 'ui-upload-begin', 'ui-upload-chunk', 'ui-upload-finish', 'ui-download-link', 'ui-read-command-output']);
+    // UI actions update the current card; only public show tools can render a widget.
+    for (const tool of privateTools) {
+      assert.deepEqual(tool._meta.ui.visibility, ['app']);
+      assert.equal(tool._meta.ui.resourceUri, undefined, tool.name + ' must not render a widget');
+      assert.equal(tool._meta['openai/outputTemplate'], undefined, tool.name + ' must not render a legacy widget');
+    }
+    assert.deepEqual(tools.filter(tool => tool._meta?.ui?.resourceUri || tool._meta?.['openai/outputTemplate']).map(tool => tool.name), showNames);
+    const resources = (await f.client.listResources()).resources;
+    assert.equal(resources.length, 1); assert.equal(resources[0].mimeType, 'text/html;profile=mcp-app');
+    for (const name of showNames) {
+      const tool = tools.find(tool => tool.name === name);
+      assert.deepEqual(tool._meta.ui.visibility, ['model', 'app']);
+      assert.equal(tool._meta.ui.resourceUri, resources[0].uri);
+    }
+    const resource = await f.client.readResource({ uri: resources[0].uri });
+    assert.equal(resource.contents[0].mimeType, 'text/html;profile=mcp-app');
+    assert.equal(resource.contents[0].text, '<html>fixture</html>');
+    for (const old of ['get-client-capabilities', 'get-client-setup', 'run-command', 'read-command', 'run-python-source', 'request-upload', 'read-command-output']) assert.equal(tools.some(tool => tool.name === old), false, old);
+    const result = await f.call('submit', { kind: 'command', operationKey, command: 'sudo id' });
+    assert.deepEqual(JSON.parse(result.content[0].text), result.structuredContent);
+    assert.deepEqual(Object.keys(result.structuredContent).sort(), ['contractVersion', 'data', 'error', 'ok']);
+    assert.equal(result.structuredContent.contractVersion, '2.0'); assert.equal(result.structuredContent.ok, true); assert.equal(result.structuredContent.error, null); assert.equal(result._meta, undefined);
+  } finally { await f.close(); }
+});
+
+test('cardless discovery stays read-only and exposes limits plus owner authority for either UI setting', async () => {
+  for (const enabled of [false, true]) { const f = await fixture({ settings: { ...settings, uiEnabled: enabled } }); try {
+    const descriptor = (await f.client.listTools()).tools.find(tool => tool.name === 'targets');
+    assert.equal(descriptor.annotations.readOnlyHint, true); assert.equal(descriptor.annotations.destructiveHint, false);
+    const reply = await f.call('targets'), result = JSON.parse(reply.content[0].text); assert.deepEqual(result, reply.structuredContent);
+    assert.equal(result.data.limits.commandBytes, 32768); assert.equal(result.data.limits.sourceBytes, 16384);
+    assert.equal(result.data.limits.artifactBytes, 64); assert.equal(result.data.limits.chunkBytes, 262144);
+    assert.equal(result.data.approval.agentSelfApproval, false); assert.equal(result.data.approval.ownerUrl, settings.adminOrigin);
+    assert.doesNotMatch(JSON.stringify(reply), /contract-mcp|contract-admin|approvalTicket|bootstrapTicket|downloadUrl/);
+    assert.equal(f.calls.submit.length, 0); assert.equal(f.calls.append.length, 0); assert.equal(f.calls.imports.length, 0);
+    assert.match(f.client.getInstructions(), /stable operationKey/);
+    assert.match(f.client.getInstructions(), /One remote MCP connection is sufficient/);
+    assert.match(f.client.getInstructions(), /portal-files client reads and transmits bytes outside the model/);
+  } finally { await f.close(); } }
+});
+
+test('SDK-published MCP schemas compile in draft-07 and remain structurally compatible with 2020-12', async () => {
+  const f = await fixture(); try {
+    const tools = (await f.client.listTools()).tools;
+    for (const [index, ajv] of [new Ajv({ strict: false, allErrors: true }), new Ajv2020({ strict: false, allErrors: true })].entries()) {
+      addFormats(ajv); let compiled = 0;
+      for (const tool of tools) for (const key of ['inputSchema', 'outputSchema']) {
+        const published = tool[key]; assert.ok(published, `${tool.name}.${key}`); assert.equal(published.$schema, 'http://json-schema.org/draft-07/schema#');
+        const schema = index === 0 ? published : { ...published, $schema: 'https://json-schema.org/draft/2020-12/schema' };
+        assert.doesNotThrow(() => ajv.compile(schema), `${tool.name}.${key}`); compiled++;
+      }
+      assert.equal(compiled, tools.length * 2);
+    }
+  } finally { await f.close(); }
+});
+
+test('native submit rejects unknown fields, wrong kinds, missing payload and invalid replay keys before dispatch', async () => {
+  const f = await fixture(); try {
+    for (const input of [{ kind: 'command', operationKey, command: 'id', autoApprove: true }, { kind: 'command', operationKey, command: 'id', remotePath: '/tmp/file' }, { kind: 'command', operationKey }, { kind: 'source', operationKey, source: 'print(1)' }, { kind: 'download', operationKey }, { kind: 'upload', operationKey }, { kind: 'command', operationKey: 'short', command: 'id' }, { kind: 'command', operationKey: 123, command: 'id' }, { kind: 'command', operationKey, command: 'id', target: '../escape' }]) assert.equal((await f.call('submit', input)).isError, true, JSON.stringify(input));
+    assert.equal(f.calls.submit.length, 0);
+    const source = 'print("한글")\r\n'; assert.equal((await f.call('submit', { kind: 'source', operationKey, source, cwd: '/tmp', argv: ['one'] })).structuredContent.ok, true); assert.equal(f.calls.submit[0].source, source);
+    assert.equal((await f.call('submit', { kind: 'download', operationKey, remotePath: '/tmp/file' })).structuredContent.ok, true);
+    for (const revision of [undefined, 'a'.repeat(64)]) {
+      const download = { kind: 'download', operationKey, remotePath: '/tmp/file', context: 'Download the authorized fixture.', displayContext: '승인된 시험 파일을 내려받습니다.',
+        ...(revision ? { expectedTargetRevision: revision } : {}) };
+      assert.equal((await f.call('submit', download)).structuredContent.ok, true);
+      assert.deepEqual(f.calls.submit.at(-1), download);
+    }
+  } finally { await f.close(); }
+});
+
+test('observe requires one stable lookup and explicit output reads; timeout never cancels or resubmits', async () => {
+  const f = await fixture(); try {
+    for (const input of [{}, { id: identifier, operationKey }, { id: identifier, cursor: 4 }, { id: identifier, maxBytes: 8 }, { id: identifier, waitMs: 60001 }]) assert.equal((await f.call('observe', input)).isError, true);
+    assert.equal(f.calls.observe.length, 0); f.operations.observe = async input => { f.calls.observe.push(input); return { job: f.pending, waitTimedOut: true }; };
+    const result = await f.call('observe', { operationKey, waitMs: 1 }); assert.equal(result.structuredContent.data.state, 'pending'); assert.equal(result.structuredContent.data.waitTimedOut, true);
+    assert.equal(f.calls.cancel.length, 0); assert.equal(f.calls.submit.length, 0);
+    assert.equal((await f.call('cancel', { id: identifier })).structuredContent.data.state, 'cancelled'); assert.deepEqual(f.calls.cancel, [{ id: identifier }]);
+  } finally { await f.close(); }
+});
+
+test('text-only MCP clients reconstruct bounded UTF-8 output and digest with no status body leakage', async () => {
+  const f = await fixture(), text = '가\n나', digest = createHash('sha256').update(text).digest('hex'); try {
+    f.pending.state = 'completed'; f.pending.result = { failed: false, texts: [text], output: { id: identifier, state: 'ready', bytes: 7, sha256: digest } };
+    f.operations.observe = async input => ({ job: f.pending, outputPage: input.cursor === 0 ? { text: '가\n', cursor: 0, nextCursor: 4, bytes: 4, totalBytes: 7, sha256: digest, eof: false, expiresAt: 100 } : { text: '나', cursor: 4, nextCursor: 7, bytes: 3, totalBytes: 7, sha256: digest, eof: true, expiresAt: 100 } });
+    const status = await f.call('observe', { id: identifier }); assert.equal(JSON.stringify(status).includes(text), false); assert.equal(status.structuredContent.data.outputPage, null);
+    let cursor = 0, reconstructed = '', pages = 0;
+    while (true) { const reply = await f.call('observe', { id: identifier, includeOutput: true, cursor, maxBytes: 4 }), page = JSON.parse(reply.content[0].text).data.outputPage;
+      assert.equal(page.cursor, cursor); assert.equal(page.bytes, Buffer.byteLength(page.text)); assert.equal(page.sha256, digest); assert.equal(page.totalBytes, 7); assert.equal(page.expiresAt, 100); assert.ok(page.nextCursor > cursor);
+      reconstructed += page.text; cursor = page.nextCursor; pages++; if (page.eof) break; assert.ok(pages < 3);
+    }
+    assert.equal(reconstructed, text); assert.equal(pages, 2); assert.equal(createHash('sha256').update(reconstructed).digest('hex'), digest); assert.equal(f.calls.submit.length, 0);
+  } finally { await f.close(); }
+});
+
+test('actual MCP observe projects signal delivery without converting a request into remote exit evidence', async () => {
+  const f = await fixture(); try {
+    f.pending.state = 'unknown';
+    for (const [signalDelivery, expected] of [['requested', 'requested'], ['unsupported', 'unsupported'], ['claimed-terminated', null], [undefined, null]]) {
+      f.pending.result = { failed: true, texts: [], execution: { phase: 'settled', reason: 'cancel', remoteState: 'unknown',
+        exitCode: null, cleanupComplete: false, requiresReconciliation: true, automaticReplay: false, signalDelivery } };
+      const result = await f.call('observe', { id: identifier });
+      assert.equal(result.structuredContent.ok, true);
+      const data = result.structuredContent.data;
+      assert.equal(data.execution.signalDelivery, expected); assert.equal(data.state, 'unknown');
+      assert.equal(data.execution.remoteState, 'unknown'); assert.equal(data.execution.cleanupComplete, false);
+      assert.equal(data.execution.requiresReconciliation, true); assert.equal(data.execution.automaticReplay, false);
+    }
+    const descriptor = (await f.client.listTools()).tools.find(tool => tool.name === 'observe');
+    assert.match(descriptor.description, /signalDelivery=requested.*not that remote termination was confirmed/);
+  } finally { await f.close(); }
+});
+
+test('native submit keeps exact UTF-8 limits and refuses command overflow without dispatch', async () => {
+  const f = await fixture(); try {
+    const submit = (await f.client.listTools()).tools.find(t => t.name === 'submit'); assert.equal(submit.inputSchema.properties.command.maxLength, 32768); assert.equal(submit.inputSchema.properties.source.maxLength, 16384);
+    const command = 'printf ' + 'x'.repeat(32768 - 7 - 8) + 'END_TAIL'; assert.equal(Buffer.byteLength(command), 32768);
+    assert.equal((await f.call('submit', { kind: 'command', operationKey, command })).structuredContent.ok, true); assert.equal(f.calls.submit.at(-1).command, command);
+    for (const value of [command + 'x', 'printf ' + '가'.repeat(11000), 'printf \ud800']) assert.equal((await f.call('submit', { kind: 'command', operationKey, command: value })).isError, true);
+    assert.equal(f.calls.submit.length, 1);
+  } finally { await f.close(); }
+});
 test('app-only chunks decode canonical base64 before the application sees bytes', async () => {
   const f = await fixture();
   try {
@@ -137,6 +294,7 @@ test('app-only chunks decode canonical base64 before the application sees bytes'
     assert.deepEqual(result.structuredContent, { sequence: 1, received: 3 }); assert.deepEqual(f.calls.append[0].bytes, Buffer.from([0, 255, 1]));
   } finally { await f.close(); }
 });
+
 
 test('health callback exceptions become controlled 503 and leave the HTTP server usable', async () => {
   let fails = true;
@@ -181,85 +339,7 @@ test('download-ready publishes only filename while the renewed URL stays in priv
   } finally { await f.close(); }
 });
 
-test('MCP preserves detailed optional context and rejects oversized descriptions before dispatch', async () => {
-  const seen = [], f = await fixture();
-  f.commands.run = async (...args) => { seen.push(args); return { type: 'job', job: f.pending }; };
-  try {
-    const { tools } = await f.client.listTools();
-    const tool = tools.find(item => item.name === 'run-command');
-    assert.equal(tool.inputSchema.properties.context.maxLength, 8192);
-    assert.equal(tool.inputSchema.required.includes('context'), false);
-    assert.match(tool.description, /evidence already checked/); assert.match(tool.description, /one hour/);
-    const context = 'a'.repeat(8192);
-    const result = await f.call('run-command', { command: 'sudo id', context });
-    assert.equal(result.isError, undefined); assert.deepEqual(seen[0], ['sudo id', undefined, undefined, context]);
-    assert.equal((await f.call('run-command', { command: 'sudo id', context: context + 'a' })).isError, true);
-    assert.equal(seen.length, 1);
-  } finally { await f.close(); }
-});
-
-test('command-only hosts decode a strict context envelope before dispatch; invalid or conflicting fields never dispatch', async () => {
-  const seen = [], f = await fixture();
-  f.commands.run = async (...args) => { seen.push(args); return { type: 'job', job: f.pending }; };
-  const input = { command: 'sudo id', context: 'Test instance; check identity only; no mutation; no rollback needed', requestKey: 'synthetic-context-request-1' };
-  const envelope = value => 'ssh-request-v1:' + JSON.stringify(value);
-  try {
-    assert.equal((await f.call('run-command', { command: envelope(input) })).isError, undefined);
-    assert.deepEqual(seen, [[input.command, undefined, input.requestKey, input.context]]);
-    for (const args of [
-      { command: envelope(input), context: 'conflicting context' },
-      { command: envelope(input), requestKey: 'conflicting-request-key' },
-      { command: envelope({ ...input, target: 'other-server' }) },
-      { command: envelope({ ...input, userApproval: true }) },
-      { command: envelope({ ...input, context: '   ' }) },
-      { command: envelope({ ...input, context: 'api_key=synthetic-value' }) },
-      { command: envelope({ ...input, requestKey: 12 }) },
-      { command: envelope({ ...input, command: envelope(input) }) },
-      { command: 'ssh-request-v1:invalid' },
-    ]) assert.equal((await f.call('run-command', args)).isError, true);
-    assert.equal(seen.length, 1);
-  } finally { await f.close(); }
-});
 
 test('health and MCP initialization report the actual package version', async () => {
  const f=await fixture();try{assert.equal((await (await fetch(f.mcpBase+'/health')).json()).version,metadata.version);assert.equal(f.client.getServerVersion().version,metadata.version);}finally{await f.close();}
-});
-
-test('MCP keeps English evaluator context separate from the Korean owner explanation, including command-only hosts', async () => {
-  const seen = [], f = await fixture();
-  f.commands.run = async (...args) => { seen.push(args); return { type: 'job', job: f.pending }; };
-  const input = { command: 'sudo id', context: 'Inspect identity on the test host; no mutation or restart.', displayContext: '테스트 서버의 실행 계정을 조회합니다. 변경·재시작은 없습니다.', requestKey: 'synthetic-language-pair-1' };
-  try {
-    const listed = (await f.client.listTools()).tools.find(t => t.name === 'run-command');
-    assert.equal(listed.inputSchema.properties.displayContext.maxLength, 8192);
-    assert.match(listed.description, /context in English/); assert.match(listed.description, /never sent to the evaluator/);
-    assert.equal((await f.call('run-command', input)).isError, undefined);
-    assert.deepEqual(seen[0], [input.command, undefined, input.requestKey, input.context, input.displayContext]);
-    assert.equal((await f.call('run-command', { command: 'ssh-request-v1:' + JSON.stringify(input) })).isError, undefined);
-    assert.deepEqual(seen[1], seen[0]);
-    for (const bad of [
-      { ...input, displayContext: 'a'.repeat(8193) },
-      { ...input, displayContext: 'password=synthetic-only' },
-      { ...input, displayContext: false },
-      { command: 'ssh-request-v1:' + JSON.stringify(input), displayContext: '' },
-      { command: 'ssh-request-v1:' + JSON.stringify({ ...input, displayContext: 0 }) },
-    ]) assert.equal((await f.call('run-command', bad)).isError, true);
-    assert.equal(seen.length, 2);
-  } finally { await f.close(); }
-});
-
-test('LIMIT-MCP actual HTTP schema and dispatch retain long command/envelope and refuse overflow',async()=>{
- const f=await fixture(),seen=[];f.commands.run=async(command,_target,_key,context)=>{seen.push({command,context});return{type:'job',job:f.pending};};
- try{
-  const tools=(await f.client.listTools()).tools;
-  assert.equal(tools.find(t=>t.name==='read-command').inputSchema.properties.command.maxLength,32768);
-  assert.equal(tools.find(t=>t.name==='run-command').inputSchema.properties.command.maxLength,524288);
-  const command='printf '+'x'.repeat(32768-7-8)+'END_TAIL';
-  assert.equal(Buffer.byteLength(command),32768);
-  assert.equal((await f.call('run-command',{command})).isError,undefined);assert.equal(seen.at(-1).command,command);
-  const context='Synthetic purpose '.repeat(300),wire='ssh-request-v1:'+JSON.stringify({command,context});
-  assert.equal((await f.call('run-command',{command:wire})).isError,undefined);assert.deepEqual(seen.at(-1),{command,context});
-  for(const value of [command+'x','printf '+'가'.repeat(11000),'printf \ud800'])assert.equal((await f.call('run-command',{command:value})).isError,true);
-  assert.equal(seen.length,2);
- }finally{await f.close();}
 });

@@ -4,6 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createApplication } from '../../app.mjs';
+import { openRequest } from './admin-ui.mjs';
 import { launchBrowser } from './browser.mjs';
 
 for (const failed of [false, true]) test(`owner approval releases the browser while actual execution is held (${failed ? 'failed' : 'completed'})`, { timeout: 30000 }, async () => {
@@ -31,24 +32,31 @@ for (const failed of [false, true]) test(`owner approval releases the browser wh
       return route.continue();
     });
     page.setDefaultTimeout(10000);
-    await page.clock.install(); await page.clock.pauseAt(new Date());
+    const clockTime = new Date();
+    // No application timers exist before navigation; the 60s margin exceeds this test's 30s timeout.
+    await page.clock.install({ time: new Date(clockTime.getTime() - 60000) });
+    await page.clock.pauseAt(clockTime);
     await page.goto(origin); await page.locator('#token').fill('synthetic-owner'); await page.locator('#load').click();
     const card = id => page.locator(`#jobs [data-request-id="${id}"]`);
     await card(first.id).waitFor();
     const accepted = page.waitForResponse(response => response.url() === `${origin}/api/${first.id}/approve`);
-    await card(first.id).getByRole('button', { name: 'Approve and run', exact: true }).click();
+    await openRequest(page, first.id, '#jobs');
+    await page.locator('#request-detail-body').getByRole('button', { name: 'Approve and run', exact: true }).click();
     const response = await accepted;
     assert.equal(response.status(), 202); assert.equal(response.headers()['preference-applied'], 'respond-async');
     assert.equal(response.request().headers().prefer, 'respond-async');
     await page.locator(`#running [data-request-id="${first.id}"]`).waitFor();
     assert.equal(app.queue.get(first.id).state, 'running'); assert.equal(executions, 1);
-    assert.equal(await card(second.id).getByRole('button', { name: 'Approve and run', exact: true }).isEnabled(), true);
-    await page.locator('[data-page-link][href="/settings"]').click();
+    assert.ok((await page.locator('#request-detail-target').textContent()).includes(first.id));
+    await openRequest(page, second.id, '#jobs');
+    assert.equal(await page.locator('#request-detail-body').getByRole('button', { name: 'Approve and run', exact: true }).isEnabled(), true);
+    await page.locator('[data-page-link][href="/preferences"]').click();
     assert.equal(await page.locator('#appearance-settings').isVisible(), true);
     assert.equal(app.queue.get(first.id).state, 'running', 'settings navigation does not await execution');
     await page.locator('[data-page-link][href="/"]').click();
     const denied = page.waitForResponse(response => response.url() === `${origin}/api/${second.id}/deny`);
-    await card(second.id).getByRole('button', { name: 'Denied', exact: true }).click();
+    await openRequest(page, second.id, '#jobs');
+    await page.locator('#request-detail-body').getByRole('button', { name: 'Denied', exact: true }).click();
     assert.equal((await denied).request().headers().prefer, undefined);
     assert.equal(app.queue.get(second.id).state, 'denied'); assert.equal(executions, 1);
     release(); assert.equal((await app.queue.wait(first.id)).state, failed ? 'failed' : 'completed');

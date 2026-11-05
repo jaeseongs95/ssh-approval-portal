@@ -1,4 +1,4 @@
-import { ASSESSMENT_CONTEXT_LIMIT } from './execution-context.mjs';
+import { assessmentContextWithinLimit } from './execution-context.mjs';
 import { COMMAND_MAX_BYTES, utf8WithinLimit } from '../contracts/ports.mjs';
 
 /** Observation only: these values confer no execution authority. */
@@ -47,10 +47,11 @@ export function candidateMatch(assessment) {
 }
 
 /** Whitelisted synthetic context only; callers must authorize external disclosure. */
-export function safetyInput(input) {
+export function safetyInput(input, { sourcePlan } = {}) {
   const result = {};
   for (const key of ['command', 'target', 'environment', 'context']) {
-    if (typeof input?.[key] !== 'string' || !input[key].trim() || (key === 'command' ? !utf8WithinLimit(input[key], COMMAND_MAX_BYTES) : input[key].length > (key === 'context' ? ASSESSMENT_CONTEXT_LIMIT : 4096))) throw Error('Invalid safety input');
+    if (typeof input?.[key] !== 'string' || !input[key].trim() || (key === 'command' ? !utf8WithinLimit(input[key], COMMAND_MAX_BYTES)
+      : key === 'context' ? !assessmentContextWithinLimit(input[key], sourcePlan) : input[key].length > 4096)) throw Error('Invalid safety input');
     result[key] = input[key];
   }
   return result;

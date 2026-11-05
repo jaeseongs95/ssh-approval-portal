@@ -1,11 +1,46 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, readFile, readdir, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, readdir, writeFile, lstat, symlink } from 'node:fs/promises';
 import { Readable } from 'node:stream';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Artifacts } from '../src/adapters/storage/artifacts.mjs';
 import { hash } from '../src/domain/validation.mjs';
+
+test('prepareRoot creates a private directory before initialization and preserves expired staging unchanged', async () => {
+  const parent = await mkdtemp(join(tmpdir(), 'ssh-prepare-root-')), root = join(parent, 'new', 'transfers');
+  let now = 0;
+  try {
+    const store = new Artifacts(root, { maxBytes: 4, budget: 4, now: () => now });
+    await assert.rejects(lstat(root), { code: 'ENOENT' });
+    await store.prepareRoot();
+    const directory = await lstat(root);
+    assert.equal(directory.isDirectory(), true); assert.equal(directory.isSymbolicLink(), false);
+    if (process.platform !== 'win32') { assert.equal(directory.mode & 0o077, 0); assert.equal(directory.uid, process.getuid()); }
+    assert.deepEqual(await readdir(root), []); assert.equal(store.size, 0); assert.equal(store.reserved, 0);
+    await store.init();
+    const item = await store.begin({ remotePath: '/tmp/x', fileName: 'x', size: 4, sha256: hash('test') });
+    await store.append(item.id, 0, Buffer.from('test')); now = item.expiresAt;
+    const capture = async () => Promise.all((await readdir(root)).sort().map(async name => ({ name, bytes: await readFile(join(root, name)) })));
+    const before = await capture();
+    const reopened = new Artifacts(root, { maxBytes: 4, budget: 4, now: () => now });
+    await reopened.prepareRoot();
+    assert.deepEqual(await capture(), before); assert.equal(reopened.size, 0); assert.equal(reopened.reserved, 0);
+    await reopened.init(); assert.equal(reopened.get(item.id).received, 4);
+    assert.deepEqual(await capture(), before);
+    const notDirectory = join(parent, 'file'); await writeFile(notDirectory, 'keep');
+    await assert.rejects(new Artifacts(notDirectory).prepareRoot()); assert.equal(await readFile(notDirectory, 'utf8'), 'keep');
+  } finally { await rm(parent, { recursive: true }); }
+});
+
+test('prepareRoot refuses a symbolic-link root without changing its target', { skip: process.platform === 'win32' }, async () => {
+  const parent = await mkdtemp(join(tmpdir(), 'ssh-prepare-link-'));
+  try {
+    const link = join(parent, 'transfers'); await symlink(parent, link, 'dir');
+    await assert.rejects(new Artifacts(link).prepareRoot(), /private and owned/);
+    assert.equal((await lstat(link)).isSymbolicLink(), true);
+  } finally { await rm(parent, { recursive: true }); }
+});
 test('binary and empty uploads: chunks are idempotent, hash-bound and quota-limited', async () => {
   const root = await mkdtemp(join(tmpdir(), 'ssh-artifact-'));
   try {
@@ -60,7 +95,8 @@ test('stream imports reserve capacity before opening, hash exact bytes and reuse
     await assert.rejects(store.verified(item.id), /hash mismatch/);
     await store.remove(item.id);
     const empty = await store.importFile(meta, async () => ({ stream: Readable.from([]), expectedSize: 0, close() {} }));
-    assert.equal(empty.size, 0); assert.equal(empty.sha256, hash(Buffer.alloc(0))); assert.equal(store.reserved, 0);
+    assert.equal(empty.size, 0); assert.equal(empty.sha256, hash(Buffer.alloc(0))); assert.equal(store.reserved, 1);
+    await store.remove(empty.id); assert.equal(store.reserved, 0);
   } finally { await rm(root, { recursive: true }); }
 });
 

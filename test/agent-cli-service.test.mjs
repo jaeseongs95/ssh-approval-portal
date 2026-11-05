@@ -3,13 +3,13 @@ import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync,lstatSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
-import {ApprovalQueue} from '../src/domain/approval-queue.mjs';
-import {createClaims} from '../src/application/target-router.mjs';
+import {ApprovalQueue,settledOutcome} from './support/approval-runtime.mjs';
 import {createCommandState} from '../src/adapters/storage/command-state.mjs';
 import {CommandOutputs} from '../src/adapters/storage/command-output.mjs';
 import {prepareAgentCliPlan} from '../src/adapters/ssh/agent-cli.mjs';
 import {createAgentCliService} from '../src/application/agent-cli.mjs';
 import {validateAgentRelease} from '../src/domain/agent-cli.mjs';
+import {dispatchFailureDetails} from '../src/domain/dispatch-failure.mjs';
 
 const revision='a'.repeat(64),installationRevision='b'.repeat(64);
 function release(provider='codex'){
@@ -25,19 +25,18 @@ function fixture(t){
  const cleanup=[];let journalClosed=false;const closeJournal=journal.close.bind(journal);
  journal.close=()=>{if(!journalClosed){closeJournal();journalClosed=true;}};
  const definition={id:'fixture',revision,writeProfile:'fixture-write',get enabled(){return flags.enabled;},verify(){if(flags.targetChanged)throw Error('Target changed');}};
- const claim=createClaims(1);
- const queue=new ApprovalQueue({classify:()=>({class:'privileged'}),target:'fixture@host:22',profile:'fixture-write',identity:{targetId:'fixture',targetRevision:revision},claimExecution:claim,now:()=>tick,idFactory:()=>String(++jobId).padStart(48,'0'),audit:event=>{if(flags.auditFailure)throw Error('SYNTHETIC_PRIVATE_AUDIT');calls.audit.push(event);},executeOperation:(_,id)=>service.execute(id),onTerminal:job=>service?.onTerminal(job)});
+ const queue=new ApprovalQueue({classify:()=>({class:'privileged'}),target:'fixture@host:22',profile:'fixture-write',identity:{targetId:'fixture',targetRevision:revision},now:()=>tick,idFactory:()=>String(++jobId).padStart(48,'0'),audit:event=>{if(flags.auditFailure)throw Error('SYNTHETIC_PRIVATE_AUDIT');calls.audit.push(event);},executeOperation:(_,id)=>service.execute(id),onTerminal:job=>service?.onTerminal(job)});
  const ports={queue,journal,outputs,resolveTarget:id=>id==='fixture'?definition:null,
   readInstallation:async(provider,binding)=>{calls.read.push({provider,binding});return flags.read?flags.read(provider,binding):{provider,managed:false,installed:false,version:null,installationRevision,login:'not_checked',private:'SYNTHETIC_PRIVATE'};},
   catalog:{get:async provider=>({release:release(provider),expiresAt:tick+300000})},
   preparePlan:args=>flags.prepare?flags.prepare(args):prepareAgentCliPlan(args),
-  executePlan:async(plan,verify)=>{verify();calls.execute.push(plan);return flags.execute?flags.execute(plan,verify):{failed:false,texts:['CLI installation completed'],data:{agentCli:{provider:plan.agentCli.provider,state:'completed',login:'not_checked'}}};},
+  executePlan:async(plan,verify)=>{verify();calls.execute.push(plan);return flags.execute?flags.execute(plan,verify):settledOutcome({failed:false,texts:['CLI installation completed'],data:{agentCli:{provider:plan.agentCli.provider,state:'completed',login:'not_checked'}}});},
   checkPolicy:(plan,binding)=>{calls.policy.push({plan,binding});if(flags.denied)throw Error('Policy denied');},now:()=>tick,nonce:()=>(++identity).toString(16).padStart(48,'0')};
  service=createAgentCliService(ports);
  queue.beforeCommandStart=job=>service.beforeStart(job);
  const body=(preview,key='request-key-00000001')=>({planId:preview.planId,request:{targetId:'fixture',targetRevision:revision,profile:'fixture-write',provider:preview.release.provider,action:'install',releaseDigest:preview.release.releaseDigest,expectedInstallationRevision:preview.installation.installationRevision,requestKey:key}});
  t.after(()=>{service.close();for(const close of cleanup)close();journal.close();outputs.close();assert.ok(resolve(root).startsWith(resolve(tmpdir())+'\\')||resolve(root).startsWith(resolve(tmpdir())+'/'));assert.ok(!lstatSync(root).isSymbolicLink());rmSync(root,{recursive:true,force:true});});
- return {root,queue,journal,outputs,flags,calls,ports,get service(){return service;},replaceService(next){service=next;},beforeCleanup(fn){cleanup.push(fn);},body,clock(value){tick=value;},preview:provider=>service.preview({targetId:'fixture',provider:provider??'codex'}),releaseClaim:claim};
+ return {root,queue,journal,outputs,flags,calls,ports,get service(){return service;},replaceService(next){service=next;},beforeCleanup(fn){cleanup.push(fn);},body,clock(value){tick=value;},preview:provider=>service.preview({targetId:'fixture',provider:provider??'codex'})};
 }
 
 test('preview binds exact registered target, release, revision and lifetime; strips private extras',async t=>{
@@ -87,17 +86,24 @@ test('changed target, current deny policy and maintenance prevent dispatch at ac
  f.queue.maintenance=true;await assert.rejects(()=>f.queue.approve(job.id));f.queue.maintenance=false;
  assert.equal(f.calls.execute.length,0);assert.equal(f.queue.get(job.id).state,'pending');
 });
-test('global execution claim is shared with existing queue and prevents a second start',async t=>{
- const f=fixture(t),job=f.service.submit(f.body(await f.preview())),releaseClaim=f.releaseClaim();
- await assert.rejects(()=>f.queue.approve(job.id));assert.equal(f.calls.execute.length,0);releaseClaim();assert.equal((await f.queue.approve(job.id)).state,'completed');
+test('one scheduler slot is shared by agent CLI operations and keeps the second queued',async t=>{
+ const f=fixture(t),first=f.service.submit(f.body(await f.preview()));
+ const second=f.service.submit(f.body(await f.preview('claude'),'request-key-00000002'));
+ let release,started;const entered=new Promise(resolve=>{started=resolve;});
+ const gate=new Promise(resolve=>{release=resolve;});
+ f.flags.execute=async()=>{if(f.calls.execute.length===1){started();await gate;}return settledOutcome({failed:false,texts:[]});};
+ f.queue.start(first.id);await entered;
+ try{assert.equal(f.queue.start(second.id).state,'queued');assert.equal(f.calls.execute.length,1);}
+ finally{release();}
+ assert.equal((await f.queue.wait(first.id)).state,'completed');assert.equal((await f.queue.wait(second.id)).state,'completed');assert.equal(f.calls.execute.length,2);
 });
-test('target change after owner admission is rechecked before remote effect and leaves unknown',async t=>{
+test('target change after owner admission is rechecked and confirms no remote dispatch',async t=>{
  const f=fixture(t),job=f.service.submit(f.body(await f.preview()));f.queue.start(job.id);f.flags.targetChanged=true;
- const result=await f.queue.wait(job.id);assert.equal(result.state,'unknown');assert.equal(f.calls.execute.length,0);
+ const result=await f.queue.wait(job.id);assert.equal(result.state,'failed');assert.equal(result.result.execution.remoteState,'not_dispatched');assert.equal(f.calls.execute.length,0);
 });
 test('plan expiry between owner admission and dispatch prevents the remote effect',async t=>{
  const f=fixture(t),p=await f.preview(),job=f.service.submit(f.body(p));f.queue.start(job.id);f.clock(p.expiresAt);
- const result=await f.queue.wait(job.id);assert.equal(result.state,'unknown');assert.equal(f.calls.execute.length,0);
+ const result=await f.queue.wait(job.id);assert.equal(result.state,'expired');assert.equal(f.queue.operationStore.get(job.id).state,'expired');assert.equal(f.calls.execute.length,0);
 });
 test('output reservation failure never dispatches and cannot be replayed',async t=>{
  const f=fixture(t),body=f.body(await f.preview()),job=f.service.submit(body);f.outputs.reserve=()=>{throw Error('SYNTHETIC_PRIVATE_DISK');};
@@ -144,6 +150,12 @@ test('changed queued operation or profile cannot consume the private execution p
  const f=fixture(t),job=f.service.submit(f.body(await f.preview())),raw=f.queue.jobs.get(job.id),original=raw.operation;
  raw.operation=Object.freeze({...original,agentCliAction:'update'});await assert.rejects(()=>f.queue.approve(job.id));raw.operation=original;
  raw.profile='foreign';await assert.rejects(()=>f.queue.approve(job.id));assert.equal(f.calls.execute.length,0);
+});
+
+test('CLI-DISPATCH arbitrary policy callback failures are unknown at the policy guard, never confirmed denial',async t=>{
+ const f=fixture(t),job=f.service.submit(f.body(await f.preview()));f.flags.denied=true;
+ assert.throws(()=>f.queue.start(job.id),error=>{assert.deepEqual(dispatchFailureDetails(error),{dispatchFailureReason:'unknown',dispatchFailureStage:'policy_guard'});return true;});
+ assert.equal(f.calls.execute.length,0);assert.equal(f.queue.get(job.id).state,'pending');
 });
 test('false catalog provider, release digest or extended lifetime never becomes a preview',async t=>{
  const f=fixture(t);

@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { permissionsTab, openRequest, selectServer } from './admin-ui.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -36,8 +37,8 @@ async function fixture(t, { width = 390, height = 844, ko = true } = {}) {
   const page = await browserContext.newPage(); page.setDefaultTimeout(10000);
   const open = async path => {
     await page.goto(origin + path); await page.locator('#token').fill('fixture-owner');
-    if (path === '/settings') await page.getByRole('button', { name: ko ? '현재 설정 불러오기' : 'Load current settings', exact: true }).click();
-    else await page.locator('#load').click();
+    await page.locator('#load').click();
+    if (path === '/settings') {await selectServer(page,'alpha');await permissionsTab(page);}
   };
   const submit = async () => { const result = await app.targets.commands.runSource({ source, cwd: '/tmp', context }, 'alpha'); await app.targets.drain(); return app.queue.get(result.job.id); };
   return { app, page, api, open, submit, rules, browserContext, origin };
@@ -48,7 +49,7 @@ for (const [width, height] of [[375, 812], [390, 844], [768, 1024], [1440, 900],
     const f = await fixture(t, { width, height, ko }), { page } = f;
     await f.open('/settings'); const checkbox = page.getByRole('checkbox', { name: new RegExp('^' + title(ko)) });
     await checkbox.waitFor(); assert.equal(await checkbox.isChecked(), false); await checkbox.check();
-    const target = page.getByLabel(ko ? '정책 편집 대상' : 'Policy edit target', { exact: true });
+    const target = page.getByLabel(ko ? '편집 대상 서버' : 'Server editing target', { exact: true });
     await target.selectOption('beta'); assert.equal(await checkbox.isChecked(), false);
     await target.selectOption('alpha'); assert.equal(await checkbox.isChecked(), true);
     await page.getByRole('tab', { name: ko ? '검토·저장' : 'Review and save', exact: true }).click();
@@ -64,8 +65,9 @@ for (const [width, height] of [[375, 812], [390, 844], [768, 1024], [1440, 900],
     const job = await f.submit(); await f.open('/');
     const card = page.locator('[data-request-id="' + job.id + '"]'); await card.waitFor();
     assert.equal(await card.locator('.submitted-source').count(), 0);
-    await card.getByRole('button', { name: ko ? '제출 코드 원문 보기' : 'View submitted source', exact: true }).click();
-    const code = card.locator('.submitted-source'); await code.waitFor(); assert.equal(await code.textContent(), source); assert.equal(await code.locator('img').count(), 0);
+    await openRequest(page, job.id, '#jobs');
+    await page.locator('#request-detail-body').getByRole('button', { name: ko ? '제출 코드 원문 보기' : 'View submitted source', exact: true }).click();
+    const code = page.locator('#request-detail-body .submitted-source'); await code.waitFor(); assert.equal(await code.textContent(), source); assert.equal(await code.locator('img').count(), 0);
     const scroll = await code.evaluate(n => { n.scrollTop = n.scrollHeight; return { scrollable: n.scrollHeight > n.clientHeight, moved: n.scrollTop > 0, height: n.clientHeight }; });
     assert.equal(scroll.scrollable, true); assert.equal(scroll.moved, true); assert.ok(scroll.height <= 360);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
@@ -76,7 +78,7 @@ for (const action of ['page', 'target', 'logout']) test(`SOURCE-BROWSER delayed 
   const f = await fixture(t), { page } = f, job = await f.submit(); await f.open('/');
   let release, reached, delivered; const held = new Promise(resolve => { release = resolve; }), started = new Promise(resolve => { reached = resolve; }), delivery = new Promise(resolve => { delivered = resolve; });
   await page.route('**/api/' + job.id + '/source', async route => { const response = await route.fetch(); reached(); await held; try { await route.fulfill({ response }).catch(() => {}); } finally { delivered(); } });
-  await page.getByRole('button', { name: '제출 코드 원문 보기', exact: true }).click(); await started;
+  await openRequest(page, job.id, '#jobs'); await page.getByRole('button', { name: '제출 코드 원문 보기', exact: true }).click(); await started;
   try {
     if (action === 'page') await page.locator('[data-page-link][href="/settings"]').click();
     else if (action === 'target') await page.locator('#target-filter').selectOption('beta');
@@ -84,6 +86,6 @@ for (const action of ['page', 'target', 'logout']) test(`SOURCE-BROWSER delayed 
   } finally { release(); }
   // Let the held fetch settle and all rendering microtasks run; no fixed long sleep.
   await delivery; await page.waitForLoadState(); await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-  assert.equal(await page.locator('.submitted-source').count(), 0); assert.doesNotMatch(await page.locator('body').innerText(), /PRIVATE_BROWSER_SOURCE_32/);
+  assert.equal(await page.locator('.submitted-source:visible').count(), 0); assert.doesNotMatch(await page.locator('body').textContent(), /PRIVATE_BROWSER_SOURCE_32/);
   assert.deepEqual(await page.evaluate(() => Object.values(localStorage)), []);
 });

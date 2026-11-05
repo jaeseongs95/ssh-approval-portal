@@ -1,0 +1,49 @@
+{
+  "schemaVersion": "1.0.0",
+  "kind": "engineering-test-proof",
+  "planDigest": "sha256:491e65b5f7aeb323091fc31e98092495a10e38f4117e3affbc9aa42ed6abcd4b",
+  "candidate": {
+    "schemaVersion": "1.0.0",
+    "kind": "engineering-snapshot",
+    "files": [
+      {
+        "path": "native/freerdp-input/agni.c",
+        "digest": "sha256:dbf0706243fc7bcdd70834785fc83e5db850ec29e22be28b17ccc77e4d75faab",
+        "size": 19704,
+        "lineCount": 672
+      },
+      {
+        "path": "native/freerdp-input/agni.h",
+        "digest": "sha256:99071b0a92c548ec2352a437d32c6cb511f29c064423e06e97d155ffdb5347ca",
+        "size": 1026,
+        "lineCount": 38
+      },
+      {
+        "path": "native/freerdp-input/test_agni.c",
+        "digest": "sha256:6b0071c9d56fdf91b6baa09eede029fcf0ec02d560e79c1239dea2d090dbf8d9",
+        "size": 12560,
+        "lineCount": 455
+      }
+    ],
+    "digest": "sha256:6c145a9ec7ba9553e7d6a0ec24df83887fd855a92233831f2779672e8b305218"
+  },
+  "proofs": [
+    {
+      "caseId": "AGNI-PROTOCOL-001",
+      "status": "DEMONSTRATED",
+      "red": {
+        "path": "native/freerdp-input/proof/red.json",
+        "digest": "sha256:64947e0bf3cd286d5d4b01ee84ca4b220e3d8fac6372c61c57f500cf7c0ca8a6"
+      },
+      "green": {
+        "path": "native/freerdp-input/proof/green.json",
+        "digest": "sha256:c180c72ec64c2b434d92a3d234e2a0a4b81acbe0da64adc1b731b725aa45ac70"
+      },
+      "mutationPaths": [
+        "native/freerdp-input/agni.c"
+      ],
+      "assertionWitness": "r32(hello + 8) == 88",
+      "reason": "Native BE writer mutation fails the unchanged wire oracle; real Windows consumption remains a separate TEST."
+    }
+  ]
+}

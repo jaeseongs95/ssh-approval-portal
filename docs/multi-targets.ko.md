@@ -9,11 +9,13 @@ BRIDGE_DEFAULT_TARGET=test
 
 각 프로필 쌍은 같은 host·port·user·인증 참조·경유 서버·`trustedHostKey`를 사용해야 합니다. 읽기 프로필은 `readOnly=true`, 쓰기 프로필은 `readOnly=false`로 설정합니다. 새 대상은 별도 경로에서 확인한 host key 지문을 두 프로필에 고정해야 하며, 서로 다른 대상이 같은 프로필·host/port·host key를 공유하면 시작을 거부합니다. 자격 자체는 SSH 설정과 기존 보호된 비밀 저장 경로에 둡니다. 키나 비밀번호를 교체하면 `credentialRevision`도 `v2`처럼 바꿉니다.
 
+대상의 `platform`은 `linux` 또는 `windows`이며 생략하면 기존 Linux 동작을 사용합니다. Windows는 `platform:"windows"`를 명시하고 프로필의 `workdir` 대신 대상 등록의 Windows 절대 경로 `workdir`를 사용합니다. Windows PowerShell 5.1 일반 명령·파일 전송·명령 이름 정책·서버 CLI를 지원합니다. Python 코드 제출에는 대상의 `pythonExecutable` 절대 경로가 필요하며 권한 상승 작업은 기존 SSH 연결의 실제 관리자 토큰을 확인합니다. 키·SFTP·도우미·런타임 준비와 보안 제약은 [Windows 대상 등록](windows-targets.ko.md)을 확인하세요.
+
 ID·프로필 이름·자격 revision은 영문 소문자로 시작하는 1~32자의 소문자·숫자·`_`·`-` 조합입니다. 표시 이름은 80 UTF-16 코드 단위까지 허용하며 제어·서식 문자를 거부합니다. `enabled:false`인 등록은 목록에 표시되지만 선택하거나 실행할 수 없습니다. 표시 이름은 공개 정보로 취급합니다.
 
 `BRIDGE_TARGETS`와 `BRIDGE_DEFAULT_TARGET`을 모두 생략하면 기존 `aws-readonly`·`aws-local`을 `default`로 연결하며 기존 호출을 유지합니다. 배열만 설정하고 기본 대상을 생략하면 새 명령·전송 요청마다 `target`을 명시해야 합니다. 마지막으로 선택한 화면이나 최근 요청은 기본 대상이 되지 않습니다. 잘못된 대상과 비활성 대상은 거부하며 다른 서버로 대체하지 않습니다.
 
-`list-targets`는 ID·표시 이름·활성 여부·고정 기본 대상만 반환합니다. `read-command`, `run-command`, `request-safe-command`, `request-upload`, `request-download`, `show-file-transfer`의 `target`으로 ID를 선택합니다. 이미 생성된 요청의 상태 조회·승인·거부·파일 저장은 요청 ID에 고정된 대상을 따릅니다. 관리자 웹의 대상 필터는 조회 범위만 바꾸며 승인 대상은 편집하지 않습니다. 파일 카드에서 대상을 바꾸면 이전 파일 선택과 진행 중인 화면 작업을 폐기하고 새 전송 카드를 받습니다.
+`list-targets`는 ID·표시 이름·활성 여부·고정 기본 대상과 `platform`·`capabilities`를 반환합니다. 기능 정보에는 명령 셸·파일 전송·권한 상승 전송·Python 코드 제출·서버 CLI·명령 이름 사전승인 지원 여부가 포함됩니다. `read-command`, `run-command`, `request-safe-command`, `request-upload`, `request-download`, `show-file-transfer`의 `target`으로 ID를 선택합니다. 이미 생성된 요청의 상태 조회·승인·거부·파일 저장은 요청 ID에 고정된 대상을 따릅니다. 관리자 웹의 대상 필터는 조회 범위만 바꾸며 승인 대상은 편집하지 않습니다. 파일 카드에서 대상을 바꾸면 이전 파일 선택과 진행 중인 화면 작업을 폐기하고 새 전송 카드를 받습니다.
 
 대상 ID·설정 revision·실제 연결 대상은 요청과 결과에 남습니다. 승인·파일 전송 준비·artifact·다운로드 링크는 해당 대상에 결속되며 다른 대상의 티켓과 조합할 수 없습니다. 설정 변경에는 재시작이 필요합니다. 재시작 뒤 이전 준비 티켓과 메모리 내 요청·파일 ID는 다시 사용할 수 없습니다. 대상 프로필의 런타임 변경도 실행 전에 거부합니다.
 

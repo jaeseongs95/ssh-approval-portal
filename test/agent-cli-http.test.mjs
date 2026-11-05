@@ -10,22 +10,27 @@ import {createAgentCliState} from '../src/adapters/storage/agent-cli-state.mjs';
 
 const adminOrigin='https://owner.test';
 const defer=()=>{let resolve;return {promise:new Promise(done=>{resolve=done;}),resolve:(...args)=>resolve(...args)};};
+const fixtureExit={phase:'settled',reason:'exit',remoteState:'exited',cleanupComplete:true,requiresReconciliation:false,exitCode:0};
+async function queuedCapacity(f,queued,running){
+ const deadline=Date.now()+5000;
+ for(;;){const response=await f.api('/api/capacity');assert.equal(response.status,200);if(response.body.status.queued===queued&&response.body.status.running===running)return response.body;assert.ok(Date.now()<deadline,'expected durable queued/running counts');await new Promise(resolve=>setImmediate(resolve));}
+}
 function release(provider){const name=provider==='codex'?'@openai/codex':'@anthropic-ai/claude-code';return validateAgentRelease(provider,{name,version:'1.2.3',dist:{tarball:'https://registry.npmjs.org/'+name+'/-/'+name.split('/')[1]+'-1.2.3.tgz',integrity:'sha512-'+Buffer.alloc(64,7).toString('base64')}});}
 async function fixture(t,options={}){
  const root=await mkdtemp(join(tmpdir(),'cli-app-')),events=[],calls=[],profiles=new Map(),flags={probe:null,install:null,status:null,login:null,auditFail:false};
  let app,origin;const cleanup=[];t.after(async()=>{for(const release of cleanup)release();await app?.close();assert.ok(root.startsWith(join(tmpdir(),'cli-app-')));await rm(root,{recursive:true,force:true});});
- const env={BRIDGE_MCP_TOKEN:'fixture-mcp',BRIDGE_ADMIN_TOKEN:'fixture-owner',BRIDGE_UI_TICKET_KEY:'a'.repeat(64),BRIDGE_ADMIN_ORIGIN:adminOrigin,BRIDGE_JEV_ENABLED:'false',BRIDGE_COMMAND_AUTOMATION:'false',BRIDGE_TEST_SERVER_SECRET_REF:'secret://fixture/test-server',...options.env};
+ const env={BRIDGE_MCP_TOKEN:'fixture-mcp',BRIDGE_ADMIN_TOKEN:'fixture-owner',BRIDGE_UI_TICKET_KEY:'a'.repeat(64),BRIDGE_ADMIN_ORIGIN:adminOrigin,BRIDGE_JEV_ENABLED:'false',BRIDGE_COMMAND_AUTOMATION:'false',BRIDGE_MAX_CONCURRENCY:'1',BRIDGE_TEST_SERVER_SECRET_REF:'secret://fixture/test-server',...options.env};
  const execute=async(plan,verify,beforeDispatch)=>{
   const checked=verify();assert.equal(checked.targetId,plan.manifest.targetId);assert.equal(checked.targetRevision,plan.manifest.targetRevision);assert.equal(checked.profile,plan.manifest.profile);calls.push(plan);
   if(plan.agentCli.action==='login-status'){
    if(flags.probe)await flags.probe(plan,verify);
-   return {failed:false,texts:[],data:{agentCli:{provider:plan.agentCli.provider,state:flags.login??'signed_in',...(flags.loginReason===undefined?{}:{reason:flags.loginReason}),private:'SYNTHETIC_PRIVATE'}}};
+   return {failed:false,texts:[],execution:fixtureExit,data:{agentCli:{provider:plan.agentCli.provider,state:flags.login??'signed_in',...(flags.loginReason===undefined?{}:{reason:flags.loginReason}),private:'SYNTHETIC_PRIVATE'}}};
   }
   if(plan.agentCli.action==='inspect'){
    if(flags.probe)await flags.probe(plan,verify);
-   return {failed:false,texts:[],data:{agentCli:{provider:plan.agentCli.provider,installed:false,managed:false,version:null,active:null,installationRevision:'b'.repeat(64),login:'not_checked',private:'SYNTHETIC_PRIVATE'}}};
+   return {failed:false,texts:[],execution:fixtureExit,data:{agentCli:{provider:plan.agentCli.provider,installed:false,managed:false,version:null,active:null,installationRevision:'b'.repeat(64),login:'not_checked',private:'SYNTHETIC_PRIVATE'}}};
   }
-  if(plan.agentCli.action==='status')return {failed:false,texts:[],data:{agentCli:{provider:plan.agentCli.provider,operationId:plan.agentCli.operationId,state:flags.status??'completed',version:'1.2.3',login:'not_checked',private:'SYNTHETIC_PRIVATE'}}};
+  if(plan.agentCli.action==='status')return {failed:false,texts:[],execution:fixtureExit,data:{agentCli:{provider:plan.agentCli.provider,operationId:plan.agentCli.operationId,state:flags.status??'completed',version:'1.2.3',login:'not_checked',private:'SYNTHETIC_PRIVATE'}}};
   if(flags.install)await flags.install(plan,verify,beforeDispatch);
   return {failed:false,texts:[],data:{agentCli:{contract:AGENT_CLI_CONTRACT,provider:plan.agentCli.provider,state:'completed',operationId:plan.agentCli.operationId,version:'1.2.3',login:'not_checked'}}};
  };
@@ -99,12 +104,12 @@ test('CLI-HTTP every mutation requires owner, exact Origin and bounded JSON befo
  assert.equal((await f.api('/api/agent-cli/preview',{method:'POST',raw:JSON.stringify({...body,extra:'x'.repeat(8193)})})).status,413);
  assert.equal((await f.api('/api/agent-cli/preview?target=default',{method:'POST',body})).status,409);assert.equal(f.calls.length,0);
 });
-test('CLI-HTTP real app preview/pending/start/output flow executes only after owner and returns running promptly',async t=>{
+test('CLI-HTTP real app preview/pending/start/output flow accepts owner work promptly then observes execution',async t=>{
  const f=await fixture(t),p=await f.preview();assert.equal(f.calls.length,1);assert.equal(f.calls[0].agentCli.action,'inspect');assert.ok(!JSON.stringify(p).includes('SYNTHETIC_PRIVATE'));
  const job=await f.submit(p);assert.equal(job.state,'pending');assert.equal(f.calls.length,1);assert.equal((await f.api('/api/'+job.id+'/source')).status,200);
  for(const token of [null,'fixture-mcp'])assert.equal((await f.api('/api/agent-cli/requests/'+job.id,{token})).status,401);
  const gate=defer(),entered=defer();f.beforeClose(gate.resolve);f.flags.install=async()=>{entered.resolve();await gate.promise;};
- const started=await f.start(job);assert.equal(started.status,200);assert.equal(started.body.state,'running');await entered.promise;
+ const started=await f.start(job);assert.equal(started.status,200);assert.equal(started.body.id,job.id);assert.equal(started.body.state,'queued');assert.equal(started.body.approvalMode,'owner');await entered.promise;
  assert.equal((await f.start(job)).body.id,job.id);assert.equal(f.calls.filter(p=>p.agentCli.action==='install').length,1);
  assert.equal((await f.api('/api/agent-cli/requests/'+job.id)).body.job.state,'running');assert.equal((await f.api('/api/maintenance/reserve',{method:'POST',body:{}})).status,409);
  gate.resolve();await f.app.targets.drain();const complete=(await f.api('/api/agent-cli/requests/'+job.id)).body.job;assert.equal(complete.state,'completed');assert.equal(complete.approvalMode,'owner');
@@ -217,17 +222,35 @@ test('CLI-LOGIN owner preserves fixed failure reasons and refuses forged or inco
  f.flags.login='signed_in';f.flags.loginReason='unsafe_path';const r=await f.api(path,{method:'POST',body});assert.equal(r.body.state,'unavailable');assert.equal(r.body.reason,'check_failed');
 });
 
-test('CLI-LOGIN probe claim rejects concurrent work, hides errors and rejects binding drift',async t=>{
+test('CLI-LOGIN probes queue within target capacity, hide errors and reject binding drift',async t=>{
  const f=await fixture(t),body={targetId:'default',provider:'codex'},path='/api/agent-cli/login-status';
- const entered=defer(),gate=defer();f.beforeClose(gate.resolve);f.flags.probe=async()=>{entered.resolve();await gate.promise;};
- const pending=f.api(path,{method:'POST',body});await Promise.race([entered.promise,pending.then(r=>{assert.equal(r.status,200);})]);
- assert.equal((await f.api(path,{method:'POST',body})).status,409);
+ let active=0,peak=0;
+ const entered=defer(),gate=defer();f.beforeClose(gate.resolve);f.flags.probe=async()=>{active++;peak=Math.max(peak,active);try{entered.resolve();await gate.promise;}finally{active--;}};
+ const pending=f.api(path,{method:'POST',body});await entered.promise;
+ const second=f.api(path,{method:'POST',body});await queuedCapacity(f,1,1);
+ assert.equal(f.calls.length,1);assert.equal(active,1);assert.equal(peak,1);
  assert.equal((await f.api('/api/maintenance/reserve',{method:'POST',body:{}})).status,409);
- f.profiles.get('aws-local').user='changed';gate.resolve();assert.equal((await pending).status,409);
+ gate.resolve();const completed=await Promise.all([pending,second]);for(const response of completed){assert.equal(response.status,200);assert.equal(response.body.state,'signed_in');}
+ assert.equal(f.calls.length,2);assert.equal(active,0);assert.equal(peak,1);
+ const driftEntered=defer(),driftGate=defer();f.beforeClose(driftGate.resolve);f.flags.probe=async()=>{driftEntered.resolve();await driftGate.promise;};
+ const drift=f.api(path,{method:'POST',body});await driftEntered.promise;
+ const queuedDrift=f.api(path,{method:'POST',body});await queuedCapacity(f,1,1);
+ f.profiles.get('aws-local').user='changed';driftGate.resolve();for(const response of await Promise.all([drift,queuedDrift]))assert.equal(response.status,409);
  f.profiles.get('aws-local').user='fixture';f.flags.probe=async()=>{throw Error('SYNTHETIC_PRIVATE');};
  const r=await f.api(path,{method:'POST',body});assert.equal(r.body.state,'unavailable');assert.ok(!JSON.stringify(r).includes('SYNTHETIC_PRIVATE'));
  f.flags.probe=null;assert.equal((await f.api(path,{method:'POST',body})).body.state,'signed_in');
  assert.equal(f.events.filter(e=>e.action==='cli-probe-started').length,f.events.filter(e=>e.action==='cli-probe-finished').length);
+});
+
+test('CLI-LOGIN and preview wait behind a command through the same target scheduler',async t=>{
+ const entered=defer(),gate=defer();let active=0,peak=0;
+ const f=await fixture(t,{executeCommand:async()=>{active++;peak=Math.max(peak,active);try{entered.resolve();await gate.promise;return{failed:false,texts:['read']};}finally{active--;}}});f.beforeClose(gate.resolve);
+ f.flags.probe=async()=>{active++;peak=Math.max(peak,active);try{assert.equal(active,1);}finally{active--;}};
+ const read=await f.app.targets.commands.run('id');await entered.promise;
+ const body={targetId:'default',provider:'codex'},login=f.api('/api/agent-cli/login-status',{method:'POST',body}),preview=f.api('/api/agent-cli/preview',{method:'POST',body});
+ await queuedCapacity(f,2,1);assert.equal(f.calls.length,0);assert.equal(active,1);
+ gate.resolve();const responses=await Promise.all([login,preview]);assert.equal(responses[0].status,200);assert.equal(responses[0].body.state,'signed_in');assert.equal(responses[1].status,200);assert.ok(responses[1].body.planId);
+ await f.app.queue.wait(read.job.id);assert.equal(f.calls.length,2);assert.equal(peak,1);assert.equal(active,0);
 });
 
 
@@ -244,15 +267,19 @@ test('test server owner policy automatically executes a new CLI request and repl
 });
 
 
-test('test server CLI slot rejection is terminal and replay cannot start the installation',async t=>{
- const f=await fixture(t,{env:{BRIDGE_COMMAND_AUTOMATION:'true'}});
+test('test server CLI waits behind an active command and replay never repeats installation',async t=>{
+ const held=defer(),entered=defer();
+ const f=await fixture(t,{env:{BRIDGE_COMMAND_AUTOMATION:'true'},executeCommand:async()=>{entered.resolve();await held.promise;return{failed:false,texts:['first']};}});f.beforeClose(()=>held.resolve());
  const current=(await f.api('/api/command-policy')).body,b=current.bindings[0];
  const proposal={expectedRevision:current.revision,policy:{targets:[{targetId:b.targetId,targetRevision:b.targetRevision,profile:b.profile,commands:[],deniedCommands:[],externalDisclosure:false,modelExecution:false,testServer:true,fallback:null,thresholds:{}}]}};
  const review=await f.api('/api/command-policy/review',{method:'POST',body:proposal});assert.equal(review.status,200);
  assert.equal((await f.api('/api/command-policy',{method:'POST',body:{...proposal,reviewToken:review.body.reviewToken,acknowledged:true}})).status,200);
- const p=await f.preview(),q=f.app.targets.select('default').queue,busy=q.externalBusy;q.externalBusy=()=>true;
- const job=await f.submit(p);assert.equal(job.state,'failed');assert.equal(job.decision.dispatchFailure,'not_dispatched');
- q.externalBusy=busy;const before=f.calls.length;assert.equal((await f.submit(p)).id,job.id);assert.equal(f.calls.length,before);assert.throws(()=>q.start(job.id),/not pending/);
+ const p=await f.preview();
+ const first=await f.app.targets.commands.run('sudo first');await entered.promise;
+ const job=await f.submit(p);assert.equal(job.state,'queued');assert.equal(job.approvalMode,'automatic');assert.equal(job.decision.reasonCode,'test_server_bypass');assert.equal(job.decision.dispatchFailure,undefined);
+ const before=f.calls.length;assert.equal((await f.submit(p)).id,job.id);assert.equal(f.calls.length,before);
+ held.resolve();await f.app.queue.wait(first.job.id);await f.app.queue.wait(job.id);assert.equal(f.app.queue.get(job.id).state,'completed');
+ assert.equal(f.calls.filter(plan=>plan.agentCli.action==='install').length,1);assert.equal((await f.submit(p)).id,job.id);assert.equal(f.calls.filter(plan=>plan.agentCli.action==='install').length,1);
 });
 
 
@@ -264,6 +291,9 @@ test('test server CLI dispatch hook rejects revoked secret after admission and r
  const review=await f.api('/api/command-policy/review',{method:'POST',body:proposal});assert.equal(review.status,200);
  assert.equal((await f.api('/api/command-policy',{method:'POST',body:{...proposal,reviewToken:review.body.reviewToken,acknowledged:true}})).status,200);
  const p=await f.preview();f.flags.install=async(_plan,_verify,beforeDispatch)=>{value=undefined;await beforeDispatch();effects++;};
- const job=await f.submit(p);await f.app.queue.wait(job.id);assert.equal(f.app.queue.get(job.id).state,'unknown');assert.equal(effects,0);
+ const job=await f.submit(p);await f.app.queue.wait(job.id);const settled=f.app.queue.get(job.id);assert.equal(settled.state,'failed');assert.equal(effects,0);
+ assert.equal(settled.result.execution.remoteState,'not_dispatched');assert.equal(settled.result.execution.requiresReconciliation,false);
+ assert.equal(settled.decision.dispatchFailureReason,'authority');assert.equal(settled.decision.dispatchFailureStage,'policy_guard');
+ assert.doesNotMatch(JSON.stringify([settled,f.events]),/2222222222222222|secret:\/\/fixture\/test-server|BRIDGE_TEST_SERVER_SECRET_REF/);
  const before=f.calls.length;assert.equal((await f.submit(p)).id,job.id);assert.equal(f.calls.length,before);assert.equal(effects,0);
 });

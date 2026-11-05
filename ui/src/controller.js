@@ -1,7 +1,8 @@
 const stale = Symbol('Card view replaced');
+const activeStates = ['accepted', 'pending', 'evaluating', 'queued', 'starting', 'running', 'terminating'];
 
 export function createCardController({ state, view, host, document, hashFile, encodeFileChunk, timers = globalThis }) {
-  let polling = null;
+  let polling = null, downloadAttempt = null;
   const notified = new Set();
   const t = view.t;
   const stopPolling = () => { timers.clearInterval(polling); polling = null; };
@@ -25,7 +26,7 @@ export function createCardController({ state, view, host, document, hashFile, en
     if (state.mode === 'probe') return view.probe(state.probeMarker, state.meta);
     if (state.mode === 'transfer') return view.transfer(state.transfer, state.meta, (config, file) => submit(config, file, context), target => selectTarget(target, context));
     view.job(state.job, state.meta, { decide: action => decide(action, context), save: () => save(context), output: () => output(context) });
-    if (['pending', 'evaluating', 'running'].includes(state.job.state)) polling = timers.setInterval(() => {
+    if (activeStates.includes(state.job.state)) polling = timers.setInterval(() => {
       if (!document.hidden) refresh().catch(() => {
         if (state.current(context)) view.error(t('연결이 끊겼습니다. 명령은 재실행하지 않습니다.'));
       });
@@ -53,16 +54,35 @@ export function createCardController({ state, view, host, document, hashFile, en
       view.output(page._meta?.sshOutput?.text ?? '', metadata, metadata.eof ? null : () => output(context, metadata.nextOffset));
     }, context);
   }
+  const refused = () => Error(t('요청이 거부되었습니다. 인증·만료·전송 상태를 확인하세요.'));
+  function operationResult(result) {
+    const value = result?.structuredContent;
+    if (value?.contractVersion !== '2.0') throw refused();
+    if (value.ok === false) {
+      const error = refused();
+      if (/^[A-Z][A-Z0-9_]{1,95}$/.test(value.error?.code ?? '')) error.code = value.error.code;
+      throw error;
+    }
+    const operation = value.data;
+    if (result.isError || value.ok !== true || value.error !== null || !/^[a-f0-9]{48}$/.test(operation?.id ?? '') || !['command', 'source', 'upload', 'download'].includes(operation?.kind) || ![...activeStates, 'completed', 'failed', 'cancelled', 'denied', 'expired', 'unknown'].includes(operation?.state)) throw refused();
+    return operation;
+  }
+  async function showOperation(context, operation) {
+    // Public observe/submit omit the card presentation and private capability tickets.
+    const card = await call(context, 'show-approval', { id: operation.id });
+    const job = card.structuredContent;
+    if (job?.id !== operation.id || operation.targetId && job.targetId !== operation.targetId || operation.targetRevision && job.targetRevision !== operation.targetRevision) throw refused();
+    receive(card);
+  }
   async function refresh() {
     if (state.disposed || state.mode !== 'job') return;
     const context = state.capture();
     try {
-      const result = await call(context, 'get-request-status', { id: context.job.id });
-      if (result.structuredContent?.error) { stopPolling(); view.missing(); return; }
-      if (result.structuredContent?.state === 'pending' && context.meta.uiEnabled && !context.meta.approvalTicket) {
-        receive(await call(context, 'show-approval', { id: context.job.id }));
-      } else receive(result);
-    } catch (error) { if (error !== stale && state.current(context)) throw error; }
+      await showOperation(context, context.job);
+    } catch (error) {
+      if (error === stale || !state.current(context)) return;
+      throw error;
+    }
   }
   async function selectTarget(target, context) {
     if (!state.current(context)) return;
@@ -75,7 +95,7 @@ export function createCardController({ state, view, host, document, hashFile, en
   }
   function decide(action, context) {
     return act(async context => {
-      if (!context.meta.uiEnabled || !context.meta.approvalTicket || context.job?.state !== 'pending') return;
+      if (!context.meta.uiEnabled || !context.meta.approvalTicket || !(context.job?.state === 'pending' || context.job?.state === 'queued' && action === 'deny')) return;
       receive(await call(context, 'ui-decide-request', { id: context.job.id, action, ticket: context.meta.approvalTicket }));
     }, context);
   }
@@ -114,8 +134,24 @@ export function createCardController({ state, view, host, document, hashFile, en
     return act(async context => {
       if (!context.meta.uiEnabled || !context.transfer) return;
       if (config.direction === 'download') {
-        const request = await call(context, 'request-download', { remotePath: config.remotePath, elevate: config.elevate, ...(config.target === undefined ? {} : { target: config.target }) });
-        receive(await call(context, 'show-approval', { id: request.structuredContent.id })); return;
+        const target = context.meta.targetId, expectedTargetRevision = context.meta.targetRevision;
+        if (!/^[a-z][a-z0-9_-]{0,31}$/.test(target ?? '') || !/^[a-f0-9]{64}$/.test(expectedTargetRevision ?? '') || config.target !== undefined && config.target !== target) throw refused();
+        const input = { kind: 'download', target, expectedTargetRevision, remotePath: config.remotePath, elevate: config.elevate };
+        const intent = JSON.stringify(input);
+        if (downloadAttempt?.revision !== context.revision) downloadAttempt = { revision: context.revision, intent, input: { ...input, operationKey: crypto.randomUUID() }, started: false };
+        if (downloadAttempt.intent !== intent) throw refused();
+        const attempt = downloadAttempt;
+        let operation;
+        if (attempt.started) {
+          try { operation = operationResult(await call(context, 'observe', { operationKey: attempt.input.operationKey, includeOutput: false })); }
+          catch (error) { if (error.code !== 'OPERATION_NOT_FOUND') throw error; }
+        }
+        if (!operation) {
+          attempt.started = true;
+          operation = operationResult(await call(context, 'submit', attempt.input));
+        }
+        if (operation.kind !== 'download' || operation.targetId !== target || operation.targetRevision !== expectedTargetRevision) throw refused();
+        await showOperation(context, operation); return;
       }
       if (!file || file.size > context.meta.maxBytes) throw Error(t('파일을 선택하고 크기 한도를 확인하세요.'));
       const sha256 = await hashFile(file); check(context);
@@ -135,6 +171,6 @@ export function createCardController({ state, view, host, document, hashFile, en
     const context = state.capture();
     if (state.current(context) && context.meta.webUrl) await host.openLink({ url: context.meta.webUrl });
   }
-  function dispose() { stopPolling(); state.dispose(); view.clear(); }
+  function dispose() { stopPolling(); downloadAttempt = null; state.dispose(); view.clear(); }
   return { receive, refresh, decide, save, output, submit, selectTarget, openWeb, dispose };
 }

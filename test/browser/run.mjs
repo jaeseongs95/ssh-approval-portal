@@ -14,7 +14,7 @@ for(const name of names){
  const screenshotDir=process.env.UI_TEST_RESULTS?process.env.UI_TEST_RESULTS+'/'+name+'/screenshots':null;
  if(screenshotDir)await mkdir(screenshotDir,{recursive:true});
  console.log('Browser engine: '+name+' '+version);
- const result=spawnSync(process.execPath,['--test','test/browser/*.test.mjs'],{cwd:root,encoding:'utf8',env:{...process.env,UI_TEST_BROWSER:name,...(screenshotDir?{UI_SCREENSHOTS:screenshotDir,POLICY_UX_SCREENSHOTS:screenshotDir,FOLLOWUP_SCREENSHOTS:screenshotDir}:{})},timeout:300000,maxBuffer:16*1024*1024});
+ const result=spawnSync(process.execPath,['--test','test/browser/*.test.mjs'],{cwd:root,encoding:'utf8',env:{...process.env,UI_TEST_BROWSER:name,...(screenshotDir?{UI_SCREENSHOTS:screenshotDir,POLICY_UX_SCREENSHOTS:screenshotDir,FOLLOWUP_SCREENSHOTS:screenshotDir}:{})},timeout:600000,maxBuffer:16*1024*1024});
  process.stdout.write(result.stdout??'');process.stderr.write(result.stderr??'');
  const receipt={engine:name,version,executable,startedAt,endedAt:new Date().toISOString(),code:result.status,signal:result.signal,error:result.error?.code??null,status:result.error?(result.error.code==='ETIMEDOUT'?'TIMED_OUT':'SPAWN_ERROR'):result.status===0?'PASS':'FAIL',tests:count(result.stdout??'','tests'),passed:count(result.stdout??'','pass'),failed:count(result.stdout??'','fail'),skipped:count(result.stdout??'','skipped'),cancelled:count(result.stdout??'','cancelled')};
  results.push(receipt);

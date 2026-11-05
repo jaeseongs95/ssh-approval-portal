@@ -39,7 +39,7 @@ class PackageContract(unittest.TestCase):
         self.write('ui/src/nested/source.js', 'export const ui = true;')
         self.write('web/src/nested/source.js', 'export const web = true;')
         self.write('web/dist/app.js', 'console.log("synthetic web bundle");')
-        for name in ['verify.mjs', 'check-package-imports.mjs']:
+        for name in ['verify.mjs', 'check-package-imports.mjs', 'windows-file-helper.ps1', 'windows-file-native.cs', 'install-windows-helper.ps1']:
             shutil.copyfile(SOURCE / 'scripts' / name, self.root / 'scripts' / name)
 
     def tearDown(self):
@@ -56,6 +56,42 @@ class PackageContract(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Secret store record') as caught:
             packager.package(self.root)
         self.assertNotIn(marker, str(caught.exception))
+        self.assertFalse((self.root / 'release-manifest.json').exists())
+
+    def test_native_sources_and_pinned_bundle_ship_but_generated_runtime_does_not(self):
+        names = ['native/freerdp-input/overlay/input.c', 'native/freerdp-input/overlay/input.h',
+                 'native/freerdp-input/native.patch', 'native/freerdp-input/LICENSE',
+                 'native/freerdp-input/README.md', 'native/freerdp-input/build-lock.json',
+                 'native/freerdp-input/build.sh', 'native/freerdp-input/Dockerfile',
+                 'native/freerdp-input/apply_patch.py', 'native/freerdp-input/tests/prove_protocol.py']
+        for name in names: self.write(name, 'synthetic reproducible native source\n')
+        self.write('scripts/build-freerdp-input.py', '# synthetic native builder\n')
+        self.write('vendor/fixture-native.tgz', 'synthetic pinned bundle bytes')
+        self.write('native/freerdp-input/runtime/bin/xfreerdp3', 'do not package generated executable')
+        self.write('native/freerdp-input/runtime/manifest.json', '{}')
+        self.write('native/freerdp-input/build/compiler-output.txt', 'do not package build output')
+        archives, _ = packager.package(self.root)
+        manifest = json.loads((self.root / 'release-manifest.json').read_text())
+        paths = {entry['path'] for entry in manifest['files']}
+        self.assertEqual({name for name in paths if name.startswith('native/')}, set(names))
+        self.assertIn('vendor/fixture-native.tgz', paths)
+        self.assertIn('scripts/build-freerdp-input.py', paths)
+        for archive_path in archives:
+            with self.subTest(archive=archive_path.name):
+                if archive_path.suffix == '.zip':
+                    with zipfile.ZipFile(archive_path) as archive: found = set(archive.namelist())
+                else:
+                    with tarfile.open(archive_path) as archive: found = set(archive.getnames())
+                prefix = 'ssh-approval-portal-0.3.0/'
+                self.assertTrue({prefix + name for name in names}.issubset(found))
+                self.assertFalse(any('/runtime/' in name or '/build/' in name for name in found if '/native/' in name))
+
+    def test_native_source_symlink_is_rejected_before_manifest_publication(self):
+        native = self.root / 'native/freerdp-input'; native.mkdir(parents=True)
+        outside = self.root / 'unpackaged.c'; outside.write_text('preserve outside source')
+        try: (native / 'input.c').symlink_to(outside)
+        except OSError: self.skipTest('OS symlink permission unavailable; Linux TEST must cover this case')
+        with self.assertRaisesRegex(ValueError, 'Unsafe package symlink'): packager.package(self.root)
         self.assertFalse((self.root / 'release-manifest.json').exists())
 
     def run_node(self, script, *arguments):
@@ -116,6 +152,19 @@ class PackageContract(unittest.TestCase):
         result = self.run_node(script, self.root)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('Source missing from manifest', result.stderr)
+
+    def test_manifest_requires_windows_transfer_runtime(self):
+        packager.package(self.root)
+        manifest = self.root / 'release-manifest.json'
+        original = json.loads(manifest.read_text(encoding='utf-8'))
+        for name in ['windows-file-helper.ps1', 'windows-file-native.cs', 'install-windows-helper.ps1']:
+            with self.subTest(name=name):
+                data = dict(original)
+                data['files'] = [entry for entry in original['files'] if entry['path'] != 'scripts/' + name]
+                manifest.write_text(json.dumps(data), encoding='utf-8')
+                result = self.run_node(self.root / 'scripts/verify.mjs', self.root)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('Required package entry missing: scripts/' + name, result.stderr)
 
     def test_oidc_proxy_examples_are_in_both_archives_and_manifest_with_working_doc_links(self):
         for name in OIDC_EXAMPLES:
@@ -226,10 +275,19 @@ class PackageContract(unittest.TestCase):
         # The default build must admit its archive, rather than only test overrides.
         rules = (SOURCE / '.dockerignore').read_text(encoding='utf-8').splitlines()
         self.assertIn('!' + archive_name, rules, 'Default Docker archive is excluded from build context')
-        command = 'python3 scripts/package.py --release'
+        metadata = json.loads((SOURCE / 'package.json').read_text(encoding='utf-8'))
+        version = metadata['version']
+        self.assertEqual(metadata['scripts']['package:release'], 'python3 scripts/package-release.py')
+        output_example = '/absolute/new/portal-' + version + '-release'
+        server_name = 'ssh-approval-portal-' + version + '.tar.gz'
+        self.assertEqual(archive_name, 'dist/' + server_name)
+        command = 'npm run package:release -- --output ' + output_example
         for readme in ('README.md', 'README.ko.md'):
-            self.assertIn(command, (SOURCE / readme).read_text(encoding='utf-8'),
+            instructions = (SOURCE / readme).read_text(encoding='utf-8')
+            self.assertIn(command, instructions,
                           'Extracted source Docker instructions omit archive preparation')
+            self.assertIn('mkdir -p dist', instructions)
+            self.assertIn('cp ' + output_example + '/' + server_name + ' dist/', instructions)
         source = Path(self.temporary.name) / 'release-source'
         for path in packager.collect_files(SOURCE):
             target = source / path.relative_to(SOURCE)
@@ -239,12 +297,23 @@ class PackageContract(unittest.TestCase):
         extracted = Path(self.temporary.name) / 'clean-extracted'
         with zipfile.ZipFile(archives[1]) as archive:
             archive.extractall(extracted)
-        version = json.loads((source / 'package.json').read_text(encoding='utf-8'))['version']
         root = extracted / ('ssh-approval-portal-' + version)
         self.assertFalse((root / archive_name).exists(), 'Release must not recursively embed its distribution')
-        result = subprocess.run([sys.executable, str(root / 'scripts/package.py'), '--release'],
+        output = Path(self.temporary.name) / 'new-release-assets'
+        result = subprocess.run([sys.executable, str(root / 'scripts/package-release.py'), '--release', '--output', str(output)],
                                 capture_output=True, text=True, timeout=20)
         self.assertEqual(result.returncode, 0, result.stderr)
+        names = {'ssh-approval-portal-' + version + suffix for suffix in ('.tar.gz', '.zip')}
+        names.update('ssh-approval-portal-client-' + version + suffix for suffix in ('.tar.gz', '.zip'))
+        self.assertEqual(set(json.loads(result.stdout)['archives']), names)
+        lines = (output / 'SHA256SUMS').read_text(encoding='utf-8').splitlines()
+        self.assertEqual(len(lines), 4)
+        checksums = dict(line.split('  ', 1)[::-1] for line in lines)
+        self.assertEqual(set(checksums), names)
+        for name in names:
+            self.assertEqual(hashlib.sha256((output / name).read_bytes()).hexdigest(), checksums[name])
+        (root / archive_name).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(output / server_name, root / archive_name)
         self.assertTrue((root / archive_name).is_file(), 'Documented preparation did not supply Docker COPY input')
         self.assertEqual((root / 'release-manifest.json').read_bytes(),
                          (source / 'release-manifest.json').read_bytes())

@@ -4,9 +4,10 @@ import { constants } from 'node:fs';
 import { dirname, basename, join, isAbsolute } from 'node:path';
 import { parseSecretText } from '../src/adapters/config/secrets.mjs';
 import { settingsContract, validateOrigin, validatedPort } from '../src/adapters/config/settings.mjs';
+import { capacityDefaults, parseCapacity } from '../src/adapters/config/capacity.mjs';
 
 /** The rename is the commit point: failed staging leaves the previous file byte-for-byte intact. */
-export async function generateSecrets(file, origin, { io = fs } = {}) {
+export async function generateSecrets(file, origin, { io = fs, availableCpus } = {}) {
   if (!isAbsolute(file)) throw Error('Use an absolute env path');
   let text = '', previous, input;
   try {
@@ -24,6 +25,8 @@ export async function generateSecrets(file, origin, { io = fs } = {}) {
   const settings = parseSecretText(text);
   validateOrigin(settings.BRIDGE_ADMIN_ORIGIN ?? origin);
   for (const key of ['BRIDGE_MCP_PORT', 'BRIDGE_ADMIN_PORT']) validatedPort(settings[key] ?? settingsContract.defaults[key]);
+  const capacities = capacityDefaults(availableCpus);
+  for (const key of ['BRIDGE_QUEUE_CAPACITY', 'BRIDGE_MAX_CONCURRENCY']) if (Object.hasOwn(settings, key)) parseCapacity(settings[key], key);
   const newline = text.includes('\r\n') ? '\r\n' : '\n';
   const append = (key, value) => {
     if (Object.hasOwn(settings, key)) return;
@@ -34,6 +37,8 @@ export async function generateSecrets(file, origin, { io = fs } = {}) {
   append('BRIDGE_ADMIN_ORIGIN', origin);
   append('BRIDGE_UI_ENABLED', settingsContract.defaults.BRIDGE_UI_ENABLED);
   append('BRIDGE_UI_TOOL_PREFIX', settingsContract.defaults.BRIDGE_UI_TOOL_PREFIX);
+  append('BRIDGE_QUEUE_CAPACITY', capacities.queueCapacity);
+  append('BRIDGE_MAX_CONCURRENCY', capacities.maxConcurrency);
   const temporary = join(dirname(file), `.${basename(file)}.${randomBytes(12).toString('hex')}`);
   let handle, created = false, committed = false;
   try {

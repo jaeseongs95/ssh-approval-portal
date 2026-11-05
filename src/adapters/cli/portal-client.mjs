@@ -1,12 +1,12 @@
 import { withUploadSnapshot, saveDownload } from './local-files.mjs';
 import { CHUNK_BYTES, OUTPUT_PAGE_BYTES, MAX_BYTES } from '../../contracts/ports.mjs';
 import { createHash } from 'node:crypto';
-import { validateOrigin } from '../config/settings.mjs';
-import { remotePath as validateRemotePath } from '../../domain/validation.mjs';
+import { createOwnerHttpSession } from './owner-http-session.mjs';
+import { anyRemotePath as validateRemotePath } from '../../domain/validation.mjs';
 
 const fail = (code, details = {}) => Object.assign(new Error(code), { code, ...details });
 const identifier = value => { if (typeof value !== 'string' || !/^[a-f0-9]{48}$/.test(value)) throw fail('INVALID_REQUEST_ID'); return value; };
-const jobStates = new Set(['pending', 'evaluating', 'running', 'completed', 'failed', 'denied', 'expired', 'unknown']);
+const jobStates = new Set(['pending', 'evaluating', 'queued', 'running', 'completed', 'failed', 'denied', 'expired', 'unknown']);
 export function validateUploadExpectation(value) {
   if (value === undefined) return undefined;
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length !== 2 ||
@@ -35,44 +35,13 @@ export function validateOutputOptions(options = {}) {
   return { offsetBytes, maxBytes, format };
 }
 const captured = value => value?.version === 1 && value.captureSource === 'redacted-adapter-outcome' && value.sshCompleteness === 'unknown';
-async function readJson(response) {
-  if (!/^application\/json(?:;|$)/i.test(response.headers.get('content-type') ?? '')) throw fail('INVALID_PORTAL_RESPONSE');
-  const parts = []; let size = 0;
-  for await (const bytes of response.body) {
-    size += bytes.length;
-    if (size > 1024 * 1024) { await response.body.cancel?.().catch(() => {}); throw fail('PORTAL_RESPONSE_TOO_LARGE'); }
-    parts.push(bytes);
-  }
-  try { return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(parts))); }
-  catch { throw fail('INVALID_PORTAL_RESPONSE'); }
-}
-
 /** Access user JWT comes from an explicit private input, never a service/admin token.
  * Existing server owner verification remains authoritative on EVERY request.
  * fetch injection is for isolated tests/embedders, not a CLI insecure-TLS option. */
 export function createPortalClient({ origin, accessToken, signal, timeoutMs = 120_000, fetch: send = globalThis.fetch }) {
-  validateOrigin(origin);
-  if (typeof accessToken !== 'string' || accessToken.length > 16384 || !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(accessToken)) throw fail('INVALID_ACCESS_CREDENTIAL');
-  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 600_000) throw fail('INVALID_DEADLINE');
-  const deadline = AbortSignal.any([AbortSignal.timeout(timeoutMs), signal].filter(Boolean));
-  let cookie, connected = false, retired = false;
-  async function response(path, body) {
-    if (retired) throw fail('CLIENT_CLOSED');
-    const url = new URL(path, origin);
-    if (url.origin !== origin || url.username || url.password || url.hash) throw fail('UNTRUSTED_PORTAL_URL');
-    try {
-      const r = await send(url.href, { method: body === undefined ? 'GET' : 'POST', redirect: 'error', signal: deadline,
-        headers: { 'cf-access-token': accessToken, Origin: origin, ...(cookie ? { Cookie: cookie } : {}), ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
-      if (!r.ok) { await r.body?.cancel().catch(() => {}); throw fail(r.status === 401 ? 'OWNER_REAUTH_REQUIRED' : 'PORTAL_REQUEST_REFUSED', { status: r.status }); }
-      return r;
-    } catch (error) {
-      if (['OWNER_REAUTH_REQUIRED', 'PORTAL_REQUEST_REFUSED'].includes(error.code)) throw error;
-      throw fail(body === undefined ? 'PORTAL_READ_FAILED' : 'PORTAL_RESULT_UNKNOWN');
-    }
-  }
-  const json = async (path, body) => readJson(await response(path, body));
-  function ready() { if (!connected || retired) throw fail('OWNER_SESSION_REQUIRED'); }
+  const session = createOwnerHttpSession({ origin, accessToken, signal, timeoutMs, fetch: send });
+  const { response, json, ready } = session;
+  const deadline = session.signal;
   async function knownJob(id) {
     ready(); identifier(id);
     const job = await json('/api/' + id);
@@ -96,20 +65,8 @@ export function createPortalClient({ origin, accessToken, signal, timeoutMs = 12
     return job;
   }
   return {
-    async connect() {
-      if (connected || retired) throw fail('OWNER_SESSION_ALREADY_USED');
-      if ((await json('/api/session')).mode !== 'access') throw fail('ACCESS_MODE_REQUIRED');
-      const r = await response('/api/session/start', {});
-      const candidates = r.headers.getSetCookie().filter(value => value.startsWith('__Host-ssh_admin_session='));
-      if (candidates.length !== 1 || !/^__Host-ssh_admin_session=[a-f0-9]{64}; Path=\/; HttpOnly; Secure; SameSite=Strict; Max-Age=[1-9][0-9]*$/.test(candidates[0])) throw fail('INVALID_OWNER_SESSION');
-      if ((await readJson(r)).connected !== true) throw fail('INVALID_OWNER_SESSION');
-      cookie = candidates[0].split(';')[0]; connected = true;
-      return { connected: true, mode: 'access' };
-    },
-    async close() {
-      try { if (connected && !retired) await json('/api/session/logout', {}); }
-      finally { retired = true; connected = false; cookie = undefined; accessToken = undefined; }
-    },
+    connect: session.connect,
+    close: session.close,
     targets() { ready(); return json('/api/targets'); },
     pending() { ready(); return json('/api/pending'); },
     status: knownJob,
@@ -143,7 +100,7 @@ export function createPortalClient({ origin, accessToken, signal, timeoutMs = 12
     async decide(id, action, confirm) {
       if (confirm !== true || !['approve', 'deny'].includes(action)) throw fail('EXPLICIT_OWNER_DECISION_REQUIRED');
       const job = await knownJob(id);
-      if (job.state !== 'pending') return job; // Observe terminal/unknown; never replay.
+      if (job.state !== 'pending' && !(job.state === 'queued' && action === 'deny')) return job; // Observe queued approvals and running/terminal/unknown; never replay.
       try { return await json('/api/' + id + '/' + action, {}); }
       catch (error) { throw fail(error.code ?? 'PORTAL_RESULT_UNKNOWN', { requestId: id, phase: action }); }
     },

@@ -4,7 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
-import { ApprovalQueue } from '../src/domain/approval-queue.mjs';
+import { ApprovalQueue } from './support/approval-runtime.mjs';
 import { Tickets } from '../src/adapters/security/tickets.mjs';
 import { createCapabilities } from '../src/adapters/presentation/capabilities.mjs';
 import { Artifacts } from '../src/adapters/storage/artifacts.mjs';

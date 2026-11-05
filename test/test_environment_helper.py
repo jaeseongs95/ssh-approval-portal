@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 import urllib.request
 
 spec = importlib.util.spec_from_file_location('environment_helper', Path(__file__).resolve().parents[1] / 'helper/environment-helper.py')
@@ -49,6 +50,55 @@ class EditorTests(unittest.TestCase):
         self.assertEqual(value['revision'], self.read()['revision'])
         key = next(v for v in value['fields'] if v['key'] == 'JEV_API_KEY')
         self.assertNotIn('value', key)
+
+    def test_duplicate_assignments_last_win_and_unedited_bytes_survive(self):
+        duplicates = (b'BRIDGE_DISPLAY_NAME=first\r\nBRIDGE_DISPLAY_NAME=last\r\n'
+                      b'JEV_API_KEY=synthetic-first\r\nJEV_API_KEY=synthetic-last\r\n')
+        original = self.original + duplicates
+        self.env.write_bytes(original)
+        before = self.read()
+        self.assertEqual(next(v for v in before['fields'] if v['key'] == 'BRIDGE_DISPLAY_NAME')['value'], 'last')
+        self.assertNotIn('synthetic-last', json.dumps(before))
+        self.assertEqual(helper.entries(original)['JEV_API_KEY'], 'synthetic-last')
+        self.assertEqual(self.env.read_bytes(), original)
+        self.save({'BRIDGE_UI_ENABLED': 'true'})
+        self.assertEqual(self.env.read_bytes(), b'# retain\r\nBRIDGE_ADMIN_TOKEN=synthetic-private\r\n'
+                         + duplicates + b'BRIDGE_UI_ENABLED=true\r\n')
+        self.assertEqual((self.path / 'state/pending.env').read_bytes(), original)
+        self.save({'JEV_API_KEY': 'synthetic-replaced'})
+        updated = self.env.read_bytes()
+        self.assertEqual(updated.count(b'JEV_API_KEY='), 1)
+        self.assertIn(b'BRIDGE_DISPLAY_NAME=first\r\nBRIDGE_DISPLAY_NAME=last\r\n', updated)
+        self.assertEqual(helper.entries(updated)['JEV_API_KEY'], 'synthetic-replaced')
+
+    def test_healthy_uses_last_duplicate_port_without_system_service_access(self):
+        class Response:
+            def __enter__(self):
+                return self
+            def __exit__(self, *_):
+                pass
+            def read(self, _):
+                return b'{"healthy":true}'
+        opener = mock.Mock()
+        opener.open.return_value = Response()
+        with mock.patch.object(helper.urllib.request, 'build_opener', return_value=opener), mock.patch.object(helper, 'clean_run') as clean:
+            self.assertTrue(helper.Editor.healthy(b'BRIDGE_MCP_PORT=39124\nBRIDGE_MCP_PORT=39125\n'))
+        opener.open.assert_called_once_with('http://127.0.0.1:39125/health', timeout=1)
+        clean.assert_called_once_with(['/usr/bin/systemctl', 'is-active', '--quiet', 'ssh-approval-bridge.service'])
+
+    def test_default_restart_requires_verified_baseline_preservation(self):
+        actions = []
+        editor = helper.Editor(self.env, self.path / 'defaults', lambda _: None, self.scheduled.append)
+        owner = 'a' * 64
+        before = editor.dispatch({'action': 'read'})
+        job = editor.dispatch({'action': 'restart', 'expectedRevision': before['revision'],
+                               'acknowledged': True, 'maintenanceOwner': owner})['restart']['id']
+        with mock.patch.object(helper.Editor, 'maintenance_action', side_effect=lambda action, token: actions.append((action, token))):
+            editor.restart(job, restart=lambda: None, healthy=lambda _: True)
+        self.assertEqual(actions, [('capture', owner.encode()), ('compare-baseline', owner.encode()),
+                                   ('release-baseline-verified', owner.encode())])
+        self.assertEqual(editor.state()['state'], 'healthy')
+        self.assertFalse((editor.root / ('owner-' + job)).exists())
 
     def test_patch_preserves_backup_unknowns_crlf_and_mode(self):
         result = self.save({'BRIDGE_UI_ENABLED': 'true', 'JEV_API_KEY': 'synthetic-key'})

@@ -78,9 +78,10 @@ test('admin authorization preserves mode, maintenance, Origin and capability exc
   const download = '/downloads/' + 'a'.repeat(48) + '/' + 'b'.repeat(32);
   const req = (url, method = 'GET', headers = {}) => ({ url, method, headers });
   const bearer = { authorization: 'Bearer fixture-admin' }, post = { ...bearer, origin };
+  const principal = Object.freeze({ subject: 'verified-fixture', expiresAt: Date.now() + 60000 });
   const configs = {
     token: { adminAccess: { mode: 'token' }, adminToken: env.BRIDGE_ADMIN_TOKEN, adminOrigin: origin },
-    access: { adminAccess: { mode: 'access', identity: async r => r.headers.owner === 'signed-owner'?{subject:'verified-fixture',expiresAt:Date.now()+60000}:null }, browserSessions:{authenticated:r=>r.headers.browser==='fixture-session'}, adminToken: env.BRIDGE_ADMIN_TOKEN, adminOrigin: origin },
+    access: { adminAccess: { mode: 'access', identity: async r => r.headers.owner === 'signed-owner' ? principal : null }, browserSessions:{authenticated:(r, verified)=>{assert.equal(verified,principal);return r.headers.browser==='fixture-session';}}, adminToken: env.BRIDGE_ADMIN_TOKEN, adminOrigin: origin },
   };
   const cases = [
     ['token', req('/'), true, 'static'], ['token', req('/app.js'), true, 'static'],
@@ -105,7 +106,8 @@ test('admin authorization preserves mode, maintenance, Origin and capability exc
   ];
   for (const [mode, request, allowed, routeKind, status] of cases) {
     const actual = await authorizeAdminRequest(request, configs[mode]);
-    assert.deepEqual(actual, { allowed, ...(status ? { status } : {}), routeKind }, `${mode} ${request.method} ${request.url}`);
+    assert.deepEqual(actual, { allowed, ...(status ? { status } : {}), routeKind,
+      ...(mode === 'access' && allowed && routeKind !== 'maintenance' ? { principal } : {}) }, `${mode} ${request.method} ${request.url}`);
   }
 });
 

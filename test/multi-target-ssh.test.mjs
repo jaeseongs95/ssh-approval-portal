@@ -46,18 +46,21 @@ test('two independent pinned loopback SSH servers receive only their selected re
   const env={BRIDGE_MCP_TOKEN:'loopback-mcp',BRIDGE_ADMIN_TOKEN:'loopback-admin',BRIDGE_ADMIN_ORIGIN:'https://admin.example.test',BRIDGE_UI_TICKET_KEY:'b'.repeat(64),BRIDGE_CONFIG_PATH:configPath,BRIDGE_DEFAULT_TARGET:'alpha',BRIDGE_TARGETS:JSON.stringify([alpha,beta].map(target=>({id:target.id,displayName:target.id,readProfile:target.id+'-read',writeProfile:target.id+'-write',credentialRevision:'synthetic-v1'})))};
   runtime=await createSshRuntime(env);
   app=await createApplication({...runtime,audit:()=>{},transferRoot:join(root,'transfers'),env,uiHtml:'<html>synthetic</html>'});
-  assert.equal((await app.targets.commands.read('id -un','beta')).output.state,'ready');
+  const read=await app.targets.commands.read('id -un','beta');
+  assert.equal(read.output.state,'ready');assert.equal(read.execution.remoteState,'exited');assert.equal(read.execution.exitCode,0);assert.equal(read.execution.cleanupComplete,true);
   assert.equal(alpha.calls.length,0);assert.equal(beta.calls.length,1);
   const a=(await app.targets.commands.run('sudo id -u','alpha')).job,b=(await app.targets.commands.run('sudo id -u','beta')).job;
   assert.equal(alpha.calls.length,0);assert.equal(beta.calls.length,1);
   await Promise.all([app.queue.approve(a.id),app.queue.approve(b.id)]);
   assert.equal(alpha.calls.length,1);assert.equal(beta.calls.length,2);
   assert.equal(app.queue.get(a.id).state,'completed');assert.equal(app.queue.get(b.id).state,'completed');
+  for(const id of [a.id,b.id]){const execution=app.queue.get(id).result.execution;assert.equal(execution.reason,'exit');assert.equal(execution.remoteState,'exited');assert.equal(execution.exitCode,0);assert.equal(execution.cleanupComplete,true);}
   assert.equal(app.queue.get(a.id).result.output.state,'ready');assert.equal(app.queue.get(b.id).result.output.state,'ready');
   assert.notEqual(app.queue.get(a.id).result.output.id,app.queue.get(b.id).result.output.id);
   // A changed expected key must fail before an SSH exec reaches that server.
   runtime.registry.getProfile('alpha-read').trustedHostKey=beta.hostKey;
-  await assert.rejects(app.targets.commands.read('id -un','alpha'));assert.equal(alpha.calls.length,1);
+  const refused=await app.targets.commands.read('id -un','alpha');
+  assert.equal(refused.failed,true);assert.equal(refused.execution.remoteState,'not_dispatched');assert.equal(refused.execution.cleanupComplete,true);assert.equal(alpha.calls.length,1);
   await assert.rejects(runtime.registry.getOrCreate('alpha-read'));assert.equal(alpha.calls.length,1);
   assert.equal((await app.targets.commands.read('id -un','beta')).output.state,'ready');
  }finally{await app?.close();await runtime?.registry.closeAll();await alpha?.close();await beta?.close();await rm(root,{recursive:true,force:true});}

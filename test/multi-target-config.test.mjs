@@ -11,20 +11,21 @@ test('registered target configuration is bounded, immutable, optional, with an e
   assert.equal(parseSettings(base).targets, null);
   assert.doesNotThrow(()=>resolveTargets(parseSettings(base),{getProfile:name=>({host:'legacy.example',port:22,user:'fixture',readOnly:name==='aws-readonly',keyRef:name+'-key'})}));
   assert.throws(() => parseSettings({ ...base, BRIDGE_DEFAULT_TARGET: 'alpha' }));
+  assert.equal(parseTargets(JSON.stringify(Array.from({length:33},(_,i)=>entry('target'+i)))).length, 33);
   const settings = parseSettings({ ...base, BRIDGE_TARGETS: JSON.stringify([entry(), entry('beta')]), BRIDGE_DEFAULT_TARGET: 'beta' });
   assert.equal(settings.defaultTarget, 'beta'); assert.ok(Object.isFrozen(settings.targets)); assert.ok(Object.isFrozen(settings.targets[0]));
   assert.equal(parseSettings({ ...base, BRIDGE_TARGETS: JSON.stringify([entry()]) }).defaultTarget, undefined);
-  for (const value of ['null', '{}', '[]', '[', ' '.repeat(65537), JSON.stringify(Array.from({length:33},(_,i)=>entry('target'+i))), JSON.stringify([entry(),entry()])]) assert.throws(() => parseTargets(value));
+  for (const value of ['null', '{}', '[]', '[', ' '.repeat(65537), JSON.stringify([entry(),entry()])]) assert.throws(() => parseTargets(value));
   for (const invalid of [
     {id:'../escape'}, {id:'__proto__'}, {id:'https://unregistered.example'}, {displayName:'bad\u202ename'}, {displayName:'A'.repeat(81)},
     {enabled:'true'}, {credentialRevision:''}, {readProfile:'aws-local',writeProfile:'aws-local'}, {privateKey:'not-permitted'},
   ]) assert.throws(() => parseTargets(JSON.stringify([{...entry(),...invalid}])));
-  assert.throws(() => parseTargets(JSON.stringify([entry(),{...entry('beta'),writeProfile:entry().writeProfile}])));
+  assert.doesNotThrow(() => parseTargets(JSON.stringify([entry(),{...entry('beta'),writeProfile:entry().writeProfile}])));
   assert.throws(() => parseTargets(JSON.stringify([{...entry(),enabled:false}]),'alpha'));
   assert.throws(() => parseTargets(JSON.stringify([entry()]),'unknown'));
 });
 
-test('target snapshots require matching profile pairs, distinct pinned identities and revisions that fence changes', () => {
+test('target aliases preserve profile pairing and separate revision fences even on shared SSH identities', () => {
   const settings = {...parseSettings(base),targets:parseTargets(JSON.stringify([entry(),entry('beta')]))};
   const [alpha,beta] = resolveTargets(settings,registry);
   assert.notEqual(alpha.revision,beta.revision); assert.equal(alpha.identity.targetId,'alpha');
@@ -34,8 +35,8 @@ test('target snapshots require matching profile pairs, distinct pinned identitie
   for (const patch of [{trustedHostKey:undefined},{readOnly:false},{host:'wrong.example'}]) {
     assert.throws(() => resolveTargets(settings,{getProfile:name=>({...registry.getProfile(name),...(name==='alpha-read'?patch:{})})}));
   }
-  assert.throws(() => resolveTargets(settings,{getProfile:name=>({...registry.getProfile(name),trustedHostKey:'SHA256:same'})}));
-  assert.throws(() => resolveTargets(settings,{getProfile:name=>({...registry.getProfile(name),host:'same.example'})}));
+  assert.doesNotThrow(() => resolveTargets(settings,{getProfile:name=>({...registry.getProfile(name),trustedHostKey:'SHA256:same'})}));
+  assert.doesNotThrow(() => resolveTargets(settings,{getProfile:name=>({...registry.getProfile(name),host:'same.example'})}));
   const profiles = new Map(['alpha-read','alpha-write','beta-read','beta-write'].map(name=>[name,registry.getProfile(name)]));
   const resolved = resolveTargets(settings,{getProfile:name=>profiles.get(name)});
   profiles.get('alpha-write').host='changed.example'; assert.throws(resolved[0].verify); resolved[1].verify();

@@ -1,20 +1,23 @@
 import { uiText as tr } from './ui-text.js';
 import { createCommandLineImport } from './command-line-import.js';
+import { windowsPolicyName } from '../../src/domain/windows-command-line.mjs';
 import definitions from '../../src/domain/command-risks.json' with { type: 'json' };
 const names = value => value.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
-const unique = values => [...new Set(values)];
 const definition = name => Object.hasOwn(definitions.commands, name) ? definitions.commands[name] : undefined;
 const riskLabel = value => ({ low: tr('낮음'), moderate: tr('보통'), high: tr('높음') }[value] ?? tr('정보 없음'));
-const membership = (name, allowed, denied) => denied.includes(name) ? tr('차단 우선') + (allowed.includes(name) ? tr(' · 자동승인 목록에도 포함') : '') : allowed.includes(name) ? tr('자동승인 목록') : tr('미등록 · 모델 평가 또는 개별 승인');
 
 /** The existing raw inputs remain the single editable policy; this list is a view. */
-export function createCommandWorkspace({ document, container, commands, denied, getOriginal, onChange, onError }) {
+export function createCommandWorkspace({ document, container, commands, denied, getOriginal, onChange, onError, getPlatform = () => 'linux' }) {
+  const key = name => getPlatform() === 'windows' ? windowsPolicyName(name) ?? name.toLowerCase() : name;
+  const includes = (values, name) => values.some(value => key(value) === key(name));
+  const unique = values => [...new Map(values.map(value => [key(value), value])).values()];
+  const membership = (name, allowed, denied) => includes(denied, name) ? tr('차단 우선') + (includes(allowed, name) ? tr(' · 자동승인 목록에도 포함') : '') : includes(allowed, name) ? tr('자동승인 목록') : tr('미등록 · 모델 평가 또는 개별 승인');
   const el = (tag, text = '', cls = '') => { const n = document.createElement(tag); n.textContent = text; n.className = cls; return n; };
   const button = (text, action, cls = 'secondary') => { const b = el('button', text, cls); b.type = 'button'; b.onclick = action; return b; };
   container.append(el('p', tr('왼쪽 목록에서 명령을 고르면 오른쪽에서 내용을 확인하고 수정할 수 있습니다. 변경은 검토·저장 후 적용됩니다.'), 'policy-help'));
   const stats = el('p', '', 'command-stats'); container.append(stats);
   const layout = el('div', '', 'command-workspace'); container.append(layout);
-  const lineImport = createCommandLineImport({ document, commands, denied, onChange: () => { onChange(); refresh(); }, onError });
+  const lineImport = createCommandLineImport({ document, commands, denied, onChange: () => { onChange(); refresh(); }, onError, getPlatform });
   container.insertBefore(lineImport.panel, layout);
   const master = el('section', '', 'command-master'); master.setAttribute('aria-label', tr('명령 등록 목록')); layout.append(master);
   master.append(el('h4', tr('명령 등록 목록')));
@@ -36,31 +39,37 @@ export function createCommandWorkspace({ document, container, commands, denied, 
   const help = el('p', tr('이름을 등록하면 옵션·인자·출력 리다이렉션도 허용합니다. 명령줄의 명령이 모두 등록돼 있으면 인자 위험도·Jev 평가 없이 실행합니다. 제외는 차단이 아니며, 미등록 명령도 모델 평가에 따라 자동 실행될 수 있습니다.'), 'policy-warning'); help.id = 'command-authority-warning'; container.append(help);
   const direct = el('details', '', 'policy-details command-direct'); direct.append(el('summary', tr('목록에 없는 명령 직접 추가'))); container.append(direct);
   const directLabel = el('label', '', 'policy-field'), entry = el('input'); entry.type = 'text'; entry.maxLength = 80; entry.autocomplete = 'off'; entry.spellcheck = false;
-  directLabel.append(el('span', tr('추가할 명령 이름')), entry); direct.append(directLabel, el('p', tr('이름만 입력하세요. 예: ls. 내장 목록에 없으면 기능·위험 안내를 제공할 수 없습니다.'), 'policy-help'));
+  const directHelp = el('p', '', 'policy-help');
+  directLabel.append(el('span', tr('추가할 명령 이름')), entry); direct.append(directLabel, directHelp);
   const entryError = el('p', '', 'policy-field-error'); entryError.setAttribute('role', 'alert'); entryError.hidden = true; direct.append(entryError);
   const entryActions = el('div', '', 'command-actions'); direct.append(entryActions);
   entryActions.append(button(tr('자동승인 초안에 추가'), () => addDirect(commands)), button(tr('차단 초안에 추가'), () => addDirect(denied)));
   let limit = 12, selected;
   function addDirect(input) {
     const value = entry.value.trim(); entryError.hidden = true; entry.removeAttribute('aria-invalid');
-    if (!/^[A-Za-z0-9_][A-Za-z0-9_.+-]{0,79}$/.test(value)) { entryError.textContent = tr('옵션 없이 명령 이름만 입력하세요. 예: ls -l 대신 ls'); entryError.hidden = false; entry.setAttribute('aria-invalid', 'true'); entry.focus(); return; }
+    if (getPlatform() === 'windows' ? !windowsPolicyName(value) : !/^[A-Za-z0-9_][A-Za-z0-9_.+-]{0,79}$/.test(value)) { entryError.textContent = getPlatform() === 'windows' ? tr('Windows 실행 파일 이름, 모듈 한정 명령 또는 절대 실행 경로만 입력하세요. 옵션은 제외합니다.') : tr('옵션 없이 명령 이름만 입력하세요. 예: ls -l 대신 ls'); entryError.hidden = false; entry.setAttribute('aria-invalid', 'true'); entry.focus(); return; }
     if (edit(input, value, true)) { entry.value = ''; filter.value = 'rules'; search.value = value; refresh(); entry.focus(); }
   }
   function edit(input, name, include) {
     const current = names(input.value);
-    if (include && !current.includes(name) && current.length >= 128) { onError(tr('각 명령 목록은 최대 128개까지 등록할 수 있습니다.')); return false; }
-    input.value = include ? (current.includes(name) ? input.value : input.value + (input.value && !input.value.endsWith('\n') ? '\n' : '') + name) : input.value.split(/\r?\n/).filter(line => line.trim() !== name).join('\n');
+    if (include && !includes(current, name) && current.length >= 128) { onError(tr('각 명령 목록은 최대 128개까지 등록할 수 있습니다.')); return false; }
+    input.value = include ? (includes(current, name) ? input.value : input.value + (input.value && !input.value.endsWith('\n') ? '\n' : '') + name) : input.value.split(/\r?\n/).filter(line => key(line.trim()) !== key(name)).join('\n');
     onChange(); return true;
   }
   function refresh() {
     const original = getOriginal(), allowed = names(commands.value), blocked = names(denied.value), priorAllowed = original?.commands ?? [], priorDenied = original?.deniedCommands ?? [];
     const rules = unique([...priorAllowed, ...priorDenied, ...allowed, ...blocked]);
-    const catalog = filter.value === 'all' ? Object.keys(definitions.commands) : [];
+    const windows = getPlatform() === 'windows';
+    discover.hidden = windows; filter.querySelector('option[value="all"]').disabled = windows;
+    entry.maxLength = windows ? 512 : 80;
+    directHelp.textContent = windows ? tr('예: whoami.exe, Microsoft.PowerShell.Management\\Get-Location, C:\\Tools\\tool.exe. 이름은 UTF-8 512바이트까지이며 대소문자를 구분하지 않습니다.') : tr('이름만 입력하세요. 예: ls. 내장 목록에 없으면 기능·위험 안내를 제공할 수 없습니다.');
+    help.textContent = windows ? tr('리터럴 구문으로 확인된 실행 이름이 모두 등록돼야 이름 사전승인이 적용됩니다. 변수·동적 구문·별칭은 전체 명령 평가로 보냅니다. 등록은 인자를 제한하지 않으며 대소문자를 구분하지 않습니다.') : tr('이름을 등록하면 옵션·인자·출력 리다이렉션도 허용합니다. 명령줄의 명령이 모두 등록돼 있으면 인자 위험도·Jev 평가 없이 실행합니다. 제외는 차단이 아니며, 미등록 명령도 모델 평가에 따라 자동 실행될 수 있습니다.');
+    const catalog = !windows && filter.value === 'all' ? Object.keys(definitions.commands) : [];
     const query = search.value.trim().toLowerCase(), terms = query.split(/\s+/).filter(Boolean);
-    const changed = name => allowed.includes(name) !== priorAllowed.includes(name) || blocked.includes(name) !== priorDenied.includes(name);
+    const changed = name => includes(allowed, name) !== includes(priorAllowed, name) || includes(blocked, name) !== includes(priorDenied, name);
     const matches = unique([...rules, ...catalog]).filter(name => {
       const info = definition(name);
-      return (filter.value !== 'allowed' || allowed.includes(name) || priorAllowed.includes(name)) && (filter.value !== 'denied' || blocked.includes(name) || priorDenied.includes(name)) &&
+      return (filter.value !== 'allowed' || includes(allowed, name) || includes(priorAllowed, name)) && (filter.value !== 'denied' || includes(blocked, name) || includes(priorDenied, name)) &&
         (filter.value !== 'changed' || changed(name)) && (filter.value !== 'unknown' || !info) && terms.every(term => [name, info?.description, info?.category].join(' ').toLowerCase().includes(term));
     }).sort((a, b) => Number(b.toLowerCase() === query) - Number(a.toLowerCase() === query) || a.localeCompare(b));
     const delta = rules.filter(changed).length;
@@ -86,11 +95,11 @@ export function createCommandWorkspace({ document, container, commands, denied, 
       state.append(el('p', tr('마지막 저장값: ') + (original ? membership(name, priorAllowed, priorDenied) : tr('정책 없음'))), el('p', tr('저장할 초안: ') + membership(name, allowed, blocked)));
       if (changed(name)) state.append(el('strong', tr('미저장 변경'), 'command-delta')); detail.append(state, el('h5', tr('이 명령 설정 수정')));
       const actions = el('div', '', 'command-actions'); detail.append(actions);
-      for (const [input, present, action, label] of [[commands, allowed.includes(name), 'allowed', allowed.includes(name) ? tr('자동승인에서 제외') : tr('자동승인에 추가')], [denied, blocked.includes(name), 'denied', blocked.includes(name) ? tr('차단 해제') : tr('항상 차단')]]) {
+      for (const [input, present, action, label] of [[commands, includes(allowed, name), 'allowed', includes(allowed, name) ? tr('자동승인에서 제외') : tr('자동승인에 추가')], [denied, includes(blocked, name), 'denied', includes(blocked, name) ? tr('차단 해제') : tr('항상 차단')]]) {
         const b = button(label, () => edit(input, name, !present)); b.setAttribute('aria-label', name + ' ' + label); b.setAttribute('aria-describedby', help.id + ' ' + description.id); b.dataset.commandAction = action; actions.append(b);
       }
-      if (blocked.includes(name) && allowed.includes(name)) detail.append(el('p', tr('차단이 우선합니다. 차단을 해제하면 남아 있는 자동승인 등록이 다시 작동할 수 있습니다.'), 'command-consequence'));
-      else if (priorAllowed.includes(name) && !allowed.includes(name)) detail.append(el('p', tr('제외 예정 · 차단한 것이 아닙니다. 모델 설정에 따라 평가 후 자동 실행될 수 있습니다.'), 'command-consequence'));
+      if (includes(blocked, name) && includes(allowed, name)) detail.append(el('p', tr('차단이 우선합니다. 차단을 해제하면 남아 있는 자동승인 등록이 다시 작동할 수 있습니다.'), 'command-consequence'));
+      else if (includes(priorAllowed, name) && !includes(allowed, name)) detail.append(el('p', tr('제외 예정 · 차단한 것이 아닙니다. 모델 설정에 따라 평가 후 자동 실행될 수 있습니다.'), 'command-consequence'));
       detail.append(el('p', tr('수정은 초안에만 반영됩니다. 위의 변경 확인·저장에서 위험도를 확인하고 OK 후 저장하세요.'), 'policy-help'));
     } else detail.append(el('h4', tr('선택할 명령이 없습니다')), el('p', tr('검색어나 필터를 바꾸거나 명령 찾아 추가를 눌러주세요.'), 'policy-help'));
     lineImport.refresh();

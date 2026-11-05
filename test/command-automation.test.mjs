@@ -1,3 +1,7 @@
+// MCP 1.8 port: ssh-request-v1 strings map to native submit command/context;
+// wait-for-request approval/completion callbacks map to observe state, approvalMode
+// and failed. Exact old bodies remain in legacy-17/command-automation.test.mjs.17.
+// The AIK port unit test below retains its actual adapter calls, outside public MCP.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -7,8 +11,11 @@ import { classifyCommand } from 'ssh-mcp/build/policy/classifier.js';
 import { createApplication } from '../app.mjs';
 import { inspectCommand, validateCommandPolicy } from '../src/domain/command-policy.mjs';
 import { createCommandState } from '../src/adapters/storage/command-state.mjs';
+import { createOperationStore } from '../src/adapters/storage/operation-store.mjs';
 import { createAikSshTool } from '../src/adapters/aik/ssh-tool.mjs';
 import { createJevAssessor } from '../src/adapters/safety/jev.mjs';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
 const low = { status: 'assessed', model: 'jev-1.14.0', label: 'low_risk', confidence: 1,
   probabilities: { low_risk: 1, high_risk: 0 } };
@@ -178,9 +185,40 @@ test('durable admission restores interrupted evaluation/execution as unknown and
   const root = await mkdtemp(join(tmpdir(), 'command-state-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   let state = createCommandState(root);
-  for (const status of ['evaluating', 'running', 'pending']) state.insert({ id: status, state: status }, status, 'digest');
+  for (const status of ['evaluating', 'running', 'queued', 'pending']) state.insert({ id: status, state: status }, status, 'digest');
   state.close(); state = createCommandState(root);
-  assert.deepEqual(state.list().map(job => job.state), ['unknown', 'unknown', 'expired']); state.close();
+  assert.deepEqual(state.list().map(job => job.state), ['unknown', 'unknown', 'unknown', 'expired']); state.close();
+});
+
+test('startup restores a natively claimed command as unknown and never automatically replays it', { timeout: 10000 }, async t => {
+  const f = await fixture(t); await f.policy({ commands: [], externalDisclosure: false });
+  const key = 'fixture-queued-restart-0001', command = 'sudo id';
+  const pending = await f.run(command, key);
+  assert.equal(pending.state, 'pending'); assert.equal(f.executions.length, 0);
+  await f.app.close();
+  const state = createCommandState(f.root), operations = createOperationStore(f.root);
+  try {
+    const persisted = state.find(key);
+    assert.equal(persisted.job.id, pending.id);
+    // Simulate a crash after owner approval and the native durable dispatch claim,
+    // before an executor exists. Mutating only the legacy row after completion
+    // leaves a valid completed operation, which must win during restoration.
+    const queued = { ...persisted.job, state: 'queued', approvalMode: 'owner' };
+    delete queued.result; delete queued.finishedAt;
+    state.save(queued);
+    const accepted = operations.get(pending.id);
+    assert.equal(accepted.state, 'accepted');
+    operations.update(pending.id, { state: 'queued', metadata: { ...accepted.metadata, approval: queued } }, { expectedVersion: accepted.version });
+    assert.equal(operations.claim(pending.id).state, 'starting');
+  } finally { operations.close(); state.close(); }
+  await f.restart();
+  const restored = f.app.queue.get(pending.id), durable = f.app.targets.select().queue.operationStore.get(pending.id);
+  assert.equal(restored.state, 'unknown'); assert.equal(restored.approvalMode, 'owner');
+  assert.equal(durable.state, 'unknown'); assert.equal(durable.recoveryReason, 'bridge_restart'); assert.equal(durable.requiresReconciliation, true);
+  assert.equal(f.executions.length, 0, 'startup adds no execution');
+  const replay = await f.run(command, key);
+  assert.equal(replay.id, pending.id); assert.equal(replay.state, 'unknown');
+  assert.equal(f.executions.length, 0, 'the same request key cannot replay an interrupted native claim');
 });
 
 test('owner authentication, exact Origin, revision and target bindings protect policy mutations', async t => {
@@ -221,14 +259,18 @@ test('partial name approval never tells Jev the whole mixed line was explicitly 
 });
 
 test('AIK adapter never dispatches before authority and keeps host authorization out of MCP', async () => {
+  const { publicReply, presentOperation, publicOutputSchemas } = await import('../src/adapters/mcp/public-contract.mjs');
   const events = [], auth = { status: 'authorized', binding_digest: 'fixture', authorization_revision: 1 };
+  let operationKey;
   const adapter = createAikSshTool({ authority: { authorize: async () => { events.push('authorize'); return auth; },
     revalidate: async value => { assert.equal(value, auth); events.push('revalidate'); }, recordReceipt: async () => events.push('receipt'),
     recordDispatch: async () => events.push('intent'), bindRequest: async () => events.push('bind'), lookupRequest: async () => auth },
-    mcp: { call: async (name, args) => { events.push(name); assert.equal(JSON.stringify(args).includes('binding_digest'), false); if (name === 'run-command') assert.equal(args.context, 'Inspect test identity; no changes'); return { id: 'a'.repeat(48), state: 'completed' }; } } });
+    mcp: { call: async (name, args) => { events.push(name); assert.equal(JSON.stringify(args).includes('binding_digest'), false);
+      if (name === 'submit') { assert.equal(args.context, 'Inspect test identity; no changes'); operationKey = args.operationKey; }
+      return publicReply(presentOperation({ id: 'a'.repeat(48), operationKey, kind: 'command', state: 'completed', createdAt: 1, result: { failed: false } }), publicOutputSchemas[name]); } } });
   const job = await adapter.run({ tool_call_id: 'fixture-call', effect_id: 'fixture-effect', arguments: { target: 'test', command: 'sudo id', context: 'Inspect test identity; no changes' } });
   await adapter.status(job.id);
-  assert.deepEqual(events, ['authorize', 'revalidate', 'intent', 'revalidate', 'run-command', 'bind', 'get-request-status', 'receipt']);
+  assert.deepEqual(events, ['authorize', 'revalidate', 'intent', 'revalidate', 'submit', 'bind', 'observe', 'receipt']);
   let calls = 0;
   const denied = createAikSshTool({ authority: { authorize: async () => { throw Error('AIK denied'); }, revalidate() {}, recordReceipt() {}, recordDispatch() {}, bindRequest() {}, lookupRequest() {} }, mcp: { call: () => calls++ } });
   await assert.rejects(denied.run({}), /AIK denied/); assert.equal(calls, 0);
@@ -267,20 +309,32 @@ test('concurrent duplicate key observes the same evaluating job and does not eva
 
 test('execution admission audit failure cannot dispatch a preapproved command', async t => {
   const f = await fixture(t, { audit: event => { if (event.action === 'policy-execution-started') throw Error('audit unavailable'); } });
-  await f.policy({}); const job = await f.run('sudo id');
-  assert.equal(job.state, 'pending'); assert.equal(job.decision.reasonCode, 'execution_busy'); assert.equal(f.executions.length, 0);
-  assert.equal(job.approvalMode, undefined);
+  await f.policy({}); const key = 'audit-preapproved-failed-0001', job = await f.run('sudo id', key);
+  // This audit is after durable scheduling, before the executor: it settles as
+  // failed/not_dispatched, retaining the policy decision that authorized admission.
+  assert.equal(job.state, 'failed'); assert.equal(job.decision.reasonCode, 'command_set'); assert.equal(job.decision.dispatchFailure, 'not_dispatched');
+  assert.equal(job.decision.dispatchFailureReason, 'audit_failed'); assert.equal(job.decision.dispatchFailureStage, 'start_audit'); assert.equal(f.executions.length, 0);
+  assert.equal(job.approvalMode, 'automatic'); assert.equal(job.result.failed, true); assert.equal(job.result.execution.remoteState, 'not_dispatched'); assert.equal(job.result.execution.requiresReconciliation, false);
+  assert.equal(f.app.targets.select().queue.operationStore.get(job.id).state, 'failed');
+  await f.restart(); const replay = await f.run('sudo id', key);
+  assert.equal(replay.id, job.id); assert.equal(replay.state, 'failed'); assert.equal(f.executions.length, 0);
 });
 
 test('an evaluated command retains observed usage when execution admission fails', async t => {
-  const f = await fixture(t, { riskEvaluators: { jev: { model: 'jev-1.14.0', assess: async () => ({ ...low, inputTokens: 17, outputTokens: 3 }) } },
+  let modelCalls = 0;
+  const f = await fixture(t, { riskEvaluators: { jev: { model: 'jev-1.14.0', assess: async () => { modelCalls++; return { ...low, inputTokens: 17, outputTokens: 3 }; } } },
     audit: event => { if (event.action === 'policy-execution-started') throw Error('synthetic audit unavailable'); } });
   await f.policy({ commands: [], modelExecution: true, thresholds: { jev: threshold('jev-1.14.0') } });
-  const job = await f.run('sudo id');
-  assert.equal(job.state, 'pending'); assert.equal(job.decision.reasonCode, 'execution_busy');
-  assert.equal(job.decision.decision, 'review'); assert.equal(job.approvalMode, undefined);
+  const key = 'audit-evaluated-failed-0001', job = await f.run('sudo id', key);
+  assert.equal(job.state, 'failed'); assert.equal(job.decision.reasonCode, 'model_passed'); assert.equal(job.decision.dispatchFailure, 'not_dispatched');
+  assert.equal(job.decision.dispatchFailureReason, 'audit_failed'); assert.equal(job.decision.dispatchFailureStage, 'start_audit');
+  assert.equal(job.decision.decision, 'execute'); assert.equal(job.approvalMode, 'automatic');
   assert.equal(job.decision.assessment.inputTokens, 17); assert.equal(job.decision.assessment.outputTokens, 3);
-  assert.equal(f.executions.length, 0);
+  assert.equal(job.result.failed, true); assert.equal(job.result.execution.remoteState, 'not_dispatched'); assert.equal(job.result.execution.requiresReconciliation, false);
+  assert.equal(f.app.targets.select().queue.operationStore.get(job.id).state, 'failed'); assert.equal(f.executions.length, 0);
+  await f.restart(); const replay = await f.run('sudo id', key);
+  assert.equal(replay.id, job.id); assert.equal(replay.state, 'failed');
+  assert.equal(replay.decision.assessment.inputTokens, 17); assert.equal(replay.decision.assessment.outputTokens, 3); assert.equal(modelCalls, 1); assert.equal(f.executions.length, 0);
 });
 
 test('unknown elevated programs and interpreter carriers route to independent evaluation', async t => {
@@ -364,7 +418,7 @@ test('missing or whitespace-only task context withholds the model call and execu
   assert.equal(f.inputs.length, 0);
 });
 
-test('the legacy command-only MCP path delivers exact task context through automation into the Jev HTTP body', async t => {
+test('the native command MCP submission delivers exact task context through automation into the Jev HTTP body', async t => {
   const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
   const { StreamableHTTPClientTransport } = await import('@modelcontextprotocol/sdk/client/streamableHttp.js');
   const { AUTOMATION_QUESTION } = await import('../src/domain/command-policy.mjs');
@@ -380,9 +434,9 @@ test('the legacy command-only MCP path delivers exact task context through autom
   const command = 'sudo id', context = 'Test only; inspect effective identity to verify the SSH account; no writes or restart; no recovery required';
   try {
     await client.connect(new StreamableHTTPClientTransport(new URL('http://127.0.0.1:' + f.app.mcpHttp.address().port + '/mcp'), { requestInit: { headers: { Authorization: 'Bearer fixture-mcp' } } }));
-    const response = await client.callTool({ name: 'run-command', arguments: { command: 'ssh-request-v1:' + JSON.stringify({ command, context }) } });
+    const response = await client.callTool({ name: 'submit', arguments: { kind: 'command', operationKey: 'command-context-mcp-0001', command, context } });
     assert.equal(response.isError, undefined); await f.app.targets.drain();
-    const job = f.app.queue.get(response.structuredContent.id);
+    const job = f.app.queue.get(response.structuredContent.data.id);
     assert.equal(job.operation.command, command); assert.equal(job.operation.context, context);
     assert.equal(payload.state.command, command); assert.equal(JSON.parse(payload.state.context).callerSituation, context);
     assert.equal(payload.state.userApproval.explicit, false); assert.deepEqual(payload.state.preapprovedCommands, ['sudo']);
@@ -561,14 +615,52 @@ test('test server bypass overrides deny, sudo and missing evaluators only after 
 });
 
 
-test('test server busy rejection is terminal and never becomes owner approval or deferred execution', async t => {
- const f = await fixture(t); await f.policy({ commands: [], testServer: true, externalDisclosure: false });
- const queue=f.app.targets.select('default').queue, externalBusy=queue.externalBusy; queue.externalBusy=()=>true;
- const job=await f.run('sudo id','test-server-busy-key-0001','');
- assert.equal(job.state,'failed'); assert.equal(job.decision.dispatchFailure,'not_dispatched'); assert.equal(job.approvalMode,undefined);
- assert.equal(f.executions.length,0);queue.externalBusy=externalBusy;
- assert.equal((await f.run('sudo id','test-server-busy-key-0001','')).id,job.id);assert.equal(f.executions.length,0);
- assert.throws(()=>queue.start(job.id),/not pending/);
+test('test server automatic command waits for execution capacity and replay never dispatches twice', async t => {
+ const held=Promise.withResolvers(),entered=Promise.withResolvers(),executed=[];
+ // This case owns one execution slot regardless of host CPU capacity.
+ const f=await fixture(t,{env:{...env,BRIDGE_MAX_CONCURRENCY:'1'},executeCommand:async(_profile,command)=>{executed.push(command);if(command==='sudo first'){entered.resolve();await held.promise;}return{failed:false,texts:['ok']};}});
+ await f.policy({commands:[],testServer:true,externalDisclosure:false});
+ await new Promise(resolve=>f.app.mcpHttp.listen(0,'127.0.0.1',resolve));
+ const client=new Client({name:'execution-queue-contract',version:'1'});
+ try {
+  await client.connect(new StreamableHTTPClientTransport(new URL('http://127.0.0.1:'+f.app.mcpHttp.address().port+'/mcp'),{requestInit:{headers:{Authorization:'Bearer fixture-mcp'}}}));
+  const first=await f.app.targets.commands.run('sudo first');await entered.promise;
+  const args={kind:'command',command:'sudo id',operationKey:'test-server-busy-key-0001',context:''};
+  const request=await client.callTool({name:'submit',arguments:args});
+  assert.equal(request.isError,undefined);const job=request.structuredContent.data;assert.equal(job.state,'queued');assert.equal(job.approvalMode,'automatic');
+  const privateJob=f.app.queue.get(job.id);assert.equal(privateJob.decision.reasonCode,'test_server_bypass');assert.equal(privateJob.decision.dispatchFailure,undefined);
+  // 1.8 exposes operation state instead of the removed approval/completion callback body.
+  const approved=await client.callTool({name:'observe',arguments:{id:job.id}});
+  assert.equal(approved.structuredContent.data.state,'queued');assert.equal(approved.structuredContent.data.approvalMode,'automatic');assert.equal(approved.structuredContent.data.finishedAt,null);
+  const completion=(async()=>{
+   for(let attempts=0;attempts<20;attempts++){
+    const observed=await client.callTool({name:'observe',arguments:{id:job.id,waitMs:5000}});
+    assert.equal(observed.isError,undefined);
+    if(['completed','failed','denied','expired','unknown','cancelled'].includes(observed.structuredContent.data.state))return observed.structuredContent.data;
+   }
+   assert.fail('Operation did not reach a terminal state within the bounded observation loop');
+  })();
+  assert.deepEqual(executed,['sudo first']);
+  held.resolve();await f.app.queue.wait(first.job.id);await f.app.queue.wait(job.id);
+  const completed=await completion;assert.equal(completed.state,'completed');assert.equal(completed.failed,false);
+  assert.equal(f.app.queue.get(job.id).state,'completed');assert.deepEqual(executed,['sudo first','sudo id']);
+  const replay=await client.callTool({name:'submit',arguments:args});assert.equal(replay.isError,undefined);assert.equal(replay.structuredContent.data.id,job.id);assert.equal(executed.length,2);
+ } finally {held.resolve();await client.close();}
+});
+
+test('application shutdown cancels queued automatic work and drains only the active command', {timeout:10000}, async t => {
+ const held=Promise.withResolvers(),entered=Promise.withResolvers(),executed=[];
+ // Shutdown must find one active operation and a second awaiting the same slot.
+ const f=await fixture(t,{env:{...env,BRIDGE_MAX_CONCURRENCY:'1'},executeCommand:async(_profile,command)=>{executed.push(command);entered.resolve();await held.promise;return{failed:false,texts:['ok']};}});
+ await f.policy({commands:[],testServer:true,externalDisclosure:false});
+ try {
+  const first=await f.app.targets.commands.run('sudo first');await entered.promise;
+  const second=await f.app.targets.commands.run('sudo second');assert.equal(f.app.queue.get(second.job.id).state,'queued');
+  const queuedDone=f.app.queue.wait(second.job.id),closing=f.app.close();
+  const cancelled=await queuedDone;assert.equal(cancelled.state,'failed');assert.equal(cancelled.decision.dispatchFailure,'not_dispatched');assert.equal(cancelled.decision.dispatchFailureReason,'maintenance');
+  assert.equal(f.app.queue.get(first.job.id).state,'running');assert.deepEqual(executed,['sudo first']);
+  held.resolve();await closing;assert.equal(f.app.queue.get(first.job.id).state,'completed');assert.deepEqual(executed,['sudo first']);
+ } finally {held.resolve();}
 });
 
 
@@ -584,7 +676,11 @@ test('test server secret is mandatory for policy registration, rechecked on save
  assert.equal((await f.api('/api/command-policy',{...proposal,reviewToken:review.reviewToken,acknowledged:true})).status,409);
  assert.equal((await f.api('/api/command-policy/review',proposal)).status,409);
  value='2'.repeat(64);await f.policy({testServer:true,commands:[],externalDisclosure:false});value=undefined;
- const job=await f.run('sudo id');assert.equal(job.state,'failed');assert.equal(f.executions.length,0);
+ // Revocation is refused by the server guard before any adapter invocation;
+ // transport ambiguity cannot replace this known not-dispatched outcome.
+ const key='test-secret-revoked-key-0001',job=await f.run('sudo id',key);assert.equal(job.state,'failed');assert.equal(f.executions.length,0);assert.equal(f.inputs.length,0);
+ assert.equal(job.result.execution.remoteState,'not_dispatched');assert.equal(job.result.execution.requiresReconciliation,false);
+ const replay=await f.run('sudo id',key);assert.equal(replay.id,job.id);assert.equal(replay.state,'failed');assert.equal(f.executions.length,0);assert.equal(f.inputs.length,0);
  assert.doesNotMatch(JSON.stringify([current,job,f.events,(await f.api('/api/command-policy')).body]),/2222222222222222|secret:\/\/fixture\/test-server|BRIDGE_TEST_SERVER_SECRET_REF/);
  await f.policy({testServer:false,commands:[],externalDisclosure:false});assert.equal((await f.run('sudo id')).state,'pending');
 });

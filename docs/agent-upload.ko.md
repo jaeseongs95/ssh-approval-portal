@@ -1,10 +1,14 @@
 # 에이전트 파일 업로드
 
+> 이 문서는 1.x의 계약과 검증 기록입니다. 2.0.0에서는 [공개 MCP 도구 계약](mcp-tools.ko.md), [에이전트 연결](agent-clients.ko.md), [PC 파일 전송 클라이언트](client-files.ko.md)를 사용하세요. 아래의 예전 도구 이름과 한도를 2.0.0 호출에 적용하지 마세요.
+
+AI 제품 이름으로 전송 가능 여부를 판단하지 않습니다. 먼저 `get-client-capabilities`를 조회하고 [공통 에이전트 연결](agent-clients.ko.md)에서 현재 클라이언트의 파일 접근·로컬 실행·stdio·카드 지원에 맞는 경로를 선택합니다. 아래 첫 부분의 `openai/fileParams` 제한은 원격 `request-upload` 어댑터에만 적용하며, 로컬 CLI와 stdio 도구에는 적용하지 않습니다.
+
 `request-upload`는 지원되는 클라이언트가 전달한 파일을 중계기에 임시 저장하고, 실측 크기와 SHA-256을 확정해 업로드 승인 대기에 등록합니다. 에이전트가 파일 선택 단계를 대신할 수 있지만 서버 경로에 반영하려면 소유자의 카드 또는 웹 승인이 필요합니다. 파일 실행과 ZIP 압축 해제는 하지 않습니다.
 
 현재 구현은 ChatGPT의 공식 `openai/fileParams` 계약을 사용합니다. 필수 필드는 `download_url`·`file_id`, 선택 필드는 `mime_type`·`file_name`입니다. 실제 ChatGPT 파일 입력은 `upload-source-not-configured`와 공급자 hostname 반환까지 도달했지만 공급자 파일 가져오기·승인·SSH 왕복은 아직 확인되지 않았습니다. [공식 파일 입력 계약](https://developers.openai.com/plugins/reference#file-apis)
 
-실제 Claude 시험에서는 `file_uuid`와 빈 `download_url`을 보내 입력 검증에 실패했습니다. `file_uuid`를 다운로드 주소로 바꾸거나 Anthropic Files API의 `file_id`로 간주하지 않습니다. 같은 Claude 샌드박스의 대상 HTTPS 연결은 proxy CONNECT 403으로 차단됐습니다. 이 원격 파일 입력을 통한 Claude 자동 업로드 경로는 제공하지 않으며 기존 카드의 PC 파일 선택을 사용합니다.
+실제 원격 Claude 시험에서는 `file_uuid`와 빈 `download_url`을 보내 입력 검증에 실패했습니다. `file_uuid`를 다운로드 주소로 바꾸거나 Anthropic Files API의 `file_id`로 간주하지 않습니다. 같은 Claude 샌드박스의 대상 HTTPS 연결은 proxy CONNECT 403으로 차단됐습니다. 이 호스트 파일 입력 경로는 제공하지 않습니다. 로컬 파일 접근·명령 실행 권한이 있는 에이전트는 아래 CLI를, 로컬 stdio MCP 클라이언트는 파일 ID 도구를, 둘 다 없는 환경은 소유자의 파일 선택 카드를 사용합니다.
 
 Claude Team·Enterprise의 조직 소유자는 `Organization settings > Capabilities`에서 코드 실행의 특정 도메인 접근을 설정할 수 있습니다. 개인 Free·Pro·Max에서 임의 도메인 추가가 가능하다고 보장하지 않습니다. MCP 연결 성공은 샌드박스 egress 허용을 뜻하지 않습니다. 도메인 접근과 실제 원본 바이트 전송이 별도로 입증되기 전에는 샌드박스 push 경로를 지원으로 표시하지 않습니다. [Claude 파일 생성과 네트워크 설정](https://support.claude.com/en/articles/12111783-create-and-edit-files-with-claude)
 
@@ -49,7 +53,7 @@ node @portalArgs save DOWNLOAD_REQUEST_ID 'C:\work\saved-new.bin'
 
 전송할 파일의 바이트를 미리 지정하려면 `upload`에 `--expect-size 바이트 --expect-sha256 소문자SHA256`을 함께 사용합니다. 예를 들어 크기와 해시를 확인한 파일에 두 옵션을 지정하면, CLI가 캡처한 불변 스냅샷과 일치할 때만 원격 업로드를 시작합니다. 불일치는 `UPLOAD_SOURCE_MISMATCH`로 중지하며 새 전송을 만들지 않습니다. `resume-upload`는 기존 전송의 크기·해시와 원래 대상을 대조하므로 이 옵션을 받지 않습니다.
 
-Claude Code에서는 허용된 로컬 명령 실행 도구로 이 CLI를 호출하고 PC 파일의 절대경로를 전달할 수 있습니다. 파일 바이트는 CLI가 직접 전송합니다. 실제 Claude Code 클라이언트의 업로드·PC 저장 실증은 별도 수용 검증이 필요하며, 이 옵션의 로컬 테스트만으로 플랫폼 전체 지원을 확정하지 않습니다.
+Claude Code, Codex CLI 등 제품 이름과 무관하게 허용된 로컬 명령 실행 도구로 이 CLI를 호출하고 PC 파일의 절대경로를 전달할 수 있습니다. 파일 바이트는 CLI가 직접 전송합니다. Linux 목적지는 `/home/operator/file.bin`, Windows 목적지는 `C:/upload/file.bin`처럼 지정하고 해당 대상 ID를 선택합니다. 실제 개별 에이전트 클라이언트의 업로드·PC 저장 실증은 별도 수용 검증이 필요하며, 합성 시험만으로 플랫폼 전체 지원을 확정하지 않습니다.
 
 ## 파일 API의 대상 버전 결속
 

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { getEventListeners } from 'node:events';
 import { setTimeout as delay } from 'node:timers/promises';
-import { ApprovalQueue } from '../src/domain/approval-queue.mjs';
+import { ApprovalQueue } from './support/approval-runtime.mjs';
 import { createTargetRouter } from '../src/application/target-router.mjs';
 import { createApplication } from '../app.mjs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -14,15 +14,16 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 function queueFixture(t, options = {}) {
   let effects = 0;
   const controller = new AbortController();
+  const execute = options.executeOperation ?? (async () => ({ failed: false, texts: [] }));
   const queue = new ApprovalQueue({ classify: () => ({ class: 'privileged' }), profile: 'fixture', target: 'fixture',
-    executeOperation: async () => { effects++; return { failed: false, texts: [] }; }, ...options });
+    ...options, executeOperation: async (...args) => { effects++; const result = await execute(...args); return { ...result, execution: { phase: 'settled', reason: 'exit', remoteState: 'exited', cleanupComplete: true, requiresReconciliation: false, exitCode: result.failed ? 1 : 0 } }; } });
   t.after(() => controller.abort());
   return { queue, controller, wait: (id, options) => queue.waitForRequest(id, { signal: controller.signal, ...options }), get effects() { return effects; } };
 }
 
 async function eventually(predicate) {
   const deadline = Date.now() + 5000;
-  while (!predicate()) { assert.ok(Date.now() < deadline, 'condition did not become true'); await delay(5); }
+  while (!predicate()) { assert.ok(Date.now() < deadline, 'condition did not become true'); await new Promise(resolve => setImmediate(resolve)); }
 }
 
 test('approval callback arrives before execution completion; late waits observe the existing result', async t => {
@@ -30,11 +31,11 @@ test('approval callback arrives before execution completion; late waits observe 
   const f = queueFixture(t, { executeOperation: () => new Promise(resolve => { finish = resolve; }) });
   const job = f.queue.submit('fixture-command');
   const approved = f.wait(job.id), completed = f.wait(job.id, { until: 'completion' });
-  assert.equal(f.queue.start(job.id).state, 'running');
+  assert.equal(f.queue.start(job.id).state, 'queued');
   const first = await approved;
-  assert.equal(first.event, 'approved'); assert.equal(first.job.state, 'running'); assert.equal(first.job.approvalMode, 'owner');
+  assert.equal(first.event, 'approved'); assert.equal(first.job.state, 'queued'); assert.equal(first.job.approvalMode, 'owner');
   assert.equal((await f.wait(job.id)).event, 'approved');
-  finish({ failed: false, texts: [] });
+  await eventually(() => typeof finish === 'function'); finish({ failed: false, texts: [] });
   assert.equal((await completed).event, 'completed');
   assert.equal((await f.wait(job.id)).job.state, 'completed');
   assert.equal(f.queue.requestWaiters.size, 0);
@@ -68,13 +69,13 @@ test('denial, failed execution, unknown source and missing IDs are not approval 
 
 test('audit or persistence failure cannot send approval or execute a command', async t => {
   for (const phase of ['audit', 'persist']) {
-    const f = queueFixture(t, { audit: event => { if (phase === 'audit' && event.action === 'approved') throw Error('protected failure'); } });
+    const f = queueFixture(t, { audit: event => { if (phase === 'audit' && event.action === 'execution-queued') throw Error('protected failure'); } });
     const job = f.queue.submit('fixture-command');
     if (phase === 'persist') f.queue.track(job.id, () => { throw Error('protected persistence failure'); });
     const wait = f.wait(job.id, { timeoutMs: 10 });
     assert.throws(() => f.queue.start(job.id));
     const result = await wait;
-    assert.equal(result.event, phase === 'audit' ? 'timeout' : 'unknown');
+    assert.equal(result.event, 'timeout');
     assert.equal(result.job.approvalMode, undefined); assert.equal(f.effects, 0); assert.equal(f.queue.requestWaiters.size, 0);
   }
 });
@@ -91,6 +92,34 @@ test('expiry wakes without a queue reaper, while timeout leaves the original req
   const late = queueFixture(t, { now: () => now }), unseen = late.queue.submit('fixture-command');
   late.queue.beginEvaluation(unseen.id); now = unseen.expiresAt;
   assert.equal((await late.wait(unseen.id)).event, 'expired'); assert.equal(late.queue.requestWaiters.size, 0); assert.equal(late.effects, 0);
+});
+
+test('expiry wake before the wall-clock deadline rearms without consuming the caller timeout', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  // Track live handles around the existing fake clock; expiry and caller timeout
+  // must both disappear when the wait settles, without running a real timer.
+  const scheduled = new Set(), fakeSetTimeout = globalThis.setTimeout, fakeClearTimeout = globalThis.clearTimeout;
+  t.mock.method(globalThis, 'setTimeout', (callback, milliseconds, ...args) => {
+    const handle = fakeSetTimeout(() => { scheduled.delete(handle); callback(...args); }, milliseconds);
+    scheduled.add(handle); return handle;
+  });
+  t.mock.method(globalThis, 'clearTimeout', handle => { scheduled.delete(handle); return fakeClearTimeout(handle); });
+  let now = 1000, deliveries = 0, outcome;
+  const f = queueFixture(t, { now: () => now });
+  const job = f.queue.submitOperation({ kind: 'command', command: 'fixture-command' }, 'privileged', { expiresAt: 1015 });
+  const waiting = f.wait(job.id, { timeoutMs: 1000 }).then(value => { deliveries++; outcome = value; return value; });
+  assert.equal(f.queue.requestWaiters.size, 1);
+  now = 1014; t.mock.timers.tick(15); await Promise.resolve();
+  assert.equal(outcome, undefined, 'an early expiry wake is not the caller timeout');
+  assert.equal(deliveries, 0); assert.equal(f.queue.requestWaiters.size, 1); assert.equal(f.effects, 0);
+  now = 1015; t.mock.timers.tick(1);
+  const result = await waiting;
+  assert.equal(result.event, 'expired'); assert.equal(result.job.state, 'expired');
+  assert.equal(deliveries, 1); assert.equal(f.queue.requestWaiters.size, 0); assert.equal(f.effects, 0);
+  assert.equal(getEventListeners(f.controller.signal, 'abort').length, 0);
+  assert.equal(scheduled.size, 0, 'expiry completion must clear its independent caller timeout');
+  t.mock.timers.tick(1000); await Promise.resolve();
+  assert.equal(deliveries, 1); assert.equal(scheduled.size, 0);
 });
 
 test('abort, saturation and invalid deadlines release subscriptions without cancelling the operation', async t => {
@@ -130,64 +159,74 @@ async function httpFixture(t, executeCommand, audit = () => {}) {
   const client = new Client({ name: 'callback-contract', version: '1' });
   await client.connect(new StreamableHTTPClientTransport(new URL('http://127.0.0.1:' + app.mcpHttp.address().port + '/mcp'), { requestInit: { headers: { Authorization: 'Bearer fixture-mcp' } } }));
   t.after(async () => { await client.close(); await app.close(); assert.ok(root.startsWith(join(tmpdir(), 'approval-callback-'))); await rm(root, { recursive: true, force: true }); });
+  let operationSequence = 0;
   return { app, client, queue: app.targets.select('default').queue,
-    call: (name, args) => client.callTool({ name, arguments: args }),
+    call: (name, args) => client.callTool({ name, arguments: name === 'submit' ? { kind: 'command', operationKey: 'callback-contract-' + String(++operationSequence).padStart(8, '0'), ...args } : args }),
     owner: (id, action) => fetch('http://127.0.0.1:' + app.adminHttp.address().port + '/api/' + id + '/' + action, { method: 'POST', headers: { Authorization: 'Bearer fixture-owner', Origin: 'https://owner.example.test' } }) };
 }
 
-test('real SDK HTTP call resumes on owner approval, then completion returns only the stored redacted output reference', { timeout: 20000 }, async t => {
+// 1.7 callback payloads are archived in legacy-17/approval-callback.test.mjs.17.
+// The same HTTP authority, bounded waits, disconnect and no-replay properties
+// now use native operation state observation; observe returns one version change.
+async function terminalObservation(f, id) {
+  const deadline = Date.now() + 5000;
+  for (;;) {
+    const reply = await f.call('observe', { id, waitMs: 1000 }); assert.equal(reply.isError, undefined);
+    const value = reply.structuredContent.data;
+    if (['completed', 'failed', 'cancelled', 'denied', 'expired', 'unknown'].includes(value.state)) return value;
+    assert.ok(Date.now() < deadline);
+  }
+}
+
+test('real SDK observation reports approval before completion and omits stored output bodies', { timeout: 20000 }, async t => {
   let finish, effects = 0;
   const f = await httpFixture(t, () => { effects++; return new Promise(resolve => { finish = resolve; }); });
-  const job = (await f.call('run-command', { command: 'fixture-command' })).structuredContent;
-  assert.equal(job.approvalCallback.tool, 'wait-for-request'); assert.equal(job.approvalCallback.arguments.id, job.id);
-  const wait = f.call('wait-for-request', { id: job.id, until: 'approval', timeoutMs: 5000 });
-  await eventually(() => f.queue.requestWaiters.size === 1);
+  const job = (await f.call('submit', { command: 'fixture-command' })).structuredContent.data;
+  const wait = f.call('observe', { id: job.id, waitMs: 5000 });
+  // HTTP observation is registered before owner approval; pending observation may
+  // report queued or starting while the independently asserted executor is live.
+  await new Promise(resolve => setImmediate(resolve));
   const approvedResponse = f.owner(job.id, 'approve');
-  const approved = (await wait).structuredContent;
-  assert.deepEqual(approved.callback, { contract: 'approval-callback-v1', until: 'approval', event: 'approved', approved: true, terminal: false, executionSucceeded: false });
-  assert.equal(approved.state, 'running'); assert.equal(effects, 1);
-  const completed = f.call('wait-for-request', { id: job.id, until: 'completion', timeoutMs: 5000 });
-  await eventually(() => f.queue.requestWaiters.size === 1);
-  finish({ failed: false, texts: ['PRIVATE-output-body'] });
+  const approved = (await wait).structuredContent.data;
+  assert.equal(approved.approvalMode, 'owner'); assert.ok(['queued', 'starting', 'running'].includes(approved.state));
+  await eventually(() => effects === 1);
+  const completed = terminalObservation(f, job.id); finish({ failed: false, texts: ['PRIVATE-output-body'] });
   assert.equal((await approvedResponse).status, 200);
-  const result = await completed;
-  assert.equal(result.structuredContent.callback.executionSucceeded, true); assert.equal(result.structuredContent.callback.event, 'completed');
-  assert.equal(result.structuredContent.result.structuredContent.output.state, 'ready');
-  assert.equal(JSON.stringify(result).includes('PRIVATE-output-body'), false); assert.equal(f.queue.requestWaiters.size, 0);
+  const result = await completed; assert.equal(result.state, 'completed'); assert.equal(result.failed, false);
+  assert.equal(result.output.state, 'ready'); assert.equal(JSON.stringify(result).includes('PRIVATE-output-body'), false);
 });
 
-test('MCP deny, timeout, unknown ID and SDK cancellation preserve zero execution and bounded waits', { timeout: 20000 }, async t => {
+test('MCP denial, timeout, unknown ID and SDK cancellation preserve zero execution', { timeout: 20000 }, async t => {
   let effects = 0;
   const f = await httpFixture(t, async () => { effects++; return { failed: false, texts: [] }; });
-  const job = (await f.call('run-command', { command: 'fixture-command' })).structuredContent;
-  const wait = f.call('wait-for-request', { id: job.id, timeoutMs: 5000 });
-  await eventually(() => f.queue.requestWaiters.size === 1); assert.equal((await f.owner(job.id, 'deny')).status, 200);
-  const denied = (await wait).structuredContent; assert.equal(denied.callback.event, 'denied'); assert.equal(denied.callback.approved, false);
-  const unknown = (await f.call('wait-for-request', { id: 'f'.repeat(48) })).structuredContent; assert.equal(unknown.callback.event, 'missing');
-  const pending = (await f.call('run-command', { command: 'fixture-command' })).structuredContent;
-  assert.equal((await f.call('wait-for-request', { id: pending.id, timeoutMs: 5 })).structuredContent.callback.event, 'timeout');
+  const job = (await f.call('submit', { command: 'fixture-command' })).structuredContent.data;
+  const wait = f.call('observe', { id: job.id, waitMs: 5000 });
+  await new Promise(resolve => setImmediate(resolve)); assert.equal((await f.owner(job.id, 'deny')).status, 200);
+  assert.equal((await wait).structuredContent.data.state, 'denied');
+  const unknown = await f.call('observe', { id: 'f'.repeat(48) }); assert.equal(unknown.structuredContent.error.code, 'OPERATION_NOT_FOUND');
+  const pending = (await f.call('submit', { command: 'fixture-command' })).structuredContent.data;
+  const timed = (await f.call('observe', { id: pending.id, waitMs: 5 })).structuredContent.data;
+  assert.equal(timed.waitTimedOut, true); assert.equal(timed.state, 'pending');
   const controller = new AbortController();
-  const waiting = f.client.callTool({ name: 'wait-for-request', arguments: { id: pending.id, timeoutMs: 500 } }, undefined, { signal: controller.signal });
-  const rejection = assert.rejects(waiting); await eventually(() => f.queue.requestWaiters.size === 1); controller.abort(); await rejection;
-  await eventually(() => f.queue.requestWaiters.size === 0); assert.equal(f.queue.get(pending.id).state, 'pending'); assert.equal(effects, 0);
+  const waiting = f.client.callTool({ name: 'observe', arguments: { id: pending.id, waitMs: 500 } }, undefined, { signal: controller.signal });
+  const rejection = assert.rejects(waiting); await new Promise(resolve => setImmediate(resolve)); controller.abort(); await rejection;
+  assert.equal(f.queue.get(pending.id).state, 'pending'); assert.equal(effects, 0);
 });
 
-test('actual HTTP disconnect and application shutdown release waiting callbacks', { timeout: 15000 }, async t => {
+test('actual HTTP disconnect and shutdown release observations without executing pending requests', { timeout: 15000 }, async t => {
   const f = await httpFixture(t, async () => assert.fail('waiting must not execute SSH'));
-  const job = (await f.call('run-command', { command: 'fixture-command' })).structuredContent;
+  const job = (await f.call('submit', { command: 'fixture-command' })).structuredContent.data;
   const controller = new AbortController();
   const waiting = fetch('http://127.0.0.1:' + f.app.mcpHttp.address().port + '/mcp', {
     method: 'POST', signal: controller.signal,
     headers: { Authorization: 'Bearer fixture-mcp', 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 999, method: 'tools/call', params: { name: 'wait-for-request', arguments: { id: job.id, timeoutMs: 60000 } } }),
+    body: JSON.stringify({ jsonrpc: '2.0', id: 999, method: 'tools/call', params: { name: 'observe', arguments: { id: job.id, waitMs: 60000 } } }),
   });
-  const rejected = assert.rejects(waiting);
-  await eventually(() => f.queue.requestWaiters.size === 1); controller.abort(); await rejected;
-  await eventually(() => f.queue.requestWaiters.size === 0);
-  const next = f.call('wait-for-request', { id: job.id, timeoutMs: 60000 });
-  await eventually(() => f.queue.requestWaiters.size === 1);
+  const rejected = assert.rejects(waiting); await new Promise(resolve => setImmediate(resolve)); controller.abort(); await rejected;
+  assert.equal(f.queue.get(job.id).state, 'pending');
+  const next = f.call('observe', { id: job.id, waitMs: 60000 }); await new Promise(resolve => setImmediate(resolve));
   const closed = f.app.close(); await next.catch(() => {}); await closed;
-  assert.equal(f.queue.requestWaiters.size, 0);
+  assert.equal(f.queue.get(job.id).state, 'pending');
 });
 
 test('terminal audit or persistence failure remains visible and never retries completed effects', async t => {
@@ -220,7 +259,7 @@ test('approval and completion race with abort exactly once, including duplicate 
     const original = g.queue.submit('fixture-command'), cancel = new AbortController();
     const result = g.wait(original.id, { until: 'completion', signal: cancel.signal });
     const observed = result.then(value => ({ value }), error => ({ error }));
-    g.queue.start(original.id); await Promise.resolve();
+    g.queue.start(original.id); await eventually(() => typeof finish === 'function');
     if (order === 'abort-first') cancel.abort();
     finish({ failed: false, texts: [] });
     if (order === 'completion-first') await g.queue.wait(original.id);
@@ -231,17 +270,17 @@ test('approval and completion race with abort exactly once, including duplicate 
   }
 });
 
-test('MCP terminal audit error explicitly refuses execution-success signalling', { timeout: 15000 }, async t => {
+test('MCP observes terminal audit failure without replaying the original effects', { timeout: 15000 }, async t => {
   for (const phase of ['audit', 'persist']) {
     let effects = 0;
     const f = await httpFixture(t, async () => { effects++; return { failed: false, texts: [] }; }, event => { if (phase === 'audit' && event.action === 'completed') throw Error('private audit failure'); });
-    const job = (await f.call('run-command', { command: 'fixture-command' })).structuredContent;
+    const job = (await f.call('submit', { command: 'fixture-command' })).structuredContent.data;
     if (phase === 'persist') f.queue.track(job.id, value => { if (value.state === 'completed') throw Error('private persistence failure'); });
-    const completed = f.call('wait-for-request', { id: job.id, until: 'completion', timeoutMs: 5000 });
-    await eventually(() => f.queue.requestWaiters.size === 1); assert.equal((await f.owner(job.id, 'approve')).status, 200);
-    const result = (await completed).structuredContent;
-    assert.equal(result.callback.approved, true); assert.equal(result.callback.executionSucceeded, false);
-    assert.match(result.auditError, /must not be retried/); assert.equal(effects, 1); assert.equal(f.queue.requestWaiters.size, 0);
+    assert.equal((await f.owner(job.id, 'approve')).status, 200);
+    const result = await terminalObservation(f, job.id);
+    assert.equal(result.state, 'completed'); assert.match(f.queue.get(job.id).auditError, /must not be retried/);
+    assert.equal((await f.call('observe', { id: job.id })).structuredContent.data.id, job.id);
+    assert.equal(effects, 1); assert.equal(JSON.stringify(result).includes('private audit failure'), false);
   }
 });
 
@@ -252,7 +291,7 @@ test('timeout and completion ordering settle once under the same clock tick', as
     const f = queueFixture(t, { executeOperation: () => { effects++; return new Promise(resolve => { finish = resolve; }); } });
     const job = f.queue.submit('fixture-command');
     const result = f.wait(job.id, { until: 'completion', timeoutMs: 10 }).then(value => { deliveries++; return value; });
-    f.queue.start(job.id); await Promise.resolve();
+    f.queue.start(job.id); await eventually(() => typeof finish === 'function');
     if (order === 'timeout-first') t.mock.timers.tick(10);
     finish({ failed: false, texts: [] }); await f.queue.wait(job.id);
     if (order === 'completion-first') t.mock.timers.tick(10);

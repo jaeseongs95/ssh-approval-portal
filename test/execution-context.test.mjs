@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ApprovalQueue } from '../src/domain/approval-queue.mjs';
+import { ApprovalQueue } from './support/approval-runtime.mjs';
 import { createRequestSafety } from '../src/application/request-safety.mjs';
-import { assessmentContext, callerContext, commandRequest, sensitiveText } from '../src/domain/execution-context.mjs';
+import { assessmentContext, callerContext, commandRequest, credentialText, sensitiveText, ASSESSMENT_CONTEXT_LIMIT, SOURCE_EVIDENCE_MAX_BYTES } from '../src/domain/execution-context.mjs';
+import { preparePythonSource } from '../src/adapters/ssh/python-source.mjs';
+import { safetyInput } from '../src/domain/safety.mjs';
 import { createJevAssessor } from '../src/adapters/safety/jev.mjs';
 import { AUTOMATION_QUESTION, explicitUserApproval, commandDigest } from '../src/domain/command-policy.mjs';
 
@@ -76,4 +78,60 @@ test('advisory assessment includes the queued situation and additional evidence 
   await safety.assess(job.id); assert.equal(seen.length, 1); assert.equal(queue.get(job.id).state, 'pending');
   const long = queue.submit('sudo id', false, 'a'.repeat(8192));
   await assert.rejects(safety.assess(long.id, 'extra'), /context/); assert.equal(seen.length, 1);
+});
+
+test('source evidence uses a bounded separate budget tied to the actual private plan at every evaluator boundary', async () => {
+  const source = '#' + '\u0001'.repeat(16382) + '\n';
+  const settings = {source,cwd:'/tmp',targetId:'fixture',targetRevision:'a'.repeat(64),profile:'fixture-write'};
+  const plan = preparePythonSource(settings);
+  const context = assessmentContext('x'.repeat(8192),{},undefined,plan);
+  const evidence = JSON.parse(context).submittedSource;
+  assert.equal(evidence.source,source); assert.ok(context.length > ASSESSMENT_CONTEXT_LIMIT);
+  assert.ok(Buffer.byteLength(JSON.stringify(evidence)) <= SOURCE_EVIDENCE_MAX_BYTES);
+  const input = {command:plan.command,target:'fixture',environment:'synthetic fixture',context,preapprovedCommands:[],userApproval:explicitUserApproval(plan.command,[])};
+  assert.throws(()=>safetyInput(input),/Invalid safety input/);
+  assert.throws(()=>safetyInput({...input,sourceEvidenceContract:'bounded-source-evidence-v1'}),/Invalid safety input/);
+  const other = preparePythonSource({...settings,source:'#'+'y'.repeat(16382)+'\n'});
+  assert.throws(()=>safetyInput(input,{sourcePlan:other}),/Invalid safety input/);
+  assert.equal(safetyInput(input,{sourcePlan:plan}).context,context);
+  assert.throws(()=>assessmentContext('"'.repeat(8192),{},undefined,plan),/Assessment context/);
+  assert.throws(()=>safetyInput({...input,context:'x'.repeat(ASSESSMENT_CONTEXT_LIMIT+1)}),/Invalid safety input/);
+  let calls=0,wireBytes=0;
+  const assessor=createJevAssessor({apiKey:'synthetic-only',inputKind:'execution',question:AUTOMATION_QUESTION,fetchImpl:async(_url,options)=>{
+    calls++;wireBytes=Buffer.byteLength(options.body);
+    return new Response(JSON.stringify({model:'jev-1.14.0',answers:{risk:{type:'choice',choice:'high_risk',confidence:1,probabilities:{low_risk:0,high_risk:1}}},usage:{input_tokens:1,output_tokens:1}}),{headers:{'content-type':'application/json'}});
+  }});
+  assert.equal((await assessor.assess(input)).reason,'invalid_input');
+  assert.equal((await assessor.assess(input,{sourcePlan:other})).reason,'invalid_input'); assert.equal(calls,0);
+  assert.equal((await assessor.assess(input,{sourcePlan:plan})).status,'assessed'); assert.equal(calls,1);
+  assert.ok(wireBytes <= 512*1024);
+  for(const inputKind of ['observation','registration']) {
+    const observer=createJevAssessor({apiKey:'synthetic-only',inputKind,fetchImpl:()=>assert.fail('source budget is execution-only')});
+    assert.equal((await observer.assess(input,{sourcePlan:plan})).reason,'invalid_input');
+  }
+});
+
+test('normalized secret references are public identifiers, without hiding credential material', () => {
+  const references = ['secret://local-file/windows-gui-agent', 'secret://vault/model-safety-api-key',
+    'secret://a/A_1.2-3', `secret://${'a'.repeat(32)}/${'x'.repeat(64)}`];
+  for (const reference of references) {
+    const source = `reference = '${reference}'\nprint(reference)\n`;
+    assert.equal(credentialText(source), false, reference);
+    assert.equal(callerContext(reference), reference);
+    assert.equal(sensitiveText(reference), false);
+    assert.equal(credentialText(JSON.stringify({ reference })), false);
+    for (const literal of ['password=synthetic', 'api_key:synthetic', 'secret=synthetic',
+      'token=synthetic', 'Bearer synthetic', '-----BEGIN PRIVATE KEY-----']) {
+      for (const combined of [source + literal, literal + '\n' + source]) {
+        assert.equal(credentialText(combined), true, combined);
+        assert.throws(() => callerContext(combined), { code: 'COMMAND_CONTEXT_CONTAINS_SECRET' });
+      }
+    }
+  }
+  for (const reference of ['SECRET://local-file/name', 'secret://Local-file/name', 'secret: //local-file/name',
+    'secret://local-file/', 'secret://local-file/name/extra', 'secret://local-file/name?value=synthetic',
+    'secret://local-file/name#fragment', 'secret://local-file/name%20', 'secret://local-file/name\\extra',
+    'prefixsecret://local-file/name', `secret://${'a'.repeat(33)}/name`, `secret://local-file/${'x'.repeat(65)}`]) {
+    assert.equal(credentialText(reference), true, reference);
+  }
 });

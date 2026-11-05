@@ -6,6 +6,7 @@ import { parseUploadHosts } from './upload-hosts.mjs';
 import { parseTargets } from './targets.mjs';
 import path from 'node:path';
 import { parseSecretReference } from '../../application/secret-service.mjs';
+import { capacityDefaults, parseCapacity } from './capacity.mjs';
 
 export { settingsContract };
 
@@ -45,6 +46,10 @@ export function parseSettings(env) {
   if (!/^[A-Za-z0-9_-]*$/.test(prefix)) throw Error('Invalid UI namespace');
   const maxBytes = Number(value('BRIDGE_TRANSFER_MAX_BYTES')), budget = Number(value('BRIDGE_TRANSFER_BUDGET_BYTES'));
   if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0 || maxBytes > MAX_BYTES || !Number.isSafeInteger(budget) || budget < maxBytes) throw Error('Invalid staging limits');
+  const requestCapacity = parseCapacity(value('BRIDGE_REQUEST_CAPACITY'), 'request capacity');
+  const defaults = capacityDefaults();
+  const queueCapacity = parseCapacity(env.BRIDGE_QUEUE_CAPACITY === undefined ? String(defaults.queueCapacity) : env.BRIDGE_QUEUE_CAPACITY, 'queue capacity');
+  const maxConcurrency = parseCapacity(env.BRIDGE_MAX_CONCURRENCY === undefined ? String(defaults.maxConcurrency) : env.BRIDGE_MAX_CONCURRENCY, 'maximum concurrency');
   if (!['true', 'false'].includes(value('BRIDGE_JEV_ENABLED'))) throw Error('Invalid Jev switch');
   if (!['true', 'false'].includes(value('BRIDGE_COMMAND_AUTOMATION'))) throw Error('Invalid command automation switch');
   const jevMaxCalls = Number(value('BRIDGE_JEV_MAX_CALLS'));
@@ -58,7 +63,7 @@ export function parseSettings(env) {
   if (vaultOrigin) validateOrigin(vaultOrigin);
   if (typeof vaultMount !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(vaultMount)) throw Error('Configure a flat Vault mount');
   if (typeof vaultTokenRef !== 'string' || (vaultTokenRef && parseSecretReference(vaultTokenRef).provider !== 'local-file')) throw Error('Configure a local-file Vault token reference');
-  return Object.freeze({ mcpToken, adminToken, adminOrigin,
+  return Object.freeze({ mcpToken, adminToken, adminOrigin, requestCapacity, queueCapacity, maxConcurrency, availableCpus: defaults.availableCpus,
     targets: parseTargets(value('BRIDGE_TARGETS'), value('BRIDGE_DEFAULT_TARGET')),
     jevEnabled: value('BRIDGE_JEV_ENABLED') === 'true', jevMaxCalls,
     commandAutomation: value('BRIDGE_COMMAND_AUTOMATION') === 'true',

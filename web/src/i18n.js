@@ -1,7 +1,5 @@
-export function createWebI18n(language = 'en') {
-const korean = language.toLowerCase().startsWith('ko');
-const locale = korean ? 'ko-KR' : 'en-US';
-const en = {
+import { resolveLocale, messageCatalog, translate, createFormatters } from './locale.js';
+export const webCatalogs = messageCatalog({
   '위험 평가 중': 'Assessing risk', '실행 결과 불명': 'Execution outcome unknown',
   '등록됨': 'Registered', '사용 중지': 'Disabled',
   '보관 중': 'Retained', '평가 중': 'Assessing', '결과 불명': 'Outcome unknown',
@@ -10,7 +8,7 @@ const en = {
   '대상 ID': 'Target ID', '설정 revision': 'Configuration revision', '호스트 키': 'Host key', '전체 대상': 'All targets',
   '대상 선택에 실패했습니다. 다시 열어 주세요.': 'Could not select the target. Reopen the file card.',
   '중계기': 'Bridge', '대상 서버': 'Target server', '서버 식별': 'Server identity',
-  '승인 대기': 'Awaiting approval', '실행 중': 'Running', '완료': 'Completed', '실패': 'Failed', '거부': 'Denied', '만료': 'Expired',
+  '실행 대기': 'Queued for execution', '승인 대기': 'Awaiting approval', '실행 중': 'Running', '완료': 'Completed', '실패': 'Failed', '거부': 'Denied', '만료': 'Expired',
   '명령 실행': 'Command', '파일 업로드': 'File upload', '파일 다운로드': 'File download', '요청 실패': 'Request failed',
   '요청': 'Request', '처리 완료': 'Finished', '승인·실행': 'Approve and run', '실행 결과': 'Execution result', '파일 저장': 'Save file',
   '대기 중인 요청이 없습니다': 'No pending requests', '새 승인 요청이 들어오면 여기에 표시됩니다.': 'New approval requests will appear here.',
@@ -22,9 +20,12 @@ const en = {
   '로그인이 만료되었거나 접근할 수 없습니다. 다시 로그인해 주세요.': 'Your session expired or access was denied. Please sign in again.',
   '로그아웃되었습니다.': 'You have signed out.',
   'SSO에서 확인한 본인 계정으로 요청을 처리합니다.': 'Manage requests with your owner account verified by SSO.',
-};
-const t = value => korean ? value : en[value] ?? value;
-const states = Object.fromEntries(Object.entries({ pending: '승인 대기', evaluating: '위험 평가 중', unknown: '실행 결과 불명', running: '실행 중', completed: '완료', failed: '실패', denied: '거부', expired: '만료' }).map(([key,value]) => [key,t(value)]));
+});
+export function createWebI18n(language = 'en') {
+const { korean, locale, messageLanguage } = resolveLocale(language);
+
+const t = (value, values) => translate(webCatalogs, locale, value, values);
+const states = Object.fromEntries(Object.entries({ pending: '승인 대기', queued: '실행 대기', evaluating: '위험 평가 중', unknown: '실행 결과 불명', running: '실행 중', completed: '완료', failed: '실패', denied: '거부', expired: '만료' }).map(([key,value]) => [key,t(value)]));
 const kinds = Object.fromEntries(Object.entries({ command: '명령 실행', upload: '파일 업로드', download: '파일 다운로드' }).map(([key,value]) => [key,t(value)]));
-return { t, korean, locale, states, kinds };
+return { t, korean, locale, messageLanguage, ...createFormatters(locale), states, kinds };
 }

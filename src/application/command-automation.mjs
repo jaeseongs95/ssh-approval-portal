@@ -1,15 +1,18 @@
 import { safetyFailureDetails } from '../domain/safety.mjs';
-import { commandLineNames } from '../domain/command-line.mjs';
 import { inspectCommand, commandDigest, validatedRisk, deniedCommand, explicitUserApproval, AUTOMATION_QUESTION_VERSION, AUTOMATION_QUESTION, AUTOMATION_PROMPT_REVISION, AUTOMATION_PROMPT_SHA256, SAFETY_PROBABILITY_BASIS } from '../domain/command-policy.mjs';
-import { assessmentContext, callerContext, sensitiveText } from '../domain/execution-context.mjs';
+import { assessmentContext, callerContext, sensitiveText, credentialText } from '../domain/execution-context.mjs';
+import { dispatchStep, dispatchRefusal, dispatchFailureDetails } from '../domain/dispatch-failure.mjs';
+import { platformOf, deniedForTarget, requireTargetCapability, commandNamesForTarget } from '../domain/target-platform.mjs';
 
 /** Owner-recorded approval is evaluator input; execution authority remains a separate port. */
 export function createCommandAutomation({ queue, state, definition, classify, evaluators, audit, prepareSource, sourceBudget = { bytes: 0, count: 0 }, maxCalls = 100, budget = { used: 0 }, now = () => Date.now() }) {
+  const windows = platformOf(definition) === 'windows';
+  const isDenied = (command, rule) => deniedForTarget(definition, command, rule, deniedCommand);
   const tasks = new Map();
   const sources = new Map();
   const sourcePlan = id => {
     const job = queue.get(id), plan = sources.get(id);
-    if (!job || !['pending', 'evaluating', 'running'].includes(job.state) || !plan || job.operation.sourcePlanDigest !== plan.planDigest) throw Error('Source unavailable; never reconstruct or replay');
+    if (!job || !['pending', 'evaluating', 'queued', 'running'].includes(job.state) || !plan || job.operation.sourcePlanDigest !== plan.planDigest) dispatchRefusal('private_plan', 'source_plan', 'Source unavailable; never reconstruct or replay');
     return plan;
   };
   const sourceDenied = (plan, rule) => deniedCommand(plan.command + '\n' + plan.stdin + '\n' + plan.manifest.argvJson, rule);
@@ -18,19 +21,19 @@ export function createCommandAutomation({ queue, state, definition, classify, ev
     : rule.deniedCommands.length ? 'source_command_policy_review' : undefined;
   const ruleFor = policy => policy.targets.find(rule => rule.targetId === definition.id && rule.targetRevision === definition.revision && rule.profile === definition.writeProfile);
   queue.beforeCommandStart = job => {
-    definition.verify();
+    dispatchStep('target_guard', () => definition.verify(), 'target_changed');
     const policy = state.policy();
-    if (!ruleFor(policy)?.testServer && deniedCommand(job.command, ruleFor(policy))) throw Error('Command denied by current policy');
-    if (job.decision?.decision === 'execute' && policy.revision !== job.decision.policyRevision) throw Error('Command policy changed');
+    if (!ruleFor(policy)?.testServer && isDenied(job.command, ruleFor(policy))) dispatchRefusal('policy_denied', 'policy_guard', 'Command denied by current policy');
+    if (job.decision?.decision === 'execute' && policy.revision !== job.decision.policyRevision) dispatchRefusal('policy_changed', 'policy_guard', 'Command policy changed');
     if (job.operation.sourceContract) {
       const plan = sourcePlan(job.id), rule = ruleFor(policy);
-      if (!rule?.testServer && sourceDenied(plan, rule)) throw Error('Source denied by current policy');
-      if (!rule?.testServer && job.decision?.decision === 'execute' && sourceReview(rule)) throw Error('Source policy changed');
+      if (!rule?.testServer && sourceDenied(plan, rule)) dispatchRefusal('policy_denied', 'policy_guard', 'Source denied by current policy');
+      if (!rule?.testServer && job.decision?.decision === 'execute' && sourceReview(rule)) dispatchRefusal('policy_changed', 'policy_guard', 'Source policy changed');
     }
   };
   const decision = (job, data) => {
-    queue.setDecision(job.id, data);
-    audit({ action: 'command-decision', id: job.id, decision: data });
+    dispatchStep('decision_persistence', () => queue.setDecision(job.id, data), 'persistence_failed');
+    dispatchStep('decision_audit', () => audit({ action: 'command-decision', id: job.id, decision: data }), 'audit_failed');
   };
   async function assess(command, rule, context, policyRevision, plan) {
     if (!rule?.externalDisclosure) return { reasonCode: 'disclosure_not_enabled' };
@@ -40,11 +43,12 @@ export function createCommandAutomation({ queue, state, definition, classify, ev
     try { detailedContext = assessmentContext(context, { targetId: definition.id, targetDisplayName: definition.displayName,
         targetRevision: definition.revision, profile: definition.writeProfile, sshTarget: definition.target,
         commandClass: classify(command).class, policyRevision, externalDisclosure: rule.externalDisclosure,
-        modelExecution: rule.modelExecution, fallback: rule.fallback }, undefined, plan); }
+        modelExecution: rule.modelExecution, fallback: rule.fallback,
+        ...(windows ? { targetPlatform: 'windows', commandLanguage: 'windows-powershell-5.1' } : {}) }, undefined, plan); }
     catch (error) { if (plan) return { reasonCode: 'source_evidence_too_large' }; throw error; }
-    const approved = plan ? [] : [...rule.commands.filter(name => name !== 'sudo'), ...(rule.automaticSudo === true ? ['sudo'] : [])];
+    const approved = plan ? [] : windows ? [...rule.commands] : [...rule.commands.filter(name => name !== 'sudo'), ...(rule.automaticSudo === true ? ['sudo'] : [])];
     const input = { command, target: definition.id, environment: definition.displayName, context: detailedContext,
-      preapprovedCommands: approved, userApproval: explicitUserApproval(command, approved) };
+      preapprovedCommands: approved, userApproval: explicitUserApproval(command, approved, platformOf(definition)) };
     const attempts = [];
     let evaluation;
     const provenance = () => evaluation ? { evaluation: { ...evaluation, latencyMs: Math.max(0, now() - evaluation.assessedAt) } } : {};
@@ -67,7 +71,7 @@ export function createCommandAutomation({ queue, state, definition, classify, ev
           if (budget.used >= maxCalls) { exhausted = true; return null; }
           budget.used++;
           evaluation = { purpose: 'execution', promptRevision: AUTOMATION_PROMPT_REVISION, promptSha256: AUTOMATION_PROMPT_SHA256, assessedAt: startedAt, callerContextProvided: Boolean(context), modelCalled: true };
-          return evaluator.assess(structuredClone(input), { signal: controller.signal, question: AUTOMATION_QUESTION, questionVersion: AUTOMATION_QUESTION_VERSION });
+          return evaluator.assess(structuredClone(input), { signal: controller.signal, targetPlatform: platformOf(definition), question: AUTOMATION_QUESTION, questionVersion: AUTOMATION_QUESTION_VERSION, ...(plan ? { sourcePlan: plan } : {}) });
         }),
         new Promise(resolve => { timer = setTimeout(() => { controller.abort(); resolve({ status: 'unavailable', reason: 'timeout' }); }, 10000); })]); }
       catch { raw = { status: 'unavailable', reason: 'request_failed' }; } finally { clearTimeout(timer); }
@@ -124,17 +128,17 @@ export function createCommandAutomation({ queue, state, definition, classify, ev
       const persist = value => state.save(value);
       queue.track(job.id, persist);
       const task = (async () => {
-        const line = commandLineNames(command);
+        const line = commandNamesForTarget(definition, command);
         const base = { policyRevision: policy.revision, targetRevision: definition.revision };
         let result;
-        if (!rule?.testServer && (plan ? sourceDenied(plan, rule) : deniedCommand(command, rule))) {
+        if (!rule?.testServer && (plan ? sourceDenied(plan, rule) : isDenied(command, rule))) {
           decision(job, { ...base, decision: 'deny', reasonCode: 'policy_denied' }); queue.finishEvaluation(job.id, 'denied');
           return;
         }
         if (rule?.testServer === true) result = { reasonCode: 'test_server_bypass' };
         else if (plan && sourceReview(rule)) result = { reasonCode: sourceReview(rule) };
-        else if (!plan && line.usesSudo && rule?.automaticSudo !== true) result = { reasonCode: 'sudo_not_enabled' };
-        else if (!plan && line.complete && rule && line.names.every(name => name === 'sudo' ? rule.automaticSudo === true : rule.commands.includes(name))) result = { reasonCode: 'command_set', commandNames: line.names };
+        else if (!plan && !windows && line.usesSudo && rule?.automaticSudo !== true) result = { reasonCode: 'sudo_not_enabled' };
+        else if (!plan && line.complete && rule && (windows ? explicitUserApproval(command, rule.commands, 'windows').explicit : line.names.every(name => name === 'sudo' ? rule.automaticSudo === true : rule.commands.includes(name)))) result = { reasonCode: 'command_set', commandNames: line.names };
         else result = await assess(command, rule, context, policy.revision, plan);
         // No await between freshness check, decision record and execution claim.
         definition.verify();
@@ -145,13 +149,14 @@ export function createCommandAutomation({ queue, state, definition, classify, ev
         decision(job, { ...base, ...result, decision: automatic ? 'execute' : 'review' });
         queue.finishEvaluation(job.id);
         if (automatic) queue.startCommand(job.id);
-      })().catch(() => {
+      })().catch(error => {
+        const details = dispatchFailureDetails(error);
         if (queue.get(job.id)?.state === 'evaluating') {
-          try { decision(job, { ...queue.get(job.id)?.decision, policyRevision: policy.revision, decision: 'review', reasonCode: 'evaluation_failed' }); queue.finishEvaluation(job.id); }
+          try { decision(job, { ...queue.get(job.id)?.decision, policyRevision: policy.revision, decision: 'review', reasonCode: 'evaluation_failed', ...details }); queue.finishEvaluation(job.id); }
           catch { queue.abortEvaluation(job.id); }
         } else if (queue.get(job.id)?.state === 'pending') {
-          if (queue.rejectAutomaticDispatch(job.id)) return;
-          try { decision(job, { ...queue.get(job.id)?.decision, policyRevision: policy.revision, decision: 'review', reasonCode: 'execution_busy' }); } catch { queue.abortEvaluation(job.id); }
+          if (queue.rejectAutomaticDispatch(job.id, error)) return;
+          try { decision(job, { ...queue.get(job.id)?.decision, policyRevision: policy.revision, decision: 'review', reasonCode: details.dispatchFailureReason === 'busy' ? 'execution_busy' : 'execution_start_failed', ...details }); } catch { queue.abortEvaluation(job.id); }
         }
       }).finally(() => tasks.delete(job.id));
       tasks.set(job.id, task);
@@ -160,10 +165,13 @@ export function createCommandAutomation({ queue, state, definition, classify, ev
   return {
     run,
     runSource({ source, argv, cwd, elevate, requestKey, context, displayContext }) {
+      requireTargetCapability(definition, 'pythonSource');
       if (!prepareSource) throw Error('Source execution unavailable');
-      if (sensitiveText(source) || sensitiveText(JSON.stringify(argv ?? [])) || sensitiveText(cwd)) throw Error('Sensitive source input refused');
+      if (credentialText(source)) throw Object.assign(Error('Sensitive source input refused'), { code: 'SOURCE_CREDENTIAL_MATERIAL' });
+      if (sensitiveText(JSON.stringify(argv ?? []))) throw Object.assign(Error('Sensitive source input refused'), { code: 'SOURCE_ARGUMENTS_SENSITIVE' });
+      if (sensitiveText(cwd)) throw Object.assign(Error('Sensitive source input refused'), { code: 'SOURCE_WORKDIR_SENSITIVE' });
       definition.verify();
-      const plan = prepareSource({ source, argv, cwd, elevate, targetId: definition.id, targetRevision: definition.revision, profile: definition.writeProfile });
+      const plan = prepareSource({ source, argv, cwd, elevate, targetId: definition.id, targetRevision: definition.revision, profile: definition.writeProfile, ...(windows ? { platform: 'windows', pythonExecutable: definition.pythonExecutable } : {}) });
       return run(plan.command, requestKey, context, displayContext, plan);
     },
     sourcePlan,

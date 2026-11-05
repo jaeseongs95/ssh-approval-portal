@@ -153,17 +153,36 @@ if [[ "$grant_sudo" == 1 && ! -e "$grant" ]]; then
   printf '%s\n' 'mcpops ALL=(ALL:ALL) NOPASSWD: ALL' > "$grant"
   chmod 0440 "$grant"; visudo -cf "$grant" >/dev/null; grant_created=1
 fi
+prepare_private_gui() {
+  local tree=$1 native missing
+  python3 "$tree/scripts/prepare-freerdp-input.py"
+  # The pinned optional GUI client targets Ubuntu 24.04 x64; other bridge hosts remain supported.
+  native=$tree/native/freerdp-input/runtime/bin/xfreerdp3
+  if [[ "$architecture" == x64 && "$VERSION_ID" == 24.04 && -f "$native" ]]; then
+    missing=$(ldd "$native" 2>&1 || true)
+    if [[ "$missing" == *'not found'* ]]; then
+      if ! (apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+          libx11-6 libxext6 libxinerama1 libxcursor1 libxi6 libxrender1 libxrandr2 libxfixes3 \
+          libxkbfile1 libssl3t64 libicu74 libstdc++6); then
+        echo 'Optional native GUI dependencies unavailable; bridge installation continues.' >&2
+      fi
+    fi
+  fi
+}
 if [[ ! -d "$release" ]]; then
   stage=$(mktemp -d "$app/.portal-release.XXXXXXXX")
   cp -a -- "$source_dir"/. "$stage"/
   (cd "$stage"; npm ci --omit=dev --ignore-scripts)
-  node --check "$stage/bridge.mjs"
-  node "$stage/scripts/check-package-imports.mjs"
   chown -R root:mcpbridge "$stage"
   find "$stage" -type d -exec chmod 0750 {} +
   find "$stage" -type f -exec chmod 0640 {} +
+  prepare_private_gui "$stage"
+  node --check "$stage/bridge.mjs"
+  node "$stage/scripts/check-package-imports.mjs"
   install -d -m 0755 "$app/releases"
   mv -- "$stage" "$release"
+else
+  prepare_private_gui "$release"
 fi
 if [[ -d "$active" && ! -L "$active" ]]; then mv -- "$active" "$old_active"; fi
 next=$app/.approval-bridge-next.$stamp

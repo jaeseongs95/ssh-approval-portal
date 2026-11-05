@@ -1,19 +1,22 @@
 import { COMMAND_MAX_BYTES, utf8WithinLimit } from '../../src/contracts/ports.mjs';
 import { commandLineNames } from '../../src/domain/command-line.mjs';
+import { windowsCommandLineNames, windowsPolicyName } from '../../src/domain/windows-command-line.mjs';
 import { uiText as tr } from './ui-text.js';
 const lines = value => value.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
-export function parseCommandImport(source) {
+export function parseCommandImport(source, platform = 'linux') {
   const fail = reason => ({ complete: false, names: [], usesSudo: false, reason });
   if (typeof source !== 'string' || !source.trim()) return fail('empty');
   if (!utf8WithinLimit(source, COMMAND_MAX_BYTES)) return fail('length');
-  const result = commandLineNames(source);
+  const result = platform === 'windows' ? windowsCommandLineNames(source) : commandLineNames(source);
   if (!result.complete) return fail('unsupported');
-  if (result.names.some(name => name.length > 80)) return fail('name_length');
+  if (platform !== 'windows' && result.names.some(name => name.length > 80)) return fail('name_length');
   return { complete: true, names: result.names, usesSudo: result.usesSudo };
 }
 
 /** Local parsing only. The existing raw name field and reviewed save remain authoritative. */
-export function createCommandLineImport({ document, commands, denied, onChange, onError }) {
+export function createCommandLineImport({ document, commands, denied, onChange, onError, getPlatform = () => 'linux' }) {
+  const key = name => getPlatform() === 'windows' ? windowsPolicyName(name) ?? name.toLowerCase() : name;
+  const includes = (values, name) => values.some(value => key(value) === key(name));
   const el = (tag, text = '', cls = '') => { const n = document.createElement(tag); n.textContent = text; n.className = cls; return n; };
   const button = (text, action) => { const n = el('button', tr(text), 'secondary'); n.type = 'button'; n.onclick = action; return n; };
   const panel = el('details', '', 'policy-details command-import'); panel.append(el('summary', tr('명령줄에서 이름 가져오기')));
@@ -35,14 +38,14 @@ export function createCommandLineImport({ document, commands, denied, onChange, 
     allowedBefore = commands.value; deniedBefore = denied.value;
     const allowed = lines(commands.value), blocked = lines(denied.value);
     for (const c of choices) {
-      c.input.disabled = allowed.includes(c.name) || blocked.includes(c.name);
+      c.input.disabled = includes(allowed, c.name) || includes(blocked, c.name);
       if (c.input.disabled) c.input.checked = false;
-      c.state.textContent = blocked.includes(c.name) ? tr('차단 목록에 있음 · 가져오기 제외') : allowed.includes(c.name) ? tr('이미 자동승인 초안에 있음') : '';
+      c.state.textContent = includes(blocked, c.name) ? tr('차단 목록에 있음 · 가져오기 제외') : includes(allowed, c.name) ? tr('이미 자동승인 초안에 있음') : '';
     }
     updateSelection();
   }
   function extract() {
-    clearResults(); const parsed = parseCommandImport(source.value);
+    clearResults(); const parsed = parseCommandImport(source.value, getPlatform());
     if (!parsed.complete) { status.textContent = parsed.reason === 'length' ? tr('명령줄은 UTF-8 기준 32KiB(32,768바이트) 이하로 입력하세요.') : parsed.reason === 'name_length' ? tr('등록할 명령 이름은 80자 이하여야 합니다.') : tr('한 줄의 완전한 명령을 입력하세요. 동적·지원하지 않는 구문에서는 이름을 추측하지 않습니다.'); source.setAttribute('aria-invalid', 'true'); return; }
     source.removeAttribute('aria-invalid'); analyzedSource = source.value; allowedBefore = deniedBefore = undefined;
     for (const name of parsed.names) {
@@ -55,8 +58,8 @@ export function createCommandLineImport({ document, commands, denied, onChange, 
   function stage() {
     if (source.value !== analyzedSource) { clearResults(tr('원문이 바뀌었습니다. 이름을 다시 추출하세요.')); return; }
     const picked = selected(), existing = lines(commands.value), blocked = lines(denied.value);
-    if (picked.some(name => blocked.includes(name))) { refresh(); return; }
-    const fresh = picked.filter(name => !existing.includes(name));
+    if (picked.some(name => includes(blocked, name))) { refresh(); return; }
+    const fresh = picked.filter(name => !includes(existing, name));
     if (!fresh.length) { refresh(); return; }
     if (existing.length + fresh.length > 128) { const message = tr('각 명령 목록은 최대 128개까지 등록할 수 있습니다.'); status.textContent = message; onError(message); return; }
     commands.value += (commands.value && !commands.value.endsWith('\n') ? '\n' : '') + fresh.join('\n');

@@ -7,6 +7,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createApplication } from '../../app.mjs';
+import { openRequest } from './admin-ui.mjs';
 const id = 'a'.repeat(48), output = { id: 'b'.repeat(48), executionId: id, state: 'ready', bytes: 20, expiresAt: 2000000000000, sha256: 'c'.repeat(64) };
 const job = { id, kind: 'command', state: 'completed', command: 'sudo id', target: 'fixture', expiresAt: 2000000000000, result: { content: [], structuredContent: { output } } };
 async function fixture(run) {
@@ -44,17 +45,17 @@ test('late card output cannot overwrite a replacement request', async () => fixt
 }));
 test('web history reads no output before explicit click and keeps content outside polling snapshots', async () => fixture(async (page, server) => {
   server.state.jobs = [job]; await page.goto(server.origin + '/history');
-  await page.locator('#history details').waitFor(); await page.locator('#history details summary').click();
+  await openRequest(page, id);
   assert.equal(server.state.outputReads ?? 0, 0);
   await page.getByRole('button', { name: '출력 보기', exact: true }).click();
   await page.getByText('EXPLICIT_WEB_SENTINEL', { exact: true }).waitFor();
   assert.equal(server.state.outputReads, 1); assert.equal(JSON.stringify(server.state.jobs).includes('SENTINEL'), false);
 }));
 test('late web output is discarded through target A to B to A replacement', async () => fixture(async (page, server) => {
-  let release; server.state.multiTarget = true; server.state.jobs = [{ ...job, targetId: 'alpha', targetRevision: 'alpha-v1' }];
-  server.state.beforeOutput = () => new Promise(resolve => { release = resolve; });
-  await page.goto(server.origin + '/history'); await page.locator('#history details summary').click();
-  await page.getByRole('button', { name: '출력 보기', exact: true }).click(); await page.waitForFunction(() => document.querySelector('#history button').disabled);
+  let release,entered;const started=new Promise(resolve=>entered=resolve); server.state.multiTarget = true; server.state.jobs = [{ ...job, targetId: 'alpha', targetRevision: 'alpha-v1' }];
+  server.state.beforeOutput = () => {entered();return new Promise(resolve => { release = resolve; });};
+  await page.goto(server.origin + '/history'); await openRequest(page, id);
+  await page.getByRole('button', { name: '출력 보기', exact: true }).click(); await started;
   await page.locator('#target-filter').selectOption('beta'); await page.locator('#target-filter').selectOption('alpha'); release();
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   assert.equal(await page.getByText('EXPLICIT_WEB_SENTINEL', { exact: true }).count(), 0);
@@ -71,7 +72,7 @@ test('built administrator bundle loads stored result from actual authenticated a
     const page = await browser.newPage({ locale: 'ko-KR', viewport: { width: 390, height: 844 } }); let outputReads = 0;
     await page.route('**/*', route => { if (new URL(route.request().url()).origin !== origin) return route.abort(); if (route.request().url().includes('/api/outputs/')) outputReads++; return route.continue(); });
     await page.goto(origin); await page.locator('#token').fill('synthetic-owner'); await page.locator('#load').click(); await page.locator('[href="/history"]').click();
-    await page.locator('#history details summary').click(); assert.equal(outputReads, 0); assert.equal(await page.getByText('ACTUAL_OUTPUT_SENTINEL', { exact: true }).count(), 0);
+    await openRequest(page, requested.id); assert.equal(outputReads, 0); assert.equal(await page.getByText('ACTUAL_OUTPUT_SENTINEL', { exact: true }).count(), 0);
     await page.getByRole('button', { name: '출력 보기', exact: true }).click(); await page.getByText('ACTUAL_OUTPUT_SENTINEL', { exact: true }).waitFor(); assert.equal(outputReads, 1);
   } finally { await browser?.close(); await app?.close(); await rm(root, { recursive: true, force: true }); }
 });

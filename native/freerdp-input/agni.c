@@ -1,0 +1,672 @@
+/* SPDX-License-Identifier: Apache-2.0
+ * Private AGNI v1 endpoint. No payload or input-derived diagnostics. */
+#define _POSIX_C_SOURCE 200809L
+#include "agni.h"
+#include <errno.h>
+#include <fcntl.h>
+#include <limits.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <time.h>
+#include <unistd.h>
+
+typedef struct
+{
+    uint32_t key, scan;
+} held_key;
+struct agni
+{
+    int fd;
+    agni_ops ops;
+    uint8_t rx[20 + AGNI_MAX_PAYLOAD], tx[108];
+    size_t rn, need, tn, tw;
+    uint64_t sequence, deadline;
+    bool closing, dead, release, close_request;
+    agni_event plan[AGNI_MAX_CALLS];
+    size_t count, cursor;
+    held_key held[256];
+    size_t held_count;
+    uint8_t buttons, raw_buttons;
+    uint16_t x, y, unicode_down, transient_scan;
+    bool unicode_held, transient_held;
+    uint32_t attempted, succeeded;
+    uint16_t action, element;
+    uint8_t phase;
+};
+static void wipe(void *p, size_t n)
+{
+    volatile unsigned char *b = p;
+    while (n--)
+        *b++ = 0;
+}
+static uint16_t r16(const uint8_t *p) { return (uint16_t)((p[0] << 8) | p[1]); }
+static uint32_t r32(const uint8_t *p) { return ((uint32_t)r16(p) << 16) | r16(p + 2); }
+static uint64_t r64(const uint8_t *p) { return ((uint64_t)r32(p) << 32) | r32(p + 4); }
+static void w16(uint8_t *p, uint16_t v)
+{
+    p[0] = (uint8_t)(v >> 8);
+    p[1] = (uint8_t)v;
+}
+static void w32(uint8_t *p, uint32_t v)
+{
+    w16(p, (uint16_t)(v >> 16));
+    w16(p + 2, (uint16_t)v);
+}
+static void w64(uint8_t *p, uint64_t v)
+{
+    w32(p, (uint32_t)(v >> 32));
+    w32(p + 4, (uint32_t)v);
+}
+static uint64_t now_ms(void)
+{
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return (uint64_t)t.tv_sec * 1000 + (uint64_t)t.tv_nsec / 1000000;
+}
+static void header(uint8_t *p, uint8_t kind, uint32_t n, uint64_t seq)
+{
+    memcpy(p, "AGNI", 4);
+    p[4] = 1;
+    p[5] = kind;
+    w16(p + 6, 0);
+    w32(p + 8, n);
+    w64(p + 12, seq);
+}
+static int held_find(const held_key *h, size_t n, uint32_t k)
+{
+    for (size_t i = 0; i < n; i++)
+        if (h[i].key == k)
+            return (int)i;
+    return -1;
+}
+static bool modifier(uint32_t k) { return (k >= 0xffe1 && k <= 0xffee) || k == 0xfe03; }
+static void update(agni *a, const agni_event *e)
+{
+    if (e->track == 1)
+    {
+        int i = held_find(a->held, a->held_count, e->key);
+        if (e->down)
+        {
+            if (i < 0 && a->held_count < 256)
+                a->held[a->held_count++] = (held_key){e->key, e->code};
+        }
+        else if (i >= 0)
+        {
+            memmove(a->held + i, a->held + i + 1,
+                    (a->held_count - (size_t)i - 1) * sizeof(held_key));
+            a->held_count--;
+        }
+    }
+    if (e->track == 2)
+    {
+        uint8_t bit = (uint8_t)e->key;
+        if (e->down)
+            a->buttons |= bit;
+        else
+            a->buttons &= (uint8_t)~bit;
+    }
+    if (e->track == 3)
+        a->raw_buttons = (uint8_t)e->key;
+    if (e->track == 4)
+    {
+        a->transient_scan = e->code;
+        a->transient_held = e->down != 0;
+    }
+    if (e->kind == AGNI_MOUSE || e->kind == AGNI_EXT_MOUSE)
+    {
+        a->x = e->x;
+        a->y = e->y;
+    }
+    if (e->kind == AGNI_UNICODE)
+    {
+        a->unicode_held = e->down != 0;
+        a->unicode_down = e->code;
+    }
+}
+static bool emit(agni *a, agni_event e)
+{
+    if (a->count >= AGNI_MAX_CALLS)
+        return false;
+    a->plan[a->count++] = e;
+    return true;
+}
+static bool pair(agni *a, uint8_t kind, uint16_t code, uint16_t action, uint16_t unit)
+{
+    agni_event e = {.kind = kind,
+                    .phase = 1,
+                    .track = kind == AGNI_SCAN ? 4 : 0,
+                    .down = 1,
+                    .code = code,
+                    .action = action,
+                    .element = unit};
+    if (!emit(a, e))
+        return false;
+    e.down = 0;
+    e.phase = 2;
+    return emit(a, e);
+}
+static int text(agni *a, const uint8_t *p, size_t n, uint16_t action, uint32_t *public_cost)
+{
+    size_t i = 0;
+    uint16_t units = 0;
+    if (!n || n > 6144)
+        return 3;
+    while (i < n)
+    {
+        uint32_t cp = p[i++];
+        unsigned more = 0;
+        uint32_t min = 0;
+        if (cp < 0x80)
+        {
+        }
+        else if (cp >= 0xc2 && cp <= 0xdf)
+        {
+            cp &= 0x1f;
+            more = 1;
+            min = 0x80;
+        }
+        else if (cp >= 0xe0 && cp <= 0xef)
+        {
+            cp &= 0xf;
+            more = 2;
+            min = 0x800;
+        }
+        else if (cp >= 0xf0 && cp <= 0xf4)
+        {
+            cp &= 7;
+            more = 3;
+            min = 0x10000;
+        }
+        else
+            return 6;
+        if (n - i < more)
+            return 6;
+        while (more--)
+        {
+            uint8_t b = p[i++];
+            if ((b & 0xc0) != 0x80)
+                return 6;
+            cp = (cp << 6) | (b & 0x3f);
+        }
+        if (cp < min || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff))
+            return 6;
+        if (cp < 0x20 && cp != 9 && cp != 10)
+            return 19;
+        if (cp >= 0x7f && cp <= 0x9f)
+            return 19;
+        unsigned width = cp > 0xffff ? 2 : 1;
+        if ((unsigned)units + width > 2048)
+            return 7;
+        if (cp == 9 || cp == 10)
+        {
+            if (!pair(a, AGNI_SCAN, (uint16_t)(cp == 9 ? 0x0f : 0x1c), action, units))
+                return 7;
+        }
+        else if (cp <= 0xffff)
+        {
+            if (!pair(a, AGNI_UNICODE, (uint16_t)cp, action, units))
+                return 7;
+        }
+        else
+        {
+            cp -= 0x10000;
+            if (!pair(a, AGNI_UNICODE, (uint16_t)(0xd800 + (cp >> 10)), action, units) ||
+                !pair(a, AGNI_UNICODE, (uint16_t)(0xdc00 + (cp & 1023)), action,
+                      (uint16_t)(units + 1)))
+                return 7;
+        }
+        units = (uint16_t)(units + width);
+        *public_cost += 2;
+    }
+    return 0;
+}
+static int release_plan(agni *a, uint16_t action)
+{
+    if (a->unicode_held)
+    {
+        agni_event e = {.kind = AGNI_UNICODE,
+                        .phase = 5,
+                        .code = a->unicode_down,
+                        .action = action,
+                        .element = 0};
+        if (!emit(a, e))
+            return 7;
+    }
+    if (a->transient_held)
+    {
+        agni_event e = {.kind = AGNI_SCAN,
+                        .phase = 5,
+                        .track = 4,
+                        .code = a->transient_scan,
+                        .action = action,
+                        .element = 0};
+        if (!emit(a, e))
+            return 7;
+    }
+    for (size_t i = a->held_count; i > 0; i--)
+    {
+        agni_event e = {.kind = AGNI_SCAN,
+                        .phase = 5,
+                        .track = 1,
+                        .code = (uint16_t)a->held[i - 1].scan,
+                        .key = a->held[i - 1].key,
+                        .action = action,
+                        .element = (uint16_t)(a->held_count - i)};
+        if (!emit(a, e))
+            return 7;
+    }
+    for (unsigned bit = 0; bit < 8; bit++)
+        if (a->buttons & (1u << bit))
+        {
+            agni_event e = {.kind = AGNI_MOUSE,
+                            .phase = 5,
+                            .track = 2,
+                            .key = 1u << bit,
+                            .x = a->x,
+                            .y = a->y,
+                            .action = action,
+                            .element = (uint16_t)(256 + bit)};
+            if (bit == 7)
+            {
+                e.kind = AGNI_EXT_MOUSE;
+                e.code = 1;
+            }
+            else
+                e.code = (uint16_t)(bit == 0 ? 0x1000 : bit == 1 ? 0x4000 : 0x2000);
+            if (!emit(a, e))
+                return 7;
+        }
+    return 0;
+}
+static int validate(agni *a, const uint8_t *p, size_t n)
+{
+    held_key sim[256];
+    size_t sn = a->held_count;
+    memcpy(sim, a->held, sn * sizeof(held_key));
+    uint8_t buttons = a->raw_buttons;
+    size_t off = 0;
+    uint16_t action = 0;
+    uint32_t cost = 0;
+    if (!n)
+        return 3;
+    while (off < n)
+    {
+        a->action = action;
+        a->element = 0xffff;
+        if (action >= 128)
+            return 7;
+        if (n - off < 8)
+            return 3;
+        uint8_t type = p[off];
+        uint32_t len = r32(p + off + 4);
+        if (p[off + 1] || r16(p + off + 2))
+            return 5;
+        off += 8;
+        if (len > n - off)
+            return 3;
+        const uint8_t *v = p + off;
+        int error = 0;
+        if (type == 1)
+        {
+            for (size_t k = 0; k < sn; k++)
+                if (modifier(sim[k].key))
+                    return 14;
+            error = text(a, v, len, action, &cost);
+        }
+        else if (type == 2)
+        {
+            if (len != 5 || v[4] > 1)
+                return 5;
+            uint32_t key = r32(v);
+            if (!key || key > 0x1fffffff)
+                return 8;
+            int old = held_find(sim, sn, key);
+            uint32_t scan = old >= 0 ? sim[old].scan : a->ops.map_key(a->ops.user, key);
+            if (!scan || scan > 0x1ff)
+                return 8;
+            if (v[4] && old < 0)
+            {
+                if (sn >= 256)
+                    return 7;
+                sim[sn++] = (held_key){key, scan};
+            }
+            if (!v[4] && old >= 0)
+            {
+                memmove(sim + old, sim + old + 1, (sn - (size_t)old - 1) * sizeof(held_key));
+                sn--;
+            }
+            agni_event e = {.kind = AGNI_SCAN,
+                            .phase = v[4] ? 1 : 2,
+                            .track = 1,
+                            .down = v[4],
+                            .code = (uint16_t)scan,
+                            .key = key,
+                            .action = action,
+                            .element = 0};
+            if (!emit(a, e))
+                return 7;
+            cost++;
+        }
+        else if (type == 3)
+        {
+            if (len != 5)
+                return 5;
+            uint16_t x = r16(v), y = r16(v + 2);
+            uint8_t b = v[4];
+            if (!a->ops.geometry(a->ops.user, x, y))
+                return 9;
+            if (!a->ops.pointer_supported(a->ops.user, b))
+                return 9;
+            agni_event e = {.kind = AGNI_MOUSE,
+                            .phase = 3,
+                            .track = 3,
+                            .key = b,
+                            .code = 0x800,
+                            .x = x,
+                            .y = y,
+                            .action = action,
+                            .element = 0};
+            if (!emit(a, e))
+                return 7;
+            static const uint16_t codes[8] = {0x1000, 0x4000, 0x2000, 0x278,
+                                              0x388,  0x578,  0x488,  1};
+            for (unsigned bit = 0; bit < 8; bit++)
+            {
+                uint8_t mask = (uint8_t)(1u << bit);
+                bool physical = bit < 3 || bit == 7;
+                if (physical ? ((b ^ buttons) & mask) != 0 : ((b & mask) && !(buttons & mask)))
+                {
+                    e.kind = bit == 7 ? AGNI_EXT_MOUSE : AGNI_MOUSE;
+                    e.phase = 4;
+                    e.element = (uint16_t)(bit + 1);
+                    e.code = codes[bit];
+                    e.key = mask;
+                    e.track = physical ? 2 : 0;
+                    e.down = (b & mask) != 0;
+                    if (physical && e.down)
+                        e.code |= 0x8000;
+                    if (!emit(a, e))
+                        return 7;
+                }
+            }
+            buttons = b;
+            cost++;
+        }
+        else if (type == 4)
+        {
+            if (len != 1 || v[0] != 1 || action || off + len != n)
+                return 5;
+            a->release = true;
+            error = release_plan(a, action);
+        }
+        else
+            return 5;
+        if (error)
+            return error;
+        if (cost > 4096)
+            return 7;
+        off += len;
+        action++;
+    }
+    /* Check every required sender before any effect, then again at each call. */
+    for (size_t i = 0; i < a->count; i++)
+    {
+        int e = a->ops.guard(a->ops.user, a->plan[i].kind);
+        if (e)
+            return e;
+    }
+    wipe(sim, sizeof(sim));
+    return 0;
+}
+static void ack(agni *a, int error, bool effect_unknown)
+{
+    uint8_t *p = a->tx + 20;
+    memset(a->tx, 0, sizeof(a->tx));
+    header(a->tx, 3, 24, a->sequence);
+    p[0] = error ? (a->attempted ? 2 : 1) : 0;
+    p[1] = 1;
+    w16(p + 2, (uint16_t)error);
+    w32(p + 4, a->succeeded);
+    w32(p + 8, a->attempted);
+    w16(p + 12, error ? a->action : 0xffff);
+    w16(p + 14, error ? a->element : 0xffff);
+    p[16] = error ? a->phase : 6;
+    p[17] = (uint8_t)((effect_unknown ? 1 : 0) | (!error && a->release ? 2 : 0) |
+                      (a->close_request ? 4 : 0));
+    w16(p + 18, (uint16_t)a->held_count);
+    p[20] = a->buttons;
+    a->tn = 44;
+    a->tw = 0;
+    a->deadline = now_ms() + 5000;
+    if (error || a->close_request)
+        a->closing = true;
+    wipe(a->rx, sizeof(a->rx));
+    a->rn = 0;
+    a->need = 20;
+    wipe(a->plan, sizeof(a->plan));
+    a->count = a->cursor = 0;
+}
+static bool flush(agni *a)
+{
+    while (a->tw < a->tn)
+    {
+        ssize_t n = send(a->fd, a->tx + a->tw, a->tn - a->tw, MSG_NOSIGNAL | MSG_DONTWAIT);
+        if (n > 0)
+            a->tw += (size_t)n;
+        else if (n < 0 && errno == EINTR)
+            continue;
+        else if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+            return true;
+        else
+            return false;
+    }
+    if (a->tn)
+    {
+        wipe(a->tx, sizeof(a->tx));
+        a->tn = a->tw = 0;
+        a->deadline = 0;
+        if (a->release)
+            a->raw_buttons = 0;
+        if (a->closing)
+            return false;
+    }
+    return true;
+}
+agni *agni_new(int fd, const agni_ops *ops, const uint8_t digest[32])
+{
+    int type = 0;
+    socklen_t len = sizeof(type);
+    struct sockaddr_storage addr;
+    socklen_t alen = sizeof(addr);
+    if (fd < 3 || !ops || !ops->guard || !ops->send || !ops->map_key || !ops->geometry ||
+        !ops->pointer_supported || getsockopt(fd, SOL_SOCKET, SO_TYPE, &type, &len) ||
+        type != SOCK_STREAM || getsockname(fd, (struct sockaddr *)&addr, &alen) ||
+        addr.ss_family != AF_UNIX)
+        return NULL;
+    int f = fcntl(fd, F_GETFL);
+    if (f < 0 || fcntl(fd, F_SETFL, f | O_NONBLOCK) < 0 || fcntl(fd, F_SETFD, FD_CLOEXEC) < 0)
+        return NULL;
+    agni *a = calloc(1, sizeof(*a));
+    if (!a)
+        return NULL;
+    a->fd = fd;
+    a->ops = *ops;
+    a->need = 20;
+    a->sequence = 0;
+    a->action = a->element = 0xffff;
+    header(a->tx, 1, 88, 0);
+    uint8_t *p = a->tx + 20;
+    w32(p, 0x1f);
+    w32(p + 4, 9856);
+    w16(p + 8, 128);
+    w16(p + 10, 256);
+    w32(p + 12, 2048);
+    w32(p + 16, 4096);
+    w32(p + 20, 9344);
+    p[24] = 1;
+    w16(p + 28, 3);
+    w16(p + 30, 32);
+    w16(p + 32, 1);
+    static const uint8_t upstream[20] = {0xbf, 0x21, 0x7a, 0x50, 0x4e, 0x54, 0xcc,
+                                         0x71, 0x98, 0x80, 0xc2, 0x28, 0xe8, 0x23,
+                                         0x53, 0x38, 0x2c, 0xd7, 0xd4, 0xfa};
+    memcpy(p + 36, upstream, 20);
+    memcpy(p + 56, digest, 32);
+    a->tn = 108;
+    a->deadline = now_ms() + 5000;
+    return a;
+}
+bool agni_busy(const agni *a) { return a && (a->rn || a->tn || a->count); }
+bool agni_pump(agni *a)
+{
+    if (!a || a->dead)
+        return false;
+    if (a->deadline && now_ms() > a->deadline)
+    {
+        a->dead = true;
+        return false;
+    }
+    if (!flush(a))
+    {
+        a->dead = true;
+        return false;
+    }
+    if (a->tn)
+        return true;
+    if (a->count)
+    {
+        unsigned quantum = 32;
+        while (a->cursor < a->count && quantum--)
+        {
+            uint8_t peek;
+            ssize_t n = recv(a->fd, &peek, 1, MSG_PEEK | MSG_DONTWAIT);
+            if (n == 0)
+            {
+                a->dead = true;
+                return false;
+            }
+            if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR)
+            {
+                a->dead = true;
+                return false;
+            }
+            agni_event *e = a->plan + a->cursor;
+            a->action = e->action;
+            a->element = e->element;
+            a->phase = e->phase;
+            int error = a->ops.guard(a->ops.user, e->kind);
+            if (error)
+            {
+                ack(a, error, false);
+                return true;
+            }
+            a->attempted++;
+            if (!a->ops.send(a->ops.user, e))
+            {
+                if (e->down)
+                    update(a, e);
+                ack(a, 13, true);
+                return true;
+            }
+            a->succeeded++;
+            update(a, e);
+            a->cursor++;
+        }
+        if (a->cursor == a->count)
+            ack(a, 0, false);
+        return true;
+    }
+    while (a->rn < a->need)
+    {
+        ssize_t n = recv(a->fd, a->rx + a->rn, a->need - a->rn, MSG_DONTWAIT);
+        if (n > 0)
+        {
+            if (!a->rn)
+            {
+                a->deadline = now_ms() + 5000;
+                a->attempted = a->succeeded = 0;
+                a->release = a->close_request = false;
+            }
+            a->rn += (size_t)n;
+        }
+        else if (n < 0 && errno == EINTR)
+            continue;
+        else if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+            return true;
+        else
+        {
+            a->dead = true;
+            return false;
+        }
+        if (a->rn == 20 && a->need == 20)
+        {
+            uint8_t *p = a->rx;
+            uint32_t len = r32(p + 8);
+            uint64_t seq = r64(p + 12);
+            if (memcmp(p, "AGNI", 4) || p[4] != 1 || r16(p + 6) || len > 9856 ||
+                (p[5] != 2 && p[5] != 4))
+            {
+                a->dead = true;
+                return false;
+            }
+            if (a->sequence == UINT64_MAX || seq != a->sequence + 1)
+            {
+                a->sequence = seq;
+                a->close_request = p[5] == 4;
+                a->action = a->element = 0xffff;
+                a->phase = 0;
+                ack(a, 4, false);
+                return true;
+            }
+            a->sequence = seq;
+            a->need = 20 + len;
+        }
+    }
+    a->attempted = a->succeeded = 0;
+    a->action = a->element = 0xffff;
+    a->phase = 0;
+    a->release = a->close_request = false;
+    int error = 0;
+    if (a->rx[5] == 4)
+    {
+        a->close_request = a->release = true;
+        if (a->need != 21 || a->rx[20] != 1)
+            error = 5;
+        else
+            error = release_plan(a, 0xffff);
+        if (!error)
+            for (size_t i = 0; i < a->count; i++)
+            {
+                error = a->ops.guard(a->ops.user, a->plan[i].kind);
+                if (error)
+                    break;
+            }
+    }
+    else
+        error = validate(a, a->rx + 20, a->need - 20);
+    if (error)
+        ack(a, error, false);
+    else if (!a->count)
+        ack(a, 0, false);
+    else
+        a->deadline = now_ms() + 10000;
+    return true;
+}
+void agni_free(agni *a)
+{
+    if (!a)
+        return;
+    /* Best effort owned releases only. No claim of Windows/application consumption. */
+    a->count = 0;
+    release_plan(a, 0xffff);
+    for (size_t i = 0; i < a->count; i++)
+    {
+        agni_event *e = a->plan + i;
+        if (!a->ops.guard(a->ops.user, e->kind) && a->ops.send(a->ops.user, e))
+            update(a, e);
+    }
+    close(a->fd);
+    wipe(a, sizeof(*a));
+    free(a);
+}

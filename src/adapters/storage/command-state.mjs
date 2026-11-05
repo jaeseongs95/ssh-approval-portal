@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { openSync, closeSync, lstatSync } from 'node:fs';
 import { join } from 'node:path';
 import { validateCommandPolicy } from '../../domain/command-policy.mjs';
+import { journalHistoryReader } from './history-query.mjs';
 
 /** Service-private SQLite journal; one bridge process owns the database at a time. */
 export function createCommandState(root) {
@@ -14,15 +15,25 @@ export function createCommandState(root) {
     db.exec("PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL; PRAGMA locking_mode=EXCLUSIVE; BEGIN EXCLUSIVE; COMMIT;");
     db.exec('CREATE TABLE IF NOT EXISTS policy (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, body TEXT NOT NULL); CREATE TABLE IF NOT EXISTS requests (id TEXT PRIMARY KEY, request_key TEXT UNIQUE, digest TEXT NOT NULL, body TEXT NOT NULL);');
     db.prepare('INSERT OR IGNORE INTO policy VALUES (1,0,?)').run(JSON.stringify({ targets: [] }));
-    for (const row of db.prepare('SELECT id,body FROM requests').all()) {
-      const job = JSON.parse(row.body);
-      if (['running', 'evaluating'].includes(job.state)) { job.state = 'unknown'; job.finishedAt = Date.now(); }
-      else if (job.state === 'pending') { job.state = 'expired'; job.finishedAt = Date.now(); }
-      db.prepare('UPDATE requests SET body=? WHERE id=?').run(JSON.stringify(job), row.id);
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const update = db.prepare('UPDATE requests SET body=? WHERE id=?');
+      for (const row of db.prepare('SELECT id,body FROM requests').all()) {
+        const job = JSON.parse(row.body);
+        if (['queued', 'running', 'evaluating'].includes(job.state)) job.state = 'unknown';
+        else if (job.state === 'pending') job.state = 'expired';
+        else continue;
+        job.finishedAt = Date.now();
+        update.run(JSON.stringify(job), row.id);
+      }
+      db.exec('COMMIT');
+    } catch (error) {
+      try { db.exec('ROLLBACK'); } finally { throw error; }
     }
   } catch (error) { db.close(); throw error; }
   const policy = () => { const row = db.prepare('SELECT revision,body FROM policy WHERE id=1').get(); return { revision: row.revision, ...validateCommandPolicy(JSON.parse(row.body)) }; };
   return {
+    ...journalHistoryReader(db),
     policy,
     preservationRows() {
       const usage = db.prepare('SELECT count(*) AS count, coalesce(sum(length(CAST(body AS BLOB))),0) AS bytes FROM requests').get();

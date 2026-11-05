@@ -1,0 +1,99 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { ApprovalQueue } from './support/approval-runtime.mjs';
+import { parseSettings } from '../src/adapters/config/settings.mjs';
+import { parseSecretText } from '../src/adapters/config/secrets.mjs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createApplication } from '../app.mjs';
+
+const env = { BRIDGE_MCP_TOKEN: 'fixture-mcp', BRIDGE_ADMIN_TOKEN: 'fixture-admin', BRIDGE_ADMIN_ORIGIN: 'https://admin.example.test' };
+const execution = { phase: 'settled', reason: 'exit', remoteState: 'exited', exitCode: 0, cleanupComplete: true, requiresReconciliation: false };
+const ports = { classify: () => ({ class: 'privileged' }), profile: 'fixture-write', target: 'fixture', executeOperation: async () => ({ failed: false, texts: ['preserved'], execution }) };
+
+test('request capacity defaults to 100 and accepts canonical positive safe integers', () => {
+  assert.equal(parseSettings(env).requestCapacity, 100);
+  assert.equal(parseSettings({ ...env, ...parseSecretText('BRIDGE_REQUEST_CAPACITY=101\n') }).requestCapacity, 101);
+  for (const value of ['1', '99', '100', '101', '1000', '1001', '9007199254740991']) assert.equal(parseSettings({ ...env, BRIDGE_REQUEST_CAPACITY: value }).requestCapacity, Number(value));
+  for (const value of ['', '0', '-100', '1e3', '100.0', '0100', ' 100', '100 ', '100\n', 'Infinity', 'NaN', '9007199254740992', 100]) {
+    assert.throws(() => parseSettings({ ...env, BRIDGE_REQUEST_CAPACITY: value }), /request capacity/);
+  }
+  for (const requestCapacity of [1, 99, 1001, Number.MAX_SAFE_INTEGER]) assert.doesNotThrow(() => new ApprovalQueue({ ...ports, requestCapacity }));
+  for (const requestCapacity of [0, -1, Number.MAX_SAFE_INTEGER + 1, 100.5, Infinity, NaN, '100', null]) assert.throws(() => new ApprovalQueue({ ...ports, requestCapacity }), /request capacity/);
+});
+
+test('application wiring applies the configured capacity independently to legacy and every explicit target', async () => {
+  for (const explicit of [false, true]) {
+    const root = await mkdtemp(join(tmpdir(), 'request-capacity-'));
+    const entries = ['alpha', 'beta', 'gamma'].map(id => ({ id, displayName: id, readProfile: id + '-read', writeProfile: id + '-write', credentialRevision: 'v1' }));
+    const profiles = new Map((explicit ? entries : [{ id: 'default', readProfile: 'aws-readonly', writeProfile: 'aws-local' }])
+      .flatMap(entry => [entry.readProfile, entry.writeProfile].map(name => [name, { name, host: entry.id + '.example.test', port: 22, user: 'fixture', readOnly: name === entry.readProfile, trustedHostKey: 'SHA256:' + entry.id }])));
+    let app;
+    try {
+      app = await createApplication({ registry: { getProfile: name => profiles.get(name), closeAll: async () => {} }, classify: ports.classify,
+        executeCommand: () => assert.fail('Capacity checks must never execute SSH'), audit: () => {}, transferRoot: root, uiHtml: '<html></html>',
+        env: { ...env, BRIDGE_UI_TICKET_KEY: 'b'.repeat(64), BRIDGE_REQUEST_CAPACITY: '101', ...(explicit ? { BRIDGE_TARGETS: JSON.stringify(entries) } : {}) } });
+      for (const id of explicit ? ['alpha', 'beta', 'gamma'] : ['default']) {
+        const runtime = app.targets.select(id);
+        for (let i = 0; i < 101; i++) runtime.queue.deny(app.queue.submit('sudo id', false, id).id);
+        assert.equal(runtime.queue.jobs.size, 101);
+        assert.throws(() => app.queue.submit('sudo id', false, id), /Queue full/);
+      }
+    } finally { await app?.close(); await rm(root, { recursive: true, force: true }); }
+  }
+});
+
+test('default saturation refuses before allocating an ID and preserves all 100 terminal requests', async () => {
+  let ids = 0;
+  const queue = new ApprovalQueue({ ...ports, idFactory: () => (++ids).toString(16).padStart(48, '0') });
+  for (let i = 0; i < 100; i++) {
+    const job = queue.submit('sudo id');
+    await queue.approve(job.id);
+  }
+  assert.equal(queue.jobs.size, 100);
+  assert.throws(() => queue.submit('sudo id'), /Queue full/);
+  assert.equal(ids, 100);
+  assert.ok(queue.listAll().every(job => job.state === 'completed' && job.result.texts[0] === 'preserved'));
+});
+
+test('custom capacity stays bounded, retains terminal output for one hour and never reaps running work', async t => {
+  let now = 0, finish;
+  t.after(() => finish?.({ failed: false, texts: [], execution }));
+  const queue = new ApprovalQueue({ ...ports, requestCapacity: 1000, now: () => now,
+    executeOperation: () => new Promise(resolve => { finish = resolve; }) });
+  const running = queue.submit('sudo id');
+  queue.start(running.id); await new Promise(resolve => setImmediate(resolve));
+  for (let i = 1; i < 1000; i++) queue.deny(queue.submit('sudo id').id);
+  assert.equal(queue.jobs.size, 1000);
+  assert.throws(() => queue.submit('sudo id'), /Queue full/);
+  now = 3_600_000; queue.reap(); assert.equal(queue.jobs.size, 1000);
+  now++; queue.reap(); assert.equal(queue.jobs.size, 1); assert.equal(queue.get(running.id).state, 'running');
+  finish({ failed: false, texts: ['preserved'], execution, output: { id: 'fixture-output' } });
+  const completed = await queue.wait(running.id);
+  now += 3_600_000; queue.reap(); assert.deepEqual(queue.get(running.id), completed);
+  now++; queue.reap(); assert.equal(queue.get(running.id), null);
+  assert.equal(queue.submit('sudo id').state, 'pending');
+});
+
+test('larger request capacity preserves configured serialization in the common durable scheduler', async t => {
+  const effects = [], first = Promise.withResolvers(), second = Promise.withResolvers();
+  t.after(() => { first.resolve({ failed: false, texts: [], execution }); second.resolve({ failed: false, texts: [], execution }); });
+  const queue = new ApprovalQueue({ ...ports, requestCapacity: 101,
+    executeOperation: operation => { effects.push(operation.command); return effects.length === 1 ? first.promise : second.promise; } });
+  const a = queue.submit('sudo first'), b = queue.submit('sudo second');
+  assert.equal(queue.start(a.id).state, 'queued');
+  assert.equal(queue.start(b.id).state, 'queued');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(effects, ['sudo first']);
+  assert.equal(queue.operationStore.get(a.id).state, 'running');
+  assert.equal(queue.operationStore.get(b.id).state, 'queued');
+  first.resolve({ failed: false, texts: [], execution }); await queue.wait(a.id);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(effects, ['sudo first', 'sudo second']);
+  assert.equal(queue.operationStore.get(a.id).state, 'completed');
+  assert.equal(queue.operationStore.get(b.id).state, 'running');
+  second.resolve({ failed: false, texts: [], execution }); await queue.wait(b.id);
+  assert.equal(queue.operationStore.get(b.id).state, 'completed');
+  assert.equal(queue.busy(), false);
+});
