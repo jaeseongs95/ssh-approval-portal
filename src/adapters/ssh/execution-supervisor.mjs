@@ -35,6 +35,10 @@ export function superviseExecution(port, command, { stdin, timeoutMs = DEFAULT_R
             cleanupComplete, requiresReconciliation: remoteState === 'unknown' || !cleanupComplete,
             outputState: captureFailed || truncated || remoteState === 'unknown' || !cleanupComplete || reason === 'transport_lost' ? 'partial' : 'complete',
             captureFailed, signalDelivery, stdout: metadata(streams.stdout), stderr: metadata(streams.stderr) } });
+        // A durable sink may still have the readables paused when settlement
+        // starts. Drain EOF/CLOSE after saving the conservative result above;
+        // releasing this channel must not wait for another execution or replay.
+        channel?.resume?.(); channel?.stderr?.resume?.();
       });
     };
     const sendSignal = name => {
