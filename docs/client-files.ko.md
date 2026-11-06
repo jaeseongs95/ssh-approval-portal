@@ -1,4 +1,4 @@
-# PC 파일 전송 클라이언트 2.3.0
+# PC 파일 전송 클라이언트 2.3.1
 
 ## 완료 알림을 hook으로 받기
 
@@ -118,8 +118,8 @@ Claude Code처럼 백그라운드 작업 완료를 자체적으로 통지하는 
 
 ## 배포 파일
 
-ssh-approval-portal-client-2.3.0.tar.gz와 같은 이름의.zip은 동일 클라이언트 소스를 담습니다. client-manifest.json은 포함 파일의 크기·SHA-256과 Node 요구사항을 기록합니다. SHA256SUMS-client-2.3.0은 두 압축 파일의 전체 해시입니다. 서버 설치 파일이나 인증 캐시는 포함하지 않습니다. 실행 진입점은 `scripts/portal-files.mjs`이며 명령은 `doctor`·`upload`·`status`·`watch`입니다. 별도 `scripts/portal-client.mjs`·`scripts/portal-file-mcp.mjs` 실행 스크립트는 이 client 자산에 포함하지 않습니다.
+ssh-approval-portal-client-2.3.1.tar.gz와 같은 이름의.zip은 동일 클라이언트 소스를 담습니다. client-manifest.json은 포함 파일의 크기·SHA-256과 Node 요구사항을 기록합니다. SHA256SUMS-client-2.3.1은 두 압축 파일의 전체 해시입니다. 서버 설치 파일이나 인증 캐시는 포함하지 않습니다. 실행 진입점은 `scripts/portal-files.mjs`이며 명령은 `doctor`·`upload`·`status`·`watch`입니다. 별도 `scripts/portal-client.mjs`·`scripts/portal-file-mcp.mjs` 실행 스크립트는 이 client 자산에 포함하지 않습니다.
 
 개발자는 python scripts/package-client.py --output 새출력폴더로 같은 진입점의 소스 의존 그래프를 묶습니다. 기존 결과물은 덮어쓰지 않습니다. 로컬 생성 허용과 제품 동작 시험은 구분하며, 동작 회귀와 압축 해제 사본의 실행 검사는 승인된 TEST 환경에서 수행합니다.
 
-자동 설치·호스트 등록은 [클라이언트 설치 안내](https://github.com/jaeseongs95/ssh-approval-portal/blob/v2.3.0/docs/client-install.ko.md)를 따릅니다. background watch·native 수신·receipt/claim ACK 순서는 [완료 훅 안내](https://github.com/jaeseongs95/ssh-approval-portal/blob/v2.3.0/docs/mcp-tools.ko.md#완료-훅으로-다른-작업과-병행하기)를 참고하세요.
+자동 설치·호스트 등록은 [클라이언트 설치 안내](https://github.com/jaeseongs95/ssh-approval-portal/blob/v2.3.1/docs/client-install.ko.md)를 따릅니다. background watch·native 수신·receipt/claim ACK 순서는 [완료 훅 안내](https://github.com/jaeseongs95/ssh-approval-portal/blob/v2.3.1/docs/mcp-tools.ko.md#완료-훅으로-다른-작업과-병행하기)를 참고하세요.
