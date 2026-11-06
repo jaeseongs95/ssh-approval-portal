@@ -1,7 +1,7 @@
 import { recordedApprovalMode } from '../../ui/src/decision.js';
 import { createRequestDetail } from './request-detail.js';
 export function createWebView({ document, i18n }) {
-  const { t, korean, locale, states, kinds } = i18n;
+  const { t, korean, locale, states, kinds, formatNumber } = i18n;
   const el = id => document.getElementById(id);
   const bridgeName = document.body.dataset.bridgeDisplayName || document.location?.host || 'SSH Approval Portal';
   const targetName = document.body.dataset.targetDisplayName || 'SSH';
@@ -245,7 +245,7 @@ export function createWebView({ document, i18n }) {
     history: data => {
       historyResult=data;historyBusy=false;historyFailure=false;el('history')?.setAttribute('aria-busy','false');
       const incomplete=!!data.coverage?.metadataIncomplete;
-      if(historyStatus)historyStatus.textContent=incomplete ? (korean?`확인 가능한 기록 ${data.items.length}건을 표시합니다. 일부 기록이 제외된 불완전 조회이며, 0건이어도 기록이 없다고 판단할 수 없습니다.`:`Showing ${data.items.length} verifiable requests. Results are incomplete because some records were excluded; zero results do not establish that no history exists.`) : (korean?`${data.items.length}건을 표시합니다. 전체 건수는 제공하지 않습니다.`:`Showing ${data.items.length} requests. An all-time total is not available.`);
+      if(historyStatus)historyStatus.textContent=incomplete ? (korean?`확인 가능한 기록 ${formatNumber(data.items.length)}건을 표시합니다. 일부 기록이 제외된 불완전 조회이며, 0건이어도 기록이 없다고 판단할 수 없습니다.`:`Showing verifiable requests: ${formatNumber(data.items.length)}. Results are incomplete because some records were excluded; zero results do not establish that no history exists.`) : (korean?`${formatNumber(data.items.length)}건을 표시합니다. 전체 건수는 제공하지 않습니다.`:`Showing requests: ${formatNumber(data.items.length)}. An all-time total is not available.`);
       if(historyCoverage){
         historyCoverage.dataset.incomplete=String(incomplete);
         const warning=incomplete ? (korean?'일부 기록 제외: 기록 정보나 현재 연결을 확인하지 못한 기록은 표시하지 않습니다. 아래 목록은 조회 범위의 모든 기록을 보장하지 않습니다. ':'Some records excluded: metadata or the current connection could not be verified. The list does not represent complete history for the selected scope. ') : '';

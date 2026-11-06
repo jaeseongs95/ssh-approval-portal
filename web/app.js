@@ -25,17 +25,17 @@ const controller = createWebController({ state, view, api, document, location, b
 controller.start();
 const pages = createAdminPages({ document, location, history });
 let agentCli, workspaceReady = false, changingServer = false, syncingServer = false, serverTab = 'policy';
-const policyEditor = createCommandPolicyEditor({ document, api, onNavigate: pages.settings, onRequestTarget: id => selectServer(id, 'policy'), onStateChange: refreshServerContext, isSignedOut: () => state.signedOut });
+const policyEditor = createCommandPolicyEditor({ document, api, i18n, onNavigate: pages.settings, onRequestTarget: id => selectServer(id, 'policy'), onStateChange: refreshServerContext, isSignedOut: () => state.signedOut });
 view.openPolicy = id => policyEditor?.openTarget(id);
 view.importCommandNames = input => policyEditor?.importCommandNames(input);
 document.querySelector('#logout')?.addEventListener('click', () => policyEditor?.clearCommandImport());
-createAutomationMetricsPanel({ document, api });
+createAutomationMetricsPanel({ document, api, i18n });
 const environment = createEnvironmentPanel({ document, api });
-const capacity = createCapacityPanel({ document, api, getTarget: currentServer, isSignedOut: () => state.signedOut });
-const desktop = createDesktopPanel({ document, api, getTarget: currentServer, isSignedOut: () => state.signedOut, onStateChange: refreshServerContext });
+const capacity = createCapacityPanel({ document, api, i18n, getTarget: currentServer, isSignedOut: () => state.signedOut });
+const desktop = createDesktopPanel({ document, api, i18n, getTarget: currentServer, isSignedOut: () => state.signedOut, onStateChange: refreshServerContext });
 let sessionStorage;
 try { sessionStorage=globalThis.sessionStorage; } catch { /* storage can be disabled */ }
-agentCli=createAgentCliPanel({document,api,isSignedOut:()=>state.signedOut,canLoad:()=>state.accessMode||Boolean(view.token()),storage:sessionStorage,
+agentCli=createAgentCliPanel({document,api,i18n,isSignedOut:()=>state.signedOut,canLoad:()=>state.accessMode||Boolean(view.token()),storage:sessionStorage,
   getTarget: policyEditor ? () => policyEditor.scopeState().targetId : undefined, onRequestTarget: id => selectServer(id, 'cli'), onStateChange: refreshServerContext});
 const say = (ko, en) => i18n.korean ? ko : en;
 const context = document.getElementById('server-context'), serverTarget = policyEditor?.targetControl ?? agentCli.targetControl;

@@ -1,4 +1,4 @@
-/** Native BCP 47 parsing; unsupported message languages use the English catalog. */
+/** Native Unicode BCP 47 locale parsing; unsupported message languages use English. */
 export function resolveLocale(language = 'en') {
   let locale;
   try { locale = Intl.getCanonicalLocales(language)[0]; } catch { /* invalid browser preference */ }
@@ -35,7 +35,9 @@ export function validateCatalogs(catalogs) {
 
 export function translate(catalogs, language, key, values = {}) {
   const { messageLanguage } = resolveLocale(language);
-  const message = catalogs[messageLanguage]?.[key] ?? catalogs.en?.[key] ?? key;
+  const catalog = catalogs[messageLanguage];
+  const message = catalog && Object.hasOwn(catalog, key) ? catalog[key] : catalogs.en && Object.hasOwn(catalogs.en, key) ? catalogs.en[key] : undefined;
+  if (message === undefined) return key;
   return message.replace(/\{([A-Za-z][A-Za-z0-9_]*)\}/g, (placeholder, name) => Object.hasOwn(values, name) ? String(values[name]) : placeholder);
 }
 

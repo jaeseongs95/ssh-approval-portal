@@ -1,5 +1,7 @@
 /** Fixed-provider owner workflow. Browser storage contains only bounded public lookup hints. */
-export function createAgentCliPanel({document,api,isSignedOut,canLoad,storage,getTarget,onRequestTarget,onStateChange=()=>{},random=globalThis.crypto,schedule=setTimeout,cancel=clearTimeout}) {
+import { createWebI18n } from './i18n.js';
+export function createAgentCliPanel({document,api,i18n = createWebI18n(document.documentElement.lang),isSignedOut,canLoad,storage,getTarget,onRequestTarget,onStateChange=()=>{},random=globalThis.crypto,schedule=setTimeout,cancel=clearTimeout}) {
+ const { formatDate } = i18n;
  const ko=document.documentElement.lang.startsWith('ko'),t=(a,b)=>ko?a:b;
  const el=(tag,text='',cls='')=>{const n=document.createElement(tag);n.textContent=text;if(cls)n.className=cls;return n;};
  const root=el('section','','request agent-cli-settings');root.id='agent-cli-settings';
@@ -91,7 +93,7 @@ if ($executable.EndsWith('.exe')) { & $executable ${p==='codex'?'login':'auth lo
   const last=rows.at(-1),next=value.next;
   if(next!==null&&(!next||Object.keys(next).length!==2||rows.length!==20||next.before!==last.createdAt||next.beforeId!==last.id))throw Error('Invalid CLI history page');
   const empty=el('option',t('요청 선택','Choose a request'));empty.value='';historySelect.append(empty);
-  for(const row of rows){const option=el('option',new Date(row.createdAt).toLocaleString()+' · '+stateName(row.state)+' · '+row.id);option.value=row.id;historySelect.append(option);}
+  for(const row of rows){const option=el('option',formatDate(row.createdAt)+' · '+stateName(row.state)+' · '+row.id);option.value=row.id;historySelect.append(option);}
   historyCursor=next;historyNext.hidden=next===null;history.hidden=false;message.textContent=rows.length?t('기존 요청을 선택해 상태를 확인하세요. 설치는 다시 실행되지 않습니다.','Choose an existing request to read its status. Installation is not repeated.'):t('현재 서버·CLI의 요청 기록이 없습니다.','No request records for this server and CLI.');
  }
  async function restore(){return run(async current=>{const h=hint();if(!h)return loadHistory(current);uncertain=true;const value=await api('/api/agent-cli/lookup?'+new URLSearchParams({key:h.requestKey,targetId:h.targetId,provider:h.provider}));if(!current())return;
@@ -115,11 +117,11 @@ if ($executable.EndsWith('.exe')) { & $executable ${p==='codex'?'login':'auth lo
    check_failed:t('SSH 연결 또는 로그인 검사를 완료하지 못했습니다. 서버 연결과 해당 SSH 계정의 CLI 실행 가능 여부를 확인한 뒤 다시 조회하세요.','The SSH connection or login check could not be completed. Check server connectivity and CLI execution for this SSH account, then check again.')
   };
   if(value?.provider!==p||value.binding?.targetId!==b.targetId||value.binding.targetRevision!==b.targetRevision||value.binding.profile!==b.profile||!Object.hasOwn(states,value.state)||Object.hasOwn(value,'reason')&&(value.state!=='unavailable'||typeof value.reason!=='string'||!Object.hasOwn(reasons,value.reason))||!Number.isSafeInteger(value.checkedAt)||value.checkedAt<=0){loginState.textContent=t('로그인 상태: 확인 불가','Login status: Unavailable');return;}
-  loginState.textContent=(p==='codex'?'Codex':'Claude')+' · '+states[value.state]+' · '+t('확인 시각: ','Checked: ')+new Date(value.checkedAt).toLocaleString()+(value.reason?' · '+reasons[value.reason]:'');
+  loginState.textContent=(p==='codex'?'Codex':'Claude')+' · '+states[value.state]+' · '+t('확인 시각: ','Checked: ')+formatDate(value.checkedAt)+(value.reason?' · '+reasons[value.reason]:'');
  });
  inspect.onclick=()=>run(async current=>{const b=binding(),p=provider.value;const value=await api('/api/agent-cli/preview','POST',{targetId:b.targetId,provider:p});if(!current())return;
   if(value?.binding?.targetId!==b.targetId||value.binding.targetRevision!==b.targetRevision||value.binding.profile!==b.profile||value.release?.provider!==p||!validId(value.planId)||!Number.isSafeInteger(value.expiresAt)||Date.now()>=value.expiresAt||!['@openai/codex','@anthropic-ai/claude-code'].includes(value.release.packageName))throw Error('Invalid CLI preview');
-  preview=value;job=remoteStatus=undefined;ack.checked=false;summary.hidden=false;summary.textContent=[identity.textContent,value.release.packageName,t('현재: ','Current: ')+(value.installation.installed?value.installation.version??t('버전 확인 불가','Version unavailable'):t('미설치','Not installed')),t('후보: ','Candidate: ')+value.release.version,t('관리 설치: ','Managed installation: ')+String(value.installation.managed),t('계획 만료: ','Plan expires: ')+new Date(value.expiresAt).toLocaleString()].join('\n');
+  preview=value;job=remoteStatus=undefined;ack.checked=false;summary.hidden=false;summary.textContent=[identity.textContent,value.release.packageName,t('현재: ','Current: ')+(value.installation.installed?value.installation.version??t('버전 확인 불가','Version unavailable'):t('미설치','Not installed')),t('후보: ','Candidate: ')+value.release.version,t('관리 설치: ','Managed installation: ')+String(value.installation.managed),t('계획 만료: ','Plan expires: ')+formatDate(value.expiresAt)].join('\n');
   submit.textContent=value.installation.managed?t('업데이트 요청 등록','Create update request'):t('설치 요청 등록','Create installation request');message.textContent=value.installation.installed&&!value.installation.managed?(value.installation.version===value.release.version?t('기존 외부 설치와 같은 버전입니다. 기존 설치를 재사용합니다.','The external installation has this version and will be reused.'):t('기존 외부 설치는 유지하고 별도 관리 경로에 설치합니다. 원래 실행 경로와 로그인 파일은 덮어쓰지 않습니다.','Keep the external installation and install in a separate managed path. The original executable path and login files are preserved.')):t('설치 계획을 확인한 뒤 요청을 등록하세요.','Review the installation plan, then create a request.');lock();
  });
  submit.onclick=()=>{if(submit.disabled)return;return run(async current=>{const p=preview,requestKey=Array.from(random.getRandomValues(new Uint8Array(24)),v=>v.toString(16).padStart(2,'0')).join(''),h={requestKey,targetId:p.binding.targetId,provider:p.release.provider};persist(h);uncertain=true;preview=undefined;ack.checked=false;

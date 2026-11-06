@@ -36,6 +36,11 @@ export const uiCatalogs = messageCatalog({
   "한 줄의 완전한 명령을 입력하세요. 동적·지원하지 않는 구문에서는 이름을 추측하지 않습니다.":"Enter one complete command line. Names are not guessed from dynamic or unsupported syntax.",
   "원문이 바뀌었습니다. 이름을 다시 추출하세요.":"The command line changed. Extract its names again.",
   "개 이름을 초안에 추가했습니다. 검토·저장 전에는 적용되지 않습니다.":" names added to the draft. Review and save to apply.",
+  '초안에 이름 {count}개를 추가했습니다. 검토·저장 전에는 적용되지 않습니다.':'Added command names to the draft: {count}. Review and save to apply.',
+  '선택한 이름: {selected} / {total}':'Selected names: {selected} / {total}',
+  '저장된 자동승인 {allowed}개 · 차단 {blocked}개':'Saved preapprovals: {allowed} · blocked: {blocked}',
+  ' / 초안: 자동승인 {allowed}개 · 차단 {blocked}개 · 변경 {changed}개':' / Draft: preapproved: {allowed} · blocked: {blocked} · changed: {changed}',
+  '일치 {count}개 · {shown}개 표시':'Matches: {count} · shown: {shown}',
   "명령 이름 추출":"Extract command names",
   "입력 지우기":"Clear input",
   "전체 선택":"Select all",
@@ -258,8 +263,8 @@ export const uiCatalogs = messageCatalog({
   '등록된 모든 서버의 연결과 요청에 영향을 주는 설정입니다. 서버별 정책과 별개이며, 저장한 환경은 서비스 재시작 후 적용됩니다.':'These settings affect connections and requests for all registered servers. They are separate from per-server policy, and saved environment settings apply after the service restarts.',
 });
 
-export function uiText(value, document = globalThis.document) {
-  return translate(uiCatalogs, document?.documentElement?.lang ?? 'en', value);
+export function uiText(value, document = globalThis.document, values) {
+  return translate(uiCatalogs, document?.documentElement?.lang ?? 'en', value, values);
 }
 
 // Only server-generated registration warnings use this composition; never caller context.
