@@ -47,6 +47,8 @@ def child_install(home,operation,revision,gate,started,result):
 
 class AgentCli(unittest.TestCase):
     def setUp(self):
+        previous_umask=os.umask(0o077)
+        self.addCleanup(os.umask,previous_umask)
         self.tmp=tempfile.TemporaryDirectory(prefix='agent-cli-test-')
         self.home=Path(self.tmp.name);self.home.chmod(0o700)
         self.manager,self.integrity,self.calls=fixture(self.home)
