@@ -100,13 +100,16 @@ test('DESKTOP-GESTURE uncertain committed input cancels unsent keys without repl
   assert.deepEqual(calls.filter(call => call.action === 'input').map(call => call.body.sequence), [1, 2]);
 }));
 
-test('DESKTOP-GESTURE close and target changes invalidate waiting gestures', { timeout: 15000 }, () => fixture(async ({ page, image, controls, calls, hold, release, waitForCount }) => {
+test('DESKTOP-GESTURE close, target changes and logout invalidate waiting gestures', { timeout: 15000 }, () => fixture(async ({ page, image, controls, calls, hold, release, waitForCount }) => {
   hold('observe'); await page.clock.runFor(2000); await waitForCount('observe', 2); await image.press('x');
   await page.evaluate(() => { void panel.close(); }); release('observe'); await waitForCount('close', 1); await page.waitForFunction(() => document.querySelector('img').hidden);
   assert.equal(calls.filter(call => call.action === 'input').length, 0);
   await page.evaluate(() => setTarget('beta')); await controls.nth(0).click(); await idle(page);
   hold('observe'); await page.clock.runFor(2000); await waitForCount('observe', 4); await image.press('y');
   await page.evaluate(() => setTarget('alpha')); release('observe'); await idle(page);
+  assert.equal(calls.filter(call => call.action === 'input').length, 0);
+  await page.evaluate(() => setTarget('beta')); hold('observe'); await page.clock.runFor(2000); await waitForCount('observe', 5); await image.press('z');
+  await page.locator('#logout').click(); release('observe'); await page.waitForFunction(() => document.querySelector('img').hidden);
   assert.equal(calls.filter(call => call.action === 'input').length, 0);
 }));
 

@@ -282,7 +282,7 @@ function presentSession(value) {
 }
 function registerDesktopTools(register, desktop) {
   register('desktop-open', async args => presentSession(await desktop.open(args)),
-    'Open an agent GUI using target, expectedTargetRevision and targets.gui.openRequest.requestKey. Keep that key after uncertainty to recover the same lease. Retain sessionId/epoch; inspect readiness, observe a frame, send actions, then observe the result. transport_ready is not desktop_ready. A closed/expired key cannot reopen. No user RDP client is required.');
+    'Open an agent GUI using target, expectedTargetRevision and the server-issued requestKey from targets.gui.openRequest.requestKey. Keep that key after uncertainty to recover the same lease. Retain sessionId/epoch; inspect readiness, observe a frame, send actions, then observe the result. transport_ready is not desktop_ready. A closed/expired key cannot reopen. No user RDP client is required.');
   register('desktop-status', async args => presentSession(await desktop.status(args)),
     'Read readiness, capabilities, nextInputSequence and lastInputReceipt without pixels, using the same sessionId/epoch. Distinguish transport_ready, auth_required and desktop_ready. Inspect status then a fresh frame after reconnecting; never replay uncertain input with a new key.');
   register('desktop-observe', async args => {

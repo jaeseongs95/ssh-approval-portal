@@ -81,7 +81,7 @@ PC 파일 클라이언트 ── HTTPS ──> UUID 임시 보관 ── files c
 <a id="files"></a>
 ## 파일 본문을 모델 문맥에 넣지 않고 PC에서 업로드
 
-[릴리스](https://github.com/jaeseongs95/ssh-approval-portal/releases/tag/v2.3.0)에서 `ssh-approval-portal-client-2.3.0.zip` 또는 `.tar.gz`를 내려받아 압축을 풉니다. 압축을 푼 폴더에서 진입 파일을 실행합니다. 포터블 클라이언트이므로 파일을 고정 위치에 두면 되며, 전역 실행 명령을 자동으로 등록하지 않습니다.
+[릴리스](https://github.com/jaeseongs95/ssh-approval-portal/releases/tag/v2.3.0)에서 `ssh-approval-portal-client-2.3.0.zip` 또는 `.tar.gz`를 내려받아 압축을 풉니다. 압축을 푼 폴더에서 진입 파일을 실행합니다. 포터블 클라이언트는 이 폴더에서 바로 실행할 수 있습니다. 버전별 설치, TEST/PROD 실행 명령, Codex·Claude Code·Antigravity Native hook 등록은 [클라이언트 설치기](docs/client-install.ko.md)를 사용합니다. 기본 읽기 전용 계획을 검토한 뒤 적용하며, 이전 버전과 관련 없는 호스트 설정을 보존합니다. PATH와 인증은 바꾸지 않습니다.
 
 현재 클라이언트는 **Access 모드**로 구성한 관리자 HTTPS origin, 신뢰하는 기존 `cloudflared`, 소유자 로그인 캐시가 필요합니다. MCP 연결 인증이나 서버의 기본 관리자 token 모드로 대신할 수 없습니다.
 

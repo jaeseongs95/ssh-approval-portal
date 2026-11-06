@@ -81,7 +81,7 @@ Output is read explicitly with `includeOutput:true` and paginated when needed. T
 <a id="files"></a>
 ## Upload a PC file without putting bytes in the model context
 
-Download and extract `ssh-approval-portal-client-2.3.0.zip` or `.tar.gz` from the [release](https://github.com/jaeseongs95/ssh-approval-portal/releases/tag/v2.3.0). Run the entry point from that extracted folder. This is a portable client: copying its files to a stable location is enough; a global command is not installed automatically.
+Download and extract `ssh-approval-portal-client-2.3.0.zip` or `.tar.gz` from the [release](https://github.com/jaeseongs95/ssh-approval-portal/releases/tag/v2.3.0). Run the entry point from that extracted folder. The portable client works directly from that folder. For a versioned installation, TEST/PROD launchers and Codex, Claude Code or Antigravity Native hooks, use the [client installer](docs/client-install.ko.md): inspect its default read-only plan, then apply it. Existing versions and unrelated host settings are preserved; PATH and authentication are unchanged.
 
 The current client requires an administrator HTTPS origin configured for **Access** mode, an existing trusted `cloudflared` executable and the owner's login cache. MCP authentication and the server's default administrator token mode do not substitute for this authentication.
 
