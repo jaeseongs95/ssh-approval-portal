@@ -256,6 +256,8 @@ python3 test/test_helper.py
 npm run package:release -- --output /absolute/new/portal-2.4.0-release
 ```
 
+서버 압축 파일 이름은 `ssh-approval-portal-2.4.0.tar.gz`입니다.
+
 패키징은 서버·클라이언트의 `.tar.gz`·`.zip`과 체크섬을 만듭니다. Node.js·cloudflared·인증 정보·사용자 세션은 포함하지 않습니다. 소스·fixture·실제 호스트·클라이언트 UI·배포 검사는 서로 다른 근거입니다. 명령이 있다는 이유만으로 시험이 통과했다고 판단하지 않습니다. 공개한 자산은 고정하고 사용 전에 릴리스 체크섬과 대조하세요.
 
 [MIT 라이선스](LICENSE).

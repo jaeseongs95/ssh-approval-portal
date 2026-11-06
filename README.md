@@ -256,6 +256,8 @@ To generate server/client archives in a **new** absolute output directory:
 npm run package:release -- --output /absolute/new/portal-2.4.0-release
 ```
 
+The server archive is named `ssh-approval-portal-2.4.0.tar.gz`.
+
 Packaging produces server and client `.tar.gz`/`.zip` assets and checksums. Node.js, cloudflared, credentials and user sessions are not bundled. Source, fixture, live-host, client UI and deployment checks establish different things; an available command is not evidence that a test has passed. Keep published assets immutable and compare the release checksums before use.
 
 [MIT license](LICENSE).
