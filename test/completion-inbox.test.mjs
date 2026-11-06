@@ -378,7 +378,20 @@ const schemaOne = `
   PRAGMA application_id = 1396919632; PRAGMA user_version = 1;
 `;
 
-async function legacyFixture(t) {
+// DDL from the schema2 waiter contract before completion_watches existed.
+const schemaTwoWaiters = `
+  CREATE TABLE completion_waiters (
+    binding_id TEXT PRIMARY KEY REFERENCES completion_bindings(binding_id),
+    owner_id TEXT, generation INTEGER NOT NULL DEFAULT 0 CHECK(generation >= 0),
+    lease_until INTEGER NOT NULL DEFAULT 0 CHECK(lease_until >= 0),
+    ended INTEGER NOT NULL DEFAULT 0 CHECK(ended IN (0, 1)),
+    CHECK((owner_id IS NULL AND lease_until = 0) OR (owner_id IS NOT NULL AND lease_until > 0)),
+    CHECK(ended = 0 OR owner_id IS NULL)
+  ) STRICT;
+  PRAGMA user_version = 2;
+`;
+
+async function legacyFixture(t, schemaVersion = 1) {
   const root = await mkdtemp(join(tmpdir(), 'completion-v1-'));
   const filePath = join(root, 'inbox.sqlite');
   await writeFile(filePath, '', { mode: 0o600 });
@@ -397,7 +410,13 @@ async function legacyFixture(t) {
           claimToken, state === 'claimed' ? 30000 : null, state === 'pending' ? 0 : 1);
       receipts.push({ receiptId, state, claimToken });
     }
-    return { filePath, bindingId, receipts, before: db.prepare('SELECT * FROM completion_events ORDER BY sequence').all() };
+    if (schemaVersion === 2) {
+      db.exec(schemaTwoWaiters);
+      db.prepare('INSERT INTO completion_waiters VALUES (?, ?, ?, ?, ?)').run(bindingId, randomUUID(), 7, 40000, 0);
+    }
+    return { filePath, bindingId, receipts, before: db.prepare('SELECT * FROM completion_events ORDER BY sequence').all(),
+      beforeBindings: db.prepare('SELECT * FROM completion_bindings ORDER BY binding_id').all(),
+      beforeWaiters: schemaVersion === 2 ? db.prepare('SELECT * FROM completion_waiters ORDER BY binding_id').all() : [] };
   } finally { db.close(); }
 }
 
@@ -434,6 +453,43 @@ test('NW01 failed migration keeps schema1 rows and can migrate after the obstacl
   const inbox = openCompletionInbox({ filePath: f.filePath });
   try { assert.deepEqual(inbox.pending({ bindingId: f.bindingId }), { pending: 1, claimed: 1, acknowledged: 1 }); }
   finally { inbox.close(); }
+});
+
+// AW18/AW19 were planned before execution in ../auto-hook-20261106-r1/TEST-CASES.ko.md.
+test('AW18 adding watch leases preserves schema2 version and exact binding event and waiter rows', async t => {
+  const f = await legacyFixture(t, 2);
+  for (let reopen = 0; reopen < 2; reopen++) {
+    const inbox = openCompletionInbox({ filePath: f.filePath, now: () => 1000 });
+    try {
+      assert.equal(inbox.findBinding({ host: 'claude-code', sessionId }).bindingId, f.bindingId);
+      assert.deepEqual(inbox.pending({ bindingId: f.bindingId }), { pending: 1, claimed: 1, acknowledged: 1 });
+    } finally { inbox.close(); }
+    const db = new DatabaseSync(f.filePath);
+    try {
+      assert.equal(db.prepare('PRAGMA user_version').get().user_version, 2);
+      assert.deepEqual(db.prepare('SELECT * FROM completion_bindings ORDER BY binding_id').all(), f.beforeBindings);
+      assert.deepEqual(db.prepare('SELECT * FROM completion_events ORDER BY sequence').all(), f.before);
+      assert.deepEqual(db.prepare('SELECT * FROM completion_waiters ORDER BY binding_id').all(), f.beforeWaiters);
+      assert.equal(db.prepare('SELECT count(*) AS n FROM completion_watches').get().n, 0);
+    } finally { db.close(); }
+  }
+});
+
+test('AW19 watch leases expire after 600000ms and stale tokens cannot release a replacement owner', async t => {
+  const f = await fixture(t), bindingId = f.binding.bindingId, watchKey = 'c'.repeat(64);
+  const first = f.inbox.acquireWatch({ bindingId, watchKey });
+  assert.equal(first.acquired, true);
+  assert.deepEqual(f.inbox.acquireWatch({ bindingId, watchKey }), { acquired: false });
+  f.setNow(600999);
+  assert.deepEqual(f.inbox.acquireWatch({ bindingId, watchKey }), { acquired: false });
+  f.setNow(601000);
+  const other = f.open(), second = other.acquireWatch({ bindingId, watchKey });
+  assert.equal(second.acquired, true); assert.notEqual(second.ownerToken, first.ownerToken);
+  assert.deepEqual(f.inbox.releaseWatch({ bindingId, watchKey, ownerToken: first.ownerToken }), { released: false });
+  assert.deepEqual(f.inbox.acquireWatch({ bindingId, watchKey }), { acquired: false });
+  assert.deepEqual(other.releaseWatch({ bindingId, watchKey, ownerToken: second.ownerToken }), { released: true });
+  const third = f.inbox.acquireWatch({ bindingId, watchKey });
+  assert.equal(third.acquired, true); assert.notEqual(third.ownerToken, second.ownerToken);
 });
 
 test('NW02 concurrent process acquisition has one winner per binding and independent sessions', async t => {

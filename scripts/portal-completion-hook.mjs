@@ -49,7 +49,7 @@ export async function main(argv = process.argv.slice(2), input = process.stdin, 
     }
     let hookResult;
     if (!ack) {
-      hookResult = runCompletionHook({ host: values.host, input: native, inboxPath: values.inbox, environment }, services);
+      if (!wait) hookResult = runCompletionHook({ host: values.host, input: native, inboxPath: values.inbox, environment }, services);
       try {
         await autoWatchCompletion({ host: values.host, input: native, inboxPath: values.inbox,
           configPath: values['watch-config'], environment }, services);

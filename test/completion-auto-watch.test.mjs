@@ -33,8 +33,10 @@ async function fixture(t) {
   const config = { version: 1, cloudflared: process.execPath,
     routes: [{ origin, tools: ['mcp__ssh_test_submit', 'mcp__ssh_test_observe'] }] };
   await writeFile(configPath, JSON.stringify(config));
+  let now = 1000;
+  const openInbox = options => openCompletionInbox({ ...options, now: () => now });
   function db(consume) {
-    const inbox = openCompletionInbox({ filePath: inboxPath });
+    const inbox = openInbox({ filePath: inboxPath });
     try { return consume(inbox); } finally { inbox.close(); }
   }
   db(inbox => {
@@ -54,8 +56,9 @@ async function fixture(t) {
   }
   const run = (input = native(), extra = {}, services = {}) => autoWatchCompletion({
     host: 'codex', input, inboxPath, configPath, environment: {}, ...extra,
-  }, { spawn, ...services });
+  }, { spawn, openInbox, ...services });
   return { root, configPath, inboxPath, config, calls, db, run, get unrefs() { return unrefs; },
+    setNow(value) { now = value; },
     async configure(value) { await writeFile(configPath, JSON.stringify(value)); } };
 }
 
@@ -167,25 +170,36 @@ test('AW09 claims include the configured origin and do not merge separate owners
   assert.deepEqual(f.calls.map(call => option(call.args, '--origin')), [origin, 'https://second.example.test']);
 });
 
-test('AW10 a definite spawn failure remains claimed and is never automatically replayed', async t => {
+// Revision 2 distinguishes a read-only observer restart from replay of remote work.
+// Superseded permanent-claim oracles are preserved beside TEST-CASES.ko.md.
+test('AW10 a definite spawn failure releases its lease so the next hook can observe the same id', async t => {
   const f = await fixture(t);
   let attempts = 0;
   const spawn = () => { attempts++; throw Object.assign(Error(marker), { code: 'ENOENT' }); };
   await assert.rejects(f.run(native(), {}, { spawn }), error => safeError(error) && error.code === 'COMPLETION_AUTO_WATCH_START_FAILED');
-  assert.equal((await f.run(native(), {}, { spawn })).state, 'duplicate');
   assert.equal(attempts, 1);
+  assert.equal((await f.run()).state, 'started');
+  assert.equal((await f.run()).state, 'duplicate');
+  assert.equal(f.calls.length, 1);
+  assert.equal(f.calls[0].args[f.calls[0].args.indexOf('watch') + 1], id);
+  assert.equal(f.calls[0].args.includes('submit'), false);
 });
 
-test('AW10 an asynchronous spawn error is sanitized and is never automatically replayed', async t => {
+test('AW10 a pre-spawn asynchronous error is sanitized and releases its observation lease', async t => {
   const f = await fixture(t);
   let attempts = 0;
   const spawn = () => { attempts++; const child = new EventEmitter(); child.unref = () => {};
     queueMicrotask(() => child.emit('error', Object.assign(Error(marker), { code: 'EACCES' }))); return child; };
   await assert.rejects(f.run(native(), {}, { spawn }), error => safeError(error) && error.code === 'COMPLETION_AUTO_WATCH_START_FAILED');
-  assert.equal((await f.run()).state, 'duplicate'); assert.equal(attempts, 1); assert.equal(f.calls.length, 0);
+  assert.equal(attempts, 1);
+  assert.equal((await f.run()).state, 'started');
+  assert.equal((await f.run()).state, 'duplicate');
+  assert.equal(f.calls.length, 1);
+  assert.equal(f.calls[0].args[f.calls[0].args.indexOf('watch') + 1], id);
+  assert.equal(f.calls[0].args.includes('submit'), false);
 });
 
-test('AW11 a launched child with an unknown outcome cannot cause an automatic restart', async t => {
+test('AW11 an unknown child is suppressed until lease expiry then only the same id is observed again', async t => {
   const f = await fixture(t);
   let attempts = 0, child;
   const spawn = () => { attempts++; child = new EventEmitter(); child.unref = () => {};
@@ -195,6 +209,14 @@ test('AW11 a launched child with an unknown outcome cannot cause an automatic re
   child.emit('exit', 1, null);
   assert.equal((await f.run(native(), {}, { spawn })).state, 'duplicate');
   assert.equal(attempts, 1);
+  f.setNow(600999);
+  assert.equal((await f.run(native(), {}, { spawn })).state, 'duplicate'); assert.equal(attempts, 1);
+  f.setNow(601000);
+  assert.equal((await f.run()).state, 'started');
+  assert.equal((await f.run()).state, 'duplicate');
+  assert.equal(f.calls.length, 1);
+  assert.equal(f.calls[0].args[f.calls[0].args.indexOf('watch') + 1], id);
+  assert.equal(f.calls[0].args.includes('submit'), false);
 });
 
 test('AW12 watcher launch uses detached shell-free hidden execution and private output fds', async t => {

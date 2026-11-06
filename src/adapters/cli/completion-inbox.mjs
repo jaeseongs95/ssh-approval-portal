@@ -151,6 +151,12 @@ export function openCompletionInbox(options = {}) {
           PRAGMA user_version = 2;
         `);
       }
+      // Additive metadata only: retain schema2 so existing installed hook clients keep reading their inbox.
+        db.exec(`CREATE TABLE IF NOT EXISTS completion_watches (
+          binding_id TEXT NOT NULL REFERENCES completion_bindings(binding_id), watch_key TEXT NOT NULL,
+          owner_token TEXT NOT NULL, lease_until INTEGER NOT NULL CHECK(lease_until >= 0),
+          PRIMARY KEY(binding_id, watch_key)
+        ) STRICT;`);
       db.exec('COMMIT');
     } catch (error) { try { db.exec('ROLLBACK'); } catch {} throw error; }
     // Rollback journal keeps the metadata local without long-lived WAL sidecars.
@@ -206,6 +212,29 @@ export function openCompletionInbox(options = {}) {
   }
   const registration = row => row ? { bindingId: row.binding_id, host: row.host, sessionId: row.session_id } : null;
   return Object.freeze({
+    acquireWatch({ bindingId, watchKey, leaseMs = 600000 }) {
+      return call(() => {
+        binding(bindingId);
+        if (typeof watchKey !== 'string' || !/^[a-f0-9]{64}(?![\s\S])/.test(watchKey)) throw fail('COMPLETION_INBOX_INVALID_INPUT');
+        const time = timeWithLease(leaseMs);
+        return transaction(() => {
+          const current = db.prepare('SELECT lease_until FROM completion_watches WHERE binding_id = ? AND watch_key = ?').get(bindingId, watchKey);
+          if (current && current.lease_until > time) return { acquired: false };
+          const ownerToken = randomUUID();
+          db.prepare(`INSERT INTO completion_watches VALUES (?, ?, ?, ?)
+            ON CONFLICT(binding_id, watch_key) DO UPDATE SET owner_token = excluded.owner_token, lease_until = excluded.lease_until`)
+            .run(bindingId, watchKey, ownerToken, time + leaseMs);
+          return { acquired: true, ownerToken };
+        });
+      });
+    },
+    releaseWatch({ bindingId, watchKey, ownerToken }) {
+      return call(() => {
+        binding(bindingId); identifier(ownerToken);
+        return { released: db.prepare('UPDATE completion_watches SET lease_until = 0 WHERE binding_id = ? AND watch_key = ? AND owner_token = ?')
+          .run(bindingId, watchKey, ownerToken).changes === 1 };
+      });
+    },
     register(input) {
       return call(() => {
         const { host, sessionId } = session(input);

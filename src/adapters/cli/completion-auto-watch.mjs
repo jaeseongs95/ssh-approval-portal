@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { completionHookInput } from './completion-hook.mjs';
 import { defaultCompletionInboxPath, validateCompletionDeliveryTarget } from './completion-delivery.mjs';
 import { validateLocalPath } from './local-files.mjs';
+import { openCompletionInbox } from './completion-inbox.mjs';
 
 const fail = code => Object.assign(Error(code), { code });
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -67,7 +68,7 @@ async function readConfig(path) {
 }
 
 /** Native after-tool hook adapter. Starts the existing bounded client watch; no new service or MCP server. */
-export async function autoWatchCompletion({ host, input, inboxPath, configPath, environment = process.env }, { spawn = spawnProcess } = {}) {
+export async function autoWatchCompletion({ host, input, inboxPath, configPath, environment = process.env }, { spawn = spawnProcess, openInbox = openCompletionInbox } = {}) {
   if (!configPath) return ignored();
   if (!object(input) || input.error || !['PostToolUse', 'PostInvocation'].includes(input.hook_event_name)) return ignored();
   // PostInvocation has no operation payload; it remains an inbox-consumption boundary.
@@ -96,17 +97,15 @@ export async function autoWatchCompletion({ host, input, inboxPath, configPath, 
   const location = inboxPath ?? defaultCompletionInboxPath(environment);
   const binding = validateCompletionDeliveryTarget({ host, sessionId: observation.sessionId, inboxPath: location, environment });
   const fingerprint = createHash('sha256').update(JSON.stringify([binding.bindingId, route.origin, selected.operationId ?? selected.operationKey])).digest('hex');
-  const claimPath = join(dirname(location), `auto-watch-${fingerprint}.claim.json`);
-  let claim;
-  try { claim = await open(claimPath, 'wx', 0o600); }
-  catch (error) { if (error.code === 'EEXIST') return { state: 'duplicate', ...selected }; throw error; }
-  const logPath = join(dirname(location), `auto-watch-${fingerprint}.log`);
+  const inbox = openInbox({ filePath: location });
+  let lease;
+  try { lease = inbox.acquireWatch({ bindingId: binding.bindingId, watchKey: fingerprint }); }
+  finally { inbox.close(); }
+  if (!lease.acquired) return { state: 'duplicate', ...selected };
+  const logPath = join(dirname(location), `auto-watch-${fingerprint}-${lease.ownerToken}.log`);
   let log;
   try {
-    // Persist intent before spawn. A failed/uncertain spawn is never automatically reissued.
-    await claim.writeFile(JSON.stringify({ version: 1, state: 'claimed', origin: route.origin, host,
-      sessionId: observation.sessionId, ...selected, automaticRetry: false }) + '\n');
-    await claim.sync();
+    // A bounded lease suppresses concurrent readers, not future observation of the same remote operation.
     log = await open(logPath, 'wx', 0o600);
     const args = [fileURLToPath(new URL('../../../scripts/portal-files.mjs', import.meta.url)), '--origin', route.origin,
       '--cloudflared', config.cloudflared, 'watch',
@@ -118,6 +117,11 @@ export async function autoWatchCompletion({ host, input, inboxPath, configPath, 
     await new Promise((resolve, reject) => { child.once('spawn', resolve); child.once('error', reject); });
     child.unref();
     return { state: 'started', ...selected };
-  } catch { throw fail('COMPLETION_AUTO_WATCH_START_FAILED'); }
-  finally { await claim.close(); await log?.close(); }
+  } catch {
+    const inbox = openInbox({ filePath: location });
+    try { inbox.releaseWatch({ bindingId: binding.bindingId, watchKey: fingerprint, ownerToken: lease.ownerToken }); }
+    finally { inbox.close(); }
+    throw fail('COMPLETION_AUTO_WATCH_START_FAILED');
+  }
+  finally { await log?.close(); }
 }
