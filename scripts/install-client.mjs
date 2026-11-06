@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Standalone installer: only Node built-ins; authentication and PATH are untouched.
 import { readFileSync, writeFileSync, mkdirSync, lstatSync, realpathSync, openSync, closeSync, fsyncSync, renameSync, unlinkSync, constants } from 'node:fs';
-import { resolve, dirname, join, isAbsolute, parse, relative } from 'node:path';
+import { resolve, dirname, basename, join, isAbsolute, relative } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
@@ -68,7 +68,7 @@ function bundle(source, pin) {
     parent = parent.slice(0, parent.lastIndexOf('/'));
     if (seen.has(parent)) fail('INVALID_MANIFEST', 'Manifest file/directory paths overlap');
   }
-  for (const name of ['scripts/portal-files.mjs', 'scripts/portal-completion-hook.mjs', 'hooks/codex.json', 'hooks/claude-code.json', 'hooks/antigravity.json']) {
+  for (const name of ['LICENSE', 'scripts/portal-files.mjs', 'scripts/portal-completion-hook.mjs', 'hooks/codex.json', 'hooks/claude-code.json', 'hooks/antigravity.json']) {
     if (!files.has(name)) fail('INVALID_MANIFEST', `Required client file missing: ${name}`);
   }
   files.set('client-manifest.json', manifestBytes);
@@ -85,24 +85,88 @@ function executable(path, label) {
 function run(command, args, label) {
   const result = spawnSync(command, args, { encoding: 'utf8', windowsHide: true, timeout: 60_000, maxBuffer: 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
   // Do not echo third-party stdout/stderr: host output can contain private settings.
-  if (result.error || result.status !== 0) fail('HOST_COMMAND_FAILED', `${label} failed (${result.error?.code ?? `exit ${result.status}`}); inspect the host CLI directly`);
+  if (result.error || result.status !== 0) {
+    let reported;
+    for (const line of (result.stdout ?? '').trim().split('\n').reverse()) {
+      try { reported = JSON.parse(line); break; } catch { /* Only structured host codes are eligible for disclosure. */ }
+    }
+    const code = reported?.failureCode ?? reported?.code;
+    const safeCodes = new Set(['name_taken', 'not_found', 'plugin_not_found', 'marketplace_not_found', 'invalid_source', 'invalid_scope', 'not_installed', 'permission_denied', 'policy_blocked']);
+    const hostCode = typeof code === 'string' && safeCodes.has(code) ? code : null;
+    throw Object.assign(new Error(`${label} failed (${result.error?.code ?? `exit ${result.status}`}${hostCode ? `; hostCode=${hostCode}` : ''}); inspect the host CLI directly`),
+      { code: 'HOST_COMMAND_FAILED', ...(hostCode ? { hostCode } : {}) });
+  }
   return result.stdout;
 }
 
-function claudeRegistration(claude, version, target) {
+const marketplaceName = 'ssh-mcp-client-local';
+const pluginName = 'ssh-completion-client';
+const pluginId = `${pluginName}@${marketplaceName}`;
+const pluginMetadata = plugin => Object.fromEntries(['id', 'version', 'scope', 'enabled', 'readFromFolder', 'folderVersion'].map(key => [key, plugin[key] ?? null]));
+function hostList(claude, args, label, key) {
   let result;
-  try { result = JSON.parse(run(claude.command, ['plugin', 'list', '--json'], 'Claude plugin inventory')); }
-  catch (error) { if (error.code) throw error; fail('CLAUDE_INVENTORY_INVALID', 'Claude plugin list did not return JSON; no registration was attempted'); }
-  const plugins = Array.isArray(result) ? result : result?.plugins;
-  if (!Array.isArray(plugins)) fail('CLAUDE_INVENTORY_INVALID', 'Claude plugin list has an unsupported JSON shape');
-  const own = plugins.filter(plugin => plugin.id === 'ssh-completion-client@ssh-mcp-client-local' && plugin.scope === 'user');
+  try { result = JSON.parse(run(claude.command, args, label)); }
+  catch (error) { if (error.code) throw error; fail('CLAUDE_INVENTORY_INVALID', `${label} did not return JSON`); }
+  const list = Array.isArray(result) ? result : result?.[key];
+  if (!Array.isArray(list) || list.some(value => !object(value))) fail('CLAUDE_INVENTORY_INVALID', `${label} has an unsupported JSON shape`);
+  return list;
+}
+
+function ownedMarketplace(path, target) {
+  const installRoot = dirname(target);
+  if (typeof path !== 'string' || !isAbsolute(path) || basename(path) !== '.claude-marketplace'
+      || resolve(dirname(dirname(path))) !== resolve(installRoot)
+      || !/^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$/.test(basename(dirname(path)))) {
+    fail('CLAUDE_MARKETPLACE_CONFLICT', 'Existing marketplace is outside this installer root; its source will not be changed');
+  }
+  const data = readOptional(join(path, '.claude-plugin', 'marketplace.json'));
+  let catalog;
+  try { catalog = JSON.parse(data?.toString('utf8') ?? 'null'); } catch { /* Report the ownership boundary without source contents. */ }
+  if (catalog?.name !== marketplaceName || !Array.isArray(catalog.plugins) || catalog.plugins.length !== 1
+      || catalog.plugins[0]?.name !== pluginName || catalog.plugins[0]?.source !== './plugins/ssh-completion-client') {
+    fail('CLAUDE_MARKETPLACE_CONFLICT', 'Existing marketplace is not the dedicated one-plugin SSH client catalog');
+  }
+  const pluginBytes = readOptional(join(path, 'plugins', pluginName, '.claude-plugin', 'plugin.json'));
+  let manifest;
+  try { manifest = JSON.parse(pluginBytes?.toString('utf8') ?? 'null'); } catch { /* Ownership must be established before changing a source. */ }
+  if (manifest?.name !== pluginName || manifest.version !== basename(dirname(path))) fail('CLAUDE_MARKETPLACE_CONFLICT', 'Existing marketplace plugin metadata does not match its managed version directory');
+}
+
+function unrelatedPlugins(plugins) {
+  return plugins.filter(plugin => !(plugin.id === pluginId && plugin.scope === 'user'))
+    .map(pluginMetadata).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+}
+
+function claudeRegistration(claude, version, target) {
+  const plugins = hostList(claude, ['plugin', 'list', '--json'], 'Claude plugin inventory', 'plugins');
+  const marketplaces = hostList(claude, ['plugin', 'marketplace', 'list', '--json'], 'Claude marketplace inventory', 'marketplaces');
+  const own = plugins.filter(plugin => plugin.id === pluginId && plugin.scope === 'user');
   if (own.length > 1) fail('CLAUDE_INVENTORY_INVALID', 'Multiple user registrations exist for the SSH completion plugin');
   const plugin = own[0];
-  const expected = join(target, '.claude-marketplace', 'plugins', 'ssh-completion-client');
-  const same = plugin?.version === version && typeof plugin.readFromFolder === 'string' && resolve(plugin.readFromFolder) === resolve(expected);
-  if (plugin?.enabled === false && !same) fail('CLAUDE_PLUGIN_DISABLED', 'Existing SSH plugin is disabled; preserve that choice and perform the desired upgrade through the host CLI');
-  const metadata = plugin ? Object.fromEntries(['id', 'version', 'scope', 'enabled', 'readFromFolder'].map(key => [key, plugin[key] ?? null])) : null;
-  return { state: same ? (plugin.enabled === false ? 'already-registered-disabled' : 'already-registered') : null, metadata };
+  if (plugin && typeof plugin.enabled !== 'boolean') fail('CLAUDE_INVENTORY_INVALID', 'Existing plugin enabled state is not explicit');
+  const entries = marketplaces.filter(entry => entry.name === marketplaceName);
+  if (entries.length > 1) fail('CLAUDE_INVENTORY_INVALID', 'Multiple marketplace sources use the SSH client name');
+  const marketplace = entries[0];
+  if (marketplace) {
+    if (marketplace.source !== 'directory') fail('CLAUDE_MARKETPLACE_CONFLICT', 'The SSH marketplace name belongs to a non-directory source');
+    ownedMarketplace(marketplace.path, target);
+  } else if (plugin) fail('CLAUDE_INVENTORY_INVALID', 'The installed SSH plugin has no corresponding marketplace source');
+  const expected = join(target, '.claude-marketplace', 'plugins', pluginName);
+  const same = plugin?.version === version && (plugin.folderVersion == null || plugin.folderVersion === version)
+    && typeof plugin.readFromFolder === 'string' && resolve(plugin.readFromFolder) === resolve(expected)
+    && marketplace && resolve(marketplace.path) === resolve(join(target, '.claude-marketplace'));
+  if (!same && plugins.some(item => typeof item.id === 'string' && item.id.endsWith('@' + marketplaceName)
+      && (item.id !== pluginId || item.scope !== 'user'))) {
+    fail('CLAUDE_SCOPE_CONFLICT', 'Another plugin or installation scope shares this marketplace; its source will not be changed');
+  }
+  if (plugin && (!marketplace || typeof plugin.readFromFolder !== 'string'
+      || resolve(plugin.readFromFolder) !== resolve(join(marketplace.path, 'plugins', pluginName)))) {
+    fail('CLAUDE_MARKETPLACE_CONFLICT', 'Existing SSH plugin source does not match the owned marketplace');
+  }
+  const metadata = plugin ? pluginMetadata(plugin) : null;
+  return { state: same ? (plugin.enabled === false ? 'already-registered-disabled' : 'already-registered') : null,
+    metadata, marketplace: marketplace ? { name: marketplace.name, source: marketplace.source, path: marketplace.path } : null,
+    unrelatedSha256: hash(json(unrelatedPlugins(plugins))), expectedEnabled: plugin ? plugin.enabled : true };
 }
 
 function shellWord(value) {
@@ -217,6 +281,8 @@ function generatedFiles(files, options, version, target, node) {
     }
     add(prefix + '.claude-plugin/plugin.json', json({ name: 'ssh-completion-client', version, description: 'SSH MCP client native completion hooks', author: { name: 'SSH MCP client' }, hooks: './hooks/claude-code.json' }));
     add(prefix + 'hooks/claude-code.json', json(hooks));
+    add(prefix + 'LICENSE', files.get('LICENSE'));
+    add(prefix + 'README.md', `# SSH completion client ${version}\n\nNative completion hooks for this installed SSH MCP client. Use the documented host reload and trust controls; credentials are not included.\n`);
     // Keep the established marketplace identity so an upgrade replaces this plugin only.
     add('.claude-marketplace/.claude-plugin/marketplace.json', json({ name: 'ssh-mcp-client-local', owner: { name: 'Local SSH MCP client' }, metadata: { description: 'Installed SSH MCP client native hooks' }, plugins: [{ name: 'ssh-completion-client', source: './plugins/ssh-completion-client', version }] }));
   }
@@ -287,7 +353,10 @@ function main(argv) {
   if (options.hosts.includes('claude-code')) {
     if (!options.claude) fail('CLAUDE_PATH_REQUIRED', '--claude must name the existing absolute Claude Code CLI executable');
     const command = executable(options.claude, 'Claude Code');
-    claude = { command, args: ['plugin', 'install', 'ssh-completion-client', '--marketplace', join(target, '.claude-marketplace'), '--scope', 'user', '--json'] };
+    claude = { command,
+      sourceArgs: ['plugin', 'marketplace', 'add', join(target, '.claude-marketplace'), '--scope', 'user', '--json'],
+      installArgs: ['plugin', 'install', pluginId, '--scope', 'user', '--json'],
+      updateArgs: ['plugin', 'update', pluginId, '--scope', 'user', '--json'] };
   }
   safePath(target);
   let reuse = false;
@@ -299,10 +368,12 @@ function main(argv) {
     }
     reuse = true;
   }
+  // Only official read-only inventories participate in a reviewed Claude plan.
+  const claudeBefore = claude ? claudeRegistration(claude, manifest.version, target) : null;
   const plan = { schemaVersion: '1.0.0', mode: options.apply ? 'apply' : 'plan', version: manifest.version, source, manifestSha256: options['manifest-sha256'], target, platform: process.platform, node, nodeVersion, reuse,
     files: [...files].map(([path, data]) => ({ path, size: data.length, sha256: hash(data) })),
     configChanges: changes.map(change => ({ host: change.host, path: change.path, changed: change.changed, beforeSha256: change.before ? hash(change.before) : null, afterSha256: hash(change.after) })),
-    claude, claudeRecovery: claude ? 'Only selected official plugin list metadata is backed up during apply; raw Claude settings, registries, and authentication stores are never read.' : null,
+    claude, claudeBefore, claudeRecovery: claude ? 'Only selected official plugin/marketplace metadata is backed up during apply; raw Claude settings, registries, and authentication stores are never read.' : null,
     reload: { automatic: false, codex: 'Start a new session; retain the host hook trust/enable requirements.', 'claude-code': 'Run /reload-plugins in Claude Code or start a new session; preserve host trust policy.', antigravity: 'Reload the Native application or start a new session; inspect Settings > Customizations > Hooks and preserve trust requirements.' },
     noAuthenticationOrPathChanges: true };
   // The plan pin describes the intended state independently of plan/apply mode.
@@ -314,13 +385,14 @@ function main(argv) {
   let lock;
   try { lock = openSync(lockPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600); }
   catch (error) { if (error.code === 'EEXIST') fail('INSTALL_BUSY', `Installation lock exists: ${lockPath}; verify the owner process before manual recovery`); throw error; }
-  const progress = { target, copied: false, configured: [], claude: claude ? 'not-started' : 'not-requested', backup: null };
+  const progress = { target, copied: false, configured: [], claude: claude ? 'not-started' : 'not-requested', claudeSteps: [], backup: null };
   try {
     writeFileSync(lock, json({ pid: process.pid, target }));
     for (const change of changes) unchanged(change);
     const inventory = claude ? claudeRegistration(claude, manifest.version, target) : null;
+    if (claude && hash(json(inventory)) !== hash(json(claudeBefore))) fail('CLAUDE_SOURCE_CHANGED', 'Official plugin or marketplace inventory changed after planning; inspect a new plan before applying');
     const registered = inventory?.state;
-    if (registered) progress.claude = registered;
+    if (claude) { progress.claudeSteps.push('inventory-verified'); progress.claude = registered ?? 'inventory-verified'; }
     if (!reuse) {
       mkdirSync(target, { mode: 0o700 });
       for (const [name, data] of files) writeNew(join(target, ...name.split('/')), data, name.endsWith('.sh') ? 0o700 : 0o600);
@@ -335,19 +407,32 @@ function main(argv) {
         unchanged(change);
         if (change.before) writeNew(join(progress.backup, change.host.replaceAll('/', '-') + '.before'), change.before);
       }
-      if (claude) writeNew(join(progress.backup, 'claude-plugin.before.json'), json({ registration: inventory.metadata,
-        recovery: 'Use the previous readFromFolder source with the official plugin install --marketplace command; preserve scope and enabled state. No raw Claude configuration was read or copied.' }));
+      if (claude) writeNew(join(progress.backup, 'claude-plugin.before.json'), json({ registration: inventory.metadata, marketplace: inventory.marketplace, unrelatedPluginsSha256: inventory.unrelatedSha256,
+        recovery: 'Use official plugin marketplace add PREVIOUS_SOURCE --scope user, then qualified plugin update --scope user; preserve enabled state. No raw Claude configuration was read or copied.' }));
       writeNew(join(progress.backup, 'plan.json'), json({ ...plan, planSha256 }));
     }
     for (const change of pending) { replaceConfig(change); progress.configured.push(change.host); }
     if (claude && !registered) {
-      progress.claude = 'started';
-      run(claude.command, claude.args, 'Claude official plugin installation (requires >=2.1.292)');
-      progress.claude = 'official-cli-completed';
+      progress.claude = 'marketplace-add-started';
+      run(claude.command, claude.sourceArgs, 'Claude official marketplace source registration');
+      progress.claudeSteps.push('marketplace-added');
+      const update = Boolean(inventory.metadata);
+      progress.claude = update ? 'plugin-update-started' : 'plugin-install-started';
+      run(claude.command, update ? claude.updateArgs : claude.installArgs, update ? 'Claude official qualified plugin update' : 'Claude official qualified plugin installation');
+      progress.claudeSteps.push(update ? 'plugin-updated' : 'plugin-installed');
+    }
+    if (claude) {
+      progress.claude = 'post-inventory-started';
+      const after = claudeRegistration(claude, manifest.version, target);
+      if (!after.state || after.metadata.enabled !== inventory.expectedEnabled || after.unrelatedSha256 !== inventory.unrelatedSha256) {
+        fail('CLAUDE_POST_INSTALL_MISMATCH', 'Official inventory did not confirm the expected version, source, scope, enabled state, and unchanged unrelated plugins');
+      }
+      progress.claude = registered ?? 'verified';
+      progress.claudeSteps.push('post-inventory-verified');
     }
     for (const [name, data] of files) if (!readOptional(join(target, ...name.split('/')))?.equals(data)) fail('POST_INSTALL_MISMATCH', `Installed file changed: ${name}`);
     for (const change of changes) if (!readOptional(change.path)?.equals(change.after)) fail('POST_INSTALL_MISMATCH', `Host configuration changed: ${change.host}`);
-    process.stdout.write(JSON.stringify({ ...plan, planSha256, installed: true, progress, verification: { installedFiles: files.size, hostConfigFiles: changes.length, liveHostHooks: 'not-verified', claudeRegistration: claude ? 'official-cli-exit-0; verify plugin list/details and reload' : 'not-requested' } }) + '\n');
+    process.stdout.write(JSON.stringify({ ...plan, planSha256, installed: true, progress, verification: { installedFiles: files.size, hostConfigFiles: changes.length, liveHostHooks: 'not-verified', claudeRegistration: claude ? 'official-inventory-version-source-user-scope-enabled-and-unrelated-plugins-verified; reload required' : 'not-requested' } }) + '\n');
   } catch (error) {
     error.progress = progress;
     throw error;
@@ -359,6 +444,6 @@ function main(argv) {
 
 try { main(process.argv.slice(2)); }
 catch (error) {
-  process.stderr.write(JSON.stringify({ ok: false, error: { code: error.code ?? 'INSTALL_FAILED', message: error.message }, ...(error.progress ? { partialApply: error.progress, recovery: 'No automatic rollback. Preserve the version directory and backup; inspect the reported completed steps before retrying.' } : {}) }) + '\n');
+  process.stderr.write(JSON.stringify({ ok: false, error: { code: error.code ?? 'INSTALL_FAILED', message: error.message, ...(error.hostCode ? { hostCode: error.hostCode } : {}) }, ...(error.progress ? { partialApply: error.progress, recovery: 'No automatic rollback. Preserve the version directory and backup; inspect the reported completed steps before retrying.' } : {}) }) + '\n');
   process.exitCode = 1;
 }

@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 
 const installer = fileURLToPath(new URL('../scripts/install-client.mjs', import.meta.url));
 const repository = fileURLToPath(new URL('../', import.meta.url));
@@ -23,6 +24,7 @@ function fixture(t) {
   const source = join(root, 'source'), home = join(root, 'home'), programs = join(root, 'programs 한글');
   mkdirSync(home, { recursive: true });
   const files = new Map([
+    ['LICENSE', Buffer.from('Fixture license\n')],
     ['scripts/portal-files.mjs', Buffer.from('console.log(JSON.stringify(process.argv.slice(2)));\n')],
     ['scripts/portal-completion-hook.mjs', Buffer.from('console.log("fixture hook");\n')],
     ...['codex', 'claude-code', 'antigravity'].map(host => [`hooks/${host}.json`, readFileSync(join(repository, 'hooks', `${host}.json`))]),
@@ -219,17 +221,21 @@ test('I12 refuses an existing installation lock and preserves it', t => {
   assert.equal(existsSync(f.target), false);
 });
 
-test('I13 Claude plan uses official registration and absolute hook arguments without running Claude', t => {
-  const f = fixture(t);
+test('I13 Claude plan pins official read-only metadata and planned qualified commands without host mutation', t => {
+  const f = claudeFixture(t, { fresh: true });
   // Deliberately unreadable-as-files: plan must not inspect raw Claude settings/registries.
   for (const path of ['settings.json', 'plugins/known_marketplaces.json', 'plugins/installed_plugins.json']) mkdirSync(join(f.home, '.claude', path), { recursive: true });
-  const result = ok(f.run(['--hosts', 'claude-code', '--claude', process.execPath]));
-  assert.deepEqual(result.claude.args, ['plugin', 'install', 'ssh-completion-client', '--marketplace', join(f.target, '.claude-marketplace'), '--scope', 'user', '--json']);
+  const result = ok(f.runClaude({ plan: true }));
+  assert.deepEqual(result.claude.sourceArgs, ['plugin', 'marketplace', 'add', join(f.target, '.claude-marketplace'), '--scope', 'user', '--json']);
+  assert.deepEqual(result.claude.installArgs, ['plugin', 'install', 'ssh-completion-client@ssh-mcp-client-local', '--scope', 'user', '--json']);
+  assert.deepEqual(result.claude.updateArgs, ['plugin', 'update', 'ssh-completion-client@ssh-mcp-client-local', '--scope', 'user', '--json']);
   assert.equal(result.reload.automatic, false);
   assert.equal('claudeBackupFiles' in result, false);
   assert.match(result.claudeRecovery, /raw Claude settings.*never read/);
-  assert.equal(existsSync(f.programs), false);
+  assert.equal(existsSync(f.target), false);
   assert.equal(result.files.some(file => file.path === '.claude-marketplace/plugins/ssh-completion-client/hooks/claude-code.json'), true);
+  assert.deepEqual(f.state().calls, [['list', '--json'], ['marketplace', 'list', '--json']]);
+  assert.equal(result.claudeBefore.metadata, null);
 });
 
 test('reviewed plan pin detects a changed source setting before any installation', t => {
@@ -249,4 +255,178 @@ test('host names are explicit and Gemini CLI is not accepted as Native Antigravi
   const f = fixture(t);
   error(f.run(['--hosts', 'gemini', '--apply']), 'INVALID_HOST');
   assert.equal(existsSync(f.programs), false);
+});
+
+function claudeFixture(t, { fresh = false, enabled = true, ...overrides } = {}) {
+  const f = fixture(t), id = 'ssh-completion-client@ssh-mcp-client-local';
+  const source = join(f.programs, '2.2.1', '.claude-marketplace');
+  save(join(source, '.claude-plugin', 'marketplace.json'), json({ name: 'ssh-mcp-client-local', plugins: [{ name: 'ssh-completion-client', source: './plugins/ssh-completion-client' }] }));
+  save(join(source, 'plugins', 'ssh-completion-client', '.claude-plugin', 'plugin.json'), json({ name: 'ssh-completion-client', version: '2.2.1' }));
+  const unrelated = { id: 'unrelated@another-marketplace', version: '7.0.0', scope: 'project', enabled: false, readFromFolder: null, folderVersion: null };
+  const own = { id, version: '2.2.1', scope: 'user', enabled, readFromFolder: join(source, 'plugins', 'ssh-completion-client'), folderVersion: '2.2.1' };
+  const statePath = join(f.root, 'claude-fixture-state.json');
+  save(statePath, json({ plugins: fresh ? [unrelated] : [unrelated, own], marketplaces: fresh ? [] : [{ name: 'ssh-mcp-client-local', source: 'directory', path: source, installLocation: source }], calls: [], ...overrides }));
+  const shim = join(f.root, 'claude-fixture-preload.mjs');
+  save(shim, `import { readFileSync, writeFileSync } from 'node:fs';
+import { join, basename } from 'node:path';
+if (basename(process.argv[1] ?? '') === 'plugin') {
+  const path = process.env.SSH_INSTALL_TEST_STATE;
+  const state = JSON.parse(readFileSync(path, 'utf8'));
+  const args = process.argv.slice(2), id = 'ssh-completion-client@ssh-mcp-client-local';
+  state.calls.push(args);
+  function output(body, code = 0) { writeFileSync(path, JSON.stringify(state)); process.stdout.write(JSON.stringify(body) + '\\n'); process.exit(code); }
+  if (args[0] === 'list') {
+    state.listCalls = (state.listCalls ?? 0) + 1;
+    if (state.changeAtList === state.listCalls) state.plugins.find(item => item.id === id).enabled = false;
+    output(state.plugins);
+  }
+  if (args[0] === 'marketplace' && args[1] === 'list') output(state.marketplaces);
+  const stage = args[0] === 'marketplace' ? 'add' : args[0];
+  if (state.failStage === stage) output({ command: stage, outcome: 'failed', failureCode: state.failCode ?? 'name_taken', message: 'secret-fixture-value' }, 1);
+  if (stage === 'add') {
+    const source = args[2];
+    state.marketplaces = [{ name: 'ssh-mcp-client-local', source: 'directory', path: source, installLocation: source }];
+    const manifest = JSON.parse(readFileSync(join(source, 'plugins', 'ssh-completion-client', '.claude-plugin', 'plugin.json'), 'utf8'));
+    for (const plugin of state.plugins) if (plugin.id === id) { plugin.readFromFolder = join(source, 'plugins', 'ssh-completion-client'); plugin.folderVersion = manifest.version; }
+    output({ command: 'marketplace-add', outcome: 'ok' });
+  }
+  if (stage === 'update' || stage === 'install') {
+    const source = state.marketplaces.find(item => item.name === 'ssh-mcp-client-local').path;
+    const manifest = JSON.parse(readFileSync(join(source, 'plugins', 'ssh-completion-client', '.claude-plugin', 'plugin.json'), 'utf8'));
+    const previous = state.plugins.find(item => item.id === id && item.scope === 'user');
+    if (!state.skipUpdate) {
+      state.plugins = state.plugins.filter(item => !(item.id === id && item.scope === 'user'));
+      state.plugins.push({ id, version: manifest.version, scope: 'user', enabled: previous?.enabled ?? true, readFromFolder: join(source, 'plugins', 'ssh-completion-client'), folderVersion: manifest.version });
+    }
+    if (state.mutateOther) state.plugins[0].enabled = !state.plugins[0].enabled;
+    output({ command: stage, outcome: 'ok' });
+  }
+  output({ failureCode: 'unsupported_fixture_command' }, 1);
+}
+`);
+  const run = ({ plan = false, args = [] } = {}) => f.run(['--hosts', 'claude-code', '--claude', process.execPath, ...(plan ? [] : ['--apply']), ...args], { env: { NODE_OPTIONS: '--import=' + pathToFileURL(shim).href, SSH_INSTALL_TEST_STATE: statePath } });
+  return { ...f, source, statePath, unrelated, own, runClaude: run, state: () => parseJSON(statePath) };
+}
+
+test('U01 source add then qualified user update verifies new version and preserves unrelated project plugin', t => {
+  const f = claudeFixture(t);
+  const result = ok(f.runClaude()), state = f.state();
+  assert.deepEqual(state.calls, [['list', '--json'], ['marketplace', 'list', '--json'], ['list', '--json'], ['marketplace', 'list', '--json'], ['marketplace', 'add', join(f.target, '.claude-marketplace'), '--scope', 'user', '--json'], ['update', 'ssh-completion-client@ssh-mcp-client-local', '--scope', 'user', '--json'], ['list', '--json'], ['marketplace', 'list', '--json']]);
+  assert.deepEqual(state.plugins.find(plugin => plugin.id === f.unrelated.id), f.unrelated);
+  assert.equal(result.progress.claude, 'verified');
+  assert.deepEqual(result.progress.claudeSteps, ['inventory-verified', 'marketplace-added', 'plugin-updated', 'post-inventory-verified']);
+  const backup = parseJSON(join(result.progress.backup, 'claude-plugin.before.json'));
+  assert.equal(backup.registration.version, '2.2.1');
+  assert.equal(backup.marketplace.path, f.source);
+  assert.equal(readFileSync(join(f.target, '.claude-marketplace/plugins/ssh-completion-client/LICENSE'), 'utf8'), 'Fixture license\n');
+});
+
+test('U02 exact registration is reused without a host mutation or another backup', t => {
+  const f = claudeFixture(t);
+  ok(f.runClaude());
+  const backups = readdirSync(join(f.programs, 'backups'));
+  const before = f.state().calls.length;
+  const result = ok(f.runClaude());
+  assert.equal(result.progress.claude, 'already-registered');
+  assert.equal(result.progress.backup, null);
+  assert.deepEqual(f.state().calls.slice(before), [['list', '--json'], ['marketplace', 'list', '--json'], ['list', '--json'], ['marketplace', 'list', '--json'], ['list', '--json'], ['marketplace', 'list', '--json']]);
+  assert.deepEqual(readdirSync(join(f.programs, 'backups')), backups);
+});
+
+test('U03 disabled user selection survives source upgrade and official update', t => {
+  const f = claudeFixture(t, { enabled: false });
+  ok(f.runClaude());
+  assert.equal(f.state().plugins.find(plugin => plugin.id === f.own.id).enabled, false);
+  assert.equal(f.state().plugins.find(plugin => plugin.id === f.own.id).version, '2.3.0');
+});
+
+test('U07 fresh registration adds source before qualified user install', t => {
+  const f = claudeFixture(t, { fresh: true });
+  const result = ok(f.runClaude());
+  assert.deepEqual(f.state().calls[5], ['install', 'ssh-completion-client@ssh-mcp-client-local', '--scope', 'user', '--json']);
+  assert.deepEqual(result.progress.claudeSteps, ['inventory-verified', 'marketplace-added', 'plugin-installed', 'post-inventory-verified']);
+  assert.equal(f.state().plugins.find(plugin => plugin.id === f.own.id).enabled, true);
+});
+
+test('U04 existing foreign source is never retargeted even when it has no installed plugin', t => {
+  const f = claudeFixture(t, { fresh: true, marketplaces: [{ name: 'ssh-mcp-client-local', source: 'directory', path: join(tmpdir(), 'foreign-catalog') }] });
+  error(f.runClaude(), 'CLAUDE_MARKETPLACE_CONFLICT');
+  assert.deepEqual(f.state().calls, [['list', '--json'], ['marketplace', 'list', '--json']]);
+  assert.equal(existsSync(f.target), false);
+});
+
+for (const scope of ['project', 'local', 'managed']) {
+  test(`U04 refuses a source change shared with ${scope} scope`, t => {
+    const f = claudeFixture(t), state = f.state();
+    state.plugins.push({ ...f.own, scope }); save(f.statePath, json(state));
+    error(f.runClaude(), 'CLAUDE_SCOPE_CONFLICT');
+    assert.equal(f.state().calls.length, 2);
+    assert.equal(existsSync(f.target), false);
+  });
+}
+
+test('U08 dedicated catalog guard rejects another plugin before source mutation', t => {
+  const f = claudeFixture(t), path = join(f.source, '.claude-plugin/marketplace.json');
+  const body = parseJSON(path); body.plugins.push({ name: 'other-plugin', source: './plugins/other-plugin' }); save(path, json(body));
+  error(f.runClaude(), 'CLAUDE_MARKETPLACE_CONFLICT');
+  assert.equal(f.state().calls.length, 2);
+  assert.equal(existsSync(f.target), false);
+});
+
+for (const failStage of ['add', 'update']) {
+  test(`U06 ${failStage} failure preserves a safe hostCode and exact partial stage without host output`, t => {
+    const f = claudeFixture(t, { failStage, failCode: 'name_taken' });
+    const result = f.runClaude(), body = error(result, 'HOST_COMMAND_FAILED');
+    assert.equal(body.error.hostCode, 'name_taken');
+    assert.equal(body.partialApply.claude, failStage === 'add' ? 'marketplace-add-started' : 'plugin-update-started');
+    assert.equal(body.partialApply.claudeSteps.includes('marketplace-added'), failStage === 'update');
+    assert.equal((result.stdout + result.stderr).includes('secret-fixture-value'), false);
+  });
+}
+
+for (const failCode of ['bad\nsecret-fixture-value', 'SecretFixtureValue']) {
+  test('U06 non-allowlisted host code is suppressed rather than exposing host output', t => {
+    const f = claudeFixture(t, { failStage: 'add', failCode });
+    const result = f.runClaude(), body = error(result, 'HOST_COMMAND_FAILED');
+    assert.equal('hostCode' in body.error, false);
+    assert.equal(result.stderr.includes('secret-fixture-value'), false);
+    assert.equal(result.stderr.includes('SecretFixtureValue'), false);
+  });
+}
+
+for (const state of [{ skipUpdate: true }, { mutateOther: true }]) {
+  test(`U06 official exit zero is not success if final inventory differs: ${Object.keys(state)[0]}`, t => {
+    const f = claudeFixture(t, state);
+    const body = error(f.runClaude(), 'CLAUDE_POST_INSTALL_MISMATCH');
+    assert.equal(body.partialApply.claude, 'post-inventory-started');
+    assert.equal(body.partialApply.claudeSteps.includes('plugin-updated'), true);
+  });
+}
+
+for (const change of ['own-enabled', 'unrelated-enabled']) {
+  test(`reviewed Claude plan rejects ${change} metadata changes before target or source mutation`, t => {
+    const f = claudeFixture(t), plan = ok(f.runClaude({ plan: true }));
+    const state = f.state();
+    state.plugins.find(item => item.id === (change === 'own-enabled' ? f.own.id : f.unrelated.id)).enabled = true;
+    if (change === 'own-enabled') state.plugins.find(item => item.id === f.own.id).enabled = false;
+    save(f.statePath, json(state));
+    error(f.runClaude({ args: ['--expect-plan', plan.planSha256] }), 'PLAN_CHANGED');
+    assert.equal(existsSync(f.target), false);
+    assert.deepEqual(f.state().calls, [['list', '--json'], ['marketplace', 'list', '--json'], ['list', '--json'], ['marketplace', 'list', '--json']]);
+  });
+}
+
+test('Claude metadata changed at the apply lock boundary stops before copying or source mutation', t => {
+  const f = claudeFixture(t, { changeAtList: 2 });
+  error(f.runClaude(), 'CLAUDE_SOURCE_CHANGED');
+  assert.equal(existsSync(f.target), false);
+  assert.equal(f.state().calls.some(args => args.includes('add') || args.includes('update') || args.includes('install')), false);
+});
+
+test('another installed plugin using the same marketplace identity blocks a source change', t => {
+  const f = claudeFixture(t), state = f.state();
+  state.plugins.push({ ...f.own, id: 'other-plugin@ssh-mcp-client-local' }); save(f.statePath, json(state));
+  error(f.runClaude(), 'CLAUDE_SCOPE_CONFLICT');
+  assert.equal(existsSync(f.target), false);
+  assert.equal(f.state().calls.length, 2);
 });
