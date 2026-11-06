@@ -6,10 +6,12 @@ import { fstatSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { Readable } from 'node:stream';
 import { autoWatchCompletion } from '../src/adapters/cli/completion-auto-watch.mjs';
 import { openCompletionInbox } from '../src/adapters/cli/completion-inbox.mjs';
 import { runCompletionHook, acknowledgeCompletion } from '../src/adapters/cli/completion-hook.mjs';
 import { main as portalFiles } from '../scripts/portal-files.mjs';
+import { main as completionHook } from '../scripts/portal-completion-hook.mjs';
 
 // Written before execution: ../auto-hook-20261106-r1/TEST-CASES.ko.md.
 // Product execution is permitted only on TEST Node24. Fake spawn removes the host,
@@ -308,3 +310,44 @@ test('AW16 Antigravity native call wrapper watches its existing stable operation
   assert.equal(option(args, '--host'), 'antigravity'); assert.equal(option(args, '--session'), sessionA);
   assert.equal(option(args, '--origin'), origin); assert.equal(JSON.stringify(f.calls).includes(marker), false);
 });
+
+// These entry-point oracles detected removal of the native auto-watch connection:
+// TEST sensitivity green59 -> mutation56pass/3fail -> restored59 (candidate a0d231b).
+// Fake spawn verifies wiring and arguments; actual host/model receipt remains outside this test.
+for (const host of ['codex', 'claude-code', 'antigravity']) {
+  test(`AW-WIRING ${host} native hook starts its configured read-only observation`, async t => {
+    const root = await mkdtemp(join(tmpdir(), 'auto-watch-wiring-'));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const inbox = join(root, 'private', 'completion.sqlite'), config = join(root, 'watch.json');
+    const tool = host === 'antigravity' ? 'mcp__ssh-test__submit' : 'mcp__ssh_test_submit';
+    const session = sessionA, operationKey = 'stable-operation-key-1';
+    await writeFile(config, JSON.stringify({ version: 1, cloudflared: process.execPath,
+      routes: [{ origin: 'https://owner.example.test', tools: [tool] }] }));
+    const native = host === 'antigravity' ? { hook_event_name: 'PostToolUse', conversationId: session,
+      toolCall: { name: 'call_mcp_tool', args: { ServerName: 'ssh-test', ToolName: 'submit',
+        Arguments: { operationKey, target: 'default', expectedTargetRevision: revision } } } }
+      : { hook_event_name: 'PostToolUse', session_id: session, tool_name: tool, tool_input: {},
+        tool_response: { structuredContent: { contractVersion: '2.0', ok: true, error: null,
+          data: { id, state: 'queued', targetId: 'default', targetRevision: revision } } } };
+    const calls = [];
+    let stdout = '', stderr = '';
+    const code = await completionHook(['--host', host, '--inbox', inbox, '--watch-config', config],
+      Readable.from([JSON.stringify(native)]), { write(value) { stdout += value; } },
+      { write(value) { stderr += value; } }, {}, { spawn(command, args, options) {
+        calls.push({ command, args, options });
+        const child = new EventEmitter(); child.unref = () => {};
+        queueMicrotask(() => child.emit('spawn')); return child;
+      } });
+    assert.equal(code, 0, 'native hook entry point must run successfully');
+    assert.equal(stderr, '', 'valid native input must have no setup or runner error');
+    assert.equal(calls.length, 1, 'NATIVE_HOOK_AUTO_WATCH_CONNECTION_REQUIRED: expected exactly one observer spawn');
+    const args = calls[0].args;
+    assert.equal(args[args.indexOf('--session') + 1], session);
+    assert.equal(args[args.indexOf('--host') + 1], host);
+    assert.equal(args.includes('watch'), true);
+    assert.equal(args.includes('submit'), false);
+    if (host === 'antigravity') assert.equal(args[args.indexOf('--operation-key') + 1], operationKey);
+    else assert.equal(args[args.indexOf('watch') + 1], id);
+    assert.deepEqual(JSON.parse(stdout), {});
+  });
+}
