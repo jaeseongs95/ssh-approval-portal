@@ -12,7 +12,7 @@ import stat
 import tarfile
 import zipfile
 
-CLIENT_VERSION = '2.2.1'
+CLIENT_VERSION = json.loads((Path(__file__).resolve().parents[1] / 'package.json').read_text(encoding='utf-8'))['version']
 PREFIX = 'ssh-approval-portal-client-' + CLIENT_VERSION
 IMPORT = re.compile(r'''^\s*(?:import\s+(?:[^;]*?\s+from\s+)?|export\s+[^;]*?\s+from\s+)['"]([^'"]+)['"]''', re.MULTILINE)
 
@@ -24,7 +24,7 @@ def unsafe(path):
 def source_files(root):
     """Only statically imported in-repository modules/data; no directory crawling."""
     root = Path(root).resolve()
-    pending = ['scripts/portal-files.mjs', 'scripts/portal-completion-hook.mjs']
+    pending = ['scripts/portal-files.mjs', 'scripts/portal-completion-hook.mjs', 'scripts/install-client.mjs']
     files = {}
     while pending:
         name = pending.pop()
@@ -64,17 +64,17 @@ def encoded(value):
 def package(root, output):
     root, output = Path(root).resolve(), Path(output).resolve()
     files = source_files(root)
-    for name in ['LICENSE', 'docs/client-files.ko.md', 'hooks/codex.json', 'hooks/claude-code.json', 'hooks/antigravity.json', '.codex-plugin/plugin.json', '.claude-plugin/plugin.json']:
+    for name in ['LICENSE', 'docs/client-files.ko.md', 'docs/client-install.ko.md', 'hooks/codex.json', 'hooks/claude-code.json', 'hooks/antigravity.json', '.codex-plugin/plugin.json', '.claude-plugin/plugin.json']:
         path = root / name
         if not path.is_file() or unsafe(path) or any(unsafe(root / p) for p in path.relative_to(root).parents):
             raise ValueError('Missing or unsafe client documentation: ' + name)
         files[name] = path.read_bytes()
-    files['README.ko.md'] = files['docs/client-files.ko.md']
+    files['README.ko.md'] = files['docs/client-files.ko.md'] + '\n\n설치 자동화: [설치 및 호스트 등록](docs/client-install.ko.md)\n'.encode('utf-8')
     files['package.json'] = encoded({'name': 'ssh-approval-portal-client', 'version': CLIENT_VERSION, 'private': True,
         'type': 'module', 'description': 'Owner-authenticated PC file staging client; one existing remote MCP connection.',
         'engines': {'node': '>=24.2.0 <25'}, 'dependencies': {}})
     manifest = {'schemaVersion': '1.0.0', 'name': 'ssh-approval-portal-client', 'version': CLIENT_VERSION,
-        'entrypoint': 'scripts/portal-files.mjs', 'runtime': 'Preinstalled Node.js >=24.2.0 <25; no npm install required.',
+        'entrypoint': 'scripts/portal-files.mjs', 'installer': 'scripts/install-client.mjs', 'runtime': 'Preinstalled Node.js >=24.2.0 <25; no npm install required.',
         'authentication': 'Existing trusted cloudflared executable and owner login cache; no credential or executable is bundled.',
         'files': [{'path': name, 'size': len(data), 'sha256': hashlib.sha256(data).hexdigest()} for name, data in sorted(files.items())]}
     files['client-manifest.json'] = encoded(manifest)

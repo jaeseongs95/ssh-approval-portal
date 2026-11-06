@@ -12,7 +12,9 @@ def package_release(root, output, *, release=False):
     version = json.loads((root / 'package.json').read_text(encoding='utf-8'))['version']
     server = runpy.run_path(str(root / 'scripts/package.py'))
     client = runpy.run_path(str(root / 'scripts/package-client.py'))
-    if client['CLIENT_VERSION'] != version:
+    plugin_versions = [json.loads((root / name / 'plugin.json').read_text(encoding='utf-8'))['version']
+                       for name in ('.claude-plugin', '.codex-plugin')]
+    if client['CLIENT_VERSION'] != version or any(plugin_version != version for plugin_version in plugin_versions):
         raise ValueError('Server and client versions must match')
     # Refuse an existing output, including a link. Never overwrite an older package.
     output.mkdir(parents=True, exist_ok=False)
