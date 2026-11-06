@@ -257,7 +257,14 @@ export function createDesktopPanel({ document, api, getTarget, i18n, isSignedOut
   // Pause background capture while an owner prepares a private one-time input.
   const polling = timers.setInterval(() => { if (!document.hidden && document.body.dataset.page === 'settings' && !credential.value && !confirmation.checked && !fieldConfirmation.checked && !uncertain && !pendingFrame) void observe(); }, 2000);
   document.addEventListener('admin-scope-change', () => { lock(); if (document.body.dataset.page !== 'settings') void closeSession(); });
-  document.getElementById('logout')?.addEventListener('click', () => { generation++; timers.clearInterval(polling); cancelQueuedInputs(); inputWarning = ''; showInputStatus(); session = frame = pendingFrame = undefined; image.hidden = true; image.removeAttribute('src'); text.value = ''; credential.value = ''; confirmation.checked = fieldConfirmation.checked = false; readinessStatus.textContent = ''; lock(); });
+  document.getElementById('logout')?.addEventListener('click', async () => {
+    timers.clearInterval(polling); text.value = ''; credential.value = ''; confirmation.checked = fieldConfirmation.checked = false;
+    // The controller awaits this same close flight before revoking the administrator session.
+    // Keep the desktop binding until an in-flight open/observe/input and its close have settled.
+    await closeSession();
+    generation++; cancelQueuedInputs(); inputWarning = ''; showInputStatus(); session = frame = pendingFrame = undefined;
+    image.hidden = true; image.removeAttribute('src'); readinessStatus.textContent = ''; lock();
+  });
   lock();
   return { root, close: closeSession, syncTarget() { if (observedTarget !== getTarget()) { observedTarget = getTarget(); openingUncertain = false; cancelQueuedInputs(true); } lock(); }, reloadState: () => ({ blocked: busy || !!session || openingUncertain, dirty: text.value ? [t('실행 중인 데스크톱')] : [] }) };
 }

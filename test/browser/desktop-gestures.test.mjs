@@ -8,7 +8,7 @@ import { launchBrowser } from './browser.mjs';
 const root = new URL('../../', import.meta.url), revision = 'a'.repeat(64);
 // Valid PNG; the declared remote geometry is deliberately independent of CSS dimensions.
 const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=';
-async function fixture(run) {
+async function fixture(run, { opened = true } = {}) {
   const calls = [], gates = new Map(), host = { text: '', clicks: [], keys: [], width: 200, height: 100, frame: 0, sequence: 1, active: 0, maxActive: 0 };
   let session, sessionNumber = 0, failInput = false, browser;
   const held = action => gates.set(action, {});
@@ -17,14 +17,19 @@ async function fixture(run) {
     try {
       const path = new URL(request.url, 'http://fixture.invalid').pathname;
       if (path === '/') { response.setHeader('Content-Type', 'text/html'); response.end(`<!doctype html><html lang="en"><body data-page="settings"><div id="server-workspace"></div><button id="logout">Logout</button><script type="module">
-        import { createDesktopPanel } from '/web/src/desktop.js'; import { createWebApi } from '/web/src/http.js';
-        let target = 'alpha'; const api = createWebApi({ fetch, accessMode: true, getToken: () => '', isSignedOut: () => false, unauthorized() {}, t: value => value });
-        window.panel = createDesktopPanel({ document, api, getTarget: () => target });
+        import { createDesktopPanel } from '/web/src/desktop.js'; import { createWebApi } from '/web/src/http.js'; import { createWebController } from '/web/src/controller.js';
+        let target = 'alpha'; const state = { signedOut: false, accessMode: true, polling: null };
+        const api = createWebApi({ fetch, accessMode: true, getToken: () => '', isSignedOut: () => state.signedOut, unauthorized() {}, t: value => value });
+        window.logoutErrors = [];
+        const controller = createWebController({ state, view: { signedOut() {}, error: message => logoutErrors.push(message) }, api, document, location: { replace() { window.logoutDone = true; } }, beforeLogout: () => window.panel.close() });
+        document.querySelector('#logout').onclick = controller.logout;
+        window.panel = createDesktopPanel({ document, api, getTarget: () => target, isSignedOut: () => state.signedOut });
         window.setTarget = value => { target = value; panel.syncTarget(); };
         document.querySelector('img').style.cssText += ';position:absolute;left:20px;top:500px;width:200px;height:100px;border:0;z-index:1';
       </script></body></html>`); return; }
-      if (['/web/src/desktop.js', '/web/src/locale.js', '/web/src/http.js'].includes(path)) { response.setHeader('Content-Type', 'text/javascript'); response.end(await readFile(new URL(path.slice(1), root))); return; }
+      if (['/web/src/desktop.js', '/web/src/locale.js', '/web/src/http.js', '/web/src/controller.js'].includes(path)) { response.setHeader('Content-Type', 'text/javascript'); response.end(await readFile(new URL(path.slice(1), root))); return; }
       if (path === '/api/targets') { response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify({ targets: ['alpha', 'beta'].map(id => ({ id, revision, platform: 'windows' })) })); return; }
+      if (path === '/api/session/logout') { calls.push({ action: 'admin-logout' }); response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify({ connected: false })); return; }
       if (!path.startsWith('/api/desktop/')) { response.writeHead(404); response.end(); return; }
       const chunks = []; for await (const chunk of request) chunks.push(chunk);
       const body = JSON.parse(Buffer.concat(chunks).toString()), action = path.split('/').at(-1);
@@ -59,7 +64,8 @@ async function fixture(run) {
     const now = new Date(); await page.clock.install({ time: new Date(now.getTime() - 60000) }); await page.clock.pauseAt(now);
     await page.goto('http://127.0.0.1:' + server.address().port);
     const viewer = page.locator('#desktop-viewer'), image = viewer.locator('img'), controls = viewer.locator('.actions button'), text = viewer.locator('textarea');
-    await controls.nth(0).click(); await page.waitForFunction(() => document.querySelector('img').complete && document.querySelector('img').naturalWidth > 0 && !document.querySelector('#desktop-viewer .actions button:nth-child(2)').disabled);
+    await controls.nth(0).waitFor();
+    if (opened) { await controls.nth(0).click(); await page.waitForFunction(() => document.querySelector('img').complete && document.querySelector('img').naturalWidth > 0 && !document.querySelector('#desktop-viewer .actions button:nth-child(2)').disabled); }
     const count = action => calls.filter(call => call.action === action).length;
     const waitForCount = async (action, expected) => { const deadline = Date.now() + 5000; while (count(action) < expected && Date.now() < deadline) await delay(10); assert.ok(count(action) >= expected, action + ' requests: expected ' + expected + ', got ' + count(action)); };
     await run({ page, viewer, image, controls, text, host, calls, hold: held, release, count, waitForCount, loseInput: () => { failInput = true; } });
@@ -121,3 +127,20 @@ test('DESKTOP-GESTURE composition and Tab stay local while queue saturation is v
   assert.match(await viewer.innerText(), /Input is arriving too quickly/); release('observe'); await waitForCount('input', 64); await idle(page);
   assert.equal(calls.filter(call => call.action === 'input').length, 64); assert.equal(host.text, 'x'.repeat(64));
 }));
+
+for (const scenario of [{ action: 'open', uncertain: false }, { action: 'observe', uncertain: false }, { action: 'input', uncertain: false }, { action: 'input', uncertain: true }]) {
+  test('DESKTOP-LOGOUT controller closes once before admin sign-out during ' + scenario.action + ' uncertain=' + scenario.uncertain, { timeout: 15000 }, () => fixture(async ({ page, image, controls, host, calls, hold, release, waitForCount, loseInput }) => {
+    hold(scenario.action);
+    if (scenario.action === 'open') { await controls.nth(0).click(); await waitForCount('open', 1); }
+    else if (scenario.action === 'observe') { await page.clock.runFor(2000); await waitForCount('observe', 2); }
+    else { if (scenario.uncertain) loseInput(); await image.press('a'); await waitForCount('input', 1); }
+    if (scenario.action !== 'open') await image.press('x');
+    await page.locator('#logout').click(); await page.locator('#logout').click();
+    assert.equal(calls.filter(call => call.action === 'close').length, 0); assert.equal(calls.filter(call => call.action === 'admin-logout').length, 0);
+    release(scenario.action); await waitForCount('admin-logout', 1); await page.waitForFunction(() => window.logoutDone === true);
+    assert.deepEqual(calls.slice(-2).map(call => call.action), ['close', 'admin-logout']);
+    assert.equal(calls.filter(call => call.action === 'close').length, 1); assert.equal(calls.filter(call => call.action === 'admin-logout').length, 1);
+    assert.equal(calls.filter(call => call.action === 'input').length, scenario.action === 'input' ? 1 : 0);
+    assert.equal(host.text, scenario.action === 'input' ? 'a' : ''); assert.deepEqual(await page.evaluate(() => logoutErrors), []);
+  }, { opened: scenario.action !== 'open' }));
+}
