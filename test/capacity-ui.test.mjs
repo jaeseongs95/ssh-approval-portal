@@ -40,7 +40,7 @@ test('capacity values preserve inheritance and reject zero, fractional, exponent
 
 test('global and target saves carry CAS revision, explicit null inheritance and preserve other drafts', async () => {
   const h = harness(); await h.panel.reload();
-  assert.match(h.panel.global.defaults.textContent, /2 available CPUs/);
+  assert.match(h.panel.global.defaults.textContent, /Available CPUs: 2/);
   assert.match(h.panel.global.status.textContent, /queued: 3.*running: 2/);
   h.edit('target', 'queueCapacity', '5'); h.select('beta'); h.edit('target', 'maxConcurrency', '1');
   h.select('alpha'); assert.equal(h.panel.target.inputs.queueCapacity.value, '5');
