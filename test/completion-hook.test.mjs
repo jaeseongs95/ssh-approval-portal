@@ -356,11 +356,12 @@ test('AH04 agy accepts its native session field and rejects conflicting identiti
   assert.deepEqual(f.counts(binding), { pending: 1, claimed: 3, acknowledged: 0 });
 });
 
-test('AH05 agy rejects PostToolUse without taking the pending receipt', async t => {
+test('AH05 agy PostToolUse consumes only its own receipt at the native tool boundary', async t => {
   const f = await fixture(t);
   const { binding } = f.seed('antigravity');
-  assert.throws(() => f.run('antigravity', { hook_event_name: 'PostToolUse', conversationId: sessionId }), safeError);
-  assert.deepEqual(f.counts(binding), { pending: 1, claimed: 0, acknowledged: 0 });
+  const output = f.run('antigravity', { hook_event_name: 'PostToolUse', conversationId: sessionId });
+  assert.ok(contextOf(output));
+  assert.deepEqual(f.counts(binding), { pending: 0, claimed: 1, acknowledged: 0 });
 });
 
 test('AC01 only agy can supply a nonconflicting native event through the CLI flag', async t => {

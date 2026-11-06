@@ -61,6 +61,8 @@ source를 교체하기 전 기존 directory source가 같은 설치 루트의 `<
 
 Codex는 새 세션에서 확인합니다. Claude Code의 열린 세션은 `/reload-plugins` 또는 새 세션에서 확인합니다. Antigravity Native는 앱을 재적재하거나 새 세션에서 Settings > Customizations > Hooks를 확인합니다. 호스트의 hook enable·trust 요구는 그대로 유지하며 자동 재시작·권한 우회는 하지 않습니다.
 
+TEST/PROD origin을 지정한 설치는 `completion-watch.json`을 만들고 기존 hook 명령에 `--watch-config`로 연결합니다. 도구 완료 경계에서 같은 작업의 완료 관찰을 자동 시작하므로 에이전트에게 별도 watcher 실행을 요구하지 않습니다. 기본 MCP 별칭과 다른 연결 이름이면 `--test-mcp-tools submit이름,observe이름` 또는 `--prod-mcp-tools`로 실제 이름을 고정합니다. 응답 본문·자격은 구성에 저장하지 않습니다. 설정의 origin은 관리자 HTTPS origin이며 MCP endpoint URL이 아닙니다. 관찰은 기존 클라이언트 코드를 재사용하며 상주 서비스·추가 MCP 서버를 설치하지 않습니다.
+
 ## 실패와 복구 경계
 
 잘못된 핀은 `MANIFEST_HASH_MISMATCH`, 손상된 배포 파일은 `FILE_INTEGRITY_MISMATCH`, 바뀐 호스트 설정은 `HOST_SOURCE_CHANGED`, 바뀐 Claude 선택 메타데이터는 `CLAUDE_SOURCE_CHANGED`, 중복 실행은 `INSTALL_BUSY`로 구별합니다. 오류는 종료 코드 1과 JSON으로 출력하며 외부 CLI의 stdout/stderr 원문은 비밀 노출을 막기 위해 출력하지 않습니다. 공식 JSON의 `failureCode` 또는 `code`가 소스에 고정한 안전한 식별자 허용 목록에 있으면 `hostCode`로 보존해 `name_taken` 같은 원인을 구별합니다. 알 수 없는 값은 그대로 출력하지 않습니다.

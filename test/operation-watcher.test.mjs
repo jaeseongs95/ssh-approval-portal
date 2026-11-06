@@ -6,6 +6,7 @@ import { createOperationWatcher } from '../src/adapters/cli/operation-watcher.mj
 // Real owner session/watcher, injected HTTP only. Host background resumption is separate.
 const origin = 'https://owner.example.test', accessToken = 'synthetic.header.signature';
 const id = 'a'.repeat(48), revision = 'b'.repeat(64), privateMarker = 'PRIVATE_RESPONSE_MUST_NOT_ESCAPE';
+const operationKey = 'watch-operation:stable.key-0001';
 const cookie = '__Host-ssh_admin_session=' + 'f'.repeat(64);
 const operation = (state = 'completed', patch = {}) => ({
   id, state, targetId: 'alpha', targetRevision: revision, finishedAt: 123,
@@ -18,7 +19,7 @@ const expected = (patch = {}) => ({ event: 'operation.finished', id, state: 'com
   targetRevision: revision, finishedAt: 123, failed: false, auditFailure: false, failureCode: null,
   exitCode: 0, reason: 'exit', remoteOutcome: 'completed', outputState: 'ready', ...patch });
 
-function fixture(t, { pages = [operation()], read, signal, timeoutMs } = {}) {
+function fixture(t, { pages = [operation()], read, signal, timeoutMs, byKey = false } = {}) {
   const calls = [];
   let index = 0;
   const fetch = async (url, init) => {
@@ -32,8 +33,8 @@ function fixture(t, { pages = [operation()], read, signal, timeoutMs } = {}) {
     } });
     assert.equal(init.headers.Cookie, cookie, 'reads and logout retain the owner session binding');
     if (parsed.pathname === '/api/session/logout') return Response.json({ connected: false });
-    assert.equal(parsed.pathname, '/api/' + id);
-    assert.equal(parsed.search, '?observe=1&waitMs=25000'); assert.equal(init.method, 'GET');
+    assert.equal(parsed.pathname, byKey ? '/api/operations/by-key' : '/api/' + id);
+    assert.equal(parsed.search, byKey ? '?operationKey=' + encodeURIComponent(operationKey) + '&waitMs=25000' : '?observe=1&waitMs=25000'); assert.equal(init.method, 'GET');
     if (read) return read({ index: index++, signal: init.signal });
     assert.ok(index < pages.length, 'watch must stop after its terminal response');
     return response(pages[index++]);
@@ -162,4 +163,63 @@ test('W10 invalid operation identifiers are rejected before any operation read',
     });
   }
   assert.equal(reads(f).length, 0); noRemoteEffects(f);
+});
+
+// engineering-test-plan WK: real owner session/watcher with injected HTTP only.
+// Preconditions: owner session established; no submit/cancel API permitted by fixture.
+// Input/procedure: stable key, pending then terminal; mutate one binding field at a time.
+// Oracle/pass: exact key query, fixed ID/key/target/revision, one bounded terminal event.
+// Auth/transport/abort remain covered above; server route authority covered separately.
+// Actual result: NOT_RUN locally; run on TEST Node24 with node --test test/operation-watcher.test.mjs.
+test('WK01 key-only observation binds the returned ID and preserves unknown outcome', async t => {
+  const f = fixture(t, { byKey: true, pages: [operation('pending', { operationKey, finishedAt: null }),
+    operation('unknown', { operationKey, failed: null, remoteOutcome: 'unknown' })] });
+  await f.watcher.connect();
+  assert.deepEqual(await f.watcher.watch({ operationKey, target: 'alpha', expectedTargetRevision: revision }),
+    expected({ operationKey, state: 'unknown', failed: null, remoteOutcome: 'unknown' }));
+  assert.equal(f.calls.filter(call => call.path === '/api/operations/by-key').length, 2); noRemoteEffects(f);
+});
+
+test('WK02 key lookup rejects changed or absent key ID target and revision', async t => {
+  for (const patch of [{ operationKey: undefined }, { operationKey: 'different-operation-key' }, { id: 'c'.repeat(48) },
+    { targetId: 'beta' }, { targetRevision: 'c'.repeat(64) }]) await t.test(Object.keys(patch)[0], async t => {
+    const f = fixture(t, { byKey: true, pages: [operation('pending', { operationKey, finishedAt: null }), operation('completed', { operationKey, ...patch })] });
+    await f.watcher.connect();
+    await assert.rejects(f.watcher.watch({ operationKey }), error => typedFailure(error)); noRemoteEffects(f);
+  });
+});
+
+test('WK03 expected target binding is enforced on the very first terminal response', async t => {
+  for (const binding of [{ target: 'beta', expectedTargetRevision: revision }, { target: 'alpha', expectedTargetRevision: 'c'.repeat(64) }]) {
+    const f = fixture(t, { byKey: true, pages: [operation('completed', { operationKey })] });
+    await f.watcher.connect();
+    await assert.rejects(f.watcher.watch({ operationKey, ...binding }), error => typedFailure(error, 'OPERATION_BINDING_CONFLICT'));
+    noRemoteEffects(f);
+  }
+});
+
+test('WK04 invalid selectors and incomplete bindings refuse before operation reads', async t => {
+  const f = fixture(t); await f.watcher.connect();
+  for (const selector of [{}, { operationKey: 'short' }, { operationKey: operationKey + '\n' }, { operationKey, id },
+    { operationKey, target: 'alpha' }, { operationKey, expectedTargetRevision: revision }, null, []]) {
+    await assert.rejects(f.watcher.watch(selector), error => /^INVALID_/.test(error.code));
+  }
+  assert.equal(reads(f).length, 0); noRemoteEffects(f);
+});
+
+test('WK05 missing key is a refusal and never submits a replacement', async t => {
+  const f = fixture(t, { byKey: true, read: () => Response.json({ error: 'OPERATION_NOT_FOUND' }, { status: 404 }) });
+  await f.watcher.connect();
+  await assert.rejects(f.watcher.watch({ operationKey }), error => {
+    assert.equal(error.code, 'PORTAL_REQUEST_REFUSED'); assert.equal(error.serverCode, 'OPERATION_NOT_FOUND');
+    assert.equal(error.operationKey, operationKey); assert.equal(error.requestId, undefined); return true;
+  });
+  assert.equal(f.calls.filter(call => call.path === '/api/operations/by-key').length, 1); noRemoteEffects(f);
+});
+
+test('WK06 ID object selector enforces the expected binding on first response', async t => {
+  const f = fixture(t, { pages: [operation(), operation()] }); await f.watcher.connect();
+  assert.deepEqual(await f.watcher.watch({ id, target: 'alpha', expectedTargetRevision: revision }), expected());
+  await assert.rejects(f.watcher.watch({ id, target: 'beta', expectedTargetRevision: revision }), error => typedFailure(error, 'OPERATION_BINDING_CONFLICT'));
+  noRemoteEffects(f);
 });

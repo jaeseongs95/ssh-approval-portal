@@ -430,3 +430,47 @@ test('another installed plugin using the same marketplace identity blocks a sour
   assert.equal(existsSync(f.target), false);
   assert.equal(f.state().calls.length, 2);
 });
+
+// AW17 cases were frozen before execution in ../auto-hook-20261106-r1/TEST-CASES.ko.md.
+test('AW17 origin installation configures automatic watch routes and preserves unrelated native handlers', t => {
+  const f = fixture(t), origin = 'https://owner.example.test';
+  const other = { type: 'command', command: 'another-client --unchanged', timeout: 7 };
+  const nativeOther = { enabled: true, Stop: [{ command: 'another-native-client --unchanged' }] };
+  save(f.codex, json({ hooks: { PostToolUse: [{ matcher: '*', hooks: [other] }] } }));
+  save(f.antigravity, json({ unrelated: nativeOther }));
+  const tools = ['mcp__custom_submit', 'mcp__custom_observe'];
+  ok(f.run(['--hosts', 'codex,antigravity', '--test-origin', origin, '--cloudflared', process.execPath,
+    '--test-mcp-tools', tools.join(','), '--apply']));
+  const watchPath = join(f.target, 'completion-watch.json');
+  assert.deepEqual(parseJSON(watchPath), { version: 1, cloudflared: process.execPath, routes: [{ origin, tools }] });
+  const codex = parseJSON(f.codex), native = parseJSON(f.antigravity);
+  assert.deepEqual(codex.hooks.PostToolUse[0], { matcher: '*', hooks: [other] });
+  for (const handler of Object.values(codex.hooks).flatMap(groups => groups.flatMap(group => group.hooks)).filter(handler => handler !== codex.hooks.PostToolUse[0].hooks[0])) {
+    assert.ok(handler.command.includes('--watch-config')); assert.ok(handler.command.includes(watchPath));
+  }
+  assert.deepEqual(native.unrelated, nativeOther);
+  for (const [event, handlers] of Object.entries(native['ssh-completion-inbox'])) {
+    if (event === 'enabled') continue;
+    for (const handler of handlers) { assert.ok(handler.command.includes('--watch-config')); assert.ok(handler.command.includes(watchPath)); }
+  }
+});
+
+test('AW17 Claude package hooks receive the installed automatic watch config without changing another plugin', t => {
+  const f = claudeFixture(t), origin = 'https://owner.example.test', tools = ['custom_submit', 'custom_observe'];
+  ok(f.runClaude({ args: ['--test-origin', origin, '--cloudflared', process.execPath, '--test-mcp-tools', tools.join(',')] }));
+  const watchPath = join(f.target, 'completion-watch.json');
+  assert.deepEqual(parseJSON(watchPath), { version: 1, cloudflared: process.execPath, routes: [{ origin, tools }] });
+  const manifest = parseJSON(join(f.target, '.claude-marketplace/plugins/ssh-completion-client/hooks/claude-code.json'));
+  for (const handler of Object.values(manifest.hooks).flatMap(groups => groups.flatMap(group => group.hooks))) {
+    assert.equal(handler.args[handler.args.indexOf('--watch-config') + 1], watchPath);
+  }
+  assert.deepEqual(f.state().plugins.find(plugin => plugin.id === f.unrelated.id), f.unrelated);
+});
+
+test('AW17 malformed explicit MCP route aliases stop before installation or host configuration changes', t => {
+  const f = fixture(t);
+  error(f.run(['--hosts', 'codex,antigravity', '--test-origin', 'https://owner.example.test',
+    '--cloudflared', process.execPath, '--test-mcp-tools', 'valid_submit,invalid\nroute', '--apply']), 'INVALID_ARGUMENT');
+  assert.equal(existsSync(f.target), false);
+  assert.equal(existsSync(f.codex), false); assert.equal(existsSync(f.antigravity), false);
+});

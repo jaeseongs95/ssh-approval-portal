@@ -175,8 +175,9 @@ function shellWord(value) {
   return '"' + value + '"';
 }
 const psWord = value => "'" + value.replaceAll("'", "''") + "'";
-function hookCommand(node, script, host, event) {
-  return [shellWord(node), shellWord(script), '--host', host, ...(event ? ['--event', event] : [])].join(' ');
+function hookCommand(node, script, host, event, watchConfig) {
+  return [shellWord(node), shellWord(script), '--host', host, ...(event ? ['--event', event] : []),
+    ...(watchConfig ? ['--watch-config', shellWord(watchConfig)] : [])].join(' ');
 }
 
 function parsedConfig(before, label) {
@@ -191,6 +192,7 @@ const sshHandler = handler => object(handler) && [handler.command, handler.comma
 function configChange(host, path, files, node, target) {
   const before = readOptional(path), body = parsedConfig(before, host);
   const script = join(target, 'scripts', 'portal-completion-hook.mjs');
+  const watchConfig = files.has('completion-watch.json') ? join(target, 'completion-watch.json') : undefined;
   if (host === 'codex') {
     if (body.hooks !== undefined && !object(body.hooks)) fail('HOST_CONFIG_INVALID', 'Codex hooks must be an object');
     body.hooks ??= {};
@@ -207,8 +209,9 @@ function configChange(host, path, files, node, target) {
     for (const [event, groups] of Object.entries(template.hooks)) {
       const generated = structuredClone(groups);
       for (const group of generated) for (const handler of group.hooks) {
-        handler.command = hookCommand(node, script, 'codex');
-        handler.commandWindows = '& ' + psWord(node) + ' ' + psWord(script) + ' --host codex';
+        handler.command = hookCommand(node, script, 'codex', undefined, watchConfig);
+        handler.commandWindows = '& ' + psWord(node) + ' ' + psWord(script) + ' --host codex' +
+          (watchConfig ? ' --watch-config ' + psWord(watchConfig) : '');
       }
       body.hooks[event] = [...(body.hooks[event] ?? []), ...generated];
     }
@@ -226,7 +229,7 @@ function configChange(host, path, files, node, target) {
     if (previous?.enabled === false) generated.enabled = false;
     for (const [event, handlers] of Object.entries(generated)) {
       if (event === 'enabled') continue;
-      for (const handler of handlers) handler.command = hookCommand(node, script, 'antigravity', event);
+      for (const handler of handlers) handler.command = hookCommand(node, script, 'antigravity', event, watchConfig);
     }
     body[key] = generated;
   }
@@ -253,6 +256,19 @@ function generatedFiles(files, options, version, target, node) {
     files.set(name, name.endsWith('.ps1') ? Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), bytes]) : bytes);
   };
   const windows = process.platform === 'win32';
+  const routes = [];
+  for (const mode of ['test', 'prod']) {
+    if (!options[`${mode}-origin`]) continue;
+    const tools = options[`${mode}-mcp-tools`]?.split(',') ?? (mode === 'test'
+      ? ['ssh_test_submit', 'ssh_test_observe', 'ssh-test_submit', 'ssh-test_observe', 'mcp__ssh-test__submit', 'mcp__ssh-test__observe']
+      : ['ssh_approval_bridge_submit', 'ssh_approval_bridge_observe', 'ssh-approval-bridge_submit', 'ssh-approval-bridge_observe', 'mcp__ssh-approval-bridge__submit', 'mcp__ssh-approval-bridge__observe']);
+    if (tools.some(tool => !/^[A-Za-z0-9_-]{1,256}(?![\s\S])/.test(tool))) fail('INVALID_ARGUMENT', 'MCP tool names must be comma-separated identifiers');
+    routes.push({ origin: origin(options[`${mode}-origin`]), tools });
+  }
+  if (routes.length) {
+    if (!options.cloudflared) fail('CLOUDFLARED_REQUIRED', 'Existing cloudflared is required for automatic observation');
+    add('completion-watch.json', json({ version: 1, cloudflared: executable(options.cloudflared, 'cloudflared'), routes }));
+  }
   if (windows) { shellWord(node); shellWord(target); }
   for (const [name, entry] of [['portal-files', 'portal-files.mjs'], ['portal-completion-hook', 'portal-completion-hook.mjs']]) {
     const script = join(target, 'scripts', entry);
@@ -278,6 +294,7 @@ function generatedFiles(files, options, version, target, node) {
     for (const groups of Object.values(hooks.hooks)) for (const group of groups) for (const handler of group.hooks) {
       handler.command = node;
       handler.args = handler.args.map(arg => arg.replace('${CLAUDE_PLUGIN_ROOT}/scripts/portal-completion-hook.mjs', join(target, 'scripts', 'portal-completion-hook.mjs')));
+      if (routes.length) handler.args.push('--watch-config', join(target, 'completion-watch.json'));
     }
     add(prefix + '.claude-plugin/plugin.json', json({ name: 'ssh-completion-client', version, description: 'SSH MCP client native completion hooks', author: { name: 'SSH MCP client' }, hooks: './hooks/claude-code.json' }));
     add(prefix + 'hooks/claude-code.json', json(hooks));
@@ -310,7 +327,7 @@ function replaceConfig(change) {
 
 function parseArgs(argv) {
   const options = {};
-  const values = new Set(['source', 'manifest-sha256', 'install-root', 'home', 'node', 'cloudflared', 'test-origin', 'prod-origin', 'hosts', 'claude', 'expect-plan']);
+  const values = new Set(['source', 'manifest-sha256', 'install-root', 'home', 'node', 'cloudflared', 'test-origin', 'prod-origin', 'test-mcp-tools', 'prod-mcp-tools', 'hosts', 'claude', 'expect-plan']);
   for (let i = 0; i < argv.length; i++) {
     const key = argv[i].slice(2);
     if (['apply', 'help'].includes(key) && argv[i].startsWith('--') && !(key in options)) options[key] = true;

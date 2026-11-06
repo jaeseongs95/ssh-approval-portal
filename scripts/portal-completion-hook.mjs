@@ -2,6 +2,7 @@ import { parseArgs } from 'node:util';
 import { realpath } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { runCompletionHook, acknowledgeCompletion, waitForCompletionHook, completionWaitTimeoutMs } from '../src/adapters/cli/completion-hook.mjs';
+import { autoWatchCompletion } from '../src/adapters/cli/completion-auto-watch.mjs';
 
 const usage = 'portal-completion-hook [ack] --host codex|claude-code|antigravity [--inbox ABSOLUTE_DB]\n' +
   'Hooks read native JSON from stdin. ack additionally requires --session SESSION --receipt UUID --claim UUID.\n' +
@@ -27,7 +28,7 @@ export async function main(argv = process.argv.slice(2), input = process.stdin, 
     const { values, positionals } = parseArgs({ args: argv, allowPositionals: true, options: {
       help: { type: 'boolean' }, host: { type: 'string' }, inbox: { type: 'string' }, session: { type: 'string' }, event: { type: 'string' },
       receipt: { type: 'string' }, claim: { type: 'string' },
-      wait: { type: 'boolean' }, 'wait-timeout-ms': { type: 'string' },
+      wait: { type: 'boolean' }, 'wait-timeout-ms': { type: 'string' }, 'watch-config': { type: 'string' },
     } });
     if (values.help && argv.length === 1) { output.write(usage); return 0; }
     ack = positionals[0] === 'ack';
@@ -38,13 +39,24 @@ export async function main(argv = process.argv.slice(2), input = process.stdin, 
     if ((wait && (ack || values.host !== 'claude-code')) ||
         (values['wait-timeout-ms'] !== undefined && (!wait || !/^[1-9][0-9]{0,7}(?![\s\S])/.test(values['wait-timeout-ms']) ||
           Number(values['wait-timeout-ms']) > completionWaitTimeoutMs))) throw fail('COMPLETION_HOOK_INVALID_ARGUMENTS');
-    if (values.event !== undefined && (ack || values.host !== 'antigravity' || !['SessionStart', 'PreInvocation', 'PostInvocation', 'Stop'].includes(values.event)))
+    if (values.event !== undefined && (ack || values.host !== 'antigravity' || !['SessionStart', 'PreInvocation', 'PostToolUse', 'PostInvocation', 'Stop'].includes(values.event)))
       throw fail('COMPLETION_HOOK_INVALID_ARGUMENTS');
     const native = ack ? null : await readInput(input);
     if (values.event !== undefined) {
       if (!native || typeof native !== 'object' || Array.isArray(native) || (native.hook_event_name && native.hook_event_name !== values.event))
         throw fail('COMPLETION_HOOK_INVALID_INPUT');
       native.hook_event_name = values.event;
+    }
+    let hookResult;
+    if (!ack) {
+      hookResult = runCompletionHook({ host: values.host, input: native, inboxPath: values.inbox, environment }, services);
+      try {
+        await autoWatchCompletion({ host: values.host, input: native, inboxPath: values.inbox,
+          configPath: values['watch-config'], environment }, services);
+      } catch (error) {
+        const code = /^COMPLETION_[A-Z_]{3,70}$/.test(error?.code ?? '') ? error.code : 'COMPLETION_AUTO_WATCH_FAILED';
+        errorOutput.write(JSON.stringify({ error: code, automaticRetry: false }) + '\n');
+      }
     }
     if (wait) {
       const abort = new AbortController();
@@ -59,7 +71,7 @@ export async function main(argv = process.argv.slice(2), input = process.stdin, 
     }
     const result = ack ? acknowledgeCompletion({ host: values.host, sessionId: values.session, receiptId: values.receipt,
       claimToken: values.claim, inboxPath: values.inbox, environment }, services)
-      : runCompletionHook({ host: values.host, input: native, inboxPath: values.inbox, environment }, services);
+      : hookResult;
     output.write(JSON.stringify(result) + '\n');
     return 0;
   } catch (error) {

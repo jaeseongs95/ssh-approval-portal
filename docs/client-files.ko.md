@@ -6,7 +6,11 @@
 
 배포본에는 `scripts/portal-completion-hook.mjs`와 호스트별 `hooks/*.json`이 포함됩니다. Codex용 `.codex-plugin/plugin.json`은 hook만 등록합니다. 호스트가 실행할 로컬 hook 정의를 신뢰·재적재해야 하며, 파일을 압축 해제한 것만으로 현재 세션에 적재됐다고 판단하지 않습니다. 기존 AGS·다른 hook·인증 설정을 덮어쓰지 마세요.
 
-각 호스트 hook을 등록한 다음 실제 `SessionStart` 또는 도구 경계에서 세션 결속을 만듭니다. `--session`은 그 호스트가 제공한 현재 세션 ID를 사용합니다. 다른 세션의 기록을 탐색해 ID를 찾거나 임의 세션을 대신 등록하지 않습니다.
+설치기에 TEST/PROD origin과 기존 cloudflared를 지정하면 `completion-watch.json`을 만들고 기존 호스트 hook에 연결합니다. 등록된 SSH MCP의 `submit`·`observe` 호출이 끝나면 훅이 같은 작업의 관찰을 자동으로 시작합니다. 에이전트는 별도 watch 명령이나 추가 MCP 연결 없이 다른 일을 계속합니다. 관찰은 기존 클라이언트의 유한한 백그라운드 작업이며 원격 명령을 다시 실행하지 않습니다.
+
+Codex·Claude Code는 호스트가 전달한 MCP 응답의 ID를 사용합니다. Antigravity는 도구 응답을 제공하지 않으므로 원래 입력의 operationKey 또는 observe ID를 사용하며, operationKey 관찰은 서버의 `/api/operations/by-key` 지원이 필요합니다. 도구 이름이 기본 별칭과 다르면 설치기의 `--test-mcp-tools`·`--prod-mcp-tools`에 실제 submit·observe 이름을 쉼표로 지정합니다. origin·실행 파일은 로컬 설치 설정에서만 읽고 도구 응답에서 가져오지 않습니다.
+
+각 호스트 hook을 등록한 다음 실제 `SessionStart` 또는 도구 경계에서 세션 결속을 만듭니다. 세션은 호스트가 제공한 현재 세션 ID만 사용합니다. 다른 세션의 기록을 탐색해 ID를 찾거나 임의 세션을 대신 등록하지 않습니다. 아래 명령은 자동 연결을 지원하지 않는 호스트에서 사용하는 명시적 대체 경로입니다.
 
 ```bash
 node scripts/portal-files.mjs --origin https://YOUR-PORTAL watch REQUEST_ID --notify-hook --host codex --session EXACT_SESSION_ID --wake-executable /absolute/path/to/codex
@@ -32,7 +36,7 @@ node scripts/portal-completion-hook.mjs ack --host codex --session EXACT_SESSION
 | --- | --- | --- |
 | Codex | SessionStart, UserPromptSubmit, PostToolUse, Stop | 선택한 실행 파일 또는 공식 managed launcher의 `queue`; 살아 있는 같은 세션 필요 |
 | Claude Code | UserPromptSubmit 및 native asyncRewake 본문 | asyncRewake 지원·실행 중인 같은 세션·활성 대기 hook 필요 |
-| Antigravity/agy | SessionStart, PreInvocation, PostInvocation, Stop | 현재 project·agentapi·LS·CSRF 환경 및 project 일치 필요 |
+| Antigravity/agy | SessionStart, PreInvocation, PostToolUse, PostInvocation, Stop | 현재 project·agentapi·LS·CSRF 환경 및 project 일치 필요 |
 
 긴 단일 도구 호출 도중에는 다음 hook 경계까지 본문 주입이 늦을 수 있습니다. hook이 없는 ChatGPT 웹·일반 MCP 클라이언트에 로컬 hook 주입이나 자동 재개가 있다고 주장하지 않습니다. 기존 MCP의 즉시 상태 조회와 해당 호스트의 지원 경로를 사용합니다. 위 표는 구현 경계이며 실제 호스트 수용 여부는 해당 릴리스의 시험 근거에서 별도로 확인합니다. 구형 `--notify-codex ... --thread ...` 직접 메시지 옵션은 호환용이고 hook 옵션과 함께 쓰지 않습니다.
 

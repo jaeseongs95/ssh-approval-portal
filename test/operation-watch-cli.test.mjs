@@ -88,3 +88,49 @@ test('completion routing requires an explicit executable and exact thread before
     assert.equal(out.text, ''); assert.match(err.text, /INVALID_(?:CODEX_)?COMPLETION_TARGET/);
   }
 });
+
+// engineering-test-plan CK: CLI public argv boundary; watcher injected, owner/SSH excluded.
+// Input/procedure: key with binding, key+ID conflict, malformed key/binding, read refusal.
+// Pass: exact selector and 600000ms default; rejection precedes credentials; fixed ID/key errors.
+// Actual: NOT_RUN locally; TEST Node24 node --test test/operation-watch-cli.test.mjs.
+const key = 'cli-watch-stable-key-0001', revision = 'b'.repeat(64);
+const keyArgs = [...args.slice(0, -1), '--operation-key', key];
+test('CK01 key watch passes exact selector binding and retains the existing deadline', async () => {
+  const out = capture(), err = capture(); let observedOptions, observedSelector;
+  assert.equal(await main([...keyArgs, '--target', 'alpha', '--expected-target-revision', revision], out, err,
+    () => 'synthetic.header.signature', {}, () => assert.fail('no upload'), undefined, options => {
+      observedOptions = options; return { async connect() {}, async watch(selector) { observedSelector = selector; return { ...event, operationKey: key }; }, async close() {} };
+    }), 0);
+  assert.deepEqual(observedSelector, { operationKey: key, target: 'alpha', expectedTargetRevision: revision });
+  assert.equal(observedOptions.timeoutMs, 600000);
+  assert.deepEqual(JSON.parse(err.text), { event: 'operation.watch.started', operationKey: key, timeoutMs: 600000 });
+  assert.equal(JSON.parse(out.text).id, id);
+});
+
+test('CK02 key and ID are exclusive and malformed selectors refuse before authentication', async () => {
+  for (const argv of [[...keyArgs, id], [...keyArgs.slice(0, -1), 'short'], [...keyArgs.slice(0, -1), key + '\n'],
+    [...keyArgs, '--target', 'alpha'], [...keyArgs, '--expected-target-revision', revision],
+    [...keyArgs, '--target', 'Alpha', '--expected-target-revision', revision],
+    [...keyArgs, '--target', 'alpha', '--expected-target-revision', revision + '\n']]) {
+    const out = capture(), err = capture();
+    assert.equal(await main(argv, out, err, () => assert.fail('no credentials'), {}, undefined, undefined,
+      () => assert.fail('no connection')), 1);
+    assert.equal(out.text, ''); assert.match(JSON.parse(err.text).error, /^INVALID_/);
+  }
+});
+
+test('CK03 key observation errors retain the key and learned ID without replay', async () => {
+  const out = capture(), err = capture(); let closed = 0;
+  assert.equal(await main(keyArgs, out, err, () => 'synthetic.header.signature', {}, undefined, undefined,
+    () => ({ async connect() {}, async watch() { throw Object.assign(Error('private'), { code: 'OPERATION_BINDING_CONFLICT', requestId: id }); }, async close() { closed++; } })), 1);
+  assert.deepEqual(JSON.parse(err.text.trim().split('\n').at(-1)), { error: 'OPERATION_BINDING_CONFLICT', requestId: id, operationKey: key });
+  assert.equal(out.text, ''); assert.equal(closed, 1);
+});
+
+test('CK04 ID observation also accepts the exact expected target binding', async () => {
+  const out = capture(), err = capture(); let observed;
+  assert.equal(await main([...args, '--target', 'alpha', '--expected-target-revision', revision], out, err,
+    () => 'synthetic.header.signature', {}, undefined, undefined,
+    () => ({ async connect() {}, async watch(selector) { observed = selector; return event; }, async close() {} })), 0);
+  assert.deepEqual(observed, { id, target: 'alpha', expectedTargetRevision: revision });
+});

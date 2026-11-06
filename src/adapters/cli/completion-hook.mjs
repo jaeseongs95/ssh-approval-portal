@@ -13,7 +13,7 @@ export function completionHookInput(host, input) {
   if (!hosts.has(host)) throw fail('COMPLETION_HOOK_UNSUPPORTED_HOST');
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw fail('COMPLETION_HOOK_INVALID_INPUT');
   const event = input.hook_event_name;
-  if (!(host === 'antigravity' ? ['SessionStart', 'PreInvocation', 'PostInvocation', 'Stop'].includes(event) :
+  if (!(host === 'antigravity' ? ['SessionStart', 'PreInvocation', 'PostToolUse', 'PostInvocation', 'Stop'].includes(event) :
     events.has(event) || (host === 'claude-code' && event === 'SessionEnd')))
     throw fail('COMPLETION_HOOK_UNSUPPORTED_EVENT');
   const sessionId = host === 'antigravity' ? (input.conversationId || input.session_id) : input.session_id;
