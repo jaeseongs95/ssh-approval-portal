@@ -128,17 +128,40 @@ test('all actual ko/en catalogs have valid message syntax, identical keys and pl
   assert.equal(translate({ en: { key: 'Fallback' } }, 'ko', 'key'), 'Fallback');
 });
 
-test('literal Korean UI translation callsites exist in their actual English catalog', async () => {
+function assertLiteralTranslations(source, name, catalogs, file) {
+  // agent-cli's local t(ko, en) selects an inline pair; it does not read webCatalogs.
+  const inlinePair = name === 't' && /\bt\s*=\s*\(\s*a\s*,\s*b\s*\)\s*=>\s*ko\s*\?\s*a\s*:\s*b\b/.test(source);
+  const calls = new RegExp(String.raw`\b${name}\('((?:\\.|[^'\\\r\n])*)'\s*(?=[,)])`, 'g');
+  for (const match of source.matchAll(calls)) {
+    const key = new Script("'" + match[1] + "'").runInThisContext();
+    if (inlinePair) {
+      const second = /^,\s*('(?:\\.|[^'\\\r\n])*')\s*\)/.exec(source.slice(match.index + match[0].length));
+      assert.ok(second, file + ': inline translation needs an English literal: ' + key);
+      const english = new Script(second[1]).runInThisContext();
+      assert.ok(english.trim(), file + ': empty inline English translation: ' + key);
+      assert.doesNotMatch(english, /[가-힣]/, file + ': untranslated inline English: ' + key);
+      assert.equal(validateCatalogs({ ko: { [key]: key }, en: { [key]: english } }), true);
+    } else if (/[가-힣]/.test(key)) {
+      assert.ok(Object.hasOwn(catalogs.en, key), file + ': ' + key);
+    }
+  }
+}
+
+test('translation callsite guard distinguishes catalog lookup from inline bilingual pairs without ignoring missing translations', () => {
+  const catalog = { ko: { '준비': '준비' }, en: { '준비': 'Ready' } };
+  assert.doesNotThrow(() => assertLiteralTranslations("const {t}=i18n; t('준비');", 't', catalog, 'catalog'));
+  for (const source of ["const {t}=i18n; t('누락');", "const {t}=i18n; t('누락', {count: 1});"]) assert.throws(() => assertLiteralTranslations(source, 't', catalog, 'catalog'), /누락/);
+  const declaration = 'const ko=true,t=(a,b)=>ko?a:b;';
+  assert.doesNotThrow(() => assertLiteralTranslations(declaration + "t('서버 CLI 설치','Server CLI installation');", 't', catalog, 'inline'));
+  for (const call of ["t('서버 CLI 설치');", "t('서버 CLI 설치','');", "t('서버 CLI 설치','서버 CLI 설치');", "t('요청 {count}','Request {wrong}');"]) assert.throws(() => assertLiteralTranslations(declaration + call, 't', catalog, 'inline'));
+});
+
+test('literal Korean UI translations have an English message at their actual catalog or inline boundary', async () => {
   for (const [folder, name, catalogs] of [['web/src/', 'tr', uiCatalogs], ['web/src/', 't', webCatalogs], ['ui/src/', 't', cardCatalogs]]) {
     for (const file of await readdir(new URL('../' + folder, import.meta.url))) {
       if (!file.endsWith('.js') || ['capacity.js', 'desktop.js'].includes(file)) continue;
       const source = await readFile(new URL('../' + folder + file, import.meta.url), 'utf8');
-      const calls = new RegExp(String.raw`\b${name}\('((?:\\.|[^'\\\r\n])*)'\s*(?=[,)])`, 'g');
-      for (const [, literal] of source.matchAll(calls)) {
-        // The regex admits only one quoted literal; use the JS parser to decode escapes as callers do.
-        const key = new Script("'" + literal + "'").runInThisContext();
-        if (/[가-힣]/.test(key)) assert.ok(Object.hasOwn(catalogs.en, key), file + ': ' + key);
-      }
+      assertLiteralTranslations(source, name, catalogs, file);
     }
   }
 });
