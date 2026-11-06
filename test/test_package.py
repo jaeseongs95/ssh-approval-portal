@@ -285,23 +285,27 @@ class PackageContract(unittest.TestCase):
         for readme in ('README.md', 'README.ko.md'):
             instructions = (SOURCE / readme).read_text(encoding='utf-8')
             self.assertIn(command, instructions,
-                          'Extracted source Docker instructions omit archive preparation')
-            self.assertIn('mkdir -p dist', instructions)
-            self.assertIn('cp ' + output_example + '/' + server_name + ' dist/', instructions)
+                          'Source release instructions omit the packaging command')
+            for target in ('scripts/prepare-docker.sh', 'docker/compose.yaml'):
+                self.assertIn('](' + target + ')', instructions,
+                              'Docker instructions omit a deployment entry point')
         source = Path(self.temporary.name) / 'release-source'
         for path in packager.collect_files(SOURCE):
             target = source / path.relative_to(SOURCE)
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(path, target)
-        archives, _ = packager.package(source, release=True)
+        archives, _ = packager.package(source)
         extracted = Path(self.temporary.name) / 'clean-extracted'
         with zipfile.ZipFile(archives[1]) as archive:
             archive.extractall(extracted)
         root = extracted / ('ssh-approval-portal-' + version)
         self.assertFalse((root / archive_name).exists(), 'Release must not recursively embed its distribution')
+        for target in ('scripts/prepare-docker.sh', 'docker/compose.yaml'):
+            self.assertTrue((root / target).is_file(), 'Packaged Docker entry point is missing: ' + target)
         output = Path(self.temporary.name) / 'new-release-assets'
-        result = subprocess.run([sys.executable, str(root / 'scripts/package-release.py'), '--release', '--output', str(output)],
-                                capture_output=True, text=True, timeout=20)
+        # Exercise the documented default; only an explicit --release may promote a candidate.
+        result = subprocess.run([sys.executable, str(root / 'scripts/package-release.py'), '--output', str(output)],
+                                cwd=root, capture_output=True, text=True, timeout=20)
         self.assertEqual(result.returncode, 0, result.stderr)
         names = {'ssh-approval-portal-' + version + suffix for suffix in ('.tar.gz', '.zip')}
         names.update('ssh-approval-portal-client-' + version + suffix for suffix in ('.tar.gz', '.zip'))
@@ -314,7 +318,13 @@ class PackageContract(unittest.TestCase):
             self.assertEqual(hashlib.sha256((output / name).read_bytes()).hexdigest(), checksums[name])
         (root / archive_name).parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(output / server_name, root / archive_name)
-        self.assertTrue((root / archive_name).is_file(), 'Documented preparation did not supply Docker COPY input')
+        self.assertEqual((root / archive_name).read_bytes(), (output / server_name).read_bytes(),
+                         'Prepared Docker COPY input differs from the generated server archive')
+        with tarfile.open(root / archive_name, 'r:gz') as archive:
+            member = 'ssh-approval-portal-' + version + '/release-manifest.json'
+            manifest = json.load(archive.extractfile(member))
+        self.assertEqual(manifest['status'], 'candidate-pending-live-host-verification')
+        self.assertEqual(manifest, json.loads((root / 'release-manifest.json').read_bytes()))
         self.assertEqual((root / 'release-manifest.json').read_bytes(),
                          (source / 'release-manifest.json').read_bytes())
 
