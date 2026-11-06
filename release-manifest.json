@@ -15,8 +15,8 @@
     },
     {
       "path": ".dockerignore",
-      "size": 550,
-      "sha256": "2b30e27522b65c3dd3b09a66f82a13943fec148e8f5f239dcb88d5da61d393f8"
+      "size": 589,
+      "sha256": "4bd3eb1bb1238553f72ef5d7e1b2c53cfca5de287b975601cb14b7cf155ce9d7"
     },
     {
       "path": "LICENSE",
@@ -25,13 +25,13 @@
     },
     {
       "path": "README.ko.md",
-      "size": 22133,
-      "sha256": "4a2b973c13e86362a5b18e4651fcfc41b326a0ce3dea6d348278b7535d5ebbc1"
+      "size": 22210,
+      "sha256": "a5a64b4650526d0023686fd3ae67e7121666efd11b52088cb5e6ea9b8c4673ee"
     },
     {
       "path": "README.md",
-      "size": 20064,
-      "sha256": "a55b5b87ced98bcee99e8663bdcd7b3c4758c2a0f7b533286f8678df103a4ae4"
+      "size": 20129,
+      "sha256": "73ca4921294c0bd0ba315227b3676e5b389d06980fc1edaebdc804b40f42f779"
     },
     {
       "path": "THIRD_PARTY_NOTICES.json",
