@@ -180,14 +180,18 @@ namespace SshApproval {
                 StringBuilder fileSystem = new StringBuilder(32);
                 if (!GetVolumeInformationByHandleW(handle, IntPtr.Zero, 0, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, fileSystem, (uint)fileSystem.Capacity)) NativeFailure("OPERATION_FAILED", "filesystem");
                 if (!fileSystem.ToString().Equals("NTFS", StringComparison.OrdinalIgnoreCase)) throw new FileFailure("OPERATION_FAILED", "filesystem", 50);
-                StringBuilder actual = new StringBuilder(32768);
-                uint length = GetFinalPathNameByHandle(handle, actual, (uint)actual.Capacity, 0);
-                if (length == 0) NativeFailure(missing, "final_path");
-                if (length >= actual.Capacity || !actual.ToString().TrimEnd('\\').Equals(("\\\\?\\" + path).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase)) Fail("UNSAFE_PATH");
+                CheckFinalPath(handle, path, missing);
                 return handle;
             } catch { handle.Dispose(); throw; }
         }
-        static SafeFileHandle OpenLeaf(SafeFileHandle parent, string leaf, uint access, uint share, bool create, string missing, string account) {
+        static void CheckFinalPath(SafeFileHandle handle, string path, string missing) {
+            StringBuilder actual = new StringBuilder(32768);
+            uint length = GetFinalPathNameByHandle(handle, actual, (uint)actual.Capacity, 0);
+            if (length == 0) NativeFailure(missing, "final_path");
+            if (length >= actual.Capacity || !actual.ToString().TrimEnd('\\').Equals(("\\\\?\\" + path).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase)) Fail("UNSAFE_PATH");
+        }
+        static SafeFileHandle OpenLeaf(SafeFileHandle parent, string leaf, uint access, uint share, bool create, string missing, string account, bool directory = false) {
+            if (create && directory) Fail("INVALID_REQUEST");
             if (String.IsNullOrEmpty(leaf) || leaf == "." || leaf == ".." || leaf.IndexOfAny(new char[] { '\\', '/', ':' }) >= 0) Fail("UNSAFE_PATH");
             IntPtr name = Marshal.StringToHGlobalUni(leaf);
             IntPtr unicode = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(UnicodeString)));
@@ -208,16 +212,16 @@ namespace SshApproval {
                     attributes.SecurityDescriptor = pin.AddrOfPinnedObject();
                 }
                 IoStatus io;
-                // FILE_CREATE=2 / FILE_OPEN=1; NON_DIRECTORY + synchronous no-follow.
+                // FILE_CREATE=2 / FILE_OPEN=1; single-component synchronous no-follow.
                 int status = NtCreateFile(out handle, access | 0x100080, ref attributes, out io, IntPtr.Zero, 0x80,
-                    share, create ? 2u : 1u, OpenReparse | 0x40 | 0x20, IntPtr.Zero, 0);
+                    share, create ? 2u : 1u, OpenReparse | (directory ? 1u : 0x40u) | 0x20, IntPtr.Zero, 0);
                 if (status < 0) {
                     if (handle != null) handle.Dispose();
                     handle = null;
                     NativeFailure(missing, "open", (int)RtlNtStatusToDosError(status));
                 }
                 try {
-                    Inspect(handle, false);
+                    Inspect(handle, directory);
                     return handle;
                 } catch {
                     // Cleanup is handle-based too, including a newly created file that
@@ -233,16 +237,28 @@ namespace SshApproval {
             readonly List<SafeFileHandle> guards = new List<SafeFileHandle>();
             readonly string path;
             public SafeFileHandle Last { get { return handles[handles.Count - 1]; } }
-            public DirectoryChain(string path, string missing) {
+            public DirectoryChain(string path, string missing, bool sourceRead = false) {
                 this.path = path;
                 try {
                     string current = path.Substring(0, 3);
-                    handles.Add(Open(current, 0x20080, 1, 3, true, missing));
+                    // FILE_TRAVERSE participates in deny-delete sharing; metadata-only
+                    // handles do not. A source reader needs no READ_CONTROL or list right.
+                    handles.Add(Open(current, sourceRead ? 0xA0u : 0x20080u, 1, 3, true, missing));
                     if (path.Length > 3) foreach (string component in path.Substring(3).Split('\\')) {
                         current += (current.EndsWith("\\") ? "" : "\\") + component;
-                        handles.Add(Open(current, 0x20080, 1, 3, true, missing));
+                        if (sourceRead) {
+                            SafeFileHandle child = OpenLeaf(Last, component, 0xA0, 1, false, missing, null, true);
+                            handles.Add(child);
+                            CheckFinalPath(child, current, missing);
+                        } else handles.Add(Open(current, 0x20080, 1, 3, true, missing));
                     }
                 } catch { Dispose(); throw; }
+            }
+            public void CheckSource(SafeFileHandle source, string expectedPath) {
+                // Validate after the leaf is pinned, before reading any content. Every
+                // parent now has a pinned child and cannot become an empty junction.
+                CheckFinalPath(source, expectedPath, "FILE_NOT_FOUND");
+                foreach (SafeFileHandle handle in handles) Inspect(handle, true);
             }
             public void CheckTrust(string account, string installer, bool trustAccount) {
                 for (int n = 0; n < handles.Count; n++) {
@@ -496,11 +512,13 @@ namespace SshApproval {
                     catch (FileFailure failure) { if (failure.Code != "FILE_NOT_FOUND") throw; }
                     return new Dictionary<string, object> { { "cleaned", true }, { "rootPolicyApplied", rootPolicy } };
                 }
-                using (DirectoryChain parents = new DirectoryChain(Path.GetDirectoryName(path), "PARENT_NOT_FOUND")) {
-                    parents.CheckTrust(account, installer, true);
+                bool testSnapshot = bypassRoot && action == "snapshot";
+                using (DirectoryChain parents = new DirectoryChain(Path.GetDirectoryName(path), "PARENT_NOT_FOUND", testSnapshot)) {
+                    if (!testSnapshot) parents.CheckTrust(account, installer, true);
                     string leaf = Path.GetFileName(path);
                     if (action == "snapshot") {
-                        using (SafeFileHandle source = OpenLeaf(parents.Last, leaf, Read, 1, false, "FILE_NOT_FOUND", account)) {
+                        using (SafeFileHandle source = OpenLeaf(parents.Last, leaf, testSnapshot ? 1u : Read, 1, false, "FILE_NOT_FOUND", account)) {
+                            if (testSnapshot) parents.CheckSource(source, path);
                             Info before = Inspect(source, false);
                             if (before.Size > maximum) Fail("FILE_TOO_LARGE");
                             using (SafeFileHandle destination = OpenLeaf(stages.Last, id + ".part", Read | Write | Delete, 0, true, "STAGING_UNAVAILABLE", account)) {
