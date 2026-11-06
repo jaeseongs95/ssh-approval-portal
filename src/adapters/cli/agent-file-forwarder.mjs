@@ -6,6 +6,7 @@ import { validateOrigin } from '../config/settings.mjs';
 import { anyRemotePath, remotePath, windowsRemotePath } from '../../domain/validation.mjs';
 import { validateLocalPath, withUploadSnapshot, saveDownload } from './local-files.mjs';
 import { createFileForwarder, readPrivateJson, validateFileManifest } from './file-forwarder.mjs';
+import { atFileStage } from './file-mcp-diagnostics.mjs';
 
 const fail = code => Object.assign(new Error(code), { code });
 const identifier = z.string().regex(/^[a-f0-9]{48}$/);
@@ -42,20 +43,20 @@ export async function createAgentUploadForwarder({ origin, journalRoot, openClie
     const args = agentUploadSelectionArgs.parse(input);
     validateLocalPath(args.localPath);
     try { anyRemotePath(args.remotePath); } catch { throw fail('INVALID_REMOTE_PATH'); }
-    const existing = await load(args.capabilityId);
+    const existing = await atFileStage('selection-load', () => load(args.capabilityId));
     if (existing) return sameIntent(existing, args);
     const signal = AbortSignal.timeout(120000);
-    let client;
+    let client, failure;
     try {
-      client = await openClient(origin, { timeoutMs: 120000, signal });
-      const listed = await client.targets(), matches = Array.isArray(listed?.targets) ? listed.targets.filter(item => item?.id === args.target) : [];
+      client = await atFileStage('owner-session', () => openClient(origin, { timeoutMs: 120000, signal }));
+      const listed = await atFileStage('target-query', () => client.targets()), matches = Array.isArray(listed?.targets) ? listed.targets.filter(item => item?.id === args.target) : [];
       if (matches.length !== 1 || matches[0].enabled !== true || !/^[a-f0-9]{64}$/.test(matches[0].revision)) throw fail('CAPABILITY_TARGET_UNAVAILABLE');
       const platform = matches[0].platform;
       if (platform !== undefined && !['linux', 'windows'].includes(platform)) throw fail('CAPABILITY_TARGET_UNAVAILABLE');
       try {
         (platform === 'windows' ? windowsRemotePath : platform === 'linux' ? remotePath : anyRemotePath)(args.remotePath);
       } catch { throw fail('INVALID_REMOTE_PATH'); }
-      return await withUploadSnapshot(args.localPath, async snapshot => {
+      return await atFileStage('local-snapshot', () => withUploadSnapshot(args.localPath, async snapshot => {
         const publicName = [...basename(args.localPath).replace(/[^\p{L}\p{N}._ -]/gu, '-')].slice(0, 128).join('') || 'upload';
         const manifest = validateFileManifest({ version: 1, origin, capabilities: [{
           id: args.capabilityId, publicName, direction: 'upload', source: args.localPath, target: args.target,
@@ -64,14 +65,23 @@ export async function createAgentUploadForwarder({ origin, journalRoot, openClie
         }] });
         const bytes = Buffer.from(JSON.stringify(manifest) + '\n');
         // Reuse exclusive publication: no reader can observe a partial manifest.
-        try { await saveDownload(path(args.capabilityId), { size: bytes.length, sha256: digest(bytes) },
-          (async function* () { yield bytes; })(), { maxBytes: 65536, signal }); }
-        catch (error) { if (error.code !== 'EEXIST') throw error; }
-        const cap = await load(args.capabilityId);
+        await atFileStage('selection-publish', async () => {
+          try { await saveDownload(path(args.capabilityId), { size: bytes.length, sha256: digest(bytes) },
+            (async function* () { yield bytes; })(), { maxBytes: 65536, signal }); }
+          catch (error) { if (error.code !== 'EEXIST') throw error; }
+        });
+        const cap = await atFileStage('selection-load', () => load(args.capabilityId));
         if (!cap) throw fail('CAPABILITY_JOURNAL_UNKNOWN');
         return sameIntent(cap, args);
-      }, { signal });
-    } finally { await client?.close(); }
+      }, { signal }));
+    } catch (error) { failure = error; throw error; }
+    finally {
+      try { await atFileStage('owner-session-cleanup', async () => { await client?.close(); }); }
+      catch (error) {
+        if (!failure) throw error;
+        failure.cleanupError = 'OWNER_SESSION_CLEANUP_UNKNOWN';
+      }
+    }
   }
   return {
     uploadOnly: true, selectUpload,
@@ -90,10 +100,10 @@ export async function createAgentUploadForwarder({ origin, journalRoot, openClie
       if (!args || typeof args !== 'object' || Array.isArray(args) || Object.keys(args).length !== 1 ||
           !Object.hasOwn(args, 'capabilityId') || !identifier.safeParse(args.capabilityId).success) throw fail('INVALID_CAPABILITY_ARGUMENTS');
       if (!['upload', 'status', 'resume-upload'].includes(action)) throw fail('CAPABILITY_ACTION_REFUSED');
-      const cap = await load(args.capabilityId);
+      const cap = await atFileStage('capability-load', () => load(args.capabilityId));
       if (!cap) throw fail('CAPABILITY_UNAVAILABLE');
-      const forwarder = await createFileForwarder({ manifest: { version: 1, origin, capabilities: [cap] }, journalRoot, openClient });
-      return forwarder.invoke(action, args);
+      const forwarder = await atFileStage('capability-load', () => createFileForwarder({ manifest: { version: 1, origin, capabilities: [cap] }, journalRoot, openClient }));
+      return atFileStage(action === 'status' ? 'capability-status' : action === 'resume-upload' ? 'capability-resume' : 'capability-upload', () => forwarder.invoke(action, args));
     },
     async close() {},
   };

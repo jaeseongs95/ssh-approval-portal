@@ -7,6 +7,7 @@ import { validateOrigin } from '../config/settings.mjs';
 import { validateLocalPath } from './local-files.mjs';
 import { anyRemotePath } from '../../domain/validation.mjs';
 import { MAX_BYTES } from '../../contracts/ports.mjs';
+import { fileMcpFailure } from './file-mcp-diagnostics.mjs';
 
 const fail = code => Object.assign(new Error(code), { code });
 const id = z.string().regex(/^[a-f0-9]{48}$/), digest = z.string().regex(/^[a-f0-9]{64}$/);
@@ -212,7 +213,11 @@ export async function createFileForwarder({ manifest: input, journalRoot, openCl
     } catch (error) {
       let saveClaimed = false;
       try { saveClaimed = Boolean(await read(cap, 'save-claim')); } catch {}
-      return view(cap, saveClaimed ? 'save-unknown' : 'unknown', { error: safeErrors.has(error.code) ? error.code : 'CAPABILITY_RESULT_UNKNOWN' });
+      const failure = fileMcpFailure(error, action === 'status' ? 'capability-status' : action === 'resume-upload' ? 'capability-resume' : 'capability-upload');
+      return view(cap, saveClaimed ? 'save-unknown' : 'unknown', {
+        error: safeErrors.has(error.code) ? error.code : failure.error === 'CAPABILITY_REQUEST_REFUSED' ? 'CAPABILITY_RESULT_UNKNOWN' : failure.error,
+        stage: failure.stage,
+      });
     } finally {
       if (clientPromise) { try { await (await clientPromise).close(); } catch {} }
     }

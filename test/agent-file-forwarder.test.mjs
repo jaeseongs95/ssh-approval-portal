@@ -23,14 +23,14 @@ async function fixture(t, bytes = Buffer.from('PRIVATE-file-contents-\0\xff')) {
   t.after(async () => { assert.ok(root.startsWith(join(tmpdir(), 'agent-file-contract-'))); await rm(root, { recursive: true, force: true }); });
   const selection = { capabilityId, localPath, remotePath: '/tmp/PRIVATE-remote.bin', target: 'default' };
   const calls = [], chunks = [], targets = { targets: [{ id: 'default', enabled: true, revision }] };
-  let begin, sequence = 0, record, job, beginFailure = false, finishFailure = false, beforeBegin;
+  let begin, sequence = 0, record, job, beginFailure = false, finishFailure = false, beforeBegin, targetsReply, statusReply, logoutFailure = false;
   const openClient = async origin => {
     const client = createPortalClient({ origin, accessToken: token, fetch: async (url, options) => {
       const path = new URL(url).pathname; calls.push({ path, method: options.method });
       if (path === '/api/session') return json({ mode: 'access' });
       if (path === '/api/session/start') return json({ connected: true }, true);
-      if (path === '/api/session/logout') return json({ connected: false });
-      if (path === '/api/targets') return json(targets);
+      if (path === '/api/session/logout') { if (logoutFailure) throw Error('PRIVATE-unknown-logout-' + token); return json({ connected: false }); }
+      if (path === '/api/targets') return targetsReply ? targetsReply() : json(targets);
       if (path === '/api/files/uploads') {
         begin = JSON.parse(options.body); await beforeBegin?.();
         if (beginFailure) throw Error('PRIVATE-unknown-begin-' + token);
@@ -52,7 +52,7 @@ async function fixture(t, bytes = Buffer.from('PRIVATE-file-contents-\0\xff')) {
           fileTargetId: begin.target, fileTargetRevision: begin.expectedTargetRevision } };
         return json(job);
       }
-      if (path === '/api/' + requestId) return json(job);
+      if (path === '/api/' + requestId) return statusReply ? statusReply() : json(job);
       assert.fail('예상하지 못한 시험 경로: ' + path);
     } });
     await client.connect(); return client;
@@ -61,7 +61,8 @@ async function fixture(t, bytes = Buffer.from('PRIVATE-file-contents-\0\xff')) {
   return { root, journalRoot, localPath, selection, calls, chunks, targets, bytes, create, api: await create(),
     begin: () => begin, starts: () => calls.filter(x => x.path === '/api/files/uploads').length,
     effects: () => calls.filter(x => x.method === 'POST' && !x.path.startsWith('/api/session')),
-    loseBegin: () => { beginFailure = true; }, loseFinish: value => { finishFailure = value; }, mutateAtBegin: fn => { beforeBegin = fn; } };
+    loseBegin: () => { beginFailure = true; }, loseFinish: value => { finishFailure = value; }, mutateAtBegin: fn => { beforeBegin = fn; },
+    targetsReply: fn => { targetsReply = fn; }, statusReply: fn => { statusReply = fn; }, loseLogout: () => { logoutFailure = true; } };
 }
 const args = { capabilityId };
 function publicOnly(value, f) {
@@ -211,4 +212,72 @@ test('PLATFORM-SELECTION unknown advertised platform refuses target without crea
   const f = await fixture(t); Object.assign(f.targets.targets[0], { platform: 'unknown-platform' });
   await assert.rejects(f.api.selectUpload(f.selection), { code: 'CAPABILITY_TARGET_UNAVAILABLE' });
   assert.deepEqual((await f.api.list({})).capabilities, []); assert.equal(f.starts(), 0); assert.equal(f.effects().length, 0);
+});
+
+test('FWD-TARGET-API target transport, authentication and malformed replies retain safe codes and target-query stage', async t => {
+  for (const [reply, expected] of [
+    [() => { throw Error('PRIVATE-unknown-target-query-' + token); }, 'PORTAL_READ_FAILED'],
+    [() => new Response('{PRIVATE-unknown-' + token, { headers: { 'content-type': 'application/json' } }), 'INVALID_PORTAL_RESPONSE'],
+    [() => new Response('PRIVATE-unknown-' + token, { headers: { 'content-type': 'text/plain' } }), 'INVALID_PORTAL_RESPONSE'],
+    [() => new Response('x'.repeat(1024 * 1024 + 1), { headers: { 'content-type': 'application/json' } }), 'PORTAL_RESPONSE_TOO_LARGE'],
+    [() => new Response('PRIVATE-unknown-' + token, { status: 401 }), 'OWNER_REAUTH_REQUIRED'],
+    [() => new Response(JSON.stringify({ error: 'PRIVATE_UNTRUSTED_CODE', detail: token }), { status: 403, headers: { 'content-type': 'application/json' } }), 'PORTAL_REQUEST_REFUSED'],
+  ]) {
+    const f = await fixture(t); f.targetsReply(reply);
+    await assert.rejects(f.api.selectUpload(f.selection), error => {
+      assert.equal(error.code, expected); assert.equal(error.stage, 'target-query');
+      publicOnly({ code: error.code, stage: error.stage, message: error.message }, f);
+      assert.equal(error.message, expected); assert.equal(error.serverCode, undefined); assert.equal(error.cause, undefined); return true;
+    });
+    assert.deepEqual((await f.api.list({})).capabilities, []); assert.equal(f.effects().length, 0);
+    assert.equal(f.calls.filter(row => row.path === '/api/session/logout').length, 1);
+  }
+});
+
+test('FWD-CLEANUP cleanup failure reports its own stage while a primary target failure remains primary', async t => {
+  for (const primaryFailure of [false, true]) {
+    const f = await fixture(t); f.loseLogout();
+    if (primaryFailure) f.targetsReply(() => { throw Error('PRIVATE-unknown-primary-' + token); });
+    await assert.rejects(f.api.selectUpload(f.selection), error => {
+      assert.equal(error.code, primaryFailure ? 'PORTAL_READ_FAILED' : 'PORTAL_RESULT_UNKNOWN');
+      assert.equal(error.stage, primaryFailure ? 'target-query' : 'owner-session-cleanup');
+      if (primaryFailure) assert.equal(error.cleanupError, 'OWNER_SESSION_CLEANUP_UNKNOWN');
+      publicOnly({ code: error.code, stage: error.stage, cleanupError: error.cleanupError, message: error.message }, f); return true;
+    });
+    assert.equal(f.effects().length, 0);
+    assert.equal(f.calls.filter(row => row.path === '/api/session/logout').length, 1);
+    const listed = (await f.api.list({})).capabilities;
+    assert.equal(listed.length, primaryFailure ? 0 : 1);
+    if (!primaryFailure) {
+      const before = f.calls.length; assert.equal((await f.api.selectUpload(f.selection)).state, 'available'); assert.equal(f.calls.length, before);
+    }
+  }
+});
+
+test('FWD-LOCAL-SOURCE missing and non-file paths are public snapshot failures without publishing a selection', async t => {
+  for (const [scenario, expected] of [['missing', 'CAPABILITY_LOCAL_NOT_FOUND'], ['directory', 'INVALID_LOCAL_SOURCE']]) {
+    const f = await fixture(t); await rm(f.localPath); if (scenario === 'directory') await mkdir(f.localPath);
+    await assert.rejects(f.api.selectUpload(f.selection), error => {
+      assert.equal(error.code, expected); assert.equal(error.stage, 'local-snapshot');
+      publicOnly({ code: error.code, stage: error.stage, message: error.message }, f); return true;
+    });
+    assert.deepEqual((await f.api.list({})).capabilities, []); assert.equal(f.effects().length, 0);
+    assert.equal(f.calls.filter(row => row.path === '/api/session/logout').length, 1);
+  }
+});
+
+test('FWD-STATUS-API known request read failures retain unknown state, metadata and capability-status stage after restart', async t => {
+  for (const [reply, expected] of [
+    [() => { throw Error('PRIVATE-unknown-status-' + token); }, 'PORTAL_READ_FAILED'],
+    [() => new Response('{PRIVATE-unknown-' + token, { headers: { 'content-type': 'application/json' } }), 'INVALID_PORTAL_RESPONSE'],
+  ]) {
+    const f = await fixture(t); await f.api.selectUpload(f.selection);
+    assert.equal((await f.api.invoke('upload', args)).requestId, requestId); assert.equal(f.starts(), 1); f.statusReply(reply);
+    for (const api of [f.api, await f.create()]) {
+      const result = await api.invoke('status', args);
+      assert.equal(result.state, 'unknown'); assert.equal(result.error, expected); assert.equal(result.stage, 'capability-status');
+      assert.equal(result.capabilityId, capabilityId); assert.equal(result.size, f.bytes.length); assert.equal(result.sha256, sha(f.bytes));
+      assert.equal(f.starts(), 1); publicOnly(result, f);
+    }
+  }
 });

@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve, join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createHash } from 'node:crypto';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { main } from '../scripts/portal-file-mcp.mjs';
@@ -13,17 +14,17 @@ async function fixture(t) {
   await mkdir(journal, { mode: 0o700 }); await writeFile(source, 'PRIVATE-source-content');
   const clients = new Set();
   t.after(async () => { for (const client of clients) await client.close(); assert.ok(root.startsWith(join(tmpdir(), 'agent-file-process-'))); await rm(root, { recursive: true, force: true }); });
-  async function connect(mode = 'normal') {
-    const transport = new StdioClientTransport({ command: process.execPath, args: [join(repository, 'test/agent-file-mcp.fixture.mjs'), journal, source, log, mode], cwd: root, stderr: 'pipe' });
+  async function connect(mode = 'normal', env, childArgs) {
+    const transport = new StdioClientTransport({ command: process.execPath, args: childArgs ?? [join(repository, 'test/agent-file-mcp.fixture.mjs'), journal, source, log, mode], ...(env ? { env } : {}), cwd: root, stderr: 'pipe' });
     let stderr = ''; transport.stderr.on('data', bytes => { stderr += bytes; });
     const client = new Client({ name: 'owned-agent-file-test', version: '1.0.0' }); await client.connect(transport); clients.add(client);
     return { client, async call(name, arguments_ = {}) {
       const result = await client.callTool({ name, arguments: arguments_ }, undefined, { timeout: 10000 });
-      const encoded = JSON.stringify(result); for (let secret of [source, '/tmp/PRIVATE-agent.bin', 'PRIVATE-source-content', 'SYNTHETIC.PRIVATE.TOKEN', 'C:/portal-files/PRIVATE-agent.bin', 'C:\\portal-files\\PRIVATE-agent.bin', 'PRIVATE_UNTRUSTED_CODE']) {
+      const encoded = JSON.stringify(result); for (let secret of [source, '/tmp/PRIVATE-agent.bin', 'PRIVATE-source-content', 'SYNTHETIC.PRIVATE.TOKEN', 'C:/portal-files/PRIVATE-agent.bin', 'C:\\portal-files\\PRIVATE-agent.bin', 'PRIVATE_UNTRUSTED_CODE', 'PRIVATE_UNTRUSTED_STAGE']) {
         for (let layer = 0; layer < 3; layer++) { assert.equal(encoded.includes(secret), false); secret = JSON.stringify(secret).slice(1, -1); }
       }
       return result;
-    }, async close() { await client.close(); clients.delete(client); assert.equal(stderr.includes('PRIVATE-'), false); } };
+    }, async close() { await client.close(); clients.delete(client); for (const secret of ['PRIVATE-', 'SYNTHETIC.PRIVATE.TOKEN', source, 'PRIVATE_UNTRUSTED_']) assert.equal(stderr.includes(secret), false); } };
   }
   const selection = { capabilityId, localPath: source, remotePath: '/tmp/PRIVATE-agent.bin', target: 'default' };
   const effects = () => readFile(log, 'utf8').then(text => text.trim().split('\n').filter(Boolean).map(JSON.parse), error => { if (error.code === 'ENOENT') return []; throw error; });
@@ -32,10 +33,10 @@ async function fixture(t) {
 
 test('실제 MCP 프로세스는 명시 모드에서만 선택 도구를 노출하고 엄격 입력과 메타데이터를 지킨다', { timeout: 20000 }, async t => {
   const f = await fixture(t), p = await f.connect(), tools = (await p.client.listTools()).tools;
-  assert.equal(tools.length, 5); const select = tools.find(tool => tool.name === 'file_upload_select'); assert.ok(select); assert.equal(select.inputSchema.additionalProperties, false);
+  assert.equal(tools.length, 6); const select = tools.find(tool => tool.name === 'file_upload_select'); assert.ok(select); assert.equal(select.inputSchema.additionalProperties, false);
   assert.equal(tools.some(tool => ['file_save', 'file_download_request'].includes(tool.name)), false);
   for (const tool of tools.filter(tool => tool.name !== 'file_upload_select')) {
-    assert.equal(tool.inputSchema.additionalProperties, false); assert.deepEqual(Object.keys(tool.inputSchema.properties), tool.name === 'file_capabilities' ? [] : ['capabilityId']);
+    assert.equal(tool.inputSchema.additionalProperties, false); assert.deepEqual(Object.keys(tool.inputSchema.properties), ['file_capabilities', 'file_runtime'].includes(tool.name) ? [] : ['capabilityId']);
   }
   const bad = await p.call('file_upload_select', { ...f.selection, approve: true }).catch(() => ({ isError: true })); assert.equal(bad.isError, true);
   assert.deepEqual(await f.effects(), []);
@@ -130,9 +131,99 @@ test('SDK-ERROR-CODES allowlisted credentials stay actionable and private except
     const f = await fixture(t), p = await f.connect(mode), result = await p.call('file_upload_select', f.selection);
     assert.equal(result.isError, true); assert.equal(result.structuredContent.error, expected);
     assert.equal(result.structuredContent.state, 'refused');
-    assert.deepEqual(Object.keys(result.structuredContent).sort(), ['error', 'state']);
+    assert.deepEqual(Object.keys(result.structuredContent).sort(), ['error', 'stage', 'state']);
+    assert.equal(result.structuredContent.stage, 'owner-session');
     assert.deepEqual(JSON.parse(result.content[0].text), result.structuredContent);
     assert.deepEqual((await p.call('file_capabilities')).structuredContent.capabilities, []);
     assert.deepEqual(await f.effects(), []); await p.close();
   }
+});
+
+test('STDIO-LOCAL-CAUSES missing source, non-file source and unusable snapshot temp stay distinct', { timeout: 30000 }, async t => {
+  for (const [scenario, expected] of [['missing', 'CAPABILITY_LOCAL_NOT_FOUND'], ['directory', 'INVALID_LOCAL_SOURCE'], ['temp', 'CAPABILITY_LOCAL_IO_FAILED']]) {
+    const f = await fixture(t), p = await f.connect('normal', scenario === 'temp' ? { TMPDIR: f.source, TMP: f.source, TEMP: f.source } : undefined);
+    if (scenario !== 'temp') { await rm(f.source); if (scenario === 'directory') await mkdir(f.source); }
+    const result = await p.call('file_upload_select', f.selection);
+    assert.equal(result.isError, true, scenario);
+    assert.deepEqual(result.structuredContent, { state: 'refused', error: expected, stage: 'local-snapshot' }, scenario);
+    assert.deepEqual(JSON.parse(result.content[0].text), result.structuredContent);
+    assert.deepEqual((await p.call('file_capabilities')).structuredContent.capabilities, []);
+    assert.deepEqual(await f.effects(), []); await p.close();
+  }
+});
+
+test('STDIO-JOURNAL corrupt owned selection is a capability-load refusal and never starts another transfer', { timeout: 20000 }, async t => {
+  const f = await fixture(t), p = await f.connect();
+  assert.equal((await p.call('file_upload_select', f.selection)).structuredContent.state, 'available');
+  await writeFile(join(f.journal, capabilityId + '.selection.json'), '{', { mode: 0o600 });
+  const result = await p.call('file_status', args);
+  assert.equal(result.isError, true);
+  assert.deepEqual(result.structuredContent, { state: 'refused', error: 'CAPABILITY_JOURNAL_UNKNOWN', stage: 'capability-load' });
+  assert.deepEqual(JSON.parse(result.content[0].text), result.structuredContent);
+  assert.deepEqual(await f.effects(), []); await p.close();
+});
+
+test('STDIO-RUNTIME executing process reports safe identity without selecting, authenticating or uploading', { timeout: 20000 }, async t => {
+  const f = await fixture(t), p = await f.connect(), tool = (await p.client.listTools()).tools.find(tool => tool.name === 'file_runtime');
+  assert.ok(tool); assert.equal(tool.annotations.readOnlyHint, true);
+  assert.equal(tool.inputSchema.additionalProperties, false); assert.deepEqual(Object.keys(tool.inputSchema.properties), []);
+  const result = await p.call('file_runtime'), value = result.structuredContent;
+  assert.equal(result.isError, undefined); assert.equal(value.state, 'ready'); assert.equal(value.mode, 'agent-uploads');
+  assert.deepEqual(Object.keys(value).sort(), ['mode', 'runtime', 'state']);
+  assert.deepEqual(Object.keys(value.runtime).sort(), ['entrypointSha256', 'implementationSha256', 'node', 'platform', 'productVersion', 'sourceObservation']);
+  assert.equal(value.runtime.productVersion, JSON.parse(await readFile(join(repository, 'package.json'), 'utf8')).version);
+  assert.equal(value.runtime.node, process.versions.node); assert.equal(value.runtime.platform, process.platform);
+  assert.equal(value.runtime.entrypointSha256, createHash('sha256').update(await readFile(join(repository, 'scripts/portal-file-mcp.mjs'))).digest('hex'));
+  assert.match(value.runtime.implementationSha256, /^[a-f0-9]{64}$/);
+  assert.equal(value.runtime.sourceObservation, 'startup-files');
+  assert.deepEqual(JSON.parse(result.content[0].text), value);
+  assert.deepEqual((await p.call('file_runtime')).structuredContent, value);
+  assert.equal((await p.call('file_runtime', { approve: true })).isError, true);
+  assert.deepEqual((await p.call('file_capabilities')).structuredContent.capabilities, []);
+  assert.deepEqual(await f.effects(), []); await p.close();
+});
+
+test('STDIO-SAFE-ERRORS semantic codes and trusted stages survive while raw exception fields remain private', { timeout: 40000 }, async t => {
+  const f = await fixture(t), script = join(f.root, 'owned-error-fixture.mjs');
+  const cases = [
+    ['LOCAL_SOURCE_CHANGED', 'local-snapshot', 'LOCAL_SOURCE_CHANGED'],
+    ['PRIVATE_FILE_UNAVAILABLE', 'selection-load', 'PRIVATE_FILE_UNAVAILABLE'],
+    ['INVALID_FILE_MANIFEST', 'selection-load', 'INVALID_FILE_MANIFEST'],
+    ['INVALID_OWNER_SESSION', 'owner-session', 'INVALID_OWNER_SESSION'],
+    ['PORTAL_READ_FAILED', 'target-query', 'PORTAL_READ_FAILED'],
+    ['INVALID_PORTAL_RESPONSE', 'target-query', 'INVALID_PORTAL_RESPONSE'],
+    ['PORTAL_RESPONSE_TOO_LARGE', 'target-query', 'PORTAL_RESPONSE_TOO_LARGE'],
+    ['ACCESS_MODE_REQUIRED', 'owner-session', 'ACCESS_MODE_REQUIRED'],
+    ['ENOENT', 'local-snapshot', 'CAPABILITY_LOCAL_NOT_FOUND'],
+    ['EACCES', 'local-snapshot', 'CAPABILITY_LOCAL_ACCESS_DENIED'],
+    ['EPERM', 'local-snapshot', 'CAPABILITY_LOCAL_ACCESS_DENIED'],
+    ['ENOSPC', 'selection-publish', 'CAPABILITY_LOCAL_STORAGE_FULL'],
+    ['EDQUOT', 'selection-publish', 'CAPABILITY_LOCAL_STORAGE_FULL'],
+    ['EBUSY', 'local-snapshot', 'CAPABILITY_LOCAL_BUSY'],
+    ['ETXTBSY', 'local-snapshot', 'CAPABILITY_LOCAL_BUSY'],
+    ['EXDEV', 'selection-publish', 'CAPABILITY_LOCAL_LINK_UNSUPPORTED'],
+    ['ENOTSUP', 'selection-publish', 'CAPABILITY_LOCAL_LINK_UNSUPPORTED'],
+    ['EOPNOTSUPP', 'selection-publish', 'CAPABILITY_LOCAL_LINK_UNSUPPORTED'],
+    ['ENOTDIR', 'local-snapshot', 'CAPABILITY_LOCAL_IO_FAILED'],
+    ['EIO', 'local-snapshot', 'CAPABILITY_LOCAL_IO_FAILED'],
+    ['PRIVATE_UNTRUSTED_CODE', 'local-snapshot', 'CAPABILITY_REQUEST_REFUSED'],
+    ['PRIVATE_UNTRUSTED_CODE', 'PRIVATE_UNTRUSTED_STAGE', 'CAPABILITY_REQUEST_REFUSED', 'arguments'],
+    ['toString', 'local-snapshot', 'CAPABILITY_REQUEST_REFUSED'],
+    ['constructor', 'local-snapshot', 'CAPABILITY_REQUEST_REFUSED'],
+    ['__proto__', 'local-snapshot', 'CAPABILITY_REQUEST_REFUSED'],
+  ];
+  await writeFile(script, `import { startFileMcp } from ${JSON.stringify(pathToFileURL(join(repository, 'scripts/portal-file-mcp.mjs')).href)};
+const cases = ${JSON.stringify(cases)};
+const refuse = async args => { const [code, stage] = cases[Number.parseInt(args.capabilityId, 16)]; throw Object.assign(new Error('SYNTHETIC.PRIVATE.TOKEN PRIVATE-source-content'), { code, stage, path: ${JSON.stringify(f.source)}, serverCode: 'PRIVATE_UNTRUSTED_CODE', cause: new Error('PRIVATE-source-content') }); };
+await startFileMcp({ forwarder: { uploadOnly: true, list: async () => ({ capabilities: [], truncated: false }), selectUpload: refuse, invoke: refuse } });
+`);
+  const p = await f.connect('normal', undefined, [script]);
+  for (const [index, [code, stage, expected, expectedStage = stage]] of cases.entries()) {
+    const result = await p.call('file_upload_select', { ...f.selection, capabilityId: index.toString(16).padStart(48, '0') });
+    assert.equal(result.isError, true);
+    assert.deepEqual(result.structuredContent, { state: 'refused', error: expected, stage: expectedStage });
+    assert.deepEqual(JSON.parse(result.content[0].text), result.structuredContent);
+    assert.deepEqual(await f.effects(), []);
+  }
+  await p.close();
 });
