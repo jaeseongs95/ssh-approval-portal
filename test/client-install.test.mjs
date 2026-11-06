@@ -20,7 +20,7 @@ function fixture(t) {
     assert.ok(root.startsWith(join(tmpdir(), 'client-install-')));
     rmSync(root, { recursive: true, force: true });
   });
-  const source = join(root, 'source'), home = join(root, 'home'), programs = join(root, 'programs');
+  const source = join(root, 'source'), home = join(root, 'home'), programs = join(root, 'programs 한글');
   mkdirSync(home, { recursive: true });
   const files = new Map([
     ['scripts/portal-files.mjs', Buffer.from('console.log(JSON.stringify(process.argv.slice(2)));\n')],
@@ -98,6 +98,10 @@ test('I05 installs a fresh version alongside an untouched previous version', t =
   assert.equal(result.verification.liveHostHooks, 'not-verified');
   assert.equal(readFileSync(previous, 'utf8'), 'previous-version-sentinel');
   for (const [path, bytes] of f.files) assert.deepEqual(readFileSync(join(f.target, path)), bytes);
+  if (process.platform === 'win32') {
+    assert.deepEqual(readFileSync(join(f.target, 'portal-files.ps1')).subarray(0, 3), Buffer.from([0xef, 0xbb, 0xbf]));
+    assert.ok([...readFileSync(join(f.target, 'portal-files.cmd'))].every(byte => byte < 128));
+  }
   assert.equal(existsSync(join(f.programs, '.install-client.lock')), false);
 });
 
@@ -217,9 +221,13 @@ test('I12 refuses an existing installation lock and preserves it', t => {
 
 test('I13 Claude plan uses official registration and absolute hook arguments without running Claude', t => {
   const f = fixture(t);
+  // Deliberately unreadable-as-files: plan must not inspect raw Claude settings/registries.
+  for (const path of ['settings.json', 'plugins/known_marketplaces.json', 'plugins/installed_plugins.json']) mkdirSync(join(f.home, '.claude', path), { recursive: true });
   const result = ok(f.run(['--hosts', 'claude-code', '--claude', process.execPath]));
   assert.deepEqual(result.claude.args, ['plugin', 'install', 'ssh-completion-client', '--marketplace', join(f.target, '.claude-marketplace'), '--scope', 'user', '--json']);
   assert.equal(result.reload.automatic, false);
+  assert.equal('claudeBackupFiles' in result, false);
+  assert.match(result.claudeRecovery, /raw Claude settings.*never read/);
   assert.equal(existsSync(f.programs), false);
   assert.equal(result.files.some(file => file.path === '.claude-marketplace/plugins/ssh-completion-client/hooks/claude-code.json'), true);
 });

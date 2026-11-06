@@ -36,7 +36,7 @@ plan JSON에서 설치 대상, 각 파일 해시, 설정 변경 여부, 백업 �
 
 동일 명령 끝에 `--apply`를 붙여 적용합니다. 검토한 계획에 고정하려면 함께 출력된 `planSha256`을 `--expect-plan SHA256`으로 전달합니다. 그 사이 원본이나 설정이 바뀌면 새 계획을 검토하도록 중단합니다.
 
-설치 파일은 Node 절대 경로를 사용하는 `portal-files`·`portal-completion-hook` launcher와 선택한 TEST/PROD launcher를 포함합니다. Windows에서는 `.cmd`와 `.ps1`(origin launcher는 `.ps1`), Linux/macOS에서는 `.sh`를 만듭니다. 공백과 한글 경로를 인용합니다. Windows cmd 셸 해석이 모호한 경로 문자(`"`, `%`, `!`, `^`)는 거부합니다. PATH를 바꾸지 않으므로 생성된 launcher의 경로를 직접 사용합니다.
+설치 파일은 Node 절대 경로를 사용하는 `portal-files`·`portal-completion-hook` launcher와 선택한 TEST/PROD launcher를 포함합니다. Windows에서는 `.cmd`와 `.ps1`(origin launcher는 `.ps1`), Linux/macOS에서는 `.sh`를 만듭니다. Windows `.ps1`은 PowerShell 5.1에서 한글 경로를 읽도록 UTF-8 BOM을 포함하며 ASCII `.cmd`는 같은 디렉터리의 `.ps1`로 위임합니다. 기존 PowerShell 실행 정책을 따르며 우회하지 않습니다. 공백과 한글 경로를 인용합니다. Windows cmd 셸 해석이 모호한 경로 문자(`"`, `%`, `!`, `^`)는 거부합니다. PATH를 바꾸지 않으므로 생성된 launcher의 경로를 직접 사용합니다.
 
 Codex는 `~/.codex/hooks.json`의 해당 `portal-completion-hook.mjs` handler만 갱신하고, 같은 그룹에 있는 다른 handler도 보존합니다. Antigravity는 [공식 Native hook 경로](https://antigravity.google/docs/hooks)인 `~/.gemini/config/hooks.json`의 `ssh-completion-inbox` 항목만 갱신합니다. 이 이름에 다른 handler가 있으면 충돌로 중단합니다. 기존 Antigravity hook이 `enabled:false`이면 그 선택을 보존합니다. JSON 원문은 byte 단위로 백업하고, BOM·CRLF/LF를 보존해 새 설정을 씁니다. 기존 주석을 포함한 JSONC는 지원하지 않으므로 JSON 문법 오류로 중단합니다.
 
@@ -46,7 +46,7 @@ Claude Code는 기존 marketplace identity `ssh-mcp-client-local`을 사용해 �
 claude plugin install ssh-completion-client --marketplace /installed/VERSION/.claude-marketplace --scope user --json
 ```
 
-설정 변경 전 `INSTALL_ROOT/backups/<시각-고유ID>/`에 해당 hook JSON과 Claude의 기존 `settings.json`, `plugins/known_marketplaces.json`, `plugins/installed_plugins.json` 원문을 백업합니다. 인증·토큰 저장소는 열지 않습니다. 백업에는 사용자 설정이 들어 있을 수 있으므로 설치 루트의 개인 권한을 유지합니다. 기존 hook 설정은 쓰기 직전 원본 해시를 다시 확인한 뒤 같은 디렉터리의 임시 파일을 원자 rename해 교체합니다. 한 설치 루트에 설치기 잠금을 두어 중복 실행을 차단합니다.
+설정 변경 전 `INSTALL_ROOT/backups/<시각-고유ID>/`에 해당 Codex·Antigravity hook JSON 원문을 백업합니다. Claude는 공식 `plugin list --json`에서 해당 user 플러그인의 `id`, `version`, `scope`, `enabled`, `readFromFolder`만 선택해 `claude-plugin.before.json`에 저장합니다. Claude의 `settings.json`·플러그인 registry·인증·토큰 저장소 원문은 열거나 복사하지 않습니다. Claude 복구가 필요하면 보존한 이전 `readFromFolder`가 속한 marketplace source에 공식 `plugin install --marketplace ... --scope user`를 실행하고 이전 enabled 상태를 확인합니다. 백업에는 사용자 hook 설정이 들어 있을 수 있으므로 설치 루트의 개인 권한을 유지합니다. 기존 hook 설정은 쓰기 직전 원본 해시를 다시 확인한 뒤 같은 디렉터리의 임시 파일을 원자 rename해 교체합니다. 한 설치 루트에 설치기 잠금을 두어 중복 실행을 차단합니다.
 
 같은 버전의 기존 설치 파일이 정확히 일치하면 재사용하고 hook 중복을 만들지 않습니다. Claude는 공식 `plugin list --json`의 user scope·버전·`readFromFolder`가 설치 wrapper와 같으면 재등록하지 않습니다. 기존 disabled 등록이 같은 버전·경로이면 disabled 상태를 보존하고, disabled 상태에서 업그레이드가 필요하면 `CLAUDE_PLUGIN_DISABLED`로 중단해 호스트에서 원하는 동작을 결정하도록 합니다. 기존 파일이 다르면 `TARGET_CONFLICT`로 중단합니다. manifest 밖 파일은 재귀 탐색하거나 정리하지 않습니다. 설정·옵션을 바꿔 같은 버전의 생성 launcher가 달라져도 충돌하므로 새 설치 루트나 새 버전을 사용해 구분합니다.
 
@@ -54,7 +54,7 @@ claude plugin install ssh-completion-client --marketplace /installed/VERSION/.cl
 
 적용 결과는 설치 파일과 hook JSON을 다시 읽어 검증합니다. Claude CLI 종료 코드 0은 공식 등록 명령의 완료 근거이며 실제 hook 실행 성공을 뜻하지 않습니다. `claude plugin list --json`과 `claude plugin details ssh-completion-client@ssh-mcp-client-local`에서 버전·user scope·로컬 wrapper를 확인하고 실제 호스트에서 completion hook을 확인합니다. TEST와 PROD 각각 생성된 launcher로 `doctor`를 실행해 기존 owner 인증을 확인합니다. 설치기는 로그인이나 비밀 변경을 대신 수행하지 않습니다.
 
-Codex는 새 세션에서 확인합니다. Claude Code의 열린 세션은 `/reload-plugins` 또는 새 세션에서 확인합니다. Antigravity는 앱을 재적재하거나 새 세션에서 `/hooks`를 확인합니다. 호스트의 hook enable·trust 요구는 그대로 유지하며 자동 재시작·권한 우회는 하지 않습니다.
+Codex는 새 세션에서 확인합니다. Claude Code의 열린 세션은 `/reload-plugins` 또는 새 세션에서 확인합니다. Antigravity Native는 앱을 재적재하거나 새 세션에서 Settings > Customizations > Hooks를 확인합니다. 호스트의 hook enable·trust 요구는 그대로 유지하며 자동 재시작·권한 우회는 하지 않습니다.
 
 ## 실패와 복구 경계
 

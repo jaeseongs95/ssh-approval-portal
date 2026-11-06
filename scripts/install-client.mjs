@@ -101,7 +101,8 @@ function claudeRegistration(claude, version, target) {
   const expected = join(target, '.claude-marketplace', 'plugins', 'ssh-completion-client');
   const same = plugin?.version === version && typeof plugin.readFromFolder === 'string' && resolve(plugin.readFromFolder) === resolve(expected);
   if (plugin?.enabled === false && !same) fail('CLAUDE_PLUGIN_DISABLED', 'Existing SSH plugin is disabled; preserve that choice and perform the desired upgrade through the host CLI');
-  return same ? (plugin.enabled === false ? 'already-registered-disabled' : 'already-registered') : null;
+  const metadata = plugin ? Object.fromEntries(['id', 'version', 'scope', 'enabled', 'readFromFolder'].map(key => [key, plugin[key] ?? null])) : null;
+  return { state: same ? (plugin.enabled === false ? 'already-registered-disabled' : 'already-registered') : null, metadata };
 }
 
 function shellWord(value) {
@@ -183,13 +184,17 @@ function origin(value) {
 function generatedFiles(files, options, version, target, node) {
   const add = (name, data) => {
     if (files.has(name)) fail('INVALID_MANIFEST', `Generated installer path conflicts with release: ${name}`);
-    files.set(name, Buffer.isBuffer(data) ? data : Buffer.from(data));
+    const bytes = Buffer.isBuffer(data) ? data : Buffer.from(data);
+    // Windows PowerShell 5.1 requires a BOM to decode non-ASCII paths as UTF-8.
+    files.set(name, name.endsWith('.ps1') ? Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), bytes]) : bytes);
   };
   const windows = process.platform === 'win32';
+  if (windows) { shellWord(node); shellWord(target); }
   for (const [name, entry] of [['portal-files', 'portal-files.mjs'], ['portal-completion-hook', 'portal-completion-hook.mjs']]) {
     const script = join(target, 'scripts', entry);
     if (windows) {
-      add(`${name}.cmd`, `@echo off\r\n${shellWord(node)} ${shellWord(script)} %*\r\nexit /b %errorlevel%\r\n`);
+      // ASCII-only CMD delegates Unicode path handling to the BOM-tagged PS1.
+      add(`${name}.cmd`, `@echo off\r\n"%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -NoProfile -File "%~dp0${name}.ps1" %*\r\nexit /b %errorlevel%\r\n`);
       add(`${name}.ps1`, `& ${psWord(node)} ${psWord(script)} @args\nexit $LASTEXITCODE\n`);
     } else add(`${name}.sh`, `#!/bin/sh\nexec ${shellWord(node)} ${shellWord(script)} "$@"\n`);
   }
@@ -278,7 +283,6 @@ function main(argv) {
     if (finalNames.has(parent)) fail('INVALID_MANIFEST', 'Release and generated installer file paths overlap');
   }
   const changes = options.hosts.filter(host => host !== 'claude-code').map(host => configChange(host, host === 'codex' ? join(home, '.codex', 'hooks.json') : join(home, '.gemini', 'config', 'hooks.json'), files, node, target));
-  const claudeBackups = options.hosts.includes('claude-code') ? ['settings.json', 'plugins/known_marketplaces.json', 'plugins/installed_plugins.json'].map(name => ({ host: 'claude-code/' + name, path: join(home, '.claude', ...name.split('/')), before: readOptional(join(home, '.claude', ...name.split('/'))) })) : [];
   let claude = null;
   if (options.hosts.includes('claude-code')) {
     if (!options.claude) fail('CLAUDE_PATH_REQUIRED', '--claude must name the existing absolute Claude Code CLI executable');
@@ -298,8 +302,8 @@ function main(argv) {
   const plan = { schemaVersion: '1.0.0', mode: options.apply ? 'apply' : 'plan', version: manifest.version, source, manifestSha256: options['manifest-sha256'], target, platform: process.platform, node, nodeVersion, reuse,
     files: [...files].map(([path, data]) => ({ path, size: data.length, sha256: hash(data) })),
     configChanges: changes.map(change => ({ host: change.host, path: change.path, changed: change.changed, beforeSha256: change.before ? hash(change.before) : null, afterSha256: hash(change.after) })),
-    claude, claudeBackupFiles: claudeBackups.map(change => ({ path: change.path, sha256: change.before ? hash(change.before) : null })),
-    reload: { automatic: false, codex: 'Start a new session; retain the host hook trust/enable requirements.', 'claude-code': 'Run /reload-plugins in Claude Code or start a new session; preserve host trust policy.', antigravity: 'Reload the application or start a new session; inspect /hooks and preserve trust requirements.' },
+    claude, claudeRecovery: claude ? 'Only selected official plugin list metadata is backed up during apply; raw Claude settings, registries, and authentication stores are never read.' : null,
+    reload: { automatic: false, codex: 'Start a new session; retain the host hook trust/enable requirements.', 'claude-code': 'Run /reload-plugins in Claude Code or start a new session; preserve host trust policy.', antigravity: 'Reload the Native application or start a new session; inspect Settings > Customizations > Hooks and preserve trust requirements.' },
     noAuthenticationOrPathChanges: true };
   // The plan pin describes the intended state independently of plan/apply mode.
   const planSha256 = hash(json({ ...plan, mode: 'plan' }));
@@ -313,8 +317,9 @@ function main(argv) {
   const progress = { target, copied: false, configured: [], claude: claude ? 'not-started' : 'not-requested', backup: null };
   try {
     writeFileSync(lock, json({ pid: process.pid, target }));
-    for (const change of [...changes, ...claudeBackups]) unchanged(change);
-    const registered = claude ? claudeRegistration(claude, manifest.version, target) : null;
+    for (const change of changes) unchanged(change);
+    const inventory = claude ? claudeRegistration(claude, manifest.version, target) : null;
+    const registered = inventory?.state;
     if (registered) progress.claude = registered;
     if (!reuse) {
       mkdirSync(target, { mode: 0o700 });
@@ -326,15 +331,16 @@ function main(argv) {
     if (pending.length || (claude && !registered)) {
       progress.backup = join(root, 'backups', new Date().toISOString().replaceAll(/[:.]/g, '-') + '-' + randomUUID());
       mkdirSync(progress.backup, { recursive: true, mode: 0o700 });
-      for (const change of [...pending, ...claudeBackups]) {
+      for (const change of pending) {
         unchanged(change);
         if (change.before) writeNew(join(progress.backup, change.host.replaceAll('/', '-') + '.before'), change.before);
       }
+      if (claude) writeNew(join(progress.backup, 'claude-plugin.before.json'), json({ registration: inventory.metadata,
+        recovery: 'Use the previous readFromFolder source with the official plugin install --marketplace command; preserve scope and enabled state. No raw Claude configuration was read or copied.' }));
       writeNew(join(progress.backup, 'plan.json'), json({ ...plan, planSha256 }));
     }
     for (const change of pending) { replaceConfig(change); progress.configured.push(change.host); }
     if (claude && !registered) {
-      for (const change of claudeBackups) unchanged(change);
       progress.claude = 'started';
       run(claude.command, claude.args, 'Claude official plugin installation (requires >=2.1.292)');
       progress.claude = 'official-cli-completed';
