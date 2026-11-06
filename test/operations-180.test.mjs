@@ -177,8 +177,8 @@ test('default observe returns running state without waiting for held execution',
       f.operations.observe({ id: record.id }),
       new Promise((_, reject) => { timeout = setTimeout(() => reject(Error('observe blocked on execution')), 1000); }),
     ]);
-    assert.equal(result.id, record.id);
-    assert.equal(result.state, 'running');
+    assert.equal(result.job.id, record.id);
+    assert.equal(result.job.state, 'running');
     assert.equal(f.effects.length, 1);
   } finally { clearTimeout(timeout); f.executions[0].resolve(); }
 });
