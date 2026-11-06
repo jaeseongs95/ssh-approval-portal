@@ -1,9 +1,9 @@
-# SSH Approval Portal 2.3.1
+# SSH Approval Portal 2.3.2
 
 Completion hooks: the local client saves status in a durable inbox. Native host hooks deliver it to the agent, with a separate handling ACK; Claude Code uses its background `asyncRewake` hook. See the [client hook guide](docs/client-files.ko.md) for host support, reload requirements and idle limits.
 
 
-[한국어](README.ko.md) · [Download v2.3.1](https://github.com/jaeseongs95/ssh-approval-portal/releases/tag/v2.3.1) · [Architecture](docs/architecture.en.md) · [MCP contract (Korean)](docs/mcp-tools.ko.md)
+[한국어](README.ko.md) · [Download v2.3.2](https://github.com/jaeseongs95/ssh-approval-portal/releases/tag/v2.3.2) · [Architecture](docs/architecture.en.md) · [MCP contract (Korean)](docs/mcp-tools.ko.md)
 
 Run SSH commands, transfer files and operate real OS desktops through a vendor-neutral MCP server. Agents use a common tool contract; server policy, owner decisions and the target account's permissions govern execution.
 
@@ -81,7 +81,7 @@ Output is read explicitly with `includeOutput:true` and paginated when needed. T
 <a id="files"></a>
 ## Upload a PC file without putting bytes in the model context
 
-Download and extract `ssh-approval-portal-client-2.3.1.zip` or `.tar.gz` from the [release](https://github.com/jaeseongs95/ssh-approval-portal/releases/tag/v2.3.1). Run the entry point from that extracted folder. The portable client works directly from that folder. For a versioned installation, TEST/PROD launchers and Codex, Claude Code or Antigravity Native hooks, use the [client installer](docs/client-install.ko.md): inspect its default read-only plan, then apply it. Existing versions and unrelated host settings are preserved; PATH and authentication are unchanged.
+Download and extract `ssh-approval-portal-client-2.3.2.zip` or `.tar.gz` from the [release](https://github.com/jaeseongs95/ssh-approval-portal/releases/tag/v2.3.2). Run the entry point from that extracted folder. The portable client works directly from that folder. For a versioned installation, TEST/PROD launchers and Codex, Claude Code or Antigravity Native hooks, use the [client installer](docs/client-install.ko.md): inspect its default read-only plan, then apply it. Existing versions and unrelated host settings are preserved; PATH and authentication are unchanged.
 
 The current client requires an administrator HTTPS origin configured for **Access** mode, an existing trusted `cloudflared` executable and the owner's login cache. MCP authentication and the server's default administrator token mode do not substitute for this authentication.
 
@@ -144,12 +144,12 @@ Choose the path that matches the existing server:
 
 ### Fresh native installation
 
-Prepare an Ubuntu 22.04/24.04 server with Python 3, internet access and an administrator terminal. Download the server archive and `SHA256SUMS` from the [release](https://github.com/jaeseongs95/ssh-approval-portal/releases/tag/v2.3.1), then run on that server:
+Prepare an Ubuntu 22.04/24.04 server with Python 3, internet access and an administrator terminal. Download the server archive and `SHA256SUMS` from the [release](https://github.com/jaeseongs95/ssh-approval-portal/releases/tag/v2.3.2), then run on that server:
 
 ```sh
 sha256sum --check --ignore-missing SHA256SUMS
-tar -xzf ssh-approval-portal-2.3.1.tar.gz
-cd ssh-approval-portal-2.3.1
+tar -xzf ssh-approval-portal-2.3.2.tar.gz
+cd ssh-approval-portal-2.3.2
 python3 scripts/portal.py install --admin-origin https://approve.example.com --dry-run
 sudo python3 scripts/portal.py install --admin-origin https://approve.example.com
 sudo python3 scripts/portal.py status
@@ -251,7 +251,7 @@ python3 test/test_helper.py
 To generate server/client archives in a **new** absolute output directory:
 
 ```sh
-npm run package:release -- --output /absolute/new/portal-2.3.1-release
+npm run package:release -- --output /absolute/new/portal-2.3.2-release
 ```
 
 Packaging produces server and client `.tar.gz`/`.zip` assets and checksums. Node.js, cloudflared, credentials and user sessions are not bundled. Source, fixture, live-host, client UI and deployment checks establish different things; an available command is not evidence that a test has passed. Keep published assets immutable and compare the release checksums before use.

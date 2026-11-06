@@ -12,7 +12,7 @@ Windows PowerShell 예시입니다. 경로와 origin은 실제 값을 사용합�
 
 ```powershell
 $node = 'C:/Program Files/nodejs/node.exe'
-$source = 'C:/Downloads/ssh-approval-portal-client-2.3.1'
+$source = 'C:/Downloads/ssh-approval-portal-client-2.3.2'
 $pin = (Get-FileHash -LiteralPath "$source/client-manifest.json" -Algorithm SHA256).Hash.ToLowerInvariant()
 & $node "$source/scripts/install-client.mjs" --source $source --manifest-sha256 $pin --hosts codex,claude-code,antigravity --claude 'C:/Users/USER/.local/bin/claude.exe' --cloudflared 'C:/Tools/cloudflared.exe' --test-origin 'https://test-approve.example.com' --prod-origin 'https://approve.example.com'
 ```
@@ -20,7 +20,7 @@ $pin = (Get-FileHash -LiteralPath "$source/client-manifest.json" -Algorithm SHA2
 Linux/macOS 예시입니다. Node·Claude 경로는 해당 PC의 실제 절대 경로로 바꿉니다.
 
 ```sh
-node /downloads/ssh-approval-portal-client-2.3.1/scripts/install-client.mjs \
+node /downloads/ssh-approval-portal-client-2.3.2/scripts/install-client.mjs \
   --manifest-sha256 TRUSTED_MANIFEST_SHA256 \
   --node /opt/node/bin/node \
   --hosts codex,claude-code,antigravity --claude /home/USER/.local/bin/claude \
