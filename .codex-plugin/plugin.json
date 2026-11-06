@@ -1,6 +1,6 @@
 {
   "name": "ssh-completion-client",
-  "version": "2.3.2",
+  "version": "2.3.3",
   "description": "Local durable completion hooks for the existing SSH MCP connection.",
   "hooks": "./hooks/codex.json"
 }
