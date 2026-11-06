@@ -163,3 +163,22 @@ test('cancellation targets the original operation and never submits a replacemen
   f.executions[0].resolve(); await tick();
   assert.equal(f.journal.usage().count, 1); assert.equal(f.effects.length, 1);
 });
+
+
+// OBS01: default observe returns before held execution; an independent timer detects blocking.
+test('default observe returns running state without waiting for held execution', { timeout: 5000 }, async t => {
+  const f = fixture(t, { beforeExecute: execution => execution.promise });
+  const record = await f.operations.submit(input('observe-default-immediate-230'));
+  await tick();
+  assert.equal(f.executions.length, 1);
+  let timeout;
+  try {
+    const result = await Promise.race([
+      f.operations.observe({ id: record.id }),
+      new Promise((_, reject) => { timeout = setTimeout(() => reject(Error('observe blocked on execution')), 1000); }),
+    ]);
+    assert.equal(result.id, record.id);
+    assert.equal(result.state, 'running');
+    assert.equal(f.effects.length, 1);
+  } finally { clearTimeout(timeout); f.executions[0].resolve(); }
+});

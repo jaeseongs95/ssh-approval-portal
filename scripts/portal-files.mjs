@@ -12,14 +12,14 @@ import { createOperationWatcher } from '../src/adapters/cli/operation-watcher.mj
 import { notifyCodexCompletion, validateCodexCompletionTarget } from '../src/adapters/cli/codex-completion.mjs';
 import { validateCompletionDeliveryTarget, deliverCompletion } from '../src/adapters/cli/completion-delivery.mjs';
 
-const usage = 'SSH Approval Portal file client2.2.1 (Node.js24.2+ within major24)\n' +
+const usage = 'SSH Approval Portal file client2.3.0 (Node.js24.2+ within major24)\n' +
   'node scripts/portal-files.mjs --origin HTTPS_ORIGIN [--cloudflared EXISTING_ABSOLUTE_PATH] doctor\n' +
   'node scripts/portal-files.mjs --origin HTTPS_ORIGIN [--cloudflared EXISTING_ABSOLUTE_PATH] upload --file ABSOLUTE_FILE --operation-key STABLE_KEY\n' +
   'node scripts/portal-files.mjs --origin HTTPS_ORIGIN [--cloudflared EXISTING_ABSOLUTE_PATH] status UUID\n' +
   'node scripts/portal-files.mjs --origin HTTPS_ORIGIN [--cloudflared EXISTING_ABSOLUTE_PATH] watch REQUEST_ID [--timeout-ms 600000] [--notify-codex ABSOLUTE_EXECUTABLE --thread EXACT_SESSION_UUID]\n' +
   'node scripts/portal-files.mjs --origin HTTPS_ORIGIN [--cloudflared EXISTING_ABSOLUTE_PATH] watch REQUEST_ID --notify-hook --host codex|claude-code|antigravity --session EXACT_SESSION_ID [--inbox ABSOLUTE_DB] [--wake-executable ABSOLUTE_EXECUTABLE]\n' +
-  'Hook notification requires a binding registered by that session hook. Metadata is committed before wake; a wake request does not confirm host/model receipt. Hook and direct Codex notification options cannot be combined.\n' +
-  'Launch watch using the host background-process facility, continue independent work, and consume its one terminal event. Stopping watch never cancels or replays SSH. No automatic host wake is guaranteed without host support.\n' +
+  'Verify the completion plugin is loaded in your own session; installed/registered is not proof of hook execution. Hook notification requires a binding registered by that session hook. Metadata is committed before wake; a wake request does not confirm host/model receipt. Hook and direct Codex notification options cannot be combined.\n' +
+  'Background watch, continue independent work, then consume its hook body. Handle the same operation ID and run the supplied portal-completion-hook ack command with its exact host/session/receipt/claim. Never ACK a wake marker without a body. Stopping watch never cancels or replays SSH. No automatic host wake is guaranteed without host support.\n' +
   'Upload sends PC bytes directly over owner-authenticated HTTP. Success stdout is only {"uuid":"..."}. No automatic login, install, retry, approval or SSH destination selection.\n';
 
 export async function main(argv = process.argv.slice(2), output = process.stdout, errorOutput = process.stderr,
