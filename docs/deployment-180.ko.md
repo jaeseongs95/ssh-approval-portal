@@ -62,7 +62,7 @@ sudo /opt/ssh-approval/node/bin/node scripts/deploy180.mjs verify --plan /srv/po
 
 완료 표식이 없는 이전 배포 도구의 상태 파일도, 직전 generation이 `switching`, `start-attempted`, `activated`, `verified`, `recovered` 단계이고 유효한 이전 영수증을 갖고 있으면 같은 보관본·journal 검사를 거쳐 승계할 수 있다. `migrating` 같은 불완전 단계는 완료 증거가 아니다. 영수증 없는 기존 1.8 설치, 손상된 표식, 다른 `dataRoot`, 변경된 보관본, 누락된 canonical 행, 같은 요청키의 원문·digest 충돌은 거부한다. 보관 디렉터리의 symlink와 보관 파일의 symlink·복수 hardlink도 거부한다. 새 키로 바꾸거나 live 원본을 다시 import하여 불완전 증거를 숨기지 않는다. 원본 DB와 canonical journal을 자동 덮어쓰거나 삭제하지 않는다.
 
-기존 `requests.request_key` 컬럼이 있으면 그 값을 정확히 새 journal의 요청키로 사용한다. 컬럼이 없거나 NULL인 구형 행에만 `legacy:<source>:<id>`를 사용한다. 새 journal은 전역 요청키를 사용하므로 두 구형 DB의 같은 키가 서로 다른 이력을 가리키면 `OPERATION_KEY_CONFLICT`로 멈춘다. 이름을 임의로 바꾸거나 기존 결과를 덮어쓰지 않는다. 실패 전에 import된 행은 새 journal에 남을 수 있지만 서비스 전환은 하지 않으며 원본 두 DB와 SHA-256 보관본은 유지한다. 충돌은 별도 명시적 이력 매핑으로 해결해야 하고, 새로운 키로 실행을 재제출해 해결하지 않는다.
+기존 `requests.request_key` 컬럼이 있으면 그 값을 정확히 새 journal의 요청키로 사용한다. 컬럼이 없거나 NULL인 구형 행에만 `legacy:<source>:<id>`를 사용한다. 새 journal은 전역 요청키를 사용하므로 두 원본 전체의 source·요청키·ID·원문·digest와 기존 canonical 이력을 보관 디렉터리 생성·batch 기록 전에 조회 검증한다. identity 충돌은 `OPERATION_KEY_CONFLICT`로 멈추며 이번 이전의 신규 행은 기록하지 않는다. 이름을 임의로 바꾸거나 기존 결과를 덮어쓰지 않는다. 이 사전 검사가 중간 I/O 장애까지 전체 이전의 원자성을 보장하지는 않는다. 그런 장애 전에 commit된 정확한 부분 이력은 남을 수 있지만 서비스 전환은 하지 않으며 원본 두 DB와 SHA-256 보관본은 유지한다. 충돌은 별도 명시적 이력 매핑으로 해결해야 하고, 새로운 키로 실행을 재제출해 해결하지 않는다.
 
 기존 command output은 기존 파일과 만료 시각을 그대로 따른다. 기본 보존 TTL은 1시간이다. 이미 만료·삭제된 출력과 처음부터 영구 저장하지 않은 출력은 복원할 수 없다. 이력 이전이 출력 보존 기간을 연장하지 않는다. 출력 재생성을 위해 명령을 재실행하지 않는다. 1.7의 메모리 기반 transfer ID도 재개하지 않는다. 출력·정책을 실제 앱에서 읽는 경로는 1.8 앱 통합 검증으로 별도 확인해야 한다.
 
