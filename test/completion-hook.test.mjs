@@ -505,7 +505,7 @@ test('NW10 Claude manifest uses exec argv, bounded asyncRewake, synchronous prom
   const handlers = event => manifest.hooks[event].flatMap(group => group.hooks);
   for (const event of ['SessionStart', 'PostToolUse', 'Stop']) {
     const waits = handlers(event).filter(handler => handler.args.includes('--wait'));
-    assert.equal(waits.length, 1); assert.equal(waits[0].asyncRewake, true); assert.equal(waits[0].timeout, 86400);
+    assert.equal(waits.length, 1); assert.equal(waits[0].async, true); assert.equal(waits[0].asyncRewake, true); assert.equal(waits[0].timeout, 86400);
     assert.ok(waits[0].timeout * 1000 > completionWaitTimeoutMs);
   }
   for (const event of ['SessionStart', 'UserPromptSubmit', 'SessionEnd']) {
@@ -514,7 +514,7 @@ test('NW10 Claude manifest uses exec argv, bounded asyncRewake, synchronous prom
   for (const handler of Object.values(manifest.hooks).flatMap(groups => groups.flatMap(group => group.hooks))) {
     assert.equal(handler.command, 'node'); assert.equal(handler.args[0], '${CLAUDE_PLUGIN_ROOT}/scripts/portal-completion-hook.mjs');
     assert.equal(handler.args[1], '--host'); assert.equal(handler.args[2], 'claude-code');
-    assert.equal(handler.async, undefined);
+    assert.equal(handler.async, handler.args.includes('--wait') ? true : undefined);
   }
 });
 

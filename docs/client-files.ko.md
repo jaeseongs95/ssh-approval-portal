@@ -18,7 +18,7 @@ node scripts/portal-files.mjs --origin https://YOUR-PORTAL watch REQUEST_ID --no
 
 이 명령은 호스트의 백그라운드 실행 기능으로 시작하고 에이전트는 다른 작업을 계속합니다. Claude Code는 `--host claude-code`, agy는 `--host antigravity`를 사용합니다. Claude socket/token을 읽거나 복사하지 않습니다. agy의 project/LS 환경은 해당 호스트가 자식 프로세스에 제공한 현재 환경만 사용합니다. 다른 설정·인증 파일을 찾아 복사하지 않습니다.
 
-Claude Code는 같은 client 폴더를 `claude --plugin-dir /absolute/path/to/client`로 해당 실행에 적재할 수 있습니다. `.claude-plugin/plugin.json`은 hook만 등록합니다. `SessionStart`는 짧게 세션을 등록하고 별도의 `asyncRewake` 대기를 시작합니다. `PostToolUse`·`Stop`에서도 대기를 준비하되, SQLite의 세션별 lease로 살아 있는 대기 프로세스는 하나만 유지합니다. `SessionEnd`는 대기를 무효화하고 미처리 metadata는 보존합니다.
+Claude Code는 같은 client 폴더를 `claude --plugin-dir /absolute/path/to/client`로 해당 실행에 적재할 수 있습니다. `.claude-plugin/plugin.json`은 hook만 등록합니다. `SessionStart`는 짧게 세션을 등록하고 별도의 `asyncRewake` 대기를 시작합니다. 대기 handler는 `async: true`도 명시합니다. Claude Code 2.1.314는 `asyncRewake`만 지정하면 비대화형 단일입력 `-p`에서 동기로 대기하므로, 이 플래그를 생략하면 도구 진행이 막힐 수 있습니다. `PostToolUse`·`Stop`에서도 대기를 준비하되, SQLite의 세션별 lease로 중복 대기를 억제합니다. `SessionEnd`는 대기를 무효화하고 미처리 metadata는 보존합니다.
 
 이 백그라운드 hook은 원격 HTTP나 모델을 기다리지 않고 로컬 수신함만 확인합니다. 네이티브 hook timeout은 86,400초, 내부 대기는 86,340,000ms로 유한합니다. 대기가 만료된 뒤 아무 호스트 이벤트도 없는 유휴 상태까지 자동 수신을 보장하지 않습니다. 다음 시작·도구 실행·턴 종료에서 다시 준비됩니다. `--wait-timeout-ms`로 더 짧은 대기 시간을 지정할 수 있습니다. host가 `asyncRewake`를 지원하고 세션을 유지해야 하며, 종료된 `claude -p` 실행은 다시 깨울 수 없습니다.
 
