@@ -12,7 +12,7 @@ import { createOperationWatcher } from '../src/adapters/cli/operation-watcher.mj
 import { notifyCodexCompletion, validateCodexCompletionTarget } from '../src/adapters/cli/codex-completion.mjs';
 import { validateCompletionDeliveryTarget, deliverCompletion } from '../src/adapters/cli/completion-delivery.mjs';
 
-const usage = 'SSH Approval Portal file client2.3.3 (Node.js24.2+ within major24)\n' +
+const usage = 'SSH Approval Portal file client2.4.0 (Node.js24.2+ within major24)\n' +
   'node scripts/portal-files.mjs --origin HTTPS_ORIGIN [--cloudflared EXISTING_ABSOLUTE_PATH] doctor\n' +
   'node scripts/portal-files.mjs --origin HTTPS_ORIGIN [--cloudflared EXISTING_ABSOLUTE_PATH] upload --file ABSOLUTE_FILE --operation-key STABLE_KEY\n' +
   'node scripts/portal-files.mjs --origin HTTPS_ORIGIN [--cloudflared EXISTING_ABSOLUTE_PATH] status UUID\n' +

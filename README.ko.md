@@ -1,4 +1,6 @@
-# SSH Approval Portal 2.3.3
+# SSH Approval Portal 2.4.0
+
+2.4.0은 기존 MCP 도구 호출과 완료 관찰을 네이티브 hook으로 자동 연결합니다. 설치 상태·호스트별 검증 범위는 릴리스 노트에서 확인하세요. 아래 v2.3.3 다운로드 링크는 고정 버전 설치 예시로 보존합니다.
 
 완료 hook은 로컬 수신함에 저장한 상태를 호스트의 네이티브 훅으로 에이전트에 전달하고, 별도로 처리 ACK를 받습니다. Claude Code는 백그라운드 `asyncRewake` 훅을 사용합니다. 호스트별 지원·재적재·유휴 수신 제한은 [클라이언트 hook 안내](docs/client-files.ko.md)를 참고하세요.
 
@@ -251,7 +253,7 @@ python3 test/test_helper.py
 서버·클라이언트 압축 파일을 만들 때는 아직 존재하지 않는 **새 절대 출력 디렉터리**를 지정합니다.
 
 ```sh
-npm run package:release -- --output /absolute/new/portal-2.3.3-release
+npm run package:release -- --output /absolute/new/portal-2.4.0-release
 ```
 
 패키징은 서버·클라이언트의 `.tar.gz`·`.zip`과 체크섬을 만듭니다. Node.js·cloudflared·인증 정보·사용자 세션은 포함하지 않습니다. 소스·fixture·실제 호스트·클라이언트 UI·배포 검사는 서로 다른 근거입니다. 명령이 있다는 이유만으로 시험이 통과했다고 판단하지 않습니다. 공개한 자산은 고정하고 사용 전에 릴리스 체크섬과 대조하세요.

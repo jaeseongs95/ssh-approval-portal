@@ -1,4 +1,4 @@
-# PC 파일 전송 클라이언트 2.3.3
+# PC 파일 전송 클라이언트 2.4.0
 
 ## 완료 알림을 hook으로 받기
 
@@ -126,4 +126,4 @@ ssh-approval-portal-client-2.3.3.tar.gz와 같은 이름의.zip은 동일 클라
 
 개발자는 python scripts/package-client.py --output 새출력폴더로 같은 진입점의 소스 의존 그래프를 묶습니다. 기존 결과물은 덮어쓰지 않습니다. 로컬 생성 허용과 제품 동작 시험은 구분하며, 동작 회귀와 압축 해제 사본의 실행 검사는 승인된 TEST 환경에서 수행합니다.
 
-자동 설치·호스트 등록은 [클라이언트 설치 안내](https://github.com/jaeseongs95/ssh-approval-portal/blob/v2.3.3/docs/client-install.ko.md)를 따릅니다. background watch·native 수신·receipt/claim ACK 순서는 [완료 훅 안내](https://github.com/jaeseongs95/ssh-approval-portal/blob/v2.3.3/docs/mcp-tools.ko.md#완료-훅으로-다른-작업과-병행하기)를 참고하세요.
+자동 설치·호스트 등록은 [클라이언트 설치 안내](https://github.com/jaeseongs95/ssh-approval-portal/blob/v2.4.0/docs/client-install.ko.md)를 따릅니다. background watch·native 수신·receipt/claim ACK 순서는 [완료 훅 안내](https://github.com/jaeseongs95/ssh-approval-portal/blob/v2.4.0/docs/mcp-tools.ko.md#완료-훅으로-다른-작업과-병행하기)를 참고하세요.

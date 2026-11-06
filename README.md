@@ -1,4 +1,6 @@
-# SSH Approval Portal 2.3.3
+# SSH Approval Portal 2.4.0
+
+2.4.0 connects existing MCP tool calls to completion observation through native hooks. Check the release notes for installation status and verification on each host. The v2.3.3 download links below remain pinned installation examples.
 
 Completion hooks: the local client saves status in a durable inbox. Native host hooks deliver it to the agent, with a separate handling ACK; Claude Code uses its background `asyncRewake` hook. See the [client hook guide](docs/client-files.ko.md) for host support, reload requirements and idle limits.
 
@@ -251,7 +253,7 @@ python3 test/test_helper.py
 To generate server/client archives in a **new** absolute output directory:
 
 ```sh
-npm run package:release -- --output /absolute/new/portal-2.3.3-release
+npm run package:release -- --output /absolute/new/portal-2.4.0-release
 ```
 
 Packaging produces server and client `.tar.gz`/`.zip` assets and checksums. Node.js, cloudflared, credentials and user sessions are not bundled. Source, fixture, live-host, client UI and deployment checks establish different things; an available command is not evidence that a test has passed. Keep published assets immutable and compare the release checksums before use.
