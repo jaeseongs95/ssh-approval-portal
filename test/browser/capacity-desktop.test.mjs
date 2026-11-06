@@ -93,10 +93,10 @@ for (const options of [{ locale: 'ko-KR', width: 390, compiled: false }, { local
 
   test('DESKTOP-BROWSER real viewer gestures retain frame/sequence and close before logout ' + suffix, { timeout: 30000 }, () => fixture(async ({ page, calls, order, screenshot }) => {
     const viewer = page.locator('#desktop-viewer'), buttons = viewer.locator('.actions button'), image = viewer.locator('img');
-    await buttons.nth(0).click(); await page.waitForFunction(() => document.querySelector('#desktop-viewer img').getAttribute('aria-disabled') === 'false');
+    await buttons.nth(0).click(); await page.waitForFunction(() => document.querySelector('#desktop-viewer img').getAttribute('aria-disabled') === 'false' && document.querySelector('#desktop-viewer img').getAttribute('aria-busy') === 'false');
     assert.equal(await page.locator('#server-target').isDisabled(), true); assert.match(await image.getAttribute('src'), /^data:image\/png;base64,/);
-    await image.click(); await page.waitForFunction(() => !document.querySelector('#desktop-viewer textarea').disabled);
-    await image.press('Control+c'); await page.waitForFunction(() => !document.querySelector('#desktop-viewer textarea').disabled);
+    await image.click(); await page.waitForFunction(() => document.querySelector('#desktop-viewer img').getAttribute('aria-busy') === 'false');
+    await image.press('Control+c'); await page.waitForFunction(() => document.querySelector('#desktop-viewer img').getAttribute('aria-busy') === 'false');
     await viewer.locator('textarea').fill('hello 한글'); await viewer.locator(':scope > button').click();
     await page.waitForFunction(() => !document.querySelector('#desktop-viewer textarea').value);
     const inputs = calls.filter(call => call.path.endsWith('/input'));
@@ -128,13 +128,15 @@ test('CAPACITY-BROWSER conflict and committed response loss require explicit GET
 
 test('DESKTOP-BROWSER lost input never replays and explicit observation recovers the next sequence', { timeout: 30000 }, () => fixture(async ({ page, calls, order, loseInput, screenshot }) => {
   const viewer = page.locator('#desktop-viewer'), buttons = viewer.locator('.actions button'), image = viewer.locator('img');
-  await buttons.nth(0).click(); await page.waitForFunction(() => document.querySelector('#desktop-viewer img').getAttribute('aria-disabled') === 'false');
+  await buttons.nth(0).click(); await page.waitForFunction(() => document.querySelector('#desktop-viewer img').getAttribute('aria-disabled') === 'false' && document.querySelector('#desktop-viewer img').getAttribute('aria-busy') === 'false');
   loseInput(); await image.click(); await viewer.getByRole('alert').filter({ hasText: 'Input outcome unconfirmed' }).waitFor();
   assert.equal(await viewer.locator('.error').isVisible(), true); await screenshot('desktop-input-error-visible');
-  await page.clock.runFor(10000); assert.equal(calls.filter(call => call.path.endsWith('/input')).length, 1); assert.equal(await viewer.locator('textarea').isDisabled(), true);
-  await buttons.nth(1).click(); await page.waitForFunction(() => document.querySelector('#desktop-viewer img').getAttribute('aria-disabled') === 'false');
+  await page.clock.runFor(10000); assert.equal(calls.filter(call => call.path.endsWith('/input')).length, 1);
+  assert.equal(await viewer.locator('textarea').isDisabled(), false); await viewer.locator('textarea').fill('keep this local draft');
+  assert.equal(await viewer.locator(':scope > button').isDisabled(), true);
+  await buttons.nth(1).click(); await page.waitForFunction(() => document.querySelector('#desktop-viewer img').getAttribute('aria-disabled') === 'false' && document.querySelector('#desktop-viewer img').getAttribute('aria-busy') === 'false');
   assert.equal(await viewer.locator('.error').isVisible(), false);
-  await image.press('ArrowDown'); await page.waitForFunction(() => !document.querySelector('#desktop-viewer textarea').disabled);
+  await image.press('ArrowDown'); await page.waitForFunction(() => document.querySelector('#desktop-viewer img').getAttribute('aria-busy') === 'false');
   assert.deepEqual(calls.filter(call => call.path.endsWith('/input')).map(call => call.body.sequence), [1, 2]);
   await navigate(page, '/history'); await page.waitForFunction(() => document.querySelector('#server-target').disabled === false);
   assert.equal(order.at(-1), 'close'); assert.equal(order.filter(action => action === 'close').length, 1);
