@@ -135,13 +135,17 @@ test('RH06 invalid host event or session cannot consume pending status', async t
   assert.equal(f.db(inbox => inbox.findBinding({ host: 'claude-code', sessionId })), null);
 });
 
-test('RH07 unresolved Codex child identity cannot take the parent session receipt', async t => {
+test('RH07 unresolved Codex or Claude child identity cannot take the parent session receipt or arm waiter', async t => {
   const f = await fixture(t);
   const { binding, receipt } = f.seed();
   assert.throws(() => f.run('codex', native('PostToolUse', sessionId, { agent_id: otherSession })), safeError);
   assert.deepEqual(f.counts(binding), { pending: 1, claimed: 0, acknowledged: 0 });
   const output = f.run('codex', native('PostToolUse', sessionId, { agent_id: sessionId }));
   assert.equal(recordsOf(output)[0].ack.receipt, receipt.receiptId);
+  const claudeSeed = f.seed('claude-code', sessionId, 2);
+  assert.throws(() => f.run('claude-code', native('UserPromptSubmit', sessionId, { agent_id: otherSession })), safeError);
+  await assert.rejects(() => waitForCompletionHook({ host: 'claude-code', input: native('PostToolUse', sessionId, { agent_id: otherSession }), inboxPath: f.inboxPath }, f.services), safeError);
+  assert.deepEqual(f.counts(claudeSeed.binding), { pending: 1, claimed: 0, acknowledged: 0 });
 });
 
 test('RH08 hook claims only the registered host and session combination', async t => {

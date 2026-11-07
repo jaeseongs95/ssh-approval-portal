@@ -21,8 +21,8 @@ export function completionHookInput(host, input) {
     throw fail('COMPLETION_HOOK_INVALID_SESSION');
   if (typeof sessionId !== 'string' || !sessionId.length || Buffer.byteLength(sessionId) > 256 || /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(sessionId))
     throw fail('COMPLETION_HOOK_INVALID_SESSION');
-  // Codex can serialize the parent's session_id for a child. Never register that as the child's destination.
-  if (host === 'codex' && input.agent_id && input.agent_id !== sessionId) throw fail('COMPLETION_HOOK_CHILD_ID_UNRESOLVED');
+  // Codex and Claude subagents can serialize the parent's session_id for a child. Never register that as the child's destination.
+  if ((host === 'codex' || host === 'claude-code') && input.agent_id && input.agent_id !== sessionId) throw fail('COMPLETION_HOOK_CHILD_ID_UNRESOLVED');
   const agyStopped = host === 'antigravity' && event === 'Stop' && (input.error || input.fullyIdle === false ||
     ['USER_CANCELED', 'ERROR', 'MAX_INVOCATIONS', 'MAX_FORCED_INVOCATIONS', 'MAX_TOKEN_BUDGET_EXCEEDED',
       'TERMINAL_STEP_TYPE', 'TERMINAL_CUSTOM_HOOK'].includes(input.terminationReason));

@@ -249,6 +249,7 @@ test('AW14 invalid host inputs and missing configuration have no launch side eff
     native({ session_id: '' }), native({ session_id: marker + '\n' }), native({ agent_id: sessionB })]) {
     try { assert.equal((await f.run(input)).state, 'ignored'); } catch (error) { assert.ok(safeError(error)); }
   }
+  await assert.rejects(() => f.run(native({ agent_id: sessionB }), { host: 'claude-code' }), error => safeError(error) && error.code === 'COMPLETION_HOOK_CHILD_ID_UNRESOLVED');
   assert.equal((await f.run(native(), { configPath: undefined })).state, 'ignored');
   assert.equal(f.calls.length, 0);
 });
