@@ -980,8 +980,8 @@
     },
     {
       "path": "src/adapters/security/admin-policy.mjs",
-      "size": 3539,
-      "sha256": "3de9da014db5b20cfb2c422ea44f26d95ebcaf110e82edf00c3d1e17b567ed83"
+      "size": 3554,
+      "sha256": "98c93be31702d0ce3e425cf3108b36b37fcba9e71b7ed7ec6e63a0ff4394adb8"
     },
     {
       "path": "src/adapters/security/oidc-access.mjs",
@@ -2660,8 +2660,8 @@
     },
     {
       "path": "test/version-check.test.mjs",
-      "size": 5815,
-      "sha256": "debd0befd59757d3be6e9d3af0f92904cf606728f7aa2717c0e0b4426da76fcf"
+      "size": 5852,
+      "sha256": "a888087d0dc8c309f9c85aaac4b9fb2a6f56e7e09ca505be0332fc3c8dc74830"
     },
     {
       "path": "test/web-session.test.mjs",
