@@ -109,7 +109,7 @@ test('V04 GET /api/version requires admin auth and returns release status', asyn
       },
     });
     app = await createApplication({
-      registry: { getProfile: () => ({ host: '127.0.0.1', port: 22, user: 'fixture' }), closeAll: async () => {} },
+      registry: { getProfile: name => ({ host: '127.0.0.1', port: 22, user: 'fixture', readOnly: name === 'aws-readonly' }), closeAll: async () => {} },
       classify: () => ({ class: 'privileged' }),
       executeCommand: async () => ({ texts: [] }),
       audit: () => {},
