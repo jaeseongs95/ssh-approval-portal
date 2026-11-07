@@ -4,9 +4,9 @@
 
 ## 준비 및 계획
 
-미리 설치된 Node `>=24.2.0 <25`가 필요합니다. 설치기는 Node나 cloudflared를 다운로드·설치하지 않습니다. `--node`를 생략하면 설치기를 실행한 Node의 실제 절대 경로를 launcher와 hook에 고정합니다. cloudflared는 기존에 신뢰한 실행 파일의 절대 경로를 지정합니다.
+미리 설치된 Node `>=24.2.0 <25`가 필요합니다. 설치기는 Node나 cloudflared를 다운로드·설치하지 않습니다. `--node`를 생략하면 설치기를 실행한 Node의 실제 절대 경로를 launcher와 hook에 고정합니다. `--cloudflared`와 `--claude`는 절대 경로로 지정할 수 있으며, 생략하면 `PORTAL_CLOUDFLARED` 환경변수와 `PATH`(및 `~/.local/bin`)에서 기존 실행 파일을 자동 탐색합니다.
 
-공개 배포본의 SHA256SUMS와 대조해 내려받은 archive의 SHA-256을 확인한 다음 풀어야 합니다. `--manifest-sha256`에는 신뢰를 확인한 배포본의 `client-manifest.json` SHA-256을 넣습니다. 단순히 출처 불명의 archive 안에 있는 manifest를 해시해 넣는 것은 배포자 신뢰 확인을 대신하지 않습니다. 설치기는 그 manifest 핀과 모든 명시 파일의 size/SHA-256을 대조하고 링크·경로 탈출·Windows 예약명·중복 경로를 거부합니다. manifest 밖의 파일은 설치하지 않습니다.
+공개 배포본의 SHA256SUMS와 대조해 내려받은 archive의 SHA-256을 확인한 다음 풀어야 합니다. `--manifest-sha256`에는 신뢰를 확인한 배포본의 `client-manifest.json` SHA-256(또는 로컬 배포본 자동 계산 시 `auto`)을 넣습니다. 설치기는 그 manifest 핀과 모든 명시 파일의 size/SHA-256을 대조하고 링크·경로 탈출·Windows 예약명·중복 경로를 거부합니다. manifest 밖의 파일은 설치하지 않습니다.
 
 Windows PowerShell 예시입니다. 경로와 origin은 실제 값을 사용합니다.
 
@@ -36,9 +36,9 @@ plan JSON에서 설치 대상, 각 파일 해시, 설정 변경 여부, 백업 �
 
 동일 명령 끝에 `--apply`를 붙여 적용합니다. 검토한 계획에 고정하려면 함께 출력된 `planSha256`을 `--expect-plan SHA256`으로 전달합니다. 그 사이 원본이나 설정이 바뀌면 새 계획을 검토하도록 중단합니다.
 
-설치 파일은 Node 절대 경로를 사용하는 `portal-files`·`portal-completion-hook` launcher와 선택한 TEST/PROD launcher를 포함합니다. Windows에서는 `.cmd`와 `.ps1`(origin launcher는 `.ps1`), Linux/macOS에서는 `.sh`를 만듭니다. Windows `.ps1`은 PowerShell 5.1에서 한글 경로를 읽도록 UTF-8 BOM을 포함하며 ASCII `.cmd`는 같은 디렉터리의 `.ps1`로 위임합니다. 기존 PowerShell 실행 정책을 따르며 우회하지 않습니다. 공백과 한글 경로를 인용합니다. Windows cmd 셸 해석이 모호한 경로 문자(`"`, `%`, `!`, `^`)는 거부합니다. PATH를 바꾸지 않으므로 생성된 launcher의 경로를 직접 사용합니다.
+설치 파일은 Node 절대 경로를 사용하는 `portal-files` launcher와 선택한 TEST/PROD launcher를 포함합니다. Windows에서는 `.cmd`와 `.ps1`(origin launcher는 `.ps1`), Linux/macOS에서는 `.sh`를 만듭니다. Windows `.ps1`은 PowerShell 5.1에서 한글 경로를 읽도록 UTF-8 BOM을 포함하며 ASCII `.cmd`는 같은 디렉터리의 `.ps1`로 위임합니다. 기존 PowerShell 실행 정책을 따르며 우회하지 않습니다. 공백과 한글 경로를 인용합니다. Windows cmd 셸 해석이 모호한 경로 문자(`"`, `%`, `!`, `^`)는 거부합니다. PATH를 바꾸지 않으므로 생성된 launcher의 경로를 직접 사용합니다.
 
-Codex는 `~/.codex/hooks.json`의 해당 `portal-completion-hook.mjs` handler만 갱신하고, 같은 그룹에 있는 다른 handler도 보존합니다. Antigravity는 [공식 Native hook 경로](https://antigravity.google/docs/hooks)인 `~/.gemini/config/hooks.json`의 `ssh-completion-inbox` 항목만 갱신합니다. 이 이름에 다른 handler가 있으면 충돌로 중단합니다. 기존 Antigravity hook이 `enabled:false`이면 그 선택을 보존합니다. JSON 원문은 byte 단위로 백업하고, BOM·CRLF/LF를 보존해 새 설정을 씁니다. 기존 주석을 포함한 JSONC는 지원하지 않으므로 JSON 문법 오류로 중단합니다.
+Codex는 `~/.codex/hooks.json`의 해당 `portal-files.mjs` handler만 갱신하고, 같은 그룹에 있는 다른 handler도 보존합니다. Antigravity는 [공식 Native hook 경로](https://antigravity.google/docs/hooks)인 `~/.gemini/config/hooks.json`의 `ssh-completion-inbox` 항목만 갱신합니다. 이 이름에 다른 handler가 있으면 충돌로 중단합니다. 기존 Antigravity hook이 `enabled:false`이면 그 선택을 보존합니다. JSON 원문은 byte 단위로 백업하고, BOM·CRLF/LF를 보존해 새 설정을 씁니다. 기존 주석을 포함한 JSONC는 지원하지 않으므로 JSON 문법 오류로 중단합니다.
 
 Claude Code는 기존 marketplace identity `ssh-mcp-client-local`을 사용해 버전 디렉터리의 로컬 wrapper를 등록합니다. [공식 marketplace 등록](https://code.claude.com/docs/en/plugin-marketplaces)과 qualified plugin 명령을 사용합니다. 같은 marketplace 이름의 source 변경에는 `install --marketplace NEW`가 충돌할 수 있으므로 삭제 없이 공식 `marketplace add NEW --scope user`로 source를 추가·교체하고 기존 user 설치에는 `update`, 새 설치에는 `install`을 실행합니다. 이 경로는 TEST Claude Code 2.1.314에서 실측했습니다. 기존 플러그인 권한과 조직 정책을 우회하지 않습니다.
 

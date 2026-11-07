@@ -26,7 +26,6 @@ function fixture(t) {
   const files = new Map([
     ['LICENSE', Buffer.from('Fixture license\n')],
     ['scripts/portal-files.mjs', Buffer.from('console.log(JSON.stringify(process.argv.slice(2)));\n')],
-    ['scripts/portal-completion-hook.mjs', Buffer.from('console.log("fixture hook");\n')],
     ...['codex', 'claude-code', 'antigravity'].map(host => [`hooks/${host}.json`, readFileSync(join(repository, 'hooks', `${host}.json`))]),
   ]);
   for (const [name, data] of files) save(join(source, name), data);
@@ -119,7 +118,7 @@ test('I06 preserves unrelated handlers, disabled Native hooks, BOM/CRLF, and exa
   assert.equal(codex.description, 'keep-description');
   assert.deepEqual(codex.other, [1, 2]);
   assert.deepEqual(codex.hooks.SessionStart[0], { matcher: '*', hooks: [other] });
-  assert.equal(codex.hooks.SessionStart.flatMap(group => group.hooks).filter(handler => handler.command.includes('portal-completion-hook.mjs')).length, 1);
+  assert.equal(codex.hooks.SessionStart.flatMap(group => group.hooks).filter(handler => handler.command.includes('portal-files.mjs')).length, 1);
   assert.ok(codex.hooks.SessionStart.at(-1).hooks[0].command.includes(f.target));
   assert.deepEqual(native.unrelated, { enabled: true, Stop: [{ command: 'unchanged' }] });
   assert.equal(native['ssh-completion-inbox'].enabled, false);
@@ -473,4 +472,16 @@ test('AW17 malformed explicit MCP route aliases stop before installation or host
     '--cloudflared', process.execPath, '--test-mcp-tools', 'valid_submit,invalid\nroute', '--apply']), 'INVALID_ARGUMENT');
   assert.equal(existsSync(f.target), false);
   assert.equal(existsSync(f.codex), false); assert.equal(existsSync(f.antigravity), false);
+});
+
+test('I14 --manifest-sha256 auto computes pin from source manifest and discovers cloudflared from PORTAL_CLOUDFLARED', t => {
+  const f = fixture(t);
+  const result = ok(spawnSync(process.execPath, [installer, '--source', f.source, '--manifest-sha256', 'auto', '--install-root', f.programs, '--home', f.home, '--test-origin', 'https://test.example.test', '--apply'], {
+    encoding: 'utf8', timeout: 30_000, windowsHide: true,
+    env: { ...process.env, HOME: f.home, USERPROFILE: f.home, LOCALAPPDATA: join(f.home, 'AppData', 'Local'), PORTAL_CLOUDFLARED: process.execPath },
+  }));
+  assert.equal(result.installed, true);
+  const watchPath = join(f.target, 'completion-watch.json');
+  assert.equal(parseJSON(watchPath).cloudflared, process.execPath);
+  assert.equal(existsSync(join(f.target, 'scripts', 'portal-completion-hook.mjs')), false);
 });

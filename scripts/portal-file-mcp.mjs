@@ -11,6 +11,8 @@ import { createAgentUploadForwarder, agentUploadSelectionArgs } from '../src/ada
 import { validateLocalPath } from '../src/adapters/cli/local-files.mjs';
 import { resolveCloudflared, cachedAccessToken } from '../src/adapters/cli/cloudflared.mjs';
 import { atFileStage, fileMcpFailure, fileRuntime } from '../src/adapters/cli/file-mcp-diagnostics.mjs';
+import { runCompletionHookCli } from '../src/adapters/cli/completion-hook.mjs';
+import { autoWatchCompletion } from '../src/adapters/cli/completion-auto-watch.mjs';
 
 const fail = code => Object.assign(new Error(code), { code });
 const capabilityArgs = z.strictObject({ capabilityId: z.string().regex(/^[a-f0-9]{48}$/) });
@@ -42,6 +44,9 @@ export async function startFileMcp({ forwarder, transport = new StdioServerTrans
   return server;
 }
 export async function main(argv = process.argv.slice(2), errorOutput = process.stderr, runCredential = execFileSync) {
+  if (argv[0] === 'hook' || argv[0] === 'ack' || (argv.includes('--host') && !argv.includes('--manifest') && !argv.includes('--agent-uploads'))) {
+    return runCompletionHookCli(argv, process.stdin, process.stdout, errorOutput, process.env, { autoWatch: autoWatchCompletion });
+  }
   try {
     const { values, positionals } = parseArgs({ args: argv, allowPositionals: true, options: {
       help: { type: 'boolean' }, manifest: { type: 'string' }, journal: { type: 'string' }, cloudflared: { type: 'string' },

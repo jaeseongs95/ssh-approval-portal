@@ -74,7 +74,7 @@ async function readMcpMessage(req, res) {
   return { message };
 }
 
-export function createProtocolAdapters({ queue, commands, files, opaqueFiles, store, lifecycle, settings, signer, adminAccess, browserSessions, authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal, targets, requestSafety, commandPolicy, commandOutputs, automationMetrics, environmentEditor,agentCli, preservation, retainedHistory, requestAdmission, operations, capacity, desktop, deploymentGeneration = null }) {
+export function createProtocolAdapters({ queue, commands, files, opaqueFiles, store, lifecycle, settings, signer, adminAccess, browserSessions, authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal, targets, requestSafety, commandPolicy, commandOutputs, automationMetrics, environmentEditor,agentCli, preservation, retainedHistory, requestAdmission, operations, capacity, desktop, deploymentGeneration = null, releaseChecker }) {
   const capabilities = createCapabilities({ queue, store, signer, settings, targets, adminAuthMode: adminAccess.mode });
   const mcpServer = createMcpAdapter({ queue, commands, files, opaqueFiles, settings, capabilities, uiHtml, bindFileSource, shutdownSignal, targets, requestSafety, commandOutputs, operations, desktop });
   const admission = {
@@ -167,6 +167,12 @@ export function createProtocolAdapters({ queue, commands, files, opaqueFiles, st
         finally { if(desktopRoute[1]==='authenticate'){body.value=undefined;for(const part of chunks)part.fill(0);} }
       }
       if (req.method === 'GET' && url.pathname === '/api/session') return json(res, 200, { mode: adminAccess.mode });
+      if (url.pathname === '/api/version') {
+        if (req.method !== 'GET') return json(res, 405, { error: 'Method not allowed' });
+        const refresh = url.searchParams.get('refresh') === '1';
+        if (releaseChecker) return json(res, 200, await releaseChecker.check({ refresh }));
+        return json(res, 200, { currentVersion: metadata.version, latestVersion: null, updateAvailable: false, status: 'unavailable', releaseUrl: 'https://github.com/jaeseongs95/ssh-approval-portal/releases', publishedAt: null, checkedAt: Date.now() });
+      }
       if(agentCli && req.method==='GET' && url.pathname==='/api/agent-cli')return json(res,200,agentCli.get());
       if(agentCli && req.method==='GET' && url.pathname==='/api/agent-cli/history'){
         const keys=url.searchParams.has('before')||url.searchParams.has('beforeId')?['targetId','provider','before','beforeId']:['targetId','provider'];

@@ -2,7 +2,16 @@ export function createWebController({ state, view, api, document, location, time
   const capture = () => ({ target: view.target?.(), revision: view.selectionRevision?.() });
   const current = context => context.target === view.target?.() && context.revision === view.selectionRevision?.();
   let generation = 0, activeRead, uncertainDecision, activeDownloads = 0, latestJobs = [], loggingOut = false;
-  let historyGeneration = 0, historyRead;
+  let historyGeneration = 0, historyRead, versionChecked = false, versionChecking = false;
+  async function checkVersion(refresh = false) {
+    if (state.signedOut || versionChecking || (!state.accessMode && !view.token?.())) return;
+    versionChecking = true; view.versionLoading?.(true);
+    try {
+      const info = await api('/api/version' + (refresh ? '?refresh=1' : ''), 'GET');
+      if (!state.signedOut) { versionChecked = true; view.version?.(info); }
+    } catch { /* Non-fatal version check failure */ }
+    finally { versionChecking = false; view.versionLoading?.(false); }
+  }
   let page = document.body?.dataset.page, pageRevision = 0;
   document.addEventListener?.('admin-scope-change', () => {
     const next = document.body?.dataset.page;
@@ -32,6 +41,7 @@ export function createWebController({ state, view, api, document, location, time
       const matches = uncertainDecision ? jobs.filter(job => job.id === uncertainDecision) : [];
       if (matches.length === 1 && ['queued', 'running', 'completed', 'failed', 'denied', 'expired', 'unknown'].includes(matches[0].state)) uncertainDecision = undefined;
       latestJobs = jobs; view.render(jobs, state.deciding || !!uncertainDecision); view.connected(); view.error(uncertainDecision ? uncertainMessage() : '');
+      if (!versionChecked) void checkVersion(false);
       if (document.body?.dataset.page === 'history') loadHistory();
     } catch (error) {
       if (!state.signedOut && token === generation && !read.signal.aborted && current(context)) {
@@ -122,8 +132,8 @@ export function createWebController({ state, view, api, document, location, time
     if(!state.signedOut)location.replace('/');
   }
   function start() {
-    view.initialize({ accessMode: state.accessMode, load: () => load(true), history: historyChanged, decide, download, output, source, logout, reconnect });
+    view.initialize({ accessMode: state.accessMode, load: () => load(true), history: historyChanged, decide, download, output, source, logout, reconnect, checkVersion });
     if (state.accessMode) return load();
   }
-  return { start, load, decide, download, output, source, logout, reconnect, reloadState: () => ({ blocked: state.deciding || !!uncertainDecision || activeDownloads > 0 }) };
+  return { start, load, decide, download, output, source, logout, reconnect, checkVersion, reloadState: () => ({ blocked: state.deciding || !!uncertainDecision || activeDownloads > 0 }) };
 }

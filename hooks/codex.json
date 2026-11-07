@@ -6,9 +6,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${PLUGIN_ROOT}/scripts/portal-completion-hook.mjs\" --host codex",
+            "command": "node \"${PLUGIN_ROOT}/scripts/portal-files.mjs\" --host codex",
             "timeout": 10,
-            "commandWindows": "node \"$env:PLUGIN_ROOT\\scripts\\portal-completion-hook.mjs\" --host codex"
+            "commandWindows": "node \"$env:PLUGIN_ROOT\\scripts\\portal-files.mjs\" --host codex"
           }
         ]
       }
@@ -18,9 +18,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${PLUGIN_ROOT}/scripts/portal-completion-hook.mjs\" --host codex",
+            "command": "node \"${PLUGIN_ROOT}/scripts/portal-files.mjs\" --host codex",
             "timeout": 10,
-            "commandWindows": "node \"$env:PLUGIN_ROOT\\scripts\\portal-completion-hook.mjs\" --host codex"
+            "commandWindows": "node \"$env:PLUGIN_ROOT\\scripts\\portal-files.mjs\" --host codex"
           }
         ]
       }
@@ -30,9 +30,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${PLUGIN_ROOT}/scripts/portal-completion-hook.mjs\" --host codex",
+            "command": "node \"${PLUGIN_ROOT}/scripts/portal-files.mjs\" --host codex",
             "timeout": 10,
-            "commandWindows": "node \"$env:PLUGIN_ROOT\\scripts\\portal-completion-hook.mjs\" --host codex"
+            "commandWindows": "node \"$env:PLUGIN_ROOT\\scripts\\portal-files.mjs\" --host codex"
           }
         ]
       }
@@ -42,9 +42,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${PLUGIN_ROOT}/scripts/portal-completion-hook.mjs\" --host codex",
+            "command": "node \"${PLUGIN_ROOT}/scripts/portal-files.mjs\" --host codex",
             "timeout": 10,
-            "commandWindows": "node \"$env:PLUGIN_ROOT\\scripts\\portal-completion-hook.mjs\" --host codex"
+            "commandWindows": "node \"$env:PLUGIN_ROOT\\scripts\\portal-files.mjs\" --host codex"
           }
         ]
       }

@@ -1,12 +1,23 @@
 /** Native Unicode BCP 47 locale parsing; unsupported message languages use English. */
 export function resolveLocale(language = 'en') {
-  let locale;
-  try { locale = Intl.getCanonicalLocales(language)[0]; } catch { /* invalid browser preference */ }
-  locale ||= 'en-US';
-  const messageLanguage = new Intl.Locale(locale).language === 'ko' ? 'ko' : 'en';
+  const candidates = Array.isArray(language) ? language : [language];
+  const canonicals = [];
+  for (const item of candidates) {
+    if (typeof item !== 'string' || !item.trim()) continue;
+    try {
+      const [canonical] = Intl.getCanonicalLocales(item.trim());
+      if (canonical && !canonicals.includes(canonical)) canonicals.push(canonical);
+    } catch { /* invalid browser preference */ }
+  }
+  let locale = canonicals[0] || 'en-US';
+  let messageLanguage = 'en';
+  for (const tag of canonicals) {
+    const base = new Intl.Locale(tag).language;
+    if (base === 'ko' || base === 'en') { messageLanguage = base; break; }
+  }
   if (locale === 'ko') locale = 'ko-KR';
   if (locale === 'en') locale = 'en-US';
-  return { locale, messageLanguage, korean: messageLanguage === 'ko' };
+  return { locale, messageLanguage, korean: messageLanguage === 'ko', dir: 'ltr' };
 }
 
 /** Existing Korean source strings remain stable message identifiers. */

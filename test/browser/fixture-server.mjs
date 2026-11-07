@@ -14,6 +14,7 @@ export async function fixtureServer(root) {
         response.setHeader('Content-Type','application/json');response.end(JSON.stringify({available:false,providers:[],bindings:[]}));return;
       }
       if(['/api/session/start','/api/session/logout'].includes(url.pathname)&&request.method==='POST'){response.setHeader('Content-Type','application/json');response.end(JSON.stringify({connected:url.pathname.endsWith('/start')}));return;}
+      if(url.pathname==='/api/version'){response.setHeader('Content-Type','application/json');response.end(JSON.stringify(state.versionInfo??{currentVersion:'2.4.0',latestVersion:'2.4.0',updateAvailable:false,status:'up_to_date',releaseUrl:'https://github.com/jaeseongs95/ssh-approval-portal/releases',publishedAt:null,checkedAt:Date.now()}));return;}
       if(url.pathname==='/signed-out'){response.setHeader('Content-Type','text/html');response.end('<html><body>Administrator signed out. <a href="/">Reconnect administrator</a></body></html>');return;}
       if (url.pathname.startsWith('/api/outputs/')) {
         state.outputReads = (state.outputReads ?? 0) + 1; await state.beforeOutput?.();

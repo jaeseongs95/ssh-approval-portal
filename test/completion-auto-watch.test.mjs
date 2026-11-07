@@ -10,8 +10,7 @@ import { Readable } from 'node:stream';
 import { autoWatchCompletion } from '../src/adapters/cli/completion-auto-watch.mjs';
 import { openCompletionInbox } from '../src/adapters/cli/completion-inbox.mjs';
 import { runCompletionHook, acknowledgeCompletion } from '../src/adapters/cli/completion-hook.mjs';
-import { main as portalFiles } from '../scripts/portal-files.mjs';
-import { main as completionHook } from '../scripts/portal-completion-hook.mjs';
+import { main as portalFiles, runHook as completionHook } from '../scripts/portal-files.mjs';
 
 // Written before execution: ../auto-hook-20261106-r1/TEST-CASES.ko.md.
 // Product execution is permitted only on TEST Node24. Fake spawn removes the host,

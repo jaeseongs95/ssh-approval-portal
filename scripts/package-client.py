@@ -24,7 +24,7 @@ def unsafe(path):
 def source_files(root):
     """Only statically imported in-repository modules/data; no directory crawling."""
     root = Path(root).resolve()
-    pending = ['scripts/portal-files.mjs', 'scripts/portal-completion-hook.mjs', 'scripts/install-client.mjs']
+    pending = ['scripts/portal-files.mjs', 'scripts/install-client.mjs']
     files = {}
     while pending:
         name = pending.pop()

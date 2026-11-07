@@ -14,7 +14,7 @@ import { createDesktopPanel } from './src/desktop.js';
 
 let storage;
 try { storage = globalThis.localStorage; } catch { /* disabled browser storage */ }
-const preference = displayLanguage(storage, navigator.language ?? 'en');
+const preference = displayLanguage(storage, navigator.languages?.length ? navigator.languages : (navigator.language ?? 'en'));
 const i18n = createWebI18n(preference.language);
 const state = createWebState(['access', 'oidc'].includes(document.body?.dataset.authMode));
 const view = createWebView({ document, i18n });

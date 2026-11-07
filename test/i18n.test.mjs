@@ -17,6 +17,8 @@ test('BCP 47 canonicalization, fallback catalog and native Intl formatting', () 
   assert.equal(resolveLocale('ko-KP').messageLanguage, 'ko');
   assert.equal(resolveLocale('en-GB-u-nu-arab').locale, 'en-GB-u-nu-arab');
   for (const invalid of [null, {}, '', 'not_a_locale']) assert.equal(resolveLocale(invalid).locale, 'en-US');
+  assert.deepEqual(resolveLocale(['not_a_locale', 'fr-FR', 'ko-KR']), { locale: 'fr-FR', messageLanguage: 'ko', korean: true, dir: 'ltr' });
+  assert.deepEqual(resolveLocale(['de-DE', 'fr-FR']), { locale: 'de-DE', messageLanguage: 'en', korean: false, dir: 'ltr' });
   for (const create of [createWebI18n, createCardI18n]) {
     const korean = create('ko-KR'), french = create('fr-FR');
     assert.equal(korean.t('실행 중'), '실행 중');

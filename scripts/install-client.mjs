@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Standalone installer: only Node built-ins; authentication and PATH are untouched.
 import { readFileSync, writeFileSync, mkdirSync, lstatSync, realpathSync, openSync, closeSync, fsyncSync, renameSync, unlinkSync, constants } from 'node:fs';
-import { resolve, dirname, basename, join, isAbsolute, relative } from 'node:path';
+import { resolve, dirname, basename, join, isAbsolute, relative, delimiter } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
@@ -44,7 +44,8 @@ function manifestPath(name) {
 function bundle(source, pin) {
   const manifestBytes = readOptional(join(source, 'client-manifest.json'));
   if (!manifestBytes) fail('MANIFEST_MISSING', 'Use an extracted standalone client release, not the server source tree');
-  if (hash(manifestBytes) !== pin) fail('MANIFEST_HASH_MISMATCH', 'Manifest does not match --manifest-sha256');
+  const resolvedPin = pin === 'auto' ? hash(manifestBytes) : pin;
+  if (hash(manifestBytes) !== resolvedPin) fail('MANIFEST_HASH_MISMATCH', 'Manifest does not match --manifest-sha256');
   let manifest;
   try { manifest = JSON.parse(manifestBytes.toString('utf8')); } catch { fail('INVALID_MANIFEST', 'Manifest is not JSON'); }
   if (manifest?.name !== 'ssh-approval-portal-client' || !/^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$/.test(manifest.version)
@@ -68,11 +69,11 @@ function bundle(source, pin) {
     parent = parent.slice(0, parent.lastIndexOf('/'));
     if (seen.has(parent)) fail('INVALID_MANIFEST', 'Manifest file/directory paths overlap');
   }
-  for (const name of ['LICENSE', 'scripts/portal-files.mjs', 'scripts/portal-completion-hook.mjs', 'hooks/codex.json', 'hooks/claude-code.json', 'hooks/antigravity.json']) {
+  for (const name of ['LICENSE', 'scripts/portal-files.mjs', 'hooks/codex.json', 'hooks/claude-code.json', 'hooks/antigravity.json']) {
     if (!files.has(name)) fail('INVALID_MANIFEST', `Required client file missing: ${name}`);
   }
   files.set('client-manifest.json', manifestBytes);
-  return { manifest, files };
+  return { manifest, files, manifestSha256: resolvedPin };
 }
 
 function executable(path, label) {
@@ -80,6 +81,27 @@ function executable(path, label) {
   const actual = realpathSync(path);
   if (!lstatSync(actual).isFile()) fail('EXECUTABLE_INVALID', `${label} is not a regular executable`);
   return actual;
+}
+
+function discoverExecutable(names, extraDirs = [], envVar) {
+  const explicitEnv = envVar ? process.env[envVar] : undefined;
+  if (explicitEnv) {
+    try { return executable(explicitEnv, envVar); } catch { /* ignore invalid env and continue or fail at caller */ }
+  }
+  const pathValue = Object.entries(process.env).find(([key]) => key.toUpperCase() === 'PATH')?.[1] ?? '';
+  const dirs = [...extraDirs, ...(typeof pathValue === 'string' && pathValue.length <= 32768 ? pathValue.split(delimiter).slice(0, 256) : [])];
+  for (const raw of dirs) {
+    const dir = raw.startsWith('"') && raw.endsWith('"') ? raw.slice(1, -1) : raw;
+    if (!dir || !isAbsolute(dir)) continue;
+    for (const name of names) {
+      const candidate = join(dir, name);
+      try {
+        safePath(candidate);
+        if (exists(candidate)?.isFile()) return executable(candidate, name);
+      } catch { /* skip unusable PATH entry */ }
+    }
+  }
+  return null;
 }
 
 function run(command, args, label) {
@@ -187,11 +209,11 @@ function parsedConfig(before, label) {
   if (!object(value)) fail('HOST_CONFIG_INVALID', `${label} hook configuration must be an object`);
   return value;
 }
-const sshHandler = handler => object(handler) && [handler.command, handler.commandWindows, ...(Array.isArray(handler.args) ? handler.args : [])].some(value => typeof value === 'string' && /(?:^|[\\/])portal-completion-hook\.mjs(?:["'\s]|$)/.test(value));
+const sshHandler = handler => object(handler) && [handler.command, handler.commandWindows, ...(Array.isArray(handler.args) ? handler.args : [])].some(value => typeof value === 'string' && /(?:^|[\\/])(?:portal-completion-hook|portal-files)\.mjs(?:["'\s]|$)/.test(value));
 
 function configChange(host, path, files, node, target) {
   const before = readOptional(path), body = parsedConfig(before, host);
-  const script = join(target, 'scripts', 'portal-completion-hook.mjs');
+  const script = join(target, 'scripts', 'portal-files.mjs');
   const watchConfig = files.has('completion-watch.json') ? join(target, 'completion-watch.json') : undefined;
   if (host === 'codex') {
     if (body.hooks !== undefined && !object(body.hooks)) fail('HOST_CONFIG_INVALID', 'Codex hooks must be an object');
@@ -270,7 +292,7 @@ function generatedFiles(files, options, version, target, node) {
     add('completion-watch.json', json({ version: 1, cloudflared: executable(options.cloudflared, 'cloudflared'), routes }));
   }
   if (windows) { shellWord(node); shellWord(target); }
-  for (const [name, entry] of [['portal-files', 'portal-files.mjs'], ['portal-completion-hook', 'portal-completion-hook.mjs']]) {
+  for (const [name, entry] of [['portal-files', 'portal-files.mjs']]) {
     const script = join(target, 'scripts', entry);
     if (windows) {
       // ASCII-only CMD delegates Unicode path handling to the BOM-tagged PS1.
@@ -293,7 +315,7 @@ function generatedFiles(files, options, version, target, node) {
     const hooks = JSON.parse(files.get('hooks/claude-code.json').toString('utf8'));
     for (const groups of Object.values(hooks.hooks)) for (const group of groups) for (const handler of group.hooks) {
       handler.command = node;
-      handler.args = handler.args.map(arg => arg.replace('${CLAUDE_PLUGIN_ROOT}/scripts/portal-completion-hook.mjs', join(target, 'scripts', 'portal-completion-hook.mjs')));
+      handler.args = handler.args.map(arg => arg.replace(/\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/(?:portal-completion-hook|portal-files)\.mjs/, join(target, 'scripts', 'portal-files.mjs')));
       if (routes.length) handler.args.push('--watch-config', join(target, 'completion-watch.json'));
     }
     add(prefix + '.claude-plugin/plugin.json', json({ name: 'ssh-completion-client', version, description: 'SSH MCP client native completion hooks', author: { name: 'SSH MCP client' }, hooks: './hooks/claude-code.json' }));
@@ -340,11 +362,11 @@ function parseArgs(argv) {
 function main(argv) {
   const options = parseArgs(argv);
   if (options.help) {
-    process.stdout.write('Usage: node scripts/install-client.mjs --manifest-sha256 SHA256 [--source EXTRACTED] [--install-root DIR] [--home DIR] [--hosts codex,claude-code,antigravity|none] [--node ABSOLUTE] [--claude ABSOLUTE] [--cloudflared ABSOLUTE --test-origin HTTPS --prod-origin HTTPS] [--apply] [--expect-plan SHA256]\nDefault: read-only plan. Install root contains a separate directory for each version. See docs/client-install.ko.md.\n');
+    process.stdout.write('Usage: node scripts/install-client.mjs --manifest-sha256 SHA256|auto [--source EXTRACTED] [--install-root DIR] [--home DIR] [--hosts codex,claude-code,antigravity|none] [--node ABSOLUTE] [--claude ABSOLUTE] [--cloudflared ABSOLUTE --test-origin HTTPS --prod-origin HTTPS] [--apply] [--expect-plan SHA256]\nDefault: read-only plan. Install root contains a separate directory for each version. See docs/client-install.ko.md.\n');
     return;
   }
   if (!['win32', 'linux', 'darwin'].includes(process.platform)) fail('PLATFORM_UNSUPPORTED', 'Supported installer platforms: Windows, Linux, macOS');
-  if (!/^[a-f0-9]{64}$/.test(options['manifest-sha256'] ?? '')) fail('MANIFEST_PIN_REQUIRED', 'Pass the trusted release manifest SHA-256 using --manifest-sha256');
+  if (options['manifest-sha256'] !== 'auto' && !/^[a-f0-9]{64}$/.test(options['manifest-sha256'] ?? '')) fail('MANIFEST_PIN_REQUIRED', 'Pass the trusted release manifest SHA-256 using --manifest-sha256 (or --manifest-sha256 auto)');
   options.hosts = (options.hosts ?? 'none').split(',');
   if (options.hosts.length === 1 && options.hosts[0] === 'none') options.hosts = [];
   if (new Set(options.hosts).size !== options.hosts.length || options.hosts.some(host => !['codex', 'claude-code', 'antigravity'].includes(host))) fail('INVALID_HOST', 'Choose codex, claude-code, antigravity, or none; Gemini CLI is not Antigravity');
@@ -353,7 +375,14 @@ function main(argv) {
   const source = resolve(options.source ?? join(dirname(fileURLToPath(import.meta.url)), '..'));
   const root = resolve(options['install-root'] ?? (process.platform === 'win32' ? join(process.env.LOCALAPPDATA ?? join(home, 'AppData', 'Local'), 'Programs', 'ssh-approval-portal-client') : join(home, '.local', 'share', 'ssh-approval-portal-client')));
   safePath(source); safePath(root); safePath(home);
-  const { manifest, files } = bundle(source, options['manifest-sha256']);
+  const { manifest, files, manifestSha256 } = bundle(source, options['manifest-sha256']);
+  options['manifest-sha256'] = manifestSha256;
+  if ((options['test-origin'] || options['prod-origin']) && !options.cloudflared) {
+    options.cloudflared = discoverExecutable(process.platform === 'win32' ? ['cloudflared.exe'] : ['cloudflared'], [], 'PORTAL_CLOUDFLARED') ?? undefined;
+  }
+  if (options.hosts.includes('claude-code') && !options.claude) {
+    options.claude = discoverExecutable(process.platform === 'win32' ? ['claude.exe', 'claude.cmd'] : ['claude'], [join(home, '.local', 'bin')]) ?? undefined;
+  }
   const target = join(root, manifest.version);
   if (source === target || relative(source, target) === '' || (!relative(source, target).startsWith('..') && !isAbsolute(relative(source, target)))) fail('TARGET_INSIDE_SOURCE', 'Install root must be outside the extracted source');
   const node = executable(options.node ?? process.execPath, 'Node');

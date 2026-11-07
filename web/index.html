@@ -57,12 +57,25 @@
     #desktop-viewer .actions{flex-wrap:wrap}
     #desktop-viewer .actions button{white-space:normal}
     #capacity-global .error:empty,#capacity-target .error:empty,#desktop-viewer .error:empty{display:none}
+    .version-panel{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+    .version-badge{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;border:1px solid var(--line);background:var(--code);color:var(--muted);font-size:12px;font-weight:600;line-height:1.4}
+    .version-badge[data-status=update_available]{background:#fff3dd;border-color:var(--amber);color:var(--amber)}
+    .version-badge[data-status=up_to_date]{background:var(--soft);border-color:var(--accent);color:var(--accent)}
+    .version-check{padding:6px 11px;min-height:34px;border-radius:8px;font-size:12px}
+    .version-link{font-size:12px;font-weight:650;color:var(--accent);text-decoration:none}
+    .version-link:hover{text-decoration:underline}
+    .connection{padding:5px 11px;border-radius:999px;border:1px solid var(--line);background:var(--surface);font-weight:600}
+    .connection.connected{border-color:#18784c40;background:#e7f5ed;color:var(--green)}
+    .summary-chip{display:inline-flex;align-items:center;gap:8px;font-weight:650;font-size:13px;box-shadow:0 1px 3px #17233b08}
+    .request{transition:border-color .15s,box-shadow .15s}
+    .request-row:hover{border-color:#b8c7de}
+    @media(prefers-color-scheme:dark){.version-badge[data-status=update_available]{background:#3b3020;border-color:var(--amber);color:var(--amber)}.connection.connected{background:#20392e;border-color:#72d4a250;color:var(--green)}.request-row:hover{border-color:#4b5d78}}
   </style>
 </head>
 <body data-auth-mode="token">
   <a class="skip-link" href="#main-content" data-en="Skip to content">본문으로 이동</a>
   <main class="shell" id="main-content" tabindex="-1">
-    <header class="topbar"><div class="brand"><span class="mark" aria-hidden="true">›_</span>SSH Approval Portal</div><div class="account"><div id="connection" class="connection"><span class="dot" aria-hidden="true"></span><span id="connection-text" data-en="Not connected">연결 전</span></div><button id="logout" class="secondary" hidden data-en="Sign out">로그아웃</button></div></header>
+    <header class="topbar"><div class="brand"><span class="mark" aria-hidden="true">›_</span>SSH Approval Portal</div><div class="account"><div id="version-panel" class="version-panel" hidden><span id="version-status" class="version-badge" role="status" aria-live="polite"></span><a id="version-link" class="version-link" href="https://github.com/jaeseongs95/ssh-approval-portal/releases" target="_blank" rel="noopener noreferrer" hidden data-en="Release notes">릴리스 노트</a><button id="version-check" type="button" class="secondary version-check" data-en="Check updates">버전 확인</button></div><div id="connection" class="connection"><span class="dot" aria-hidden="true"></span><span id="connection-text" data-en="Not connected">연결 전</span></div><button id="logout" class="secondary" hidden data-en="Sign out">로그아웃</button></div></header>
     <nav class="admin-nav" aria-label="관리 메뉴"><span class="nav-brand">SSH <span data-en="Administration">관리 공간</span></span><span class="nav-label" data-en="Workflow">업무</span><a href="/" class="secondary" data-page-link data-en="Work">작업</a><a href="/history" class="secondary" data-page-link data-en="History">처리 이력</a><span class="nav-label" data-en="Management">관리</span><a href="/settings" class="secondary" data-page-link data-en="Servers">서버</a><a href="/bridge" class="secondary" data-page-link data-en="Bridge">중계기</a><a href="/preferences" class="secondary" data-page-link data-en="Appearance">화면 설정</a><p class="nav-note" data-en="Server policies and bridge-wide settings have separate scopes.">서버별 정책과 중계기 전체 설정을 구분합니다.</p></nav>
     <div class="intro">
     <label id="target-filter-label" hidden><span data-en="Request query target">요청 조회 대상</span> <select id="target-filter" aria-label="요청 조회 대상"></select></label>

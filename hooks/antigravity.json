@@ -4,35 +4,35 @@
     "SessionStart": [
       {
         "type": "command",
-        "command": "node ./scripts/portal-completion-hook.mjs --host antigravity --event SessionStart",
+        "command": "node ./scripts/portal-files.mjs --host antigravity --event SessionStart",
         "timeout": 10
       }
     ],
     "PreInvocation": [
       {
         "type": "command",
-        "command": "node ./scripts/portal-completion-hook.mjs --host antigravity --event PreInvocation",
+        "command": "node ./scripts/portal-files.mjs --host antigravity --event PreInvocation",
         "timeout": 10
       }
     ],
     "PostToolUse": [
       {
         "type": "command",
-        "command": "node ./scripts/portal-completion-hook.mjs --host antigravity --event PostToolUse",
+        "command": "node ./scripts/portal-files.mjs --host antigravity --event PostToolUse",
         "timeout": 10
       }
     ],
     "PostInvocation": [
       {
         "type": "command",
-        "command": "node ./scripts/portal-completion-hook.mjs --host antigravity --event PostInvocation",
+        "command": "node ./scripts/portal-files.mjs --host antigravity --event PostInvocation",
         "timeout": 10
       }
     ],
     "Stop": [
       {
         "type": "command",
-        "command": "node ./scripts/portal-completion-hook.mjs --host antigravity --event Stop",
+        "command": "node ./scripts/portal-files.mjs --host antigravity --event Stop",
         "timeout": 10
       }
     ]

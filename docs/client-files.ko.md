@@ -4,7 +4,7 @@
 
 기존 원격 MCP 연결은 그대로 사용합니다. 로컬 클라이언트가 owner HTTP로 요청 완료를 관찰하고, 완료 metadata를 로컬 SQLite 수신함에 먼저 저장합니다. 같은 세션의 네이티브 hook이 본문을 인수해 에이전트 문맥에 넣습니다. Codex·agy의 별도 깨우기는 `[ssh-mcp:completion:UUID]` 표식만 보냅니다. Claude Code는 공식 `asyncRewake` 백그라운드 hook이 새 본문을 stderr에 출력하고 exit 2로 종료해 유휴 세션을 깨웁니다. AGS 설치나 추가 MCP 연결은 필요하지 않습니다.
 
-배포본에는 `scripts/portal-completion-hook.mjs`와 호스트별 `hooks/*.json`이 포함됩니다. Codex용 `.codex-plugin/plugin.json`은 hook만 등록합니다. 호스트가 실행할 로컬 hook 정의를 신뢰·재적재해야 하며, 파일을 압축 해제한 것만으로 현재 세션에 적재됐다고 판단하지 않습니다. 기존 AGS·다른 hook·인증 설정을 덮어쓰지 마세요.
+배포본에는 `scripts/portal-files.mjs`와 호스트별 `hooks/*.json`이 포함됩니다. Codex용 `.codex-plugin/plugin.json`은 hook만 등록합니다. 호스트가 실행할 로컬 hook 정의를 신뢰·재적재해야 하며, 파일을 압축 해제한 것만으로 현재 세션에 적재됐다고 판단하지 않습니다. 기존 AGS·다른 hook·인증 설정을 덮어쓰지 마세요.
 
 설치기에 TEST/PROD origin과 기존 cloudflared를 지정하면 `completion-watch.json`을 만들고 기존 호스트 hook에 연결합니다. 등록된 SSH MCP의 `submit`·`observe` 호출이 끝나면 훅이 같은 작업의 관찰을 자동으로 시작합니다. 에이전트는 별도 watch 명령이나 추가 MCP 연결 없이 다른 일을 계속합니다. 관찰은 기존 클라이언트의 유한한 백그라운드 작업이며 원격 명령을 다시 실행하지 않습니다.
 
@@ -27,7 +27,7 @@ Claude Code는 같은 client 폴더를 `claude --plugin-dir /absolute/path/to/cl
 hook은 출력 후 자동 ACK하지 않습니다. 에이전트가 기록을 처리한 뒤 본문의 정확한 receipt·claim으로 다음 명령을 실행합니다. 다른 세션이나 오래된 claim의 ACK는 거절됩니다.
 
 ```bash
-node scripts/portal-completion-hook.mjs ack --host codex --session EXACT_SESSION_ID --receipt RECEIPT_UUID --claim CLAIM_UUID
+node scripts/portal-files.mjs ack --host codex --session EXACT_SESSION_ID --receipt RECEIPT_UUID --claim CLAIM_UUID
 ```
 
 저장 완료·wake 요청·hook 인수·모델 수신·ACK·원격 업무 완료는 각각 다릅니다. Claude의 `notification.wake.state=deferred`는 네이티브 hook이 수신함에서 처리할 예정이라는 뜻이며, 실제 모델 수신을 확인한 값이 아닙니다. 성공한 watch와 수신함 저장의 exit 0 역시 모델 수신을 보장하지 않습니다. wake 실패에도 기록은 남습니다. 중단·충돌로 ACK하지 못한 기록은 lease 뒤 다음 사용자 입력·재개 hook에서 다시 전달될 수 있습니다. Claude의 백그라운드 대기는 새 pending만 인수하므로, 같은 미ACK 건으로 계속 자동 재개하지 않습니다. 이를 원격 작업 재실행으로 해석하지 마세요. hook에는 원격 HTTP 대기·모델 호출·원격 명령 제출이 없습니다.

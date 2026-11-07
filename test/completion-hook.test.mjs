@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { Readable } from 'node:stream';
 import { openCompletionInbox } from '../src/adapters/cli/completion-inbox.mjs';
 import { runCompletionHook, acknowledgeCompletion, waitForCompletionHook, completionWaitTimeoutMs } from '../src/adapters/cli/completion-hook.mjs';
-import { main } from '../scripts/portal-completion-hook.mjs';
+import { runHook as main } from '../scripts/portal-files.mjs';
 
 // TEST Node24 only. Pre-execution cases: HOOK-RENDER-CASES.ko.md in the workspace parent.
 // Antigravity's renderer contract comes from root's AGS source comparison; real host receipt is NOT_RUN.
@@ -202,7 +202,7 @@ test('RH11 hook and failed acknowledgement close their real SQLite connection', 
 
 test('RC01 installed script entry point reads native stdin and writes a single JSON result', async t => {
   const f = await fixture(t);
-  const script = fileURLToPath(new URL('../scripts/portal-completion-hook.mjs', import.meta.url));
+  const script = fileURLToPath(new URL('../scripts/portal-files.mjs', import.meta.url));
   const { stdout } = await new Promise((resolve, reject) => {
     const child = execFile(process.execPath, [script, ...hookArgs(f)], { timeout: 10000, maxBuffer: 65536 },
       (error, stdout, stderr) => error ? reject(error) : resolve({ stdout, stderr }));
@@ -516,7 +516,7 @@ test('NW10 Claude manifest uses exec argv, bounded asyncRewake, synchronous prom
     assert.equal(handlers(event).filter(handler => !handler.args.includes('--wait')).length, 1);
   }
   for (const handler of Object.values(manifest.hooks).flatMap(groups => groups.flatMap(group => group.hooks))) {
-    assert.equal(handler.command, 'node'); assert.equal(handler.args[0], '${CLAUDE_PLUGIN_ROOT}/scripts/portal-completion-hook.mjs');
+    assert.equal(handler.command, 'node'); assert.equal(handler.args[0], '${CLAUDE_PLUGIN_ROOT}/scripts/portal-files.mjs');
     assert.equal(handler.args[1], '--host'); assert.equal(handler.args[2], 'claude-code');
     assert.equal(handler.async, handler.args.includes('--wait') ? true : undefined);
   }
