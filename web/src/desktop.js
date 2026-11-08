@@ -80,7 +80,7 @@ export function createDesktopPanel({ document, api, getTarget, i18n, isSignedOut
   const authSend = el('button', t('현재 선택한 로그인 입력란으로 전송')), sas = el('button', t('Ctrl+Alt+Delete 요청'));
   authSend.type = sas.type = 'button';
   auth.append(el('legend', t('일회성 인증 입력')), el('p', t('입력값은 저장하지 않습니다. 먼저 화면에서 로그인 입력란을 선택하세요. 전송 후 화면을 확인하고 Enter를 직접 누르세요. SAS 요청의 실제 동작은 서버 서비스와 정책에 따라 달라집니다.')), confirmationLabel, authLabel, fieldConfirmationLabel, authSend, sas);
-  root.append(status, error, readinessStatus, inputStatus, controls, image, label, send, auth); (document.getElementById('server-panels') ?? document.getElementById('server-workspace'))?.append(root);
+  root.append(status, error, readinessStatus, inputStatus, controls, image, label, send, auth); document.getElementById('server-workspace')?.append(root);
   let session, frame, nextSequence, busy = false, uncertain = false, openingUncertain = false, generation = 0, pendingFrame, observedTarget = getTarget();
   let closingRequested = false, closeFlight, sessionPlatform, draftRevision = 0;
   let drainingInputs = false, inputWarning = '';
@@ -123,9 +123,7 @@ export function createDesktopPanel({ document, api, getTarget, i18n, isSignedOut
       + (state.ownerOnly ? ' ' + t('RDP 창을 계속 열어 둘 필요는 없습니다. Windows 계정 인증과 화면 준비 상태는 별도로 확인합니다.') : '') : '';
   }
   function lock() {
-    const ws = document.getElementById('server-workspace');
-    const activeTab = ws?.getAttribute?.('data-server-tab') ?? ws?.['data-server-tab'];
-    root.hidden = document.body.dataset.page !== 'settings' || Boolean(activeTab && activeTab !== 'desktop');
+    root.hidden = document.body.dataset.page !== 'settings';
     open.disabled = busy || !!session || openingUncertain || isSignedOut() || !getTarget();
     refresh.disabled = busy || !session || isSignedOut(); close.disabled = busy || !session || isSignedOut();
     checkState.disabled = busy || !session || isSignedOut();

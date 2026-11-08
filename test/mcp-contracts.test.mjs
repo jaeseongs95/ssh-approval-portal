@@ -170,6 +170,10 @@ test('actual MCP HTTP refuses invalid or secret descriptions without dispatch or
     assert.equal(f.calls.submit.length, 0); f.operations.submit = async () => { throw Error('untrusted-error synthetic-private-marker'); };
     const result = await f.call('submit', { kind: 'command', operationKey, command: 'printf fixture' });
     assert.equal(result.structuredContent.error.code, 'REQUEST_REFUSED'); assert.doesNotMatch(JSON.stringify(result), /synthetic-private-marker/);
+    f.operations.submit = async () => { throw Object.assign(Error('Maintenance in progress'), { code: 'MAINTENANCE_ACTIVE', retryable: true, executionAttempted: false }); };
+    const maint = await f.call('submit', { kind: 'command', operationKey, command: 'printf fixture' });
+    assert.equal(maint.isError, true);
+    assert.deepEqual(maint.structuredContent.error, { code: 'MAINTENANCE_ACTIVE', retryable: true, executionAttempted: false });
   } finally { await f.close(); }
 });
 

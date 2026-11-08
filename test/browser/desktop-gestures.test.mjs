@@ -27,7 +27,7 @@ async function fixture(run, { opened = true } = {}) {
         window.setTarget = value => { target = value; panel.syncTarget(); };
         document.querySelector('img').style.cssText += ';position:absolute;left:20px;top:500px;width:200px;height:100px;border:0;z-index:1';
       </script></body></html>`); return; }
-      if (['/web/src/desktop.js', '/web/src/locale.js', '/web/src/http.js', '/web/src/controller.js'].includes(path)) { response.setHeader('Content-Type', 'text/javascript'); response.end(await readFile(new URL(path.slice(1), root))); return; }
+      if (['/web/src/desktop.js', '/web/src/locale.js', '/web/src/ui-text.js', '/web/src/http.js', '/web/src/controller.js'].includes(path)) { response.setHeader('Content-Type', 'text/javascript'); response.end(await readFile(new URL(path.slice(1), root))); return; }
       if (path === '/api/targets') { response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify({ targets: ['alpha', 'beta'].map(id => ({ id, revision, platform: 'windows' })) })); return; }
       if (path === '/api/session/logout') { calls.push({ action: 'admin-logout' }); response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify({ connected: false })); return; }
       if (!path.startsWith('/api/desktop/')) { response.writeHead(404); response.end(); return; }

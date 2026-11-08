@@ -56,7 +56,7 @@ export function createCapacityPanel({ document, api, i18n = createWebI18n(docume
   const global = make('global', '중계기 실행 한도', '전역 한도는 등록된 모든 서버에 적용됩니다.');
   const target = make('target', '서버 실행 한도', '빈 값은 전역 한도를 상속합니다. 서버 한도와 전역 한도가 함께 적용됩니다.');
   (document.getElementById('environment-editor') ?? document.getElementById('work-layout'))?.before(global.root);
-  (document.getElementById('server-panels') ?? document.getElementById('server-workspace'))?.append(target.root);
+  document.getElementById('server-workspace')?.append(target.root);
   const keyFor = scope => scope === 'global' ? 'global' : 'target:' + getTarget();
   const selected = () => snapshot?.targets?.find(item => item.id === getTarget());
   function lock() {
@@ -69,9 +69,7 @@ export function createCapacityPanel({ document, api, i18n = createWebI18n(docume
   }
   function render() {
     global.root.hidden = document.body.dataset.page !== 'bridge';
-    const ws = document.getElementById('server-workspace');
-    const activeTab = ws?.getAttribute?.('data-server-tab') ?? ws?.['data-server-tab'];
-    target.root.hidden = document.body.dataset.page !== 'settings' || Boolean(activeTab && activeTab !== 'capacity');
+    target.root.hidden = document.body.dataset.page !== 'settings';
     for (const [scope, panel, item] of [['global', global, snapshot?.settings], ['target', target, selected()]]) {
       const draft = drafts.get(keyFor(scope));
       for (const [name, input] of Object.entries(panel.inputs)) input.value = draft?.[name] ?? (item?.[name] === null || item?.[name] === undefined ? '' : String(item[name]));

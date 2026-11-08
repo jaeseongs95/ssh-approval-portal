@@ -160,9 +160,10 @@ const transferRefusals = new Map([
   ['Download artifact changed', 'ARTIFACT_CHANGED'], ['Bound file target verifier unavailable', 'ARTIFACT_TARGET_VERIFIER_UNAVAILABLE'],
 ]);
 function publicError(error, schema) {
-  const code = /^[A-Z][A-Z0-9_]{1,95}$/.test(error?.code) ? error.code : transferRefusals.get(error?.message) ?? 'REQUEST_REFUSED';
-  const value = schema.parse({ contractVersion: CONTRACT_VERSION, ok: false, data: null, error: { code, retryable: error?.retryable === true,
-    executionAttempted: typeof error?.executionAttempted === 'boolean' ? error.executionAttempted : error?.accepted === false ? false : 'unknown' } });
+  const mapped = transferRefusals.get(error?.message);
+  const code = /^[A-Z][A-Z0-9_]{1,95}$/.test(error?.code) ? error.code : mapped ?? 'REQUEST_REFUSED';
+  const value = schema.parse({ contractVersion: CONTRACT_VERSION, ok: false, data: null, error: { code, retryable: error?.retryable === true || code === 'ARTIFACT_MAINTENANCE',
+    executionAttempted: typeof error?.executionAttempted === 'boolean' ? error.executionAttempted : error?.accepted === false || Boolean(mapped) ? false : 'unknown' } });
   return { isError: true, content: [{ type: 'text', text: JSON.stringify(value) }], structuredContent: value };
 }
 

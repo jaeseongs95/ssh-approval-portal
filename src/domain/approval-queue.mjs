@@ -47,7 +47,7 @@ export class ApprovalQueue {
     return this.submitOperation({ kind: 'command', command, ...(context ? { context } : {}), ...(displayContext ? { displayContext } : {}) }, commandClass);
   }
   submitOperation(operation, commandClass = 'privileged', { expiresAt } = {}) {
-    if (this.maintenance) throw Error('Maintenance in progress');
+    if (this.maintenance) throw Object.assign(Error('Maintenance in progress'), { code: 'MAINTENANCE_ACTIVE', retryable: true, executionAttempted: false });
     this.reap();
     if (this.jobs.size >= this.requestCapacity) throw Error('Queue full');
     // Operations contain flat primitives; retain no caller-owned mutable object.

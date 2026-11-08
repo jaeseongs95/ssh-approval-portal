@@ -81,10 +81,16 @@ release_maintenance() {
 if systemctl is-active --quiet ssh-approval-bridge.service; then
   [[ -x "$maintenance_node" ]] || { echo 'Stop the legacy service in the administrator terminal before updating' >&2; exit 1; }
   maintenance_new_owner
-  "$maintenance_node" "$source_dir/scripts/maintenance.mjs" reserve < "$maintenance_owner_file"
+  if ! "$maintenance_node" "$source_dir/scripts/maintenance.mjs" reserve < "$maintenance_owner_file"; then
+    maintenance_recover_retained "$maintenance_node" "$source_dir/scripts/maintenance.mjs" &&
+      "$maintenance_node" "$source_dir/scripts/maintenance.mjs" reserve < "$maintenance_owner_file" || exit 1
+  fi
   maintenance_reserved=1
   # A lost/failed capture is not followed by an automatic release or rollback.
-  "$maintenance_node" "$source_dir/scripts/maintenance.mjs" capture < "$maintenance_owner_file" || { echo 'Preservation capture unconfirmed; maintenance retained.' >&2; exit 1; }
+  "$maintenance_node" "$source_dir/scripts/maintenance.mjs" capture < "$maintenance_owner_file" || {
+    echo "Preservation capture unconfirmed; maintenance retained. Recover as root: sudo bash -c '\"$maintenance_node\" \"$source_dir/scripts/maintenance.mjs\" release < \"$maintenance_owner_file\"'" >&2
+    exit 1
+  }
 else
   # Recheck under the installation lock in case the existing service stopped meanwhile.
   require_fresh_installation "$active" "$unit" "$env_file"
@@ -224,11 +230,17 @@ systemctl restart ssh-approval-bridge.service
 wait_healthy
 trap - EXIT
 if [[ "$maintenance_reserved" == 1 ]]; then
-  "$maintenance_node" "$source_dir/scripts/maintenance.mjs" compare < "$maintenance_owner_file" || { echo 'Post-restart preservation unconfirmed; maintenance retained.' >&2; exit 1; }
+  "$maintenance_node" "$source_dir/scripts/maintenance.mjs" compare < "$maintenance_owner_file" || {
+    echo "Post-restart preservation unconfirmed; maintenance retained. Recover as root: sudo bash -c '\"$maintenance_node\" \"$source_dir/scripts/maintenance.mjs\" release < \"$maintenance_owner_file\"'" >&2
+    exit 1
+  }
 else
   echo 'Post-restart preservation was not verified: no running durable predecessor was captured.' >&2
 fi
-release_maintenance || { echo 'Installation succeeded but maintenance release is unconfirmed; manual recovery required.' >&2; exit 1; }
+release_maintenance || {
+  echo "Installation succeeded but maintenance release is unconfirmed; manual recovery required: sudo bash -c '\"$maintenance_node\" \"$source_dir/scripts/maintenance.mjs\" release < \"$maintenance_owner_file\"'" >&2
+  exit 1
+}
 echo "Installed release: $release"
 echo "Rollback backup: $backup"
 echo 'UI approval remains governed by BRIDGE_UI_ENABLED. Run the harmless host probe before enabling it.'

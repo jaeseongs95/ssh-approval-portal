@@ -15,3 +15,19 @@ maintenance_forget_owner() {
   rm -f -- "$maintenance_owner_file"
   rmdir -- "$maintenance_owner_dir"
 }
+
+maintenance_recover_retained() {
+  local node_bin=$1 script_path=$2 base=/var/lib/ssh-mcp/.maintenance-owners f
+  [[ -d "$base" && ! -L "$base" ]] || return 1
+  for f in $(ls -1t "$base"/job.*/owner 2>/dev/null); do
+    [[ -f "$f" && ! -L "$f" ]] || continue
+    if [[ $("$node_bin" "$script_path" status < "$f" 2>/dev/null || true) == reserved ]]; then
+      if "$node_bin" "$script_path" release < "$f"; then
+        rm -f -- "$f"
+        rmdir -- "$(dirname -- "$f")" 2>/dev/null || true
+        return 0
+      fi
+    fi
+  done
+  return 1
+}

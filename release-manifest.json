@@ -560,8 +560,8 @@
     },
     {
       "path": "scripts/install.sh",
-      "size": 12060,
-      "sha256": "89a9f31aad19f3c3ea89e6cf504ce322d6521fbf8b0d3c4d50778095d9d6d098"
+      "size": 12677,
+      "sha256": "9c211863d517e48ae081afa1b1e49cbda119a3b31024e01a08428119de0b1918"
     },
     {
       "path": "scripts/jev-shadow-protocol.mjs",
@@ -580,8 +580,8 @@
     },
     {
       "path": "scripts/maintenance-owner.sh",
-      "size": 823,
-      "sha256": "b29397bc0973be92c52d936a3820498a8ca146f387dc410b5682bb24e79338a9"
+      "size": 1368,
+      "sha256": "be79f45e3cd3820af0e5e59fcbc5c7350242c2622746b12bde78963ede743266"
     },
     {
       "path": "scripts/maintenance.mjs",
@@ -920,8 +920,8 @@
     },
     {
       "path": "src/adapters/mcp/public-contract.mjs",
-      "size": 31456,
-      "sha256": "8647ea2c8d997193af49f2e4c09a31d5a12c2f4a45a1b01b98c7f2350ebfa2a3"
+      "size": 31535,
+      "sha256": "b05863480e385d7a415886d7d66609acd6b1ad853561731053c134caee6fa8f2"
     },
     {
       "path": "src/adapters/mcp/server.mjs",
@@ -1215,8 +1215,8 @@
     },
     {
       "path": "src/domain/approval-queue.mjs",
-      "size": 22154,
-      "sha256": "1a1348b14bd12ccc63dc96c3a1e67fead572b7e940c586e2cacc9bcbfc001618"
+      "size": 22245,
+      "sha256": "a8d236c1c0b6c21895b967fcd592405b11fa11a7206ba101909f74eb3ce66342"
     },
     {
       "path": "src/domain/automation-risk-question.json",
@@ -1515,8 +1515,8 @@
     },
     {
       "path": "test/browser/desktop-gestures.test.mjs",
-      "size": 14557,
-      "sha256": "2d8b0021c33375dd7f5345292798470d4b01f27744ae1564b4915911b2401e01"
+      "size": 14580,
+      "sha256": "7c082bb6a9c0f8588d5ac3e8c76d78d00f60d6413203a430068fa4e24b6df15d"
     },
     {
       "path": "test/browser/environment.test.mjs",
@@ -2045,8 +2045,8 @@
     },
     {
       "path": "test/maintenance-client.test.mjs",
-      "size": 3629,
-      "sha256": "ad7577a5bcb01687a5a346a2b8d55e11eff0650d247d702250979f46b504ad74"
+      "size": 5363,
+      "sha256": "f804291e012a7b3560858f538abb04a8f22d3f6265b6d6998da69a02729be151"
     },
     {
       "path": "test/maintenance-durable.test.mjs",
@@ -2065,8 +2065,8 @@
     },
     {
       "path": "test/mcp-contracts.test.mjs",
-      "size": 30609,
-      "sha256": "6605ef3047cc7274c4e5cd38cfcaf2d35052549b29b109e465512eb87425b640"
+      "size": 31055,
+      "sha256": "6a8772aa494c26dd7bfe91b6d611f6290af2792aeab19076a4569298e3e93153"
     },
     {
       "path": "test/mcp-input-limits.test.mjs",
@@ -2100,8 +2100,8 @@
     },
     {
       "path": "test/multi-target.test.mjs",
-      "size": 21841,
-      "sha256": "8966ddf5410ea2ac1ec785923adae65cbf37708d7e78b4bb26f1168a34610ac9"
+      "size": 21892,
+      "sha256": "655712e73042029a03d206a730ed0409708a75bac4929a46871221156c4f134a"
     },
     {
       "path": "test/multiline-commands.test.mjs",
@@ -2820,18 +2820,18 @@
     },
     {
       "path": "web/app.js",
-      "size": 9207,
-      "sha256": "c37e48e21869d21dfdfcdda76e939e96319a78e8dd4e71085edf29ab9388f2fa"
+      "size": 9103,
+      "sha256": "550c04dbc51762e72002c3ed90debedb8150229582746c6417331e1283f62b0a"
     },
     {
       "path": "web/dist/app.js",
-      "size": 350535,
-      "sha256": "8155b33f65cc2c6c8a2b9b9fa817c1cee3076d91d5478a89feb96e6d0b3f8bca"
+      "size": 350121,
+      "sha256": "2b69b969ac99d36e65e7b1bbd4d48618e1d84e2c45ed81499cfbde0ea066bdf4"
     },
     {
       "path": "web/index.html",
-      "size": 42668,
-      "sha256": "bd1dc4e4be9af936455b829c2f13406e7413cfecf902c706734506e3c0f55262"
+      "size": 42153,
+      "sha256": "bb2836b565790c67079b17e2f99c4eea886f80a5f8c873e762cbfdfe0bb7c079"
     },
     {
       "path": "web/src/agent-cli.js",
@@ -2845,8 +2845,8 @@
     },
     {
       "path": "web/src/capacity.js",
-      "size": 9833,
-      "sha256": "df98ae68a39477b8c9ebefc151efe0c6d03af1afbce13ff3f4100ccda6776c0d"
+      "size": 9589,
+      "sha256": "183396fbc51042b7e6093d12ae331131baa86710f9114ac1ec272f05b68dea20"
     },
     {
       "path": "web/src/command-line-import.js",
@@ -2870,8 +2870,8 @@
     },
     {
       "path": "web/src/desktop.js",
-      "size": 25064,
-      "sha256": "0016e3878756a40ac5eb55dc98e3a8117d8577a377b46868cb253e5701478128"
+      "size": 24821,
+      "sha256": "40b577d45594aa267b0e6c0000f6e7d57e631d183f632bc67b8326f68114c2ed"
     },
     {
       "path": "web/src/environment.js",

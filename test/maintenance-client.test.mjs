@@ -2,10 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 
 test('client verifies durable capability before mutation and passes the same owner on reserve and release', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'maintenance-client-'));
@@ -49,4 +50,31 @@ test('client verifies durable capability before mutation and passes the same own
     assert.match(partial.output, /complete payload preservation was not verified/);
     assert.deepEqual(calls.map(x => x.path), ['/api/maintenance/capabilities', '/api/maintenance/preservation/compare']);
   } finally { await new Promise(resolve => server.close(resolve)); await rm(dir, { recursive: true }); }
+});
+
+test('installer maintenance helper recovers a retained active owner token and cleans up its directory', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'maintenance-recover-'));
+  try {
+    const ownersBase = join(dir, 'owners'), jobDir = join(ownersBase, 'job.retained'), ownerFile = join(jobDir, 'owner');
+    await mkdir(jobDir, { recursive: true, mode: 0o700 });
+    await writeFile(ownerFile, 'c'.repeat(64), { mode: 0o600 });
+    const fakeNode = join(dir, 'fake-node.sh'), logFile = join(dir, 'calls.log');
+    await writeFile(fakeNode, [
+      '#!/usr/bin/env bash',
+      'set -euo pipefail',
+      'token=$(cat)',
+      'printf "%s:%s\\n" "$2" "$token" >> "$CALL_LOG"',
+      'if [[ "$2" == status ]]; then echo reserved; exit 0; fi',
+      'if [[ "$2" == release ]]; then exit 0; fi',
+      'exit 1',
+    ].join('\n'), { mode: 0o755 });
+    const bash = process.platform === 'win32' ? 'C:/Program Files/Git/bin/bash.exe' : 'bash';
+    const helper = resolve('scripts/maintenance-owner.sh').replaceAll('\\', '/');
+    const baseUnix = ownersBase.replaceAll('\\', '/');
+    const nodeUnix = fakeNode.replaceAll('\\', '/');
+    const logUnix = logFile.replaceAll('\\', '/');
+    const script = `source "${helper}"; eval "$(declare -f maintenance_recover_retained | sed 's|/var/lib/ssh-mcp/.maintenance-owners|${baseUnix}|g')"; maintenance_recover_retained "${nodeUnix}" /ignored/maintenance.mjs`;
+    const result = spawnSync(bash, ['-c', script], { encoding: 'utf8', env: { ...process.env, CALL_LOG: logUnix } });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+  } finally { await rm(dir, { recursive: true, force: true }); }
 });
