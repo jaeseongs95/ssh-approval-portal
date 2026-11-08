@@ -920,13 +920,13 @@
     },
     {
       "path": "src/adapters/mcp/public-contract.mjs",
-      "size": 31545,
-      "sha256": "6ee9ec522fb20af2a39ff0f88076283cb72fe8f73b85716b6e6b39ac9111c7e7"
+      "size": 31561,
+      "sha256": "794bce79c1ee2de8d702b53c248f68df64797f597aff69ecf38385a9c462d0e6"
     },
     {
       "path": "src/adapters/mcp/server.mjs",
-      "size": 9995,
-      "sha256": "5d3bd6753ad89e555bf9972fec3f498c8c5b650bd6f1d80c52f9639c450beb32"
+      "size": 10032,
+      "sha256": "0616a0ec2471b2cb30dcace3ef6863f3657ba67e14edae3c4f4084576c8cad86"
     },
     {
       "path": "src/adapters/presentation/capabilities.mjs",
