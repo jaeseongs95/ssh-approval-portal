@@ -507,12 +507,12 @@ test('NW09 polling is capped at one second and heartbeat renews every ten second
 test('NW10 Claude manifest uses exec argv, bounded asyncRewake, synchronous prompt drain and SessionEnd', async () => {
   const manifest = JSON.parse(await readFile(new URL('../hooks/claude-code.json', import.meta.url), 'utf8'));
   const handlers = event => manifest.hooks[event].flatMap(group => group.hooks);
-  for (const event of ['SessionStart', 'PostToolUse', 'Stop']) {
+  for (const event of ['SessionStart', 'Stop']) {
     const waits = handlers(event).filter(handler => handler.args.includes('--wait'));
     assert.equal(waits.length, 1); assert.equal(waits[0].async, true); assert.equal(waits[0].asyncRewake, true); assert.equal(waits[0].timeout, 86400);
     assert.ok(waits[0].timeout * 1000 > completionWaitTimeoutMs);
   }
-  for (const event of ['SessionStart', 'UserPromptSubmit', 'SessionEnd']) {
+  for (const event of ['SessionStart', 'UserPromptSubmit', 'PostToolUse', 'SessionEnd']) {
     assert.equal(handlers(event).filter(handler => !handler.args.includes('--wait')).length, 1);
   }
   for (const handler of Object.values(manifest.hooks).flatMap(groups => groups.flatMap(group => group.hooks))) {
@@ -542,9 +542,32 @@ test('NW13 Claude short hooks never block Stop while UserPromptSubmit keeps leas
     assert.deepEqual(f.counts(binding), { pending: 1, claimed: 0, acknowledged: 0 });
   }
   const [first] = recordsOf(f.run('claude-code', native('UserPromptSubmit')));
-  assert.equal(first.ack.receipt, receipt.receiptId); assert.equal(first.attempt, 1);
+  assert.equal(first.ack.receipt, receipt.receiptId); assert.equal(first.ack.claim !== undefined, true);
+  assert.deepEqual(acknowledgeCompletion({ receiptId: first.ack.receipt, claimToken: first.ack.claim, inboxPath: f.inboxPath }, f.services),
+    { acknowledged: true, duplicate: false });
+  const next = f.seed('claude-code', sessionId, 2);
+  const [second] = recordsOf(f.run('claude-code', native('UserPromptSubmit')));
+  assert.equal(second.ack.receipt, next.receipt.receiptId); assert.equal(second.attempt, 1);
   f.setNow(31000);
   const [again] = recordsOf(f.run('claude-code', native('UserPromptSubmit')));
-  assert.equal(again.ack.receipt, receipt.receiptId); assert.equal(again.attempt, 2);
-  assert.notEqual(again.ack.claim, first.ack.claim);
+  assert.equal(again.ack.receipt, next.receipt.receiptId); assert.equal(again.attempt, 2);
+  assert.notEqual(again.ack.claim, second.ack.claim);
+});
+
+test('NW14 Claude active turn hooks pause an idle SessionStart waiter so Stop owns completion rewake', async t => {
+  const f = await fixture(t);
+  let sleeps = 0;
+  const paused = await waitForCompletionHook({ host: 'claude-code', input: native('SessionStart'), inboxPath: f.inboxPath }, {
+    ...f.services, now: () => 1000, sleep: async () => {
+      sleeps++; f.run('claude-code', native('PostToolUse'));
+    } });
+  assert.equal(sleeps, 1); assert.deepEqual(paused, {});
+  const { receipt } = f.seed('claude-code');
+  const resumed = await cli(f, claudeWaitArgs(f), JSON.stringify(native('Stop')));
+  assert.equal(resumed.code, 2);
+  const [record] = JSON.parse(resumed.stderr.slice(resumed.stderr.indexOf('\n') + 1));
+  assert.equal(record.ack.receipt, receipt.receiptId);
+  const acked = await cli(f, ['ack', '--receipt', record.ack.receipt, '--claim', record.ack.claim, '--inbox', f.inboxPath]);
+  assert.equal(acked.code, 0);
+  assert.deepEqual(JSON.parse(acked.stdout), { acknowledged: true, duplicate: false });
 });

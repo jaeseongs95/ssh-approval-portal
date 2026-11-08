@@ -32,7 +32,8 @@ export async function runHook(argv = process.argv.slice(2), input = process.stdi
 }
 
 const isHookInvocation = argv => argv[0] === 'hook' || argv[0] === 'ack' ||
-  (argv.includes('--host') && !argv.includes('--origin') && !argv.some(arg => ['doctor', 'upload', 'status', 'watch'].includes(arg)));
+  ((argv.includes('--host') || argv.includes('--wait') || argv.includes('--watch-config')) &&
+   !argv.includes('--origin') && !argv.some(arg => ['doctor', 'upload', 'status', 'watch'].includes(arg)));
 
 export async function main(argv = process.argv.slice(2), output = process.stdout, errorOutput = process.stderr,
   runCredential = execFileSync, environment = process.env, openClient = createOpaqueFilesClient, diagnose = diagnoseClient, openWatcher = createOperationWatcher, notify = notifyCodexCompletion, deliveryServices = {}) {
@@ -48,7 +49,7 @@ export async function main(argv = process.argv.slice(2), output = process.stdout
       help: { type: 'boolean' }, origin: { type: 'string' }, cloudflared: { type: 'string' }, file: { type: 'string' }, 'operation-key': { type: 'string' }, 'timeout-ms': { type: 'string' },
       target: { type: 'string' }, 'expected-target-revision': { type: 'string' },
       'notify-codex': { type: 'string' }, thread: { type: 'string' },
-      'notify-hook': { type: 'boolean' }, host: { type: 'string' }, session: { type: 'string' },
+      'notify-hook': { type: 'boolean' }, binding: { type: 'string' }, host: { type: 'string' }, session: { type: 'string' },
       inbox: { type: 'string' }, 'wake-executable': { type: 'string' },
     } });
     if (values.help === true && argv.length === 1) { output.write(usage); return 0; }
@@ -75,11 +76,13 @@ export async function main(argv = process.argv.slice(2), output = process.stdout
           !/^[a-f0-9]{64}(?![\s\S])/.test(values['expected-target-revision'] ?? '')) throw Object.assign(Error(), { code: 'INVALID_OPERATION_BINDING' });
       watchSelector = { ...(operationKey === undefined ? { id: requestId } : { operationKey }), target: values.target, expectedTargetRevision: values['expected-target-revision'] };
     }
-    const hookOptions = ['notify-hook', 'host', 'session', 'inbox', 'wake-executable'];
+    const hookOptions = ['notify-hook', 'binding', 'host', 'session', 'inbox', 'wake-executable'];
     if (hookOptions.some(key => values[key] !== undefined)) {
-      if (command !== 'watch' || values['notify-hook'] !== true || !values.host || !values.session ||
+      const hasBinding = values.binding !== undefined;
+      const hasHostSession = values.host !== undefined && values.session !== undefined;
+      if (command !== 'watch' || values['notify-hook'] !== true || (hasBinding ? (values.host !== undefined || values.session !== undefined) : !hasHostSession) ||
           values['notify-codex'] !== undefined || values.thread !== undefined) throw Object.assign(Error(), { code: 'INVALID_COMPLETION_TARGET' });
-      completionTarget = validateCompletionDeliveryTarget({ host: values.host, sessionId: values.session,
+      completionTarget = validateCompletionDeliveryTarget({ bindingId: values.binding, host: values.host, sessionId: values.session,
         inboxPath: values.inbox, executable: values['wake-executable'], environment }, deliveryServices);
     }
     if (values['notify-codex'] !== undefined || values.thread !== undefined) {

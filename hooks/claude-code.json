@@ -9,7 +9,7 @@
       { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/portal-files.mjs", "--host", "claude-code"], "timeout": 10 }
     ] }],
     "PostToolUse": [{ "hooks": [
-      { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/portal-files.mjs", "--host", "claude-code", "--wait"], "async": true, "asyncRewake": true, "timeout": 86400 }
+      { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/portal-files.mjs", "--host", "claude-code"], "timeout": 10 }
     ] }],
     "Stop": [{ "hooks": [
       { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/portal-files.mjs", "--host", "claude-code", "--wait"], "async": true, "asyncRewake": true, "timeout": 86400 }

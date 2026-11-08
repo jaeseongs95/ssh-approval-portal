@@ -367,4 +367,10 @@ test('AW17 observe response in terminal state does not spawn a watcher and auto-
   assert.equal(f.calls.length, 0, 'terminal observe must never spawn a watcher');
 
   assert.deepEqual(f.db(inbox => inbox.pending({ bindingId: binding.bindingId })), { pending: 0, claimed: 0, acknowledged: 1 });
+
+  const lateEnqueue = f.db(inbox => inbox.enqueue({ bindingId: binding.bindingId, origin: 'https://late.example.test',
+    event: { event: 'operation.finished', id, state: 'completed', targetId: 'default', targetRevision: revision, finishedAt: 1000, failed: false,
+      auditFailure: false, failureCode: null, exitCode: 0, reason: 'exit', remoteOutcome: 'completed', outputState: 'ready' } }));
+  assert.equal(lateEnqueue.state, 'acknowledged');
+  assert.deepEqual(f.db(inbox => inbox.pending({ bindingId: binding.bindingId })), { pending: 0, claimed: 0, acknowledged: 2 });
 });

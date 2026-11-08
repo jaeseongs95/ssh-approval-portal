@@ -75,13 +75,14 @@ export async function autoWatchCompletion({ host, input, inboxPath, configPath, 
   // PostInvocation has no operation payload; it remains an inbox-consumption boundary.
   if (input.hook_event_name === 'PostInvocation') return ignored();
   const observation = completionHookInput(host, input);
-  const config = await readConfig(configPath), call = callOf(host, input);
+  const resolvedHost = observation.host;
+  const config = await readConfig(configPath), call = callOf(resolvedHost, input);
   if (typeof call.name !== 'string') return ignored();
   const routes = config.routes.filter(route => route.tools.some(tool => call.name === tool || call.name.endsWith('__' + tool) || call.name.endsWith('_' + tool)));
   if (routes.length !== 1) return ignored();
   const route = routes[0], response = contract(call.response);
   let selected;
-  if (host === 'antigravity') {
+  if (resolvedHost === 'antigravity') {
     if (!call.args) return ignored();
     const lookup = id(call.args.id) ? { operationId: call.args.id } : key(call.args.operationKey) ? { operationKey: call.args.operationKey } : null;
     if (!lookup) return ignored();
@@ -96,7 +97,7 @@ export async function autoWatchCompletion({ host, input, inboxPath, configPath, 
       targetId: data.targetId, targetRevision: data.targetRevision };
     if (terminalStates.has(data.state)) {
       const location = inboxPath ?? defaultCompletionInboxPath(environment);
-      const binding = validateCompletionDeliveryTarget({ host, sessionId: observation.sessionId, inboxPath: location, environment });
+      const binding = validateCompletionDeliveryTarget({ host: resolvedHost, sessionId: observation.sessionId, inboxPath: location, environment }, { openInbox });
       const inbox = openInbox({ filePath: location });
       try {
         if (selected.operationId && typeof inbox.acknowledgeOperation === 'function') {
@@ -107,7 +108,7 @@ export async function autoWatchCompletion({ host, input, inboxPath, configPath, 
     }
   }
   const location = inboxPath ?? defaultCompletionInboxPath(environment);
-  const binding = validateCompletionDeliveryTarget({ host, sessionId: observation.sessionId, inboxPath: location, environment });
+  const binding = validateCompletionDeliveryTarget({ host: resolvedHost, sessionId: observation.sessionId, inboxPath: location, environment }, { openInbox });
   const fingerprint = createHash('sha256').update(JSON.stringify([binding.bindingId, route.origin, selected.operationId ?? selected.operationKey])).digest('hex');
   const inbox = openInbox({ filePath: location });
   let lease;
@@ -122,7 +123,7 @@ export async function autoWatchCompletion({ host, input, inboxPath, configPath, 
     const args = [fileURLToPath(new URL('../../../scripts/portal-files.mjs', import.meta.url)), '--origin', route.origin,
       '--cloudflared', config.cloudflared, 'watch',
       ...(selected.operationId ? [selected.operationId] : ['--operation-key', selected.operationKey]),
-      '--notify-hook', '--host', host, '--session', observation.sessionId, '--inbox', location,
+      '--notify-hook', '--host', resolvedHost, '--session', observation.sessionId, '--inbox', location,
       ...(selected.targetId ? ['--target', selected.targetId, '--expected-target-revision', selected.targetRevision] : [])];
     const child = spawn(process.execPath, args, { detached: true, windowsHide: true, shell: false,
       stdio: ['ignore', log.fd, log.fd], env: environment });

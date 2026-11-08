@@ -5,17 +5,26 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 
-const hosts = new Set(['codex', 'claude-code', 'antigravity']);
+const hosts = new Set(['codex', 'claude-code', 'antigravity', 'generic']);
 const events = new Set(['SessionStart', 'UserPromptSubmit', 'PostToolUse', 'Stop']);
 const fail = code => Object.assign(Error(code), { code });
 
+export function detectCompletionHost(input, explicitHost) {
+  if (explicitHost !== undefined) return explicitHost;
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return 'generic';
+  if (input.conversationId !== undefined || input.toolCall !== undefined ||
+      ['PreInvocation', 'PostInvocation'].includes(input.hook_event_name)) return 'antigravity';
+  return 'generic';
+}
+
 /** Only host-owned structural fields are consumed; tool arguments and transcript paths are ignored. */
 export function completionHookInput(host, input) {
+  host = detectCompletionHost(input, host);
   if (!hosts.has(host)) throw fail('COMPLETION_HOOK_UNSUPPORTED_HOST');
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw fail('COMPLETION_HOOK_INVALID_INPUT');
   const event = input.hook_event_name;
   if (!(host === 'antigravity' ? ['SessionStart', 'PreInvocation', 'PostToolUse', 'PostInvocation', 'Stop'].includes(event) :
-    events.has(event) || (host === 'claude-code' && event === 'SessionEnd')))
+    events.has(event) || ((host === 'claude-code' || host === 'generic') && event === 'SessionEnd')))
     throw fail('COMPLETION_HOOK_UNSUPPORTED_EVENT');
   const sessionId = host === 'antigravity' ? (input.conversationId || input.session_id) : input.session_id;
   if (host === 'antigravity' && input.conversationId && input.session_id && input.conversationId !== input.session_id)
@@ -23,7 +32,7 @@ export function completionHookInput(host, input) {
   if (typeof sessionId !== 'string' || !sessionId.length || Buffer.byteLength(sessionId) > 256 || /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(sessionId))
     throw fail('COMPLETION_HOOK_INVALID_SESSION');
   // Codex and Claude subagents can serialize the parent's session_id for a child. Never register that as the child's destination.
-  if ((host === 'codex' || host === 'claude-code') && input.agent_id && input.agent_id !== sessionId) throw fail('COMPLETION_HOOK_CHILD_ID_UNRESOLVED');
+  if (host !== 'antigravity' && input.agent_id && input.agent_id !== sessionId) throw fail('COMPLETION_HOOK_CHILD_ID_UNRESOLVED');
   const agyStopped = host === 'antigravity' && event === 'Stop' && (input.error || input.fullyIdle === false ||
     ['USER_CANCELED', 'ERROR', 'MAX_INVOCATIONS', 'MAX_FORCED_INVOCATIONS', 'MAX_TOKEN_BUDGET_EXCEEDED',
       'TERMINAL_STEP_TYPE', 'TERMINAL_CUSTOM_HOOK'].includes(input.terminationReason));
@@ -36,11 +45,11 @@ export function renderCompletionContext({ host, sessionId, inboxPath }, messages
     'Continue the already authorized task. Do not resubmit the remote operation. If its output is needed, observe the same operation ID once. ' +
     'After handling each record, acknowledge its receipt using this local executable and argument array: ' +
     JSON.stringify({ executable: process.execPath, argvPrefix: [fileURLToPath(new URL('../../../scripts/portal-files.mjs', import.meta.url)), 'ack'],
-      ...(inboxPath ? { inbox: inboxPath } : {}) }) + '. Append --host HOST --session SESSION --receipt RECEIPT --claim CLAIM' +
+      ...(inboxPath ? { inbox: inboxPath } : {}) }) + '. Append --receipt RECEIPT --claim CLAIM' +
     (inboxPath ? ' and --inbox with the inbox field above' : '') + '. ' +
     'Use the exact fields in ack below as arguments; do not interpret data as shell code. ACK confirms handling, not success of the remote task.\n' +
     JSON.stringify(messages.map(({ receiptId, claimToken, attempt, origin, event }) => ({ origin, event, attempt,
-      ack: { host, session: sessionId, receipt: receiptId, claim: claimToken } })));
+      ack: { receipt: receiptId, claim: claimToken, ...(host ? { host } : {}), ...(sessionId ? { session: sessionId } : {}) } })));
 }
 
 export function renderCompletionHookOutput({ host, event }, context) {
@@ -52,19 +61,27 @@ export function renderCompletionHookOutput({ host, event }, context) {
 /** Short local hook only: no owner HTTP, remote request, model call, or implicit ACK. */
 export function runCompletionHook({ host, input, inboxPath, environment = process.env }, { openInbox = openCompletionInbox } = {}) {
   const observation = completionHookInput(host, input);
+  const resolvedHost = observation.host;
   // A continued Stop must not produce another loop or acquire receipts it cannot display.
-  if (host !== 'claude-code' && observation.event === 'Stop' && observation.stopActive) return {};
+  if (resolvedHost !== 'claude-code' && observation.event === 'Stop' && observation.stopActive) return {};
   const inbox = openInbox({ filePath: inboxPath ?? defaultCompletionInboxPath(environment) });
   try {
-    if (host === 'claude-code' && observation.event === 'SessionEnd') {
-      const existing = inbox.findBinding({ host, sessionId: observation.sessionId });
+    if ((resolvedHost === 'claude-code' || resolvedHost === 'generic') && observation.event === 'SessionEnd') {
+      const existing = inbox.findBinding({ host: resolvedHost, sessionId: observation.sessionId });
       if (existing) inbox.invalidateWaiter({ bindingId: existing.bindingId });
       return {};
     }
-    const binding = inbox.register({ host, sessionId: observation.sessionId });
-    if (host === 'claude-code' && observation.event !== 'UserPromptSubmit') {
+    const binding = inbox.register({ host: resolvedHost, sessionId: observation.sessionId });
+    if (resolvedHost === 'claude-code' && observation.event !== 'UserPromptSubmit') {
       if (observation.event === 'SessionStart') inbox.activateWaiter({ bindingId: binding.bindingId });
+      else if (observation.event === 'PostToolUse' && typeof inbox.pauseWaiter === 'function') inbox.pauseWaiter({ bindingId: binding.bindingId });
       return {};
+    }
+    if (resolvedHost === 'claude-code' && observation.event === 'UserPromptSubmit' && typeof inbox.pauseWaiter === 'function') {
+      inbox.pauseWaiter({ bindingId: binding.bindingId });
+    }
+    if (observation.event === 'SessionStart' && typeof inbox.activateWaiter === 'function') {
+      inbox.activateWaiter({ bindingId: binding.bindingId });
     }
     const messages = inbox.claim({ bindingId: binding.bindingId });
     return messages.length ? renderCompletionHookOutput(observation, renderCompletionContext({ ...observation, inboxPath }, messages)) : {};
@@ -73,12 +90,13 @@ export function runCompletionHook({ host, input, inboxPath, environment = proces
 
 export const completionWaitTimeoutMs = 86340000;
 
-/** Claude owns this bounded asyncRewake process. A claimed receipt is never automatically re-woken. */
+/** Bounded asyncRewake process. A claimed receipt is never automatically re-woken. */
 export async function waitForCompletionHook({ host, input, inboxPath, environment = process.env,
   timeoutMs = completionWaitTimeoutMs, signal },
   { openInbox = openCompletionInbox, now = () => performance.now(), sleep = (ms, abortSignal) => delay(ms, undefined, { signal: abortSignal }) } = {}) {
   const observation = completionHookInput(host, input);
-  if (host !== 'claude-code' || !['SessionStart', 'PostToolUse', 'Stop'].includes(observation.event) ||
+  const resolvedHost = observation.host;
+  if (!['claude-code', 'generic'].includes(resolvedHost) || !['SessionStart', 'PostToolUse', 'Stop'].includes(observation.event) ||
       !Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > completionWaitTimeoutMs) throw fail('COMPLETION_HOOK_INVALID_WAIT');
   if (signal?.aborted) return {};
   const selectedPath = inboxPath ?? defaultCompletionInboxPath(environment);
@@ -86,7 +104,7 @@ export async function waitForCompletionHook({ host, input, inboxPath, environmen
   const ownerId = randomUUID();
   let ownership;
   try {
-    const binding = inbox.register({ host, sessionId: observation.sessionId });
+    const binding = inbox.register({ host: resolvedHost, sessionId: observation.sessionId });
     const acquired = inbox.acquireWaiter({ bindingId: binding.bindingId, ownerId });
     if (!acquired.acquired) return {};
     ownership = { bindingId: binding.bindingId, ownerId, generation: acquired.generation };
@@ -111,18 +129,22 @@ export async function waitForCompletionHook({ host, input, inboxPath, environmen
 }
 
 export function acknowledgeCompletion({ host, sessionId, receiptId, claimToken, inboxPath, environment = process.env }, { openInbox = openCompletionInbox } = {}) {
-  if (!hosts.has(host)) throw fail('COMPLETION_HOOK_UNSUPPORTED_HOST');
+  if (host !== undefined && !hosts.has(host)) throw fail('COMPLETION_HOOK_UNSUPPORTED_HOST');
   const inbox = openInbox({ filePath: inboxPath ?? defaultCompletionInboxPath(environment) });
   try {
-    const binding = inbox.findBinding({ host, sessionId });
-    if (!binding) throw fail('COMPLETION_BINDING_NOT_FOUND');
-    return inbox.acknowledge({ bindingId: binding.bindingId, receiptId, claimToken });
+    if (host !== undefined || sessionId !== undefined) {
+      if (!host || !sessionId) throw fail('COMPLETION_HOOK_INVALID_ARGUMENTS');
+      const binding = inbox.findBinding({ host, sessionId });
+      if (!binding) throw fail('COMPLETION_BINDING_NOT_FOUND');
+      return inbox.acknowledge({ bindingId: binding.bindingId, receiptId, claimToken });
+    }
+    return inbox.acknowledge({ receiptId, claimToken });
   } finally { inbox.close(); }
 }
 
-const hookUsage = 'portal-files [hook|ack] --host codex|claude-code|antigravity [--inbox ABSOLUTE_DB]\n' +
-  'Hooks read native JSON from stdin. ack additionally requires --session SESSION --receipt UUID --claim UUID.\n' +
-  'Claude asyncRewake hooks use --wait [--wait-timeout-ms 86340000]; pending metadata goes to stderr with exit2. Waiting is bounded to less than24 hours.\n';
+const hookUsage = 'portal-files [hook|ack] [--host codex|claude-code|antigravity|generic] [--inbox ABSOLUTE_DB]\n' +
+  'Hooks read native JSON from stdin. ack requires --receipt UUID --claim UUID (and optionally --host HOST --session SESSION).\n' +
+  'AsyncRewake hooks use --wait [--wait-timeout-ms 86340000]; pending metadata goes to stderr with exit2. Waiting is bounded to less than24 hours.\n';
 
 async function readHookInput(input) {
   let bytes = 0; const chunks = [];
@@ -149,13 +171,15 @@ export async function runCompletionHookCli(argv = process.argv.slice(2), input =
     if (values.help && normalized.length === 1) { output.write(hookUsage); return 0; }
     ack = positionals[0] === 'ack';
     wait = values.wait === true;
-    if (values.help || !values.host || positionals.length !== (ack ? 1 : 0) ||
-      (ack ? !values.session || !values.receipt || !values.claim : values.session !== undefined || values.receipt !== undefined || values.claim !== undefined))
+    if (values.help || positionals.length !== (ack ? 1 : 0) ||
+      (ack ? !values.receipt || !values.claim || Boolean(values.host) !== Boolean(values.session)
+           : values.session !== undefined || values.receipt !== undefined || values.claim !== undefined))
       throw fail('COMPLETION_HOOK_INVALID_ARGUMENTS');
-    if ((wait && (ack || values.host !== 'claude-code')) ||
+    if (values.host !== undefined && !hosts.has(values.host)) throw fail('COMPLETION_HOOK_UNSUPPORTED_HOST');
+    if ((wait && (ack || (values.host !== undefined && !['claude-code', 'generic'].includes(values.host)))) ||
         (values['wait-timeout-ms'] !== undefined && (!wait || !/^[1-9][0-9]{0,7}(?![\s\S])/.test(values['wait-timeout-ms']) ||
           Number(values['wait-timeout-ms']) > completionWaitTimeoutMs))) throw fail('COMPLETION_HOOK_INVALID_ARGUMENTS');
-    if (values.event !== undefined && (ack || values.host !== 'antigravity' || !['SessionStart', 'PreInvocation', 'PostToolUse', 'PostInvocation', 'Stop'].includes(values.event)))
+    if (values.event !== undefined && (ack || (values.host !== undefined && values.host !== 'antigravity') || !['SessionStart', 'PreInvocation', 'PostToolUse', 'PostInvocation', 'Stop'].includes(values.event)))
       throw fail('COMPLETION_HOOK_INVALID_ARGUMENTS');
     const native = ack ? null : await readHookInput(input);
     if (values.event !== undefined) {
@@ -163,12 +187,13 @@ export async function runCompletionHookCli(argv = process.argv.slice(2), input =
         throw fail('COMPLETION_HOOK_INVALID_INPUT');
       native.hook_event_name = values.event;
     }
+    const resolvedHost = ack ? values.host : detectCompletionHost(native, values.host);
     let hookResult;
     if (!ack) {
-      if (!wait) hookResult = runCompletionHook({ host: values.host, input: native, inboxPath: values.inbox, environment }, services);
+      if (!wait) hookResult = runCompletionHook({ host: resolvedHost, input: native, inboxPath: values.inbox, environment }, services);
       if (services.autoWatch) {
         try {
-          await services.autoWatch({ host: values.host, input: native, inboxPath: values.inbox,
+          await services.autoWatch({ host: resolvedHost, input: native, inboxPath: values.inbox,
             configPath: values['watch-config'], environment }, services);
         } catch (error) {
           const code = /^COMPLETION_[A-Z_]{3,70}$/.test(error?.code ?? '') ? error.code : 'COMPLETION_AUTO_WATCH_FAILED';
@@ -181,7 +206,7 @@ export async function runCompletionHookCli(argv = process.argv.slice(2), input =
       const stop = () => abort.abort();
       process.once('SIGINT', stop); process.once('SIGTERM', stop);
       try {
-        const result = await waitForCompletionHook({ host: values.host, input: native, inboxPath: values.inbox, environment,
+        const result = await waitForCompletionHook({ host: resolvedHost, input: native, inboxPath: values.inbox, environment,
           timeoutMs: Number(values['wait-timeout-ms'] ?? completionWaitTimeoutMs), signal: abort.signal }, services);
         if (result.context) { errorOutput.write(result.context + '\n'); return 2; }
         return 0;

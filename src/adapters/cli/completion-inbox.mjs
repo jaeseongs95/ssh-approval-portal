@@ -156,6 +156,17 @@ export function openCompletionInbox(options = {}) {
           binding_id TEXT NOT NULL REFERENCES completion_bindings(binding_id), watch_key TEXT NOT NULL,
           owner_token TEXT NOT NULL, lease_until INTEGER NOT NULL CHECK(lease_until >= 0),
           PRIMARY KEY(binding_id, watch_key)
+        ) STRICT;
+        CREATE TABLE IF NOT EXISTS completion_deferred_watches (
+          binding_id TEXT NOT NULL REFERENCES completion_bindings(binding_id),
+          origin TEXT NOT NULL, operation_key TEXT NOT NULL,
+          payload TEXT NOT NULL,
+          PRIMARY KEY(binding_id, origin, operation_key)
+        ) STRICT;
+        CREATE TABLE IF NOT EXISTS completion_settled_operations (
+          binding_id TEXT NOT NULL REFERENCES completion_bindings(binding_id),
+          operation_id TEXT NOT NULL,
+          PRIMARY KEY(binding_id, operation_id)
         ) STRICT;`);
       db.exec('COMMIT');
     } catch (error) { try { db.exec('ROLLBACK'); } catch {} throw error; }
@@ -248,9 +259,40 @@ export function openCompletionInbox(options = {}) {
     },
     findBinding(input) {
       return call(() => {
+        if (input && typeof input === 'object' && !Array.isArray(input) && input.bindingId !== undefined && input.host === undefined && input.sessionId === undefined) {
+          identifier(input.bindingId);
+          return registration(db.prepare('SELECT * FROM completion_bindings WHERE binding_id = ?').get(input.bindingId));
+        }
         const { host, sessionId } = session(input);
         return registration(db.prepare('SELECT * FROM completion_bindings WHERE host = ? AND session_id = ?').get(host, sessionId));
       });
+    },
+    deferWatch({ bindingId, origin, operationKey, payload }) {
+      return call(() => {
+        binding(bindingId);
+        try { validateOrigin(origin); } catch { throw fail('COMPLETION_INBOX_INVALID_ORIGIN'); }
+        if (typeof operationKey !== 'string' || !operationKey.length || Buffer.byteLength(operationKey) > 256 || !payload || typeof payload !== 'object' || Array.isArray(payload)) {
+          throw fail('COMPLETION_INBOX_INVALID_INPUT');
+        }
+        return transaction(() => {
+          if (typeof payload.operationId === 'string' && db.prepare('SELECT 1 FROM completion_settled_operations WHERE binding_id = ? AND operation_id = ?').get(bindingId, payload.operationId)) {
+            return { deferred: false, settled: true };
+          }
+          db.prepare(`INSERT INTO completion_deferred_watches(binding_id, origin, operation_key, payload) VALUES (?, ?, ?, ?)
+            ON CONFLICT(binding_id, origin, operation_key) DO UPDATE SET payload = excluded.payload`)
+            .run(bindingId, origin, operationKey, JSON.stringify(payload));
+          return { deferred: true };
+        });
+      });
+    },
+    consumeDeferredWatches({ bindingId } = {}) {
+      return call(() => transaction(() => {
+        binding(bindingId);
+        const rows = db.prepare('SELECT origin, operation_key, payload FROM completion_deferred_watches WHERE binding_id = ?').all(bindingId);
+        db.prepare('DELETE FROM completion_deferred_watches WHERE binding_id = ?').run(bindingId);
+        return rows.map(row => ({ origin: row.origin, operationKey: row.operation_key, ...JSON.parse(row.payload) }))
+          .filter(item => !(typeof item.operationId === 'string' && db.prepare('SELECT 1 FROM completion_settled_operations WHERE binding_id = ? AND operation_id = ?').get(bindingId, item.operationId)));
+      }));
     },
     enqueue(input = {}) {
       return call(() => {
@@ -266,7 +308,13 @@ export function openCompletionInbox(options = {}) {
             if (previous.payload !== payload) throw fail('COMPLETION_INBOX_EVENT_CONFLICT');
             return { receiptId: previous.receipt_id, state: previous.state, duplicate: true };
           }
+          const settled = Boolean(db.prepare('SELECT 1 FROM completion_settled_operations WHERE binding_id = ? AND operation_id = ?').get(bindingId, projected.id));
           const receiptId = randomUUID();
+          if (settled) {
+            db.prepare("INSERT INTO completion_events(receipt_id, binding_id, origin, operation_id, revision, payload, state, claim_token, lease_until, attempt) VALUES (?, ?, ?, ?, ?, ?, 'acknowledged', ?, NULL, 1)")
+              .run(receiptId, bindingId, origin, projected.id, projected.targetRevision, payload, randomUUID());
+            return { receiptId, state: 'acknowledged', duplicate: false };
+          }
           db.prepare('INSERT INTO completion_events(receipt_id, binding_id, origin, operation_id, revision, payload) VALUES (?, ?, ?, ?, ?, ?)')
             .run(receiptId, bindingId, origin, projected.id, projected.targetRevision, payload);
           return { receiptId, state: 'pending', duplicate: false };
@@ -287,6 +335,13 @@ export function openCompletionInbox(options = {}) {
         const { bindingId } = argumentsObject(input); binding(bindingId);
         db.prepare('UPDATE completion_waiters SET ended = 0 WHERE binding_id = ?').run(bindingId);
         return { active: true };
+      }));
+    },
+    pauseWaiter(input = {}) {
+      return call(() => transaction(() => {
+        const { bindingId } = argumentsObject(input); binding(bindingId);
+        db.prepare('UPDATE completion_waiters SET owner_id = NULL, lease_until = 0, generation = generation + 1 WHERE binding_id = ? AND ended = 0 AND generation < 9007199254740991').run(bindingId);
+        return { paused: true };
       }));
     },
     invalidateWaiter(input = {}) {
@@ -332,15 +387,18 @@ export function openCompletionInbox(options = {}) {
     acknowledge(input = {}) {
       return call(() => {
         const { bindingId, receiptId, claimToken } = argumentsObject(input);
+        if (bindingId !== undefined) identifier(bindingId);
         identifier(receiptId); identifier(claimToken);
         return transaction(() => {
-          binding(bindingId);
-          const row = db.prepare('SELECT state, claim_token FROM completion_events WHERE binding_id = ? AND receipt_id = ?').get(bindingId, receiptId);
+          if (bindingId !== undefined) binding(bindingId);
+          const row = bindingId !== undefined
+            ? db.prepare('SELECT binding_id, state, claim_token FROM completion_events WHERE binding_id = ? AND receipt_id = ?').get(bindingId, receiptId)
+            : db.prepare('SELECT binding_id, state, claim_token FROM completion_events WHERE receipt_id = ?').get(receiptId);
           if (!row) throw fail('COMPLETION_INBOX_RECEIPT_NOT_FOUND');
           if (row.state === 'pending' || row.claim_token !== claimToken) throw fail('COMPLETION_INBOX_STALE_CLAIM');
           const duplicate = row.state === 'acknowledged';
           if (!duplicate) db.prepare("UPDATE completion_events SET state = 'acknowledged', lease_until = NULL WHERE binding_id = ? AND receipt_id = ? AND claim_token = ?")
-            .run(bindingId, receiptId, claimToken);
+            .run(row.binding_id, receiptId, claimToken);
           return { acknowledged: true, duplicate };
         });
       });
@@ -349,9 +407,12 @@ export function openCompletionInbox(options = {}) {
       return call(() => {
         const { bindingId, operationId } = argumentsObject(input);
         identifier(bindingId);
-        if (typeof operationId !== 'string' || !/^[a-f0-9]{48}(?![\s\S])/.test(operationId)) throw fail('COMPLETION_INBOX_INVALID_OPERATION');
+        if (typeof operationId !== 'string' || !/^[a-f0-9]{48}(?![\s\S])/.test(operationId)) throw fail('COMPLETION_INBOX_INVALID_INPUT');
         return transaction(() => {
           binding(bindingId);
+          db.prepare('INSERT INTO completion_settled_operations(binding_id, operation_id) VALUES (?, ?) ON CONFLICT(binding_id, operation_id) DO NOTHING')
+            .run(bindingId, operationId);
+          db.prepare('DELETE FROM completion_deferred_watches WHERE binding_id = ? AND operation_key = ?').run(bindingId, operationId);
           const autoToken = randomUUID();
           const updated = db.prepare(`UPDATE completion_events SET state = 'acknowledged',
             claim_token = coalesce(claim_token, ?), lease_until = NULL, attempt = max(attempt, 1)
