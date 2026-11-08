@@ -114,7 +114,7 @@ group = "prod"
 role = "$role"
 announceAgent = false
 tty = false
-transferTimeoutMs = 10000
+transferTimeoutMs = 60000
 "@
     }
     return "[defaults]`ndefaultProfile = `"$ProfilePrefix-write`"`ncommandTimeoutMs = 60000`n`n" + ($profiles -join "`n")

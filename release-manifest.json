@@ -800,8 +800,8 @@
     },
     {
       "path": "src/adapters/cli/local-files.mjs",
-      "size": 6890,
-      "sha256": "f7e9e6590e4792794b5df9ea68ddae329db7c2730c9f146513eab5acfda699d4"
+      "size": 7008,
+      "sha256": "067bb099c5a361edf2322fc974b23a18a5b727ac75ae50424ee9689f88b65fd8"
     },
     {
       "path": "src/adapters/cli/opaque-files-client.mjs",
@@ -1516,7 +1516,7 @@
     {
       "path": "test/browser/desktop-gestures.test.mjs",
       "size": 14637,
-      "sha256": "a5a1e8969f4882d41fc800ecfca95e17553f1994e31f8ecd1a8b0a4844be05c6"
+      "sha256": "9bec4352bbf3176ca57f102c15b25f008ffc58c14daaee8f053b2cbef6334606"
     },
     {
       "path": "test/browser/environment.test.mjs",
@@ -2725,18 +2725,18 @@
     },
     {
       "path": "test/windows-python-source.test.mjs",
-      "size": 24010,
-      "sha256": "f3a0272e45036626144fe20862923e3e8bc3081c9b8feeeec58e019d12fc3bf6"
+      "size": 24052,
+      "sha256": "68ea56096e4db9a43040602048ad3660a35221242512e07f848d8d5243cc8d63"
     },
     {
       "path": "test/windows-ssh-ci.ps1",
       "size": 25614,
-      "sha256": "32e76edfb17f75b042d99bded91ceab1f214877c37bdce18c1b8c5c9443e37ec"
+      "sha256": "a32e3b1133f2638860b1eb3d90037edefe4f96a37fce567c1b5f1d4a394e8754"
     },
     {
       "path": "test/windows-ssh-integration.test.mjs",
-      "size": 47860,
-      "sha256": "7429ba7d824dd72859a10f0f6dab65d6890dd7db48196ce7c10ab9a672aa86a9"
+      "size": 47902,
+      "sha256": "477ab32e7ad2f6f9f2ffa3035110db85559e2d2b91a38b543df7ecb0277a458e"
     },
     {
       "path": "test/windows-ssh-log-read.ps1",

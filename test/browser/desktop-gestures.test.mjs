@@ -7,7 +7,7 @@ import { launchBrowser } from './browser.mjs';
 
 const root = new URL('../../', import.meta.url), revision = 'a'.repeat(64);
 // Valid PNG; the declared remote geometry is deliberately independent of CSS dimensions.
-const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=';
+const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=';
 async function fixture(run, { opened = true } = {}) {
   const calls = [], gates = new Map(), host = { text: '', clicks: [], keys: [], width: 200, height: 100, frame: 0, sequence: 1, active: 0, maxActive: 0 };
   let session, sessionNumber = 0, failInput = false, browser;

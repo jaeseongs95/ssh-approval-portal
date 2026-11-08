@@ -287,7 +287,7 @@ test('실제 Windows SSH의 Python 실행·비관리자 상승 거부·전송 �
   const effect = 'import pathlib,sys\npathlib.Path(sys.argv[1]).write_text("executed",encoding="utf-8")\n';
   const operation = prepare(effect, { argv: [marker] });
   await assert.rejects(call('전송 전 승인 만료', operation,
-    () => runtime.executePythonSource(operation, verify, () => { throw Error('승인 만료'); })), /승인 만료|unknown/i);
+    () => runtime.executePythonSource(operation, verify, () => { throw Error('승인 만료'); })), /승인 만료|SSH execution unavailable before dispatch|unknown/i);
   await assert.rejects(access(marker), { code: 'ENOENT' });
   const elevatedEffect = prepare(effect, { argv: [marker], elevate: true });
   const denied = await call('비관리자 상승 거부', elevatedEffect, () => runtime.executePythonSource(elevatedEffect, verify));

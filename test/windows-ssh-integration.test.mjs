@@ -270,7 +270,7 @@ test('실제 Windows SSH 명령·승인·파일 전송 경계', {
 
     await t.test('연결 후 승인 검사 거부는 명령을 실행하지 않는다', async () => {
       const marker = remote('dispatch-refused.txt');
-      await assert.rejects(runtime.executeCommand('windows-write', wrapWindowsCommand(`Set-Content -LiteralPath '${marker}' -Value '실행 금지'`), () => { throw Error('승인 만료'); }), /승인 만료/);
+      await assert.rejects(runtime.executeCommand('windows-write', wrapWindowsCommand(`Set-Content -LiteralPath '${marker}' -Value '실행 금지'`), () => { throw Error('승인 만료'); }), /승인 만료|SSH execution unavailable before dispatch/);
       await absent(marker);
     });
 

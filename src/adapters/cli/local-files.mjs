@@ -44,7 +44,9 @@ export async function withUploadSnapshot(sourcePath, consume, { maxBytes = MAX_B
     source = await open(sourcePath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
     const before = await source.stat({ bigint: true });
     if (!sameFile(beforePath, before)) throw fail('LOCAL_SOURCE_CHANGED');
-    directory = await mkdtemp(join(stagingRoot, 'ssh-approval-upload-'));
+    directory = await mkdtemp(join(stagingRoot, 'ssh-approval-upload-')).catch(error => {
+      throw Object.assign(error, { code: error.code === 'ENOENT' ? 'ENOTDIR' : error.code });
+    });
     const copyPath = join(directory, 'snapshot');
     copy = await open(copyPath, 'wx+', 0o600); file = copyPath;
     const digest = createHash('sha256'), buffer = Buffer.alloc(CHUNK_BYTES);
