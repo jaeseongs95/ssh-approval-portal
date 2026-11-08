@@ -485,3 +485,16 @@ test('I14 --manifest-sha256 auto computes pin from source manifest and discovers
   assert.equal(parseJSON(watchPath).cloudflared, process.execPath);
   assert.equal(existsSync(join(f.target, 'scripts', 'portal-completion-hook.mjs')), false);
 });
+
+test('U09 recovers when a previously owned version directory was removed and Claude reports cache-miss', t => {
+  const f = claudeFixture(t);
+  rmSync(join(f.programs, '2.2.1'), { recursive: true, force: true });
+  const state = f.state();
+  delete state.plugins.find(item => item.id === f.own.id).readFromFolder;
+  state.plugins.find(item => item.id === f.own.id).errors = ['Marketplace ssh-mcp-client-local failed to load: cache-miss'];
+  save(f.statePath, json(state));
+  const result = ok(f.runClaude());
+  assert.equal(result.progress.claude, 'verified');
+  assert.equal(f.state().plugins.find(item => item.id === f.own.id).version, '2.3.0');
+  assert.equal(f.state().plugins.find(item => item.id === f.own.id).readFromFolder, join(f.target, '.claude-marketplace', 'plugins', 'ssh-completion-client'));
+});

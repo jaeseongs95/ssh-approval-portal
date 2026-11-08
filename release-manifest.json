@@ -540,8 +540,8 @@
     },
     {
       "path": "scripts/install-client.mjs",
-      "size": 34764,
-      "sha256": "10743b5e0045e40bde67acc9a548bd2a93e6000f5608825ad3c0b80291b93c1d"
+      "size": 34902,
+      "sha256": "192bfa2bf6e1dc1371c0df4d399af7706f373a9e878c2e62b05b1995871546d3"
     },
     {
       "path": "scripts/install-oidc-proxy.py",
@@ -1605,8 +1605,8 @@
     },
     {
       "path": "test/client-install.test.mjs",
-      "size": 30103,
-      "sha256": "444b567e62d7a8201cf2a502e65086428368db1e9720b0581d500744e107e7e3"
+      "size": 30916,
+      "sha256": "c049557afe1fcb58e6e4f3a3aff043048eea423b4825690b1a486389d5afa52f"
     },
     {
       "path": "test/codex-completion.test.mjs",

@@ -141,6 +141,7 @@ function ownedMarketplace(path, target) {
       || !/^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$/.test(basename(dirname(path)))) {
     fail('CLAUDE_MARKETPLACE_CONFLICT', 'Existing marketplace is outside this installer root; its source will not be changed');
   }
+  if (!exists(path)) return;
   const data = readOptional(join(path, '.claude-plugin', 'marketplace.json'));
   let catalog;
   try { catalog = JSON.parse(data?.toString('utf8') ?? 'null'); } catch { /* Report the ownership boundary without source contents. */ }
@@ -174,15 +175,16 @@ function claudeRegistration(claude, version, target) {
     ownedMarketplace(marketplace.path, target);
   } else if (plugin) fail('CLAUDE_INVENTORY_INVALID', 'The installed SSH plugin has no corresponding marketplace source');
   const expected = join(target, '.claude-marketplace', 'plugins', pluginName);
+  const marketplaceExists = Boolean(marketplace && exists(marketplace.path));
   const same = plugin?.version === version && (plugin.folderVersion == null || plugin.folderVersion === version)
     && typeof plugin.readFromFolder === 'string' && resolve(plugin.readFromFolder) === resolve(expected)
-    && marketplace && resolve(marketplace.path) === resolve(join(target, '.claude-marketplace'));
+    && marketplaceExists && resolve(marketplace.path) === resolve(join(target, '.claude-marketplace'));
   if (!same && plugins.some(item => typeof item.id === 'string' && item.id.endsWith('@' + marketplaceName)
       && (item.id !== pluginId || item.scope !== 'user'))) {
     fail('CLAUDE_SCOPE_CONFLICT', 'Another plugin or installation scope shares this marketplace; its source will not be changed');
   }
-  if (plugin && (!marketplace || typeof plugin.readFromFolder !== 'string'
-      || resolve(plugin.readFromFolder) !== resolve(join(marketplace.path, 'plugins', pluginName)))) {
+  if (plugin && (!marketplace || (marketplaceExists && (typeof plugin.readFromFolder !== 'string'
+      || resolve(plugin.readFromFolder) !== resolve(join(marketplace.path, 'plugins', pluginName)))))) {
     fail('CLAUDE_MARKETPLACE_CONFLICT', 'Existing SSH plugin source does not match the owned marketplace');
   }
   const metadata = plugin ? pluginMetadata(plugin) : null;
