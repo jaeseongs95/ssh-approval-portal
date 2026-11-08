@@ -2735,8 +2735,8 @@
     },
     {
       "path": "test/windows-ssh-integration.test.mjs",
-      "size": 47902,
-      "sha256": "477ab32e7ad2f6f9f2ffa3035110db85559e2d2b91a38b543df7ecb0277a458e"
+      "size": 47869,
+      "sha256": "14bb8c8cb94d5b47ba673dc68185421a70e1098196a333f7c0c21212e76770c5"
     },
     {
       "path": "test/windows-ssh-log-read.ps1",

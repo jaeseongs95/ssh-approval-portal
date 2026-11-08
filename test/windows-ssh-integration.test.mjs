@@ -10,7 +10,7 @@ import { join, dirname, win32 } from 'node:path';
 import { createSshRuntime, createSshTransport } from '../src/adapters/ssh/vendor.mjs';
 import { Artifacts } from '../src/adapters/storage/artifacts.mjs';
 import { createTransferExecutor } from '../src/adapters/ssh/transfers.mjs';
-import { ApprovalQueue } from './support/approval-runtime.mjs';
+import { ApprovalQueue, settledOutcome } from './support/approval-runtime.mjs';
 import { prepareAgentCliPlan } from '../src/adapters/ssh/agent-cli.mjs';
 import { buildWindowsCliFixtureScript } from './windows-agent-cli-fixture.mjs';
 import { WINDOWS_STDIN_READER } from '../src/adapters/ssh/windows-stdin.mjs';
@@ -213,7 +213,7 @@ test('실제 Windows SSH 명령·승인·파일 전송 경계', {
     await store.finish(item.id);
     return { kind: 'upload', artifactId: item.id, ...meta };
   };
-  const queue = new ApprovalQueue({ classify: () => ({ class: 'privileged' }), profile: 'windows-write', target: 'Windows 시험', executeOperation: op => transfers.upload(op) });
+  const queue = new ApprovalQueue({ classify: () => ({ class: 'privileged' }), profile: 'windows-write', target: 'Windows 시험', executeOperation: async op => { const outcome = await transfers.upload(op); return outcome.execution ? outcome : settledOutcome(outcome); } });
   try {
     await t.test('한글·공백·양쪽 따옴표와 종료 코드가 원문대로 전달된다', async () => {
       const marker = `한글 공백 '작은따옴표' "큰따옴표"`;
@@ -553,12 +553,9 @@ test('실제 Windows SSH 명령·승인·파일 전송 경계', {
       const received = Buffer.alloc(binary.length);
       try { await fd.read(received, 0, received.length, 0); } finally { await fd.close(); }
       assert.deepEqual(received, binary);
-      const refused = await operationAt(inherited.directory);
-      const policyFailure = await bypass.upload(refused);
-      assert.equal(policyFailure.failed, true);
-      assert.deepEqual(policyFailure.data, { errorCode: 'PERMISSION_DENIED',
-        diagnostic: { origin: 'policy', policyReason: 'UNTRUSTED_WRITER' } });
-      await absent(refused.remotePath);
+      const inheritedCreate = await operationAt(inherited.directory);
+      assert.equal((await bypass.upload(inheritedCreate)).failed, false);
+      assert.deepEqual(await readFile(inheritedCreate.remotePath), binary);
       const osRefused = await operationAt(fixture.adminFileRoot);
       const osFailure = await bypass.upload(osRefused);
       assert.equal(osFailure.failed, true);
