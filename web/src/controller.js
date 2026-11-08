@@ -1,3 +1,4 @@
+import { uiText } from './ui-text.js';
 export function createWebController({ state, view, api, document, location, timers = globalThis, beforeLogout }) {
   const capture = () => ({ target: view.target?.(), revision: view.selectionRevision?.() });
   const current = context => context.target === view.target?.() && context.revision === view.selectionRevision?.();
@@ -45,7 +46,7 @@ export function createWebController({ state, view, api, document, location, time
       if (document.body?.dataset.page === 'history') loadHistory();
     } catch (error) {
       if (!state.signedOut && token === generation && !read.signal.aborted && current(context)) {
-        view.error((uncertainDecision ? uncertainMessage() + ' ' : '') + error.message); view.disconnected();
+        view.error((uncertainDecision ? uncertainMessage() + ' ' : '') + uiText(error.message, document)); view.disconnected();
         if (error.status >= 400 && error.status < 500) stopPolling();
       }
     } finally { if (token === generation) { state.loading = null; view.loading(state.signedOut); } settled(); }
@@ -63,7 +64,7 @@ export function createWebController({ state, view, api, document, location, time
       if (state.signedOut || token !== historyGeneration || !current(context) || document.body?.dataset.page !== 'history') return;
       view.history?.(result);
     } catch (error) {
-      if (!state.signedOut && token === historyGeneration && !read.signal.aborted && current(context) && document.body?.dataset.page === 'history') view.historyError?.(error.message);
+      if (!state.signedOut && token === historyGeneration && !read.signal.aborted && current(context) && document.body?.dataset.page === 'history') view.historyError?.(uiText(error.message, document));
     }
   }
   function historyChanged() {
@@ -95,7 +96,7 @@ export function createWebController({ state, view, api, document, location, time
     try {
       const result = await api(`/api/${id}/download`, 'POST');
       if (currentPage()) location.assign(result.downloadUrl);
-    } catch (error) { if (currentPage()) view.error(error.message); }
+    } catch (error) { if (currentPage()) view.error(uiText(error.message, document)); }
     finally { activeDownloads--; }
   }
   async function output(outputId, offsetBytes = 0) {

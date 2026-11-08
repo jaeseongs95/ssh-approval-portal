@@ -292,13 +292,16 @@ function generatedFiles(files, options, version, target, node) {
     add('completion-watch.json', json({ version: 1, cloudflared: executable(options.cloudflared, 'cloudflared'), routes }));
   }
   if (windows) { shellWord(node); shellWord(target); }
+  const defaultCloudflared = options.cloudflared ? executable(options.cloudflared, 'cloudflared') : undefined;
   for (const [name, entry] of [['portal-files', 'portal-files.mjs']]) {
     const script = join(target, 'scripts', entry);
+    const cfArgsPs = defaultCloudflared ? ` --cloudflared ${psWord(defaultCloudflared)}` : '';
+    const cfArgsSh = defaultCloudflared ? ` --cloudflared ${shellWord(defaultCloudflared)}` : '';
     if (windows) {
       // ASCII-only CMD delegates Unicode path handling to the BOM-tagged PS1.
       add(`${name}.cmd`, `@echo off\r\n"%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" -NoProfile -File "%~dp0${name}.ps1" %*\r\nexit /b %errorlevel%\r\n`);
-      add(`${name}.ps1`, `& ${psWord(node)} ${psWord(script)} @args\nexit $LASTEXITCODE\n`);
-    } else add(`${name}.sh`, `#!/bin/sh\nexec ${shellWord(node)} ${shellWord(script)} "$@"\n`);
+      add(`${name}.ps1`, `& ${psWord(node)} ${psWord(script)}${cfArgsPs} @args\nexit $LASTEXITCODE\n`);
+    } else add(`${name}.sh`, `#!/bin/sh\nexec ${shellWord(node)} ${shellWord(script)}${cfArgsSh} "$@"\n`);
   }
   for (const mode of ['test', 'prod']) {
     const value = options[`${mode}-origin`];

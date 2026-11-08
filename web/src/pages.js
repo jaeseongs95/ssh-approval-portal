@@ -1,9 +1,10 @@
+import { resolveLocale } from './locale.js';
 /** Navigation retains DOM drafts; only non-secret location state enters history. */
 export function createAdminPages({ document, location, history, events = globalThis }) {
   const route = path => ({ '/settings': 'settings', '/servers': 'settings', '/history': 'history', '/bridge': 'bridge', '/preferences': 'preferences' })[path] ?? 'approvals';
   const memories = new Map();
   let previous = route(location.pathname);
-  const ko = () => document.documentElement.lang.startsWith('ko');
+  const ko = () => resolveLocale(document?.documentElement?.lang ?? 'en').korean;
   const titles = { approvals: ['작업', 'Work'], history: ['처리 이력', 'History'], settings: ['서버 관리', 'Servers'], bridge: ['중계기 관리', 'Bridge'], preferences: ['화면 설정', 'Appearance'] };
   const notes = {
     approvals: ['승인이 필요한 요청과 진행 상황을 확인합니다. 요청의 서버를 확인하고 처리하세요.', 'Review requests and progress. Confirm each request’s target before acting.'],

@@ -33,7 +33,7 @@ export async function diagnoseClient({ origin, cloudflared, env = process.env, r
     result.targets = listed.targets.map(({ id, enabled }) => ({ id, enabled }));
     result.checks.push({ stage, state: 'readable' });
     result.state = 'ready';
-    result.next = 'Use upload LOCAL_ABSOLUTE_PATH REMOTE_PATH --target TARGET; follow the returned request ID with status. Pending needs owner approval; queued/running need observation. Never automatically resubmit unknown or failed operations.';
+    result.next = 'Use portal-files upload --file LOCAL_ABSOLUTE_PATH --operation-key STABLE_KEY and pass the returned UUID to the remote MCP files tool, or inspect an existing UUID with status UUID. Pending requests require owner approval; never automatically resubmit unknown or failed operations.';
   } catch (error) {
     const code = error.code === 'UNSUPPORTED_NODE_VERSION' || publicCodes.has(error.code) ? error.code : 'DIAGNOSTIC_FAILED';
     result.checks.push({ stage, state: 'blocked', error: code });

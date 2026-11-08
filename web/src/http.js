@@ -31,7 +31,7 @@ export function createWebApi({ fetch, accessMode, getToken, isSignedOut, unautho
     const value = await response.json().catch(error => { throw Object.assign(error, { status: response.status }); });
     read?.signal.throwIfAborted();
     if (isSignedOut()) throw Error(t('로그아웃되었습니다.'));
-    if (!response.ok) throw Object.assign(Error(value.error ?? t('요청 실패')), { status: response.status });
+    if (!response.ok) throw Object.assign(Error(t(value.error ?? '요청 실패')), { status: response.status });
     return value;
     };
     try {

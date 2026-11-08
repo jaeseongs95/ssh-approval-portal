@@ -1,8 +1,10 @@
 /** Fixed-provider owner workflow. Browser storage contains only bounded public lookup hints. */
 import { createWebI18n } from './i18n.js';
+import { resolveLocale } from './locale.js';
+import { uiText } from './ui-text.js';
 export function createAgentCliPanel({document,api,i18n = createWebI18n(document.documentElement.lang),isSignedOut,canLoad,storage,getTarget,onRequestTarget,onStateChange=()=>{},random=globalThis.crypto,schedule=setTimeout,cancel=clearTimeout}) {
  const { formatDate } = i18n;
- const ko=document.documentElement.lang.startsWith('ko'),t=(a,b)=>ko?a:b;
+ const ko=i18n?.korean ?? resolveLocale(document?.documentElement?.lang ?? 'en').korean,t=(a,b)=>ko?a:b;
  const el=(tag,text='',cls='')=>{const n=document.createElement(tag);n.textContent=text;if(cls)n.className=cls;return n;};
  const root=el('section','','request agent-cli-settings');root.id='agent-cli-settings';
  root.append(el('h2',t('서버 CLI 설치','Server CLI installation')),el('p',t('등록된 서버에 Codex·Claude CLI를 설치합니다. 설치한 CLI는 해당 SSH 계정 권한으로 실행됩니다. 로그인과 자동심사 활성화는 별도로 진행합니다.','Install Codex or Claude CLI on a registered server. Installed code runs with that SSH account’s permissions. Login and review activation are separate.'),'policy-help'));
@@ -82,7 +84,7 @@ if ($executable.EndsWith('.exe')) { & $executable ${p==='codex'?'login':'auth lo
   summary.hidden=false;summary.textContent=[identity.textContent,provider.value,'ID: '+job.id,stateName(job.state),...(remoteStatus?[t('서버 기록: ','Server receipt: ')+stateName(remoteStatus.state)]:[])].join('\n');
   message.textContent=job.state==='unknown'?t('결과를 확정하지 못했습니다. 설치를 반복하지 말고 서버 기록을 확인하세요.','Outcome is unknown. Check the server receipt before attempting another installation.'):stateName(job.state);lock();poll();
  }
- async function run(fn){if(busy||!active())return;const token=generation;busy=true;failure.textContent='';lock();try{await fn(()=>token===generation&&active());}catch(error){if(token===generation&&active())failure.textContent=String(error.message);}finally{busy=false;lock();}}
+ async function run(fn){if(busy||!active())return;const token=generation;busy=true;failure.textContent='';lock();try{await fn(()=>token===generation&&active());}catch(error){if(token===generation&&active())failure.textContent=uiText(String(error.message),document);}finally{busy=false;lock();}}
  function poll(){clearTimer();if(!active()||document.hidden||!['pending','queued','running','evaluating'].includes(job?.state))return;timer=schedule(()=>{if(busy){poll();return;}run(async current=>{try{const value=await api('/api/agent-cli/requests/'+job.id);if(current())displayJob(value.job,value.remoteStatus);}finally{if(current())poll();}});},2000);}
  async function loadHistory(current,cursor=null){
   const b=binding(),p=provider.value;clearTimer();clearHistory();preview=job=remoteStatus=undefined;ack.checked=false;summary.hidden=true;summary.textContent='';output.hidden=true;output.textContent='';lock();

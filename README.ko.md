@@ -1,11 +1,11 @@
 # SSH Approval Portal 2.4.0
 
-2.4.0은 기존 MCP 도구 호출과 완료 관찰을 네이티브 hook으로 자동 연결합니다. 설치 상태·호스트별 검증 범위는 릴리스 노트에서 확인하세요. 아래 v2.3.3 다운로드 링크는 고정 버전 설치 예시로 보존합니다.
+2.4.0은 기존 MCP 도구 호출과 완료 관찰을 네이티브 hook으로 자동 연결합니다. 설치 상태·호스트별 검증 범위는 릴리스 노트에서 확인하세요.
 
 완료 hook은 로컬 수신함에 저장한 상태를 호스트의 네이티브 훅으로 에이전트에 전달하고, 별도로 처리 ACK를 받습니다. Claude Code는 백그라운드 `asyncRewake` 훅을 사용합니다. 호스트별 지원·재적재·유휴 수신 제한은 [클라이언트 hook 안내](docs/client-files.ko.md)를 참고하세요.
 
 
-[English](README.md) · [v2.3.3 다운로드](https://github.com/jaeseongs95/ssh-approval-portal/releases/tag/v2.3.3) · [아키텍처](docs/architecture.ko.md) · [MCP 도구 계약](docs/mcp-tools.ko.md)
+[English](README.md) · [v2.4.0 다운로드](https://github.com/jaeseongs95/ssh-approval-portal/releases/tag/v2.4.0) · [아키텍처](docs/architecture.ko.md) · [MCP 도구 계약](docs/mcp-tools.ko.md)
 
 SSH 명령 실행, 파일 전송, 실제 OS 데스크톱 조작을 제공하는 벤더 독립 MCP 서버입니다. 에이전트는 공통 도구 계약을 사용하며, 서버 정책·소유자 결정·대상 계정의 권한에 따라 작업을 실행합니다.
 
@@ -83,7 +83,7 @@ PC 파일 클라이언트 ── HTTPS ──> UUID 임시 보관 ── files c
 <a id="files"></a>
 ## 파일 본문을 모델 문맥에 넣지 않고 PC에서 업로드
 
-[릴리스](https://github.com/jaeseongs95/ssh-approval-portal/releases/tag/v2.3.3)에서 `ssh-approval-portal-client-2.3.3.zip` 또는 `.tar.gz`를 내려받아 압축을 풉니다. 압축을 푼 폴더에서 진입 파일을 실행합니다. 포터블 클라이언트는 이 폴더에서 바로 실행할 수 있습니다. 버전별 설치, TEST/PROD 실행 명령, Codex·Claude Code·Antigravity Native hook 등록은 [클라이언트 설치기](docs/client-install.ko.md)를 사용합니다. 기본 읽기 전용 계획을 검토한 뒤 적용하며, 이전 버전과 관련 없는 호스트 설정을 보존합니다. PATH와 인증은 바꾸지 않습니다.
+[릴리스](https://github.com/jaeseongs95/ssh-approval-portal/releases/tag/v2.4.0)에서 `ssh-approval-portal-client-2.4.0.zip` 또는 `.tar.gz`를 내려받아 압축을 풉니다. 압축을 푼 폴더에서 진입 파일을 실행합니다. 포터블 클라이언트는 이 폴더에서 바로 실행할 수 있습니다. 버전별 설치, TEST/PROD 실행 명령, Codex·Claude Code·Antigravity Native hook 등록은 [클라이언트 설치기](docs/client-install.ko.md)를 사용합니다. 기본 읽기 전용 계획을 검토한 뒤 적용하며, 이전 버전과 관련 없는 호스트 설정을 보존합니다. PATH와 인증은 바꾸지 않습니다.
 
 현재 클라이언트는 **Access 모드**로 구성한 관리자 HTTPS origin, 신뢰하는 기존 `cloudflared`, 소유자 로그인 캐시가 필요합니다. MCP 연결 인증이나 서버의 기본 관리자 token 모드로 대신할 수 없습니다.
 
@@ -99,7 +99,7 @@ node @portalFiles doctor
 node @portalFiles upload --file 'C:/work/package.tar.gz' --operation-key 'package-upload-0001'
 ```
 
-SSH 실행 중에도 다른 작업을 하려면 호스트의 백그라운드 실행 도구로 `node @portalFiles watch REQUEST_ID`를 시작합니다. 기존 클라이언트가 모델 밖에서 대기하고 종료 이벤트 한 줄을 반환합니다. 완료 통지·자동 재개는 호스트별 지원을 확인해야 합니다. [클라이언트 완료 관찰 안내](docs/client-files.ko.md#작업-완료를-모델-밖에서-기다리기)를 참고하세요.
+네이티브 완료 훅이 구성된 호스트(Codex, Claude Code)에서는 `observe`를 호출하면 완료 훅이 백그라운드 감시를 자동으로 연결하므로 수동으로 `watch`를 실행할 필요가 없습니다. 완료 훅이 없는 호스트에서 SSH 실행 중 다른 작업을 하려면 호스트의 백그라운드 실행 도구로 `node @portalFiles watch REQUEST_ID`를 시작합니다. 기존 클라이언트가 모델 밖에서 대기하고 종료 이벤트 한 줄을 반환합니다. 완료 통지·자동 재개는 호스트별 지원을 확인해야 합니다. [클라이언트 완료 관찰 안내](docs/client-files.ko.md#작업-완료를-모델-밖에서-기다리기)를 참고하세요.
 
 `doctor`는 기존 실행 환경·인증·연결을 진단합니다. 로그인, 파일 업로드, 승인, SSH 명령 실행을 하지 않습니다. 업로드가 성공하면 JSON 객체 하나를 출력합니다.
 
@@ -146,12 +146,12 @@ standalone 클라이언트는 **`doctor`·`upload`·`status`·`watch`**를 제�
 
 ### 신규 네이티브 설치
 
-Python 3, 인터넷 연결, 관리자 터미널을 갖춘 Ubuntu 22.04/24.04 서버를 준비합니다. [릴리스](https://github.com/jaeseongs95/ssh-approval-portal/releases/tag/v2.3.3)에서 서버 압축 파일과 `SHA256SUMS`를 내려받고, 해당 서버에서 실행합니다.
+Python 3, 인터넷 연결, 관리자 터미널을 갖춘 Ubuntu 22.04/24.04 서버를 준비합니다. [릴리스](https://github.com/jaeseongs95/ssh-approval-portal/releases/tag/v2.4.0)에서 서버 압축 파일과 `SHA256SUMS`를 내려받고, 해당 서버에서 실행합니다.
 
 ```sh
 sha256sum --check --ignore-missing SHA256SUMS
-tar -xzf ssh-approval-portal-2.3.3.tar.gz
-cd ssh-approval-portal-2.3.3
+tar -xzf ssh-approval-portal-2.4.0.tar.gz
+cd ssh-approval-portal-2.4.0
 python3 scripts/portal.py install --admin-origin https://approve.example.com --dry-run
 sudo python3 scripts/portal.py install --admin-origin https://approve.example.com
 sudo python3 scripts/portal.py status

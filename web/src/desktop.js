@@ -1,4 +1,5 @@
 import { messageCatalog, translate, resolveLocale } from './locale.js';
+import { uiText } from './ui-text.js';
 
 export const desktopCatalogs = messageCatalog({
   '서버 데스크톱': 'Server desktop', '데스크톱 열기': 'Open desktop', '화면 새로고침': 'Refresh screen', '데스크톱 닫기': 'Close desktop',
@@ -79,7 +80,7 @@ export function createDesktopPanel({ document, api, getTarget, i18n, isSignedOut
   const authSend = el('button', t('현재 선택한 로그인 입력란으로 전송')), sas = el('button', t('Ctrl+Alt+Delete 요청'));
   authSend.type = sas.type = 'button';
   auth.append(el('legend', t('일회성 인증 입력')), el('p', t('입력값은 저장하지 않습니다. 먼저 화면에서 로그인 입력란을 선택하세요. 전송 후 화면을 확인하고 Enter를 직접 누르세요. SAS 요청의 실제 동작은 서버 서비스와 정책에 따라 달라집니다.')), confirmationLabel, authLabel, fieldConfirmationLabel, authSend, sas);
-  root.append(status, error, readinessStatus, inputStatus, controls, image, label, send, auth); document.getElementById('server-workspace')?.append(root);
+  root.append(status, error, readinessStatus, inputStatus, controls, image, label, send, auth); (document.getElementById('server-panels') ?? document.getElementById('server-workspace'))?.append(root);
   let session, frame, nextSequence, busy = false, uncertain = false, openingUncertain = false, generation = 0, pendingFrame, observedTarget = getTarget();
   let closingRequested = false, closeFlight, sessionPlatform, draftRevision = 0;
   let drainingInputs = false, inputWarning = '';
@@ -122,7 +123,9 @@ export function createDesktopPanel({ document, api, getTarget, i18n, isSignedOut
       + (state.ownerOnly ? ' ' + t('RDP 창을 계속 열어 둘 필요는 없습니다. Windows 계정 인증과 화면 준비 상태는 별도로 확인합니다.') : '') : '';
   }
   function lock() {
-    root.hidden = document.body.dataset.page !== 'settings';
+    const ws = document.getElementById('server-workspace');
+    const activeTab = ws?.getAttribute?.('data-server-tab') ?? ws?.['data-server-tab'];
+    root.hidden = document.body.dataset.page !== 'settings' || Boolean(activeTab && activeTab !== 'desktop');
     open.disabled = busy || !!session || openingUncertain || isSignedOut() || !getTarget();
     refresh.disabled = busy || !session || isSignedOut(); close.disabled = busy || !session || isSignedOut();
     checkState.disabled = busy || !session || isSignedOut();
@@ -149,7 +152,7 @@ export function createDesktopPanel({ document, api, getTarget, i18n, isSignedOut
       showReadiness(value.readiness);
       if (value.mimeType !== 'image/png' || !Number.isSafeInteger(value.width) || value.width < 1 || !Number.isSafeInteger(value.height) || value.height < 1 || !Number.isSafeInteger(value.nextInputSequence) || value.nextInputSequence < 1 || typeof value.frameId !== 'string' || typeof value.data !== 'string' || !/^[A-Za-z0-9+/=]+$/.test(value.data)) throw Error(t('화면을 읽을 수 없습니다.'));
       pendingFrame = value; frame = undefined; image.hidden = false; image.src = 'data:image/png;base64,' + value.data;
-    } catch (failure) { if (token === generation) { uncertain = true; error.textContent = failure.message; } }
+    } catch (failure) { if (token === generation) { uncertain = true; error.textContent = uiText(t(failure.message), document); } }
     finally { settled(); }
   }
   image.onload = () => {
@@ -167,7 +170,7 @@ export function createDesktopPanel({ document, api, getTarget, i18n, isSignedOut
       if (token !== generation) return false;
       if (receipt.sessionId !== session.sessionId || receipt.sequence !== request.sequence || receipt.requestKey !== request.requestKey || receipt.state !== 'sent') throw Error('DESKTOP_INVALID_RECEIPT');
       nextSequence++; return true;
-    } catch (failure) { if (token === generation) { uncertain = true; error.textContent = failure.message + ' ' + t('입력 결과를 확인하지 못했습니다. 입력을 반복하지 말고 화면을 새로고침하세요.'); } return false; }
+    } catch (failure) { if (token === generation) { uncertain = true; error.textContent = uiText(t(failure.message), document) + ' ' + t('입력 결과를 확인하지 못했습니다. 입력을 반복하지 말고 화면을 새로고침하세요.'); } return false; }
     finally { settled(); }
   }
   async function authenticate(action) {
@@ -182,7 +185,7 @@ export function createDesktopPanel({ document, api, getTarget, i18n, isSignedOut
       if (token !== generation) return;
       if (receipt.sessionId !== session.sessionId || receipt.sequence !== request.sequence || receipt.requestKey !== request.requestKey || receipt.state !== 'sent') throw Error('DESKTOP_INVALID_RECEIPT');
       nextSequence++;
-    } catch (failure) { if (token === generation) { uncertain = true; error.textContent = failure.message + ' ' + t('입력 결과를 확인하지 못했습니다. 입력을 반복하지 말고 화면을 새로고침하세요.'); } }
+    } catch (failure) { if (token === generation) { uncertain = true; error.textContent = uiText(t(failure.message), document) + ' ' + t('입력 결과를 확인하지 못했습니다. 입력을 반복하지 말고 화면을 새로고침하세요.'); } }
     finally { request.value = undefined; settled(); }
     if (!uncertain && token === generation) await observe();
   }
@@ -201,7 +204,7 @@ export function createDesktopPanel({ document, api, getTarget, i18n, isSignedOut
       if (token !== generation) return;
       session = value; sessionPlatform = target.platform ?? 'linux'; error.textContent = ''; text.value = ''; inputWarning = ''; cancelQueuedInputs();
       showReadiness(value.readiness);
-    } catch (failure) { if (token === generation) { openingUncertain = submitted && !(failure.status >= 400 && failure.status < 500); error.textContent = failure.message + (openingUncertain ? ' ' + t('데스크톱 연결 결과를 확인하지 못했습니다. 자동으로 다시 열지 않습니다.') : ''); } }
+    } catch (failure) { if (token === generation) { openingUncertain = submitted && !(failure.status >= 400 && failure.status < 500); error.textContent = uiText(t(failure.message), document) + (openingUncertain ? ' ' + t('데스크톱 연결 결과를 확인하지 못했습니다. 자동으로 다시 열지 않습니다.') : ''); } }
     finally { settled(); }
     if (session && !closingRequested) await observe();
   };
@@ -221,8 +224,8 @@ export function createDesktopPanel({ document, api, getTarget, i18n, isSignedOut
         inputWarning = ''; showInputStatus();
         readinessStatus.textContent = ''; credential.value = ''; confirmation.checked = fieldConfirmation.checked = false;
         status.textContent = t('연결을 닫았습니다. 서버 계정에서 로그아웃하지 않았습니다.');
-        error.textContent = result.cleanupError ? t('데스크톱 정리 결과를 확인하세요: ') + result.cleanupError : '';
-      } catch (failure) { if (token === generation) { uncertain = true; error.textContent = failure.message; } }
+        error.textContent = result.cleanupError ? t('데스크톱 정리 결과를 확인하세요: ') + uiText(t(result.cleanupError), document) : '';
+      } catch (failure) { if (token === generation) { uncertain = true; error.textContent = uiText(t(failure.message), document); } }
       finally { settled(); }
     })();
     try { return await closeFlight; }
@@ -238,7 +241,7 @@ export function createDesktopPanel({ document, api, getTarget, i18n, isSignedOut
       if (token !== generation) return;
       if (session.readiness?.generation !== value.readiness?.generation) { frame = pendingFrame = undefined; image.hidden = true; image.removeAttribute('src'); }
       showReadiness(value.readiness); error.textContent = '';
-    } catch (failure) { if (token === generation) { uncertain = true; error.textContent = failure.message; } }
+    } catch (failure) { if (token === generation) { uncertain = true; error.textContent = uiText(t(failure.message), document); } }
     finally { settled(); }
   };
   send.onclick = async () => {

@@ -1,7 +1,8 @@
 import { createWebI18n } from './i18n.js';
+import { resolveLocale } from './locale.js';
 export function createAutomationMetricsPanel({document,api,i18n = createWebI18n(document.documentElement.lang)}) {
   const { formatDate, formatNumber } = i18n;
-  const korean=document.documentElement.lang.startsWith('ko'),node=(tag,value='',className='')=>{const n=document.createElement(tag);n.textContent=value;n.className=className;return n;};
+  const korean=i18n?.korean ?? resolveLocale(document?.documentElement?.lang ?? 'en').korean,node=(tag,value='',className='')=>{const n=document.createElement(tag);n.textContent=value;n.className=className;return n;};
   const panel=node('details','','request automation-metrics');panel.id='automation-metrics';panel.append(node('summary',korean?'자동승인 효과 · 최근 24시간':'Automation observations · last 24 hours'));
   const help=node('p',korean?'저장된 명령 심사 이력을 집계합니다. 업로드·다운로드와 별도 읽기 호출은 포함하지 않습니다. 열거나 새로고침할 때만 조회합니다.':'Recorded command decisions only. Uploads, downloads and separate read calls are excluded. Loaded only when opened or refreshed.','policy-help');
   const content=node('div'),error=node('p','','error'),refresh=node('button',korean?'측정값 새로고침':'Refresh observations','secondary');refresh.type='button';error.hidden=true;panel.append(help,content,error,refresh);

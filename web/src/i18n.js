@@ -20,6 +20,23 @@ export const webCatalogs = messageCatalog({
   '로그인이 만료되었거나 접근할 수 없습니다. 다시 로그인해 주세요.': 'Your session expired or access was denied. Please sign in again.',
   '로그아웃되었습니다.': 'You have signed out.',
   'SSO에서 확인한 본인 계정으로 요청을 처리합니다.': 'Manage requests with your owner account verified by SSO.',
+  'JSON 형식으로 요청해 주세요.': 'Send a JSON request.',
+  'ENV 변경 내용이 너무 큽니다.': 'ENV changes exceed the size limit.',
+  '잘못된 JSON 형식입니다.': 'Invalid JSON format.',
+  'ENV 작업을 완료하지 못했습니다. 현재 상태를 다시 조회해 주세요.': 'ENV operation failed. Read the current state again.',
+  '다른 ENV 작업이 진행 중입니다.': 'Another ENV operation is in progress.',
+  '실행 중·승인 대기 요청 또는 유지보수가 있습니다. 모두 종료한 뒤 다시 시도해 주세요.': 'Running or pending requests or maintenance are active. Finish all work and try again.',
+  '진행 중인 요청이나 전송이 있습니다. 모두 종료한 뒤 다시 시도해 주세요.': 'Requests or file transfers are in progress. Finish all work and try again.',
+  '감사 기록을 저장하지 못해 ENV 작업을 시작하지 않았습니다.': 'Could not write the audit log; ENV operation was not started.',
+  '서버 ENV가 변경됐습니다. 현재 설정을 다시 불러온 뒤 수정해 주세요.': 'Server ENV changed. Load current settings before editing.',
+  'ENV 검증에 실패했습니다. 입력 형식과 설정 조합을 확인해 주세요.': 'ENV validation failed. Check value formats and setting combinations.',
+  '입력값에 사용할 수 없는 문자나 형식이 있습니다.': 'An input contains unsupported characters or format.',
+  '이 화면에서 수정할 수 없는 설정입니다.': 'This setting cannot be edited on this page.',
+  '이미 재시작 중입니다. 결과를 확인해 주세요.': 'A restart is already in progress. Check its outcome.',
+  '변경 내용과 재시작 영향을 확인해 주세요.': 'Confirm the changes and restart impact.',
+  '재시작을 예약하지 못했습니다. 서버 상태를 확인해 주세요.': 'Could not schedule restart. Check server state.',
+  'ENV 관리 연결을 확인할 수 없습니다. 저장·재시작 요청을 반복하지 말고 현재 상태를 조회해 주세요.': 'ENV management connection unavailable. Do not repeat save or restart; read current state.',
+  'ENV 작업을 완료하지 못했습니다. 서버 관리자에게 상태 확인을 요청해 주세요.': 'ENV operation failed. Ask the server administrator to check its state.',
 });
 export function createWebI18n(language = 'en') {
 const { korean, locale, messageLanguage, dir } = resolveLocale(language);

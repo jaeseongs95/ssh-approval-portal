@@ -1,11 +1,11 @@
 # SSH Approval Portal 2.4.0
 
-2.4.0 connects existing MCP tool calls to completion observation through native hooks. Check the release notes for installation status and verification on each host. The v2.3.3 download links below remain pinned installation examples.
+2.4.0 connects existing MCP tool calls to completion observation through native hooks. Check the release notes for installation status and verification on each host.
 
 Completion hooks: the local client saves status in a durable inbox. Native host hooks deliver it to the agent, with a separate handling ACK; Claude Code uses its background `asyncRewake` hook. See the [client hook guide](docs/client-files.ko.md) for host support, reload requirements and idle limits.
 
 
-[한국어](README.ko.md) · [Download v2.3.3](https://github.com/jaeseongs95/ssh-approval-portal/releases/tag/v2.3.3) · [Architecture](docs/architecture.en.md) · [MCP contract (Korean)](docs/mcp-tools.ko.md)
+[한국어](README.ko.md) · [Download v2.4.0](https://github.com/jaeseongs95/ssh-approval-portal/releases/tag/v2.4.0) · [Architecture](docs/architecture.en.md) · [MCP contract (Korean)](docs/mcp-tools.ko.md)
 
 Run SSH commands, transfer files and operate real OS desktops through a vendor-neutral MCP server. Agents use a common tool contract; server policy, owner decisions and the target account's permissions govern execution.
 
@@ -83,7 +83,7 @@ Output is read explicitly with `includeOutput:true` and paginated when needed. T
 <a id="files"></a>
 ## Upload a PC file without putting bytes in the model context
 
-Download and extract `ssh-approval-portal-client-2.3.3.zip` or `.tar.gz` from the [release](https://github.com/jaeseongs95/ssh-approval-portal/releases/tag/v2.3.3). Run the entry point from that extracted folder. The portable client works directly from that folder. For a versioned installation, TEST/PROD launchers and Codex, Claude Code or Antigravity Native hooks, use the [client installer](docs/client-install.ko.md): inspect its default read-only plan, then apply it. Existing versions and unrelated host settings are preserved; PATH and authentication are unchanged.
+Download and extract `ssh-approval-portal-client-2.4.0.zip` or `.tar.gz` from the [release](https://github.com/jaeseongs95/ssh-approval-portal/releases/tag/v2.4.0). Run the entry point from that extracted folder. The portable client works directly from that folder. For a versioned installation, TEST/PROD launchers and Codex, Claude Code or Antigravity Native hooks, use the [client installer](docs/client-install.ko.md): inspect its default read-only plan, then apply it. Existing versions and unrelated host settings are preserved; PATH and authentication are unchanged.
 
 The current client requires an administrator HTTPS origin configured for **Access** mode, an existing trusted `cloudflared` executable and the owner's login cache. MCP authentication and the server's default administrator token mode do not substitute for this authentication.
 
@@ -99,7 +99,7 @@ node @portalFiles doctor
 node @portalFiles upload --file 'C:/work/package.tar.gz' --operation-key 'package-upload-0001'
 ```
 
-Run `node @portalFiles watch REQUEST_ID` through your agent host's background-process tool to keep working while SSH runs. The existing client waits outside the model and prints one terminal event. Completion delivery and automatic resumption depend on the host; see [client completion guidance](docs/client-files.ko.md#작업-완료를-모델-밖에서-기다리기).
+In hosts with configured native completion hooks (Codex, Claude Code), calling `observe` automatically connects background completion watching without running `watch` manually. In hosts without completion hooks, run `node @portalFiles watch REQUEST_ID` through your agent host's background-process tool to keep working while SSH runs. The existing client waits outside the model and prints one terminal event. Completion delivery and automatic resumption depend on the host; see [client completion guidance](docs/client-files.ko.md#작업-완료를-모델-밖에서-기다리기).
 
 `doctor` diagnoses the existing runtime, authentication and connection. It does not log in, upload a file, approve a request or execute SSH commands. Upload success prints one JSON object:
 
@@ -146,12 +146,12 @@ Choose the path that matches the existing server:
 
 ### Fresh native installation
 
-Prepare an Ubuntu 22.04/24.04 server with Python 3, internet access and an administrator terminal. Download the server archive and `SHA256SUMS` from the [release](https://github.com/jaeseongs95/ssh-approval-portal/releases/tag/v2.3.3), then run on that server:
+Prepare an Ubuntu 22.04/24.04 server with Python 3, internet access and an administrator terminal. Download the server archive and `SHA256SUMS` from the [release](https://github.com/jaeseongs95/ssh-approval-portal/releases/tag/v2.4.0), then run on that server:
 
 ```sh
 sha256sum --check --ignore-missing SHA256SUMS
-tar -xzf ssh-approval-portal-2.3.3.tar.gz
-cd ssh-approval-portal-2.3.3
+tar -xzf ssh-approval-portal-2.4.0.tar.gz
+cd ssh-approval-portal-2.4.0
 python3 scripts/portal.py install --admin-origin https://approve.example.com --dry-run
 sudo python3 scripts/portal.py install --admin-origin https://approve.example.com
 sudo python3 scripts/portal.py status

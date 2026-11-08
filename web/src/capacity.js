@@ -1,5 +1,6 @@
 import { createWebI18n } from './i18n.js';
 import { messageCatalog, translate } from './locale.js';
+import { uiText } from './ui-text.js';
 
 export const capacityCatalogs = messageCatalog({
   '중계기 실행 한도': 'Bridge execution limits', '서버 실행 한도': 'Server execution limits',
@@ -55,7 +56,7 @@ export function createCapacityPanel({ document, api, i18n = createWebI18n(docume
   const global = make('global', '중계기 실행 한도', '전역 한도는 등록된 모든 서버에 적용됩니다.');
   const target = make('target', '서버 실행 한도', '빈 값은 전역 한도를 상속합니다. 서버 한도와 전역 한도가 함께 적용됩니다.');
   (document.getElementById('environment-editor') ?? document.getElementById('work-layout'))?.before(global.root);
-  document.getElementById('server-workspace')?.append(target.root);
+  (document.getElementById('server-panels') ?? document.getElementById('server-workspace'))?.append(target.root);
   const keyFor = scope => scope === 'global' ? 'global' : 'target:' + getTarget();
   const selected = () => snapshot?.targets?.find(item => item.id === getTarget());
   function lock() {
@@ -68,7 +69,9 @@ export function createCapacityPanel({ document, api, i18n = createWebI18n(docume
   }
   function render() {
     global.root.hidden = document.body.dataset.page !== 'bridge';
-    target.root.hidden = document.body.dataset.page !== 'settings';
+    const ws = document.getElementById('server-workspace');
+    const activeTab = ws?.getAttribute?.('data-server-tab') ?? ws?.['data-server-tab'];
+    target.root.hidden = document.body.dataset.page !== 'settings' || Boolean(activeTab && activeTab !== 'capacity');
     for (const [scope, panel, item] of [['global', global, snapshot?.settings], ['target', target, selected()]]) {
       const draft = drafts.get(keyFor(scope));
       for (const [name, input] of Object.entries(panel.inputs)) input.value = draft?.[name] ?? (item?.[name] === null || item?.[name] === undefined ? '' : String(item[name]));
@@ -90,7 +93,7 @@ export function createCapacityPanel({ document, api, i18n = createWebI18n(docume
       // Explicit reconciliation discards the submitted draft; unrelated target drafts survive.
       global.message.textContent = target.message.textContent = t('한도를 불러왔습니다.');
       global.error.textContent = target.error.textContent = '';
-    } catch (error) { if (token === generation) global.error.textContent = target.error.textContent = error.message; }
+    } catch (error) { if (token === generation) global.error.textContent = target.error.textContent = uiText(t(error.message), document); }
     finally { busy = false; render(); }
   }
   async function saveScope(scope) {
@@ -105,7 +108,7 @@ export function createCapacityPanel({ document, api, i18n = createWebI18n(docume
       if (token !== generation || isSignedOut()) return;
       snapshot = value; drafts.delete(key); panel.message.textContent = t('한도를 저장했습니다.');
     } catch (error) {
-      if (token === generation) { uncertain = true; drafts.delete(key); panel.error.textContent = error.message + ' ' + t('저장 결과를 확인하지 못했습니다. 다시 저장하기 전에 한도를 불러와 확인하세요.'); }
+      if (token === generation) { uncertain = true; drafts.delete(key); panel.error.textContent = uiText(t(error.message), document) + ' ' + t('저장 결과를 확인하지 못했습니다. 다시 저장하기 전에 한도를 불러와 확인하세요.'); }
     } finally { busy = false; render(); }
   }
   document.addEventListener('admin-scope-change', render);

@@ -81,7 +81,8 @@ export async function autoWatchCompletion({ host, input, inboxPath, configPath, 
   const routes = config.routes.filter(route => route.tools.some(tool => call.name === tool || call.name.endsWith('__' + tool) || call.name.endsWith('_' + tool)));
   if (routes.length !== 1) return ignored();
   const route = routes[0], response = contract(call.response);
-  let selected;
+  const isObserve = /(?:^|_|__)observe$/.test(call.name);
+  let selected, responseState = null;
   if (resolvedHost === 'antigravity') {
     if (!call.args) return ignored();
     const lookup = id(call.args.id) ? { operationId: call.args.id } : key(call.args.operationKey) ? { operationKey: call.args.operationKey } : null;
@@ -95,26 +96,43 @@ export async function autoWatchCompletion({ host, input, inboxPath, configPath, 
         !object(data) || !id(data.id) || !states.has(data.state) || !target(data.targetId) || !revision(data.targetRevision)) return ignored();
     selected = { operationId: data.id, ...(key(data.operationKey) ? { operationKey: data.operationKey } : {}),
       targetId: data.targetId, targetRevision: data.targetRevision };
-    if (terminalStates.has(data.state)) {
-      const location = inboxPath ?? defaultCompletionInboxPath(environment);
-      const binding = validateCompletionDeliveryTarget({ host: resolvedHost, sessionId: observation.sessionId, inboxPath: location, environment }, { openInbox });
-      const inbox = openInbox({ filePath: location });
-      try {
-        if (selected.operationId && typeof inbox.acknowledgeOperation === 'function') {
-          inbox.acknowledgeOperation({ bindingId: binding.bindingId, operationId: selected.operationId });
-        }
-      } finally { inbox.close(); }
-      return { state: 'settled', ...selected };
-    }
+    responseState = data.state;
   }
   const location = inboxPath ?? defaultCompletionInboxPath(environment);
   const binding = validateCompletionDeliveryTarget({ host: resolvedHost, sessionId: observation.sessionId, inboxPath: location, environment }, { openInbox });
-  const fingerprint = createHash('sha256').update(JSON.stringify([binding.bindingId, route.origin, selected.operationId ?? selected.operationKey])).digest('hex');
+  const operationKey = selected.operationId ?? selected.operationKey;
   const inbox = openInbox({ filePath: location });
   let lease;
-  try { lease = inbox.acquireWatch({ bindingId: binding.bindingId, watchKey: fingerprint }); }
-  finally { inbox.close(); }
-  if (!lease.acquired) return { state: 'duplicate', ...selected };
+  try {
+    if (responseState !== null && terminalStates.has(responseState)) {
+      if (selected.operationId && typeof inbox.acknowledgeOperation === 'function') {
+        inbox.acknowledgeOperation({ bindingId: binding.bindingId, operationId: selected.operationId });
+      }
+      return { state: 'settled', ...selected };
+    }
+    if (resolvedHost === 'antigravity' && isObserve && selected.operationId &&
+        typeof inbox.hasOperationEvent === 'function' && inbox.hasOperationEvent({ bindingId: binding.bindingId, operationId: selected.operationId })) {
+      if (typeof inbox.acknowledgeOperation === 'function') {
+        inbox.acknowledgeOperation({ bindingId: binding.bindingId, operationId: selected.operationId });
+      }
+      return { state: 'settled', ...selected };
+    }
+    if (!isObserve) {
+      if (typeof inbox.deferWatch === 'function') {
+        const deferred = inbox.deferWatch({ bindingId: binding.bindingId, origin: route.origin, operationKey, payload: selected });
+        if (deferred?.settled) return { state: 'settled', ...selected };
+      }
+      return { state: 'deferred', ...selected };
+    }
+    if (typeof inbox.consumeDeferredWatches === 'function') {
+      inbox.consumeDeferredWatches({ bindingId: binding.bindingId, operationKey });
+    }
+    const fingerprint = createHash('sha256').update(JSON.stringify([binding.bindingId, route.origin, operationKey])).digest('hex');
+    lease = inbox.acquireWatch({ bindingId: binding.bindingId, watchKey: fingerprint });
+    if (!lease.acquired) return { state: 'duplicate', ...selected };
+    lease = { ...lease, fingerprint };
+  } finally { inbox.close(); }
+  const fingerprint = lease.fingerprint;
   const logPath = join(dirname(location), `auto-watch-${fingerprint}-${lease.ownerToken}.log`);
   let log;
   try {

@@ -49,7 +49,7 @@ if (context) {
   if (policyEditor) agentCli.targetControl.parentElement.hidden = true;
 }
 const serverTabs = [...document.querySelectorAll('#server-settings-tabs [data-server-tab]')];
-const serverPanels = { policy: policyEditor?.root, cli: agentCli.root };
+const serverPanels = { policy: policyEditor?.root, cli: agentCli.root, capacity: capacity.target.root, desktop: desktop.root };
 for (const button of serverTabs) {
   const key = button.dataset.serverTab, panel = serverPanels[key];
   button.id = 'server-tab-' + key; button.setAttribute('role', 'tab'); button.disabled = !panel;
@@ -71,6 +71,8 @@ function showServerTab(key) {
   serverTab = key; document.getElementById('server-workspace')?.setAttribute('data-server-tab', key);
   for (const button of serverTabs) { const selected = button.dataset.serverTab === key; button.setAttribute('aria-selected', String(selected)); button.tabIndex = selected ? 0 : -1; }
   for (const [name, panel] of Object.entries(serverPanels)) if (panel) panel.hidden = name !== key;
+  capacity.syncTarget();
+  desktop.syncTarget();
 }
 function refreshServerContext() {
   if (!workspaceReady || syncingServer) return;
