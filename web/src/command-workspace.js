@@ -1,13 +1,15 @@
-import { uiText as tr } from './ui-text.js';
+import { uiText } from './ui-text.js';
+import { createWebI18n } from './i18n.js';
 import { createCommandLineImport } from './command-line-import.js';
 import { windowsPolicyName } from '../../src/domain/windows-command-line.mjs';
 import definitions from '../../src/domain/command-risks.json' with { type: 'json' };
 const names = value => value.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
 const definition = name => Object.hasOwn(definitions.commands, name) ? definitions.commands[name] : undefined;
-const riskLabel = value => ({ low: tr('낮음'), moderate: tr('보통'), high: tr('높음') }[value] ?? tr('정보 없음'));
 
 /** The existing raw inputs remain the single editable policy; this list is a view. */
-export function createCommandWorkspace({ document, container, commands, denied, getOriginal, onChange, onError, getPlatform = () => 'linux' }) {
+export function createCommandWorkspace({ document, container, commands, denied, getOriginal, onChange, onError, i18n = createWebI18n(document.documentElement.lang), getPlatform = () => 'linux' }) {
+  const tr = (value, values) => uiText(value, document, values), { formatNumber } = i18n;
+  const riskLabel = value => ({ low: tr('낮음'), moderate: tr('보통'), high: tr('높음') }[value] ?? tr('정보 없음'));
   const key = name => getPlatform() === 'windows' ? windowsPolicyName(name) ?? name.toLowerCase() : name;
   const includes = (values, name) => values.some(value => key(value) === key(name));
   const unique = values => [...new Map(values.map(value => [key(value), value])).values()];
@@ -17,7 +19,7 @@ export function createCommandWorkspace({ document, container, commands, denied, 
   container.append(el('p', tr('왼쪽 목록에서 명령을 고르면 오른쪽에서 내용을 확인하고 수정할 수 있습니다. 변경은 검토·저장 후 적용됩니다.'), 'policy-help'));
   const stats = el('p', '', 'command-stats'); container.append(stats);
   const layout = el('div', '', 'command-workspace'); container.append(layout);
-  const lineImport = createCommandLineImport({ document, commands, denied, onChange: () => { onChange(); refresh(); }, onError, getPlatform });
+  const lineImport = createCommandLineImport({ document, commands, denied, i18n, onChange: () => { onChange(); refresh(); }, onError, getPlatform });
   container.insertBefore(lineImport.panel, layout);
   const master = el('section', '', 'command-master'); master.setAttribute('aria-label', tr('명령 등록 목록')); layout.append(master);
   master.append(el('h4', tr('명령 등록 목록')));
@@ -73,8 +75,8 @@ export function createCommandWorkspace({ document, container, commands, denied, 
         (filter.value !== 'changed' || changed(name)) && (filter.value !== 'unknown' || !info) && terms.every(term => [name, info?.description, info?.category].join(' ').toLowerCase().includes(term));
     }).sort((a, b) => Number(b.toLowerCase() === query) - Number(a.toLowerCase() === query) || a.localeCompare(b));
     const delta = rules.filter(changed).length;
-    stats.textContent = (original ? tr('저장된 자동승인 ') + priorAllowed.length + tr('개 · 차단 ') + priorDenied.length + tr('개') : tr('저장된 정책 없음 · 기본 선택은 아직 적용되지 않은 초안')) + tr(' / 초안: 자동승인 ') + allowed.length + tr('개 · 차단 ') + blocked.length + tr('개 · 변경 ') + delta + tr('개');
-    status.textContent = matches.length ? tr('일치 ') + matches.length + tr('개 · ') + Math.min(limit, matches.length) + tr('개 표시') + (filter.value === 'all' ? tr(' · 내장 목록은 서버 설치 여부를 확인하지 않습니다.') : tr(' · 저장값과 초안을 함께 표시합니다.')) : tr('일치하는 규칙이 없습니다. 명령 찾아 추가에서 내장 목록도 검색할 수 있습니다.');
+    stats.textContent = (original ? tr('저장된 자동승인 {allowed}개 · 차단 {blocked}개', { allowed: formatNumber(priorAllowed.length), blocked: formatNumber(priorDenied.length) }) : tr('저장된 정책 없음 · 기본 선택은 아직 적용되지 않은 초안')) + tr(' / 초안: 자동승인 {allowed}개 · 차단 {blocked}개 · 변경 {changed}개', { allowed: formatNumber(allowed.length), blocked: formatNumber(blocked.length), changed: formatNumber(delta) });
+    status.textContent = matches.length ? tr('일치 {count}개 · {shown}개 표시', { count: formatNumber(matches.length), shown: formatNumber(Math.min(limit, matches.length)) }) + (filter.value === 'all' ? tr(' · 내장 목록은 서버 설치 여부를 확인하지 않습니다.') : tr(' · 저장값과 초안을 함께 표시합니다.')) : tr('일치하는 규칙이 없습니다. 명령 찾아 추가에서 내장 목록도 검색할 수 있습니다.');
     const active = document.activeElement, activeName = active.closest?.('[data-command-name]')?.dataset.commandName, activeAction = active.dataset?.commandAction, activeSelected = selected;
     const visible = matches.slice(0, limit);
     if (!visible.includes(selected)) selected = visible[0];

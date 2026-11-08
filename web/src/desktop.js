@@ -7,6 +7,9 @@ export const desktopCatalogs = messageCatalog({
   '데스크톱이 열려 있지 않습니다.': 'No desktop is open.', '서버 화면': 'Server screen', '전송할 텍스트': 'Text to send', '텍스트 전송': 'Send text',
   '데스크톱 대상 {target} · 화면 {width} × {height}': 'Desktop target {target} · screen {width} × {height}',
   '입력 결과를 확인하지 못했습니다. 입력을 반복하지 말고 화면을 새로고침하세요.': 'Input outcome unconfirmed. Refresh the screen without repeating the input.',
+  '입력 전송을 기다리고 있습니다.': 'Waiting to send input.',
+  '전송하지 않은 대기 입력을 취소했습니다. 화면을 확인한 뒤 다시 입력하세요.': 'Unsent queued input was cancelled. Check the screen before entering more input.',
+  '입력이 밀려 추가 입력을 받지 못했습니다. 입력을 멈추고 화면을 확인하세요.': 'Input is arriving too quickly. Further input was not accepted. Stop typing and check the screen.',
   '서버 연결 정보를 확인할 수 없습니다.': 'The target binding could not be verified.',
   '화면을 읽을 수 없습니다.': 'The screen could not be loaded.',
   '데스크톱 연결 결과를 확인하지 못했습니다. 자동으로 다시 열지 않습니다.': 'Desktop connection outcome unconfirmed. It will not reopen automatically.',
@@ -48,8 +51,8 @@ export function desktopPointerActions(event, bounds, width, height) {
   return [{ type: 'pointer', x, y, buttons: [1, 2, 4][event.button] }, { type: 'pointer', x, y, buttons: 0 }];
 }
 
-export function createDesktopPanel({ document, api, getTarget, isSignedOut = () => false, timers = globalThis, randomKey = () => globalThis.crypto.randomUUID(), onStateChange = () => {} }) {
-  const { locale } = resolveLocale(document.documentElement.lang);
+export function createDesktopPanel({ document, api, getTarget, i18n, isSignedOut = () => false, timers = globalThis, randomKey = () => globalThis.crypto.randomUUID(), onStateChange = () => {} }) {
+  const { locale } = i18n ?? resolveLocale(document.documentElement.lang);
   const number = new Intl.NumberFormat(locale), t = (key, values) => translate(desktopCatalogs, locale, key, values);
   const el = (tag, text = '') => { const node = document.createElement(tag); node.textContent = text; return node; };
   const root = el('section'); root.id = 'desktop-viewer'; root.className = 'request';
@@ -57,6 +60,7 @@ export function createDesktopPanel({ document, api, getTarget, isSignedOut = () 
   const status = el('p', t('데스크톱이 열려 있지 않습니다.')); status.setAttribute('role', 'status');
   const error = el('p'); error.className = 'error'; error.setAttribute('role', 'alert');
   const readinessStatus = el('p'); readinessStatus.id = 'desktop-readiness'; readinessStatus.setAttribute('role', 'status');
+  const inputStatus = el('p'); inputStatus.id = 'desktop-input-status'; inputStatus.setAttribute('role', 'status');
   const controls = el('div'); controls.className = 'actions';
   const open = el('button', t('데스크톱 열기')), refresh = el('button', t('화면 새로고침')), close = el('button', t('데스크톱 닫기'));
   for (const button of [open, refresh, close]) { button.type = 'button'; button.className = 'secondary'; controls.append(button); }
@@ -75,12 +79,39 @@ export function createDesktopPanel({ document, api, getTarget, isSignedOut = () 
   const authSend = el('button', t('현재 선택한 로그인 입력란으로 전송')), sas = el('button', t('Ctrl+Alt+Delete 요청'));
   authSend.type = sas.type = 'button';
   auth.append(el('legend', t('일회성 인증 입력')), el('p', t('입력값은 저장하지 않습니다. 먼저 화면에서 로그인 입력란을 선택하세요. 전송 후 화면을 확인하고 Enter를 직접 누르세요. SAS 요청의 실제 동작은 서버 서비스와 정책에 따라 달라집니다.')), confirmationLabel, authLabel, fieldConfirmationLabel, authSend, sas);
-  root.append(status, error, readinessStatus, controls, image, label, send, auth); document.getElementById('server-workspace')?.append(root);
+  root.append(status, error, readinessStatus, inputStatus, controls, image, label, send, auth); document.getElementById('server-workspace')?.append(root);
   let session, frame, nextSequence, busy = false, uncertain = false, openingUncertain = false, generation = 0, pendingFrame, observedTarget = getTarget();
-  let closingRequested = false, closeFlight, sessionPlatform;
+  let closingRequested = false, closeFlight, sessionPlatform, draftRevision = 0;
+  let drainingInputs = false, inputWarning = '';
+  const queuedInputs = [];
   const idleWaiters = [];
-  const settled = () => { busy = false; lock(); for (const resolve of idleWaiters.splice(0)) resolve(); };
+  const settled = () => { busy = false; if (uncertain) cancelQueuedInputs(true); lock(); for (const resolve of idleWaiters.splice(0)) resolve(); void drainInputs(); };
   const body = () => ({ sessionId: session.sessionId, epoch: session.epoch });
+  function showInputStatus() { inputStatus.textContent = inputWarning || (queuedInputs.length ? t('입력 전송을 기다리고 있습니다.') : ''); }
+  function cancelQueuedInputs(notify = false) {
+    if (notify && queuedInputs.length) inputWarning = t('전송하지 않은 대기 입력을 취소했습니다. 화면을 확인한 뒤 다시 입력하세요.');
+    queuedInputs.length = 0; showInputStatus();
+  }
+  function enqueueInput(gesture) {
+    if (closingRequested || !session || session.targetId !== getTarget() || uncertain || isSignedOut()) return;
+    if (queuedInputs.length >= 64) {
+      inputWarning = t('입력이 밀려 추가 입력을 받지 못했습니다. 입력을 멈추고 화면을 확인하세요.'); showInputStatus(); return;
+    }
+    if (!queuedInputs.length) inputWarning = '';
+    queuedInputs.push({ ...gesture, ...body(), generation }); showInputStatus(); void drainInputs();
+  }
+  async function drainInputs() {
+    if (drainingInputs || busy || closingRequested || !session || !frame || pendingFrame || uncertain || isSignedOut()) return;
+    drainingInputs = true;
+    try {
+      while (queuedInputs.length && !busy && !closingRequested && session && frame && !pendingFrame && !uncertain && !isSignedOut()) {
+        const gesture = queuedInputs.shift(); showInputStatus();
+        if (gesture.generation !== generation || gesture.sessionId !== session.sessionId || gesture.epoch !== session.epoch || session.targetId !== getTarget()) { cancelQueuedInputs(true); break; }
+        const actions = gesture.actions ?? desktopPointerActions(gesture.pointer, gesture.bounds, frame.width, frame.height);
+        if (!await input(actions)) { cancelQueuedInputs(true); break; }
+      }
+    } finally { drainingInputs = false; lock(); }
+  }
   function showReadiness(value) {
     if (value) session.readiness = value;
     const state = session?.readiness;
@@ -95,10 +126,15 @@ export function createDesktopPanel({ document, api, getTarget, isSignedOut = () 
     open.disabled = busy || !!session || openingUncertain || isSignedOut() || !getTarget();
     refresh.disabled = busy || !session || isSignedOut(); close.disabled = busy || !session || isSignedOut();
     checkState.disabled = busy || !session || isSignedOut();
-    const blocked = busy || !session || !frame || pendingFrame || uncertain || isSignedOut();
-    image.setAttribute('aria-disabled', String(!!blocked)); text.disabled = !!blocked; send.disabled = !!blocked || !text.value;
+    const unavailable = !session || session.targetId !== getTarget() || uncertain || closingRequested || isSignedOut();
+    const blocked = busy || drainingInputs || queuedInputs.length || unavailable || !frame || pendingFrame;
+    // Editing a local draft must not blur the field whenever a remote operation starts.
+    const draftBlocked = !session || closingRequested || isSignedOut();
+    image.setAttribute('aria-disabled', String(!!(unavailable || !frame && !pendingFrame)));
+    image.setAttribute('aria-busy', String(!!(busy || pendingFrame || drainingInputs || queuedInputs.length)));
+    text.disabled = !!draftBlocked; send.disabled = !!blocked || !text.value;
     const authBlocked = blocked || sessionPlatform !== 'windows';
-    auth.hidden = !session || sessionPlatform !== 'windows'; credential.disabled = !!authBlocked;
+    auth.hidden = !session || sessionPlatform !== 'windows'; credential.disabled = !!draftBlocked || sessionPlatform !== 'windows';
     confirmation.disabled = fieldConfirmation.disabled = !!authBlocked;
     authSend.disabled = !!authBlocked || !confirmation.checked || !fieldConfirmation.checked || !credential.value;
     sas.disabled = !!authBlocked || !confirmation.checked;
@@ -119,11 +155,11 @@ export function createDesktopPanel({ document, api, getTarget, isSignedOut = () 
   image.onload = () => {
     if (!pendingFrame || !session) return;
     frame = pendingFrame; pendingFrame = undefined; nextSequence = frame.nextInputSequence; uncertain = false; error.textContent = '';
-    status.textContent = t('데스크톱 대상 {target} · 화면 {width} × {height}', { target: session.targetId, width: number.format(frame.width), height: number.format(frame.height) }); lock();
+    status.textContent = t('데스크톱 대상 {target} · 화면 {width} × {height}', { target: session.targetId, width: number.format(frame.width), height: number.format(frame.height) }); lock(); void drainInputs();
   };
-  image.onerror = () => { frame = pendingFrame = undefined; uncertain = true; error.textContent = t('화면을 읽을 수 없습니다.'); lock(); };
+  image.onerror = () => { frame = pendingFrame = undefined; uncertain = true; error.textContent = t('화면을 읽을 수 없습니다.'); cancelQueuedInputs(true); lock(); };
   async function input(actions) {
-    if (busy || closingRequested || !session || !frame || pendingFrame || uncertain || !actions.length || isSignedOut()) return false;
+    if (busy || closingRequested || !session || session.targetId !== getTarget() || !frame || pendingFrame || uncertain || !actions.length || isSignedOut()) return false;
     const request = { ...body(), frameId: frame.frameId, geometryRevision: frame.geometryRevision, sequence: nextSequence, requestKey: randomKey(), actions };
     const token = generation; busy = true; lock();
     try {
@@ -163,7 +199,7 @@ export function createDesktopPanel({ document, api, getTarget, isSignedOut = () 
       submitted = true;
       const value = await api('/api/desktop/open', 'POST', { target: targetId, expectedTargetRevision: target.revision });
       if (token !== generation) return;
-      session = value; sessionPlatform = target.platform ?? 'linux'; error.textContent = ''; text.value = '';
+      session = value; sessionPlatform = target.platform ?? 'linux'; error.textContent = ''; text.value = ''; inputWarning = ''; cancelQueuedInputs();
       showReadiness(value.readiness);
     } catch (failure) { if (token === generation) { openingUncertain = submitted && !(failure.status >= 400 && failure.status < 500); error.textContent = failure.message + (openingUncertain ? ' ' + t('데스크톱 연결 결과를 확인하지 못했습니다. 자동으로 다시 열지 않습니다.') : ''); } }
     finally { settled(); }
@@ -171,7 +207,7 @@ export function createDesktopPanel({ document, api, getTarget, isSignedOut = () 
   };
   async function closeSession() {
     credential.value = ''; confirmation.checked = fieldConfirmation.checked = false;
-    closingRequested = true;
+    closingRequested = true; cancelQueuedInputs(true); lock();
     if (closeFlight) return closeFlight;
     closeFlight = (async () => {
       while (busy) await new Promise(resolve => idleWaiters.push(resolve));
@@ -182,6 +218,7 @@ export function createDesktopPanel({ document, api, getTarget, isSignedOut = () 
         if (token !== generation) return;
         if (!result.closed) throw Error('DESKTOP_CLOSE_UNCONFIRMED');
         session = frame = pendingFrame = undefined; uncertain = false; image.hidden = true; image.removeAttribute('src'); text.value = '';
+        inputWarning = ''; showInputStatus();
         readinessStatus.textContent = ''; credential.value = ''; confirmation.checked = fieldConfirmation.checked = false;
         status.textContent = t('연결을 닫았습니다. 서버 계정에서 로그아웃하지 않았습니다.');
         error.textContent = result.cleanupError ? t('데스크톱 정리 결과를 확인하세요: ') + result.cleanupError : '';
@@ -191,7 +228,8 @@ export function createDesktopPanel({ document, api, getTarget, isSignedOut = () 
     try { return await closeFlight; }
     finally { closeFlight = undefined; closingRequested = false; lock(); }
   }
-  refresh.onclick = observe; close.onclick = closeSession; text.oninput = lock;
+  refresh.onclick = observe; close.onclick = closeSession;
+  text.oninput = () => { draftRevision++; lock(); };
   checkState.onclick = async () => {
     if (checkState.disabled || closingRequested) return;
     busy = true; lock(); const token = generation;
@@ -203,14 +241,30 @@ export function createDesktopPanel({ document, api, getTarget, isSignedOut = () 
     } catch (failure) { if (token === generation) { uncertain = true; error.textContent = failure.message; } }
     finally { settled(); }
   };
-  send.onclick = async () => { if (!send.disabled && await input([{ type: 'text', text: text.value }])) text.value = ''; lock(); };
+  send.onclick = async () => {
+    if (send.disabled) return;
+    const draft = text.value, revision = draftRevision;
+    if (await input([{ type: 'text', text: draft }]) && draftRevision === revision && text.value === draft) text.value = '';
+    lock();
+  };
   image.oncontextmenu = event => event.preventDefault();
-  image.onpointerup = event => { image.focus(); void input(desktopPointerActions(event, image.getBoundingClientRect(), frame?.width ?? 0, frame?.height ?? 0)); };
-  image.onkeydown = event => { if (event.key === 'Tab') return; const actions = desktopKeyActions(event); if (actions.length) { event.preventDefault(); void input(actions); } };
+  image.onpointerup = event => {
+    if (![0, 1, 2].includes(event.button)) return;
+    const bounds = image.getBoundingClientRect(); if (bounds.width <= 0 || bounds.height <= 0) return;
+    image.focus(); enqueueInput({ pointer: { clientX: event.clientX, clientY: event.clientY, button: event.button }, bounds: { left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height } });
+  };
+  image.onkeydown = event => { if (event.key === 'Tab') return; const actions = desktopKeyActions(event); if (actions.length) { event.preventDefault(); enqueueInput({ actions }); } };
   // Pause background capture while an owner prepares a private one-time input.
   const polling = timers.setInterval(() => { if (!document.hidden && document.body.dataset.page === 'settings' && !credential.value && !confirmation.checked && !fieldConfirmation.checked && !uncertain && !pendingFrame) void observe(); }, 2000);
   document.addEventListener('admin-scope-change', () => { lock(); if (document.body.dataset.page !== 'settings') void closeSession(); });
-  document.getElementById('logout')?.addEventListener('click', () => { generation++; timers.clearInterval(polling); session = frame = pendingFrame = undefined; image.hidden = true; image.removeAttribute('src'); text.value = ''; credential.value = ''; confirmation.checked = fieldConfirmation.checked = false; readinessStatus.textContent = ''; lock(); });
+  document.getElementById('logout')?.addEventListener('click', async () => {
+    timers.clearInterval(polling); text.value = ''; credential.value = ''; confirmation.checked = fieldConfirmation.checked = false;
+    // The controller awaits this same close flight before revoking the administrator session.
+    // Keep the desktop binding until an in-flight open/observe/input and its close have settled.
+    await closeSession();
+    generation++; cancelQueuedInputs(); inputWarning = ''; showInputStatus(); session = frame = pendingFrame = undefined;
+    image.hidden = true; image.removeAttribute('src'); readinessStatus.textContent = ''; lock();
+  });
   lock();
-  return { root, close: closeSession, syncTarget() { if (observedTarget !== getTarget()) { observedTarget = getTarget(); openingUncertain = false; } lock(); }, reloadState: () => ({ blocked: busy || !!session || openingUncertain, dirty: text.value ? [t('실행 중인 데스크톱')] : [] }) };
+  return { root, close: closeSession, syncTarget() { if (observedTarget !== getTarget()) { observedTarget = getTarget(); openingUncertain = false; cancelQueuedInputs(true); } lock(); }, reloadState: () => ({ blocked: busy || !!session || openingUncertain, dirty: text.value ? [t('실행 중인 데스크톱')] : [] }) };
 }

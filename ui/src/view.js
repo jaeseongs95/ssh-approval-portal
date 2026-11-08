@@ -49,14 +49,14 @@ export function createCardView({ document, i18n }) {
       ]) {
         if (value === undefined) continue;
         text(list, 'dt', t(label));
-        text(list, 'dd', label === '크기' ? `${formatNumber(value)} ${t('바이트')}` : value, label === 'SHA-256' ? 'hash' : '');
+        text(list, 'dd', label === '크기' ? t('{count}바이트', { count: formatNumber(value) }) : value, label === 'SHA-256' ? 'hash' : '');
       }
     }
     if (job.kind === 'command' && requestContext(job, korean)) { const context = text(el('details'), 'details', ''); text(context, 'summary', korean ? '요청자가 제공한 작업 설명' : 'Caller-provided context'); text(context, 'p', requestContext(job, korean)); }
     if (job.decision) renderDecision(document, el('details'), job.decision, korean, job);
     const output = job.result?.structuredContent?.output;
     if (output && job.kind === 'command') {
-      text(el('details'), 'p', korean ? `저장된 실행 결과 · ${output.bytes ?? 0}바이트 · ${output.state}` : `Stored result · ${output.bytes ?? 0} bytes · ${output.state}`);
+      text(el('details'), 'p', `${korean ? '저장된 실행 결과' : 'Stored result'} · ${t('{count}바이트', { count: formatNumber(output.bytes ?? 0) })} · ${output.state}`);
       text(el('details'), 'p', korean ? '필요할 때만 내용을 읽습니다. SSH 전체 출력의 완전성은 확인되지 않았습니다.' : 'Load content only when needed. Complete SSH capture is not guaranteed.');
       if (output.state === 'ready') button(korean ? '출력 보기' : 'View output', actions.output, !meta.uiEnabled || !meta.viewTicket);
       const area = text(el('details'), 'div', ''); area.id = 'command-output';

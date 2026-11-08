@@ -7,6 +7,7 @@ export async function authorizeAdminRequest(req, { adminAccess, adminToken, admi
   const method = req.method;
   const artifactUuid = '[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}';
   const artifactRead = new RegExp('^/api/artifacts/' + artifactUuid + '$').test(pathname) && method === 'GET';
+  const operationRead = pathname === '/api/operations/by-key' && method === 'GET';
   const artifactWrite = method === 'POST' && (pathname === '/api/artifacts' || new RegExp('^/api/artifacts/' + artifactUuid + '/complete$').test(pathname)) ||
     method === 'PUT' && new RegExp('^/api/artifacts/' + artifactUuid + '/chunks/(0|[1-9][0-9]*)$').test(pathname);
   const routeKind = ['/api/maintenance/reserve', '/api/maintenance/release', '/api/maintenance/status', '/api/maintenance/capabilities', '/api/maintenance/preservation/capture', '/api/maintenance/preservation/compare'].includes(pathname) ? 'maintenance'
@@ -29,8 +30,8 @@ export async function authorizeAdminRequest(req, { adminAccess, adminToken, admi
     return { allowed: true, routeKind, principal: principal ?? { subject: 'portal-token-owner' } };
   }
   if (['/api/agent-cli/history', '/api/history'].includes(pathname) && req.headers.origin && req.headers.origin !== adminOrigin) return deny(403);
-  if (['api', 'maintenance'].includes(routeKind) &&
-      !(method === 'GET' && (['/api/capacity', '/api/pending', '/api/requests', '/api/history', '/api/targets', '/api/command-policy', '/api/automation-metrics', '/api/environment','/api/agent-cli','/api/agent-cli/lookup','/api/agent-cli/history'].includes(pathname) || /^\/api\/[a-f0-9]{48}$/.test(pathname) || /^\/api\/files\/uploads\/[a-f0-9]{48}$/.test(pathname) || /^\/api\/outputs\/[a-f0-9]{48}$/.test(pathname) || /^\/api\/[a-f0-9]{48}\/source$/.test(pathname) || /^\/api\/agent-cli\/requests\/[a-f0-9]{48}$/.test(pathname))) &&
+  if (['api', 'maintenance'].includes(routeKind) && !operationRead &&
+      !(method === 'GET' && (['/api/capacity', '/api/pending', '/api/requests', '/api/history', '/api/targets', '/api/command-policy', '/api/automation-metrics', '/api/environment','/api/agent-cli','/api/agent-cli/lookup','/api/agent-cli/history','/api/version'].includes(pathname) || /^\/api\/[a-f0-9]{48}$/.test(pathname) || /^\/api\/files\/uploads\/[a-f0-9]{48}$/.test(pathname) || /^\/api\/outputs\/[a-f0-9]{48}$/.test(pathname) || /^\/api\/[a-f0-9]{48}\/source$/.test(pathname) || /^\/api\/agent-cli\/requests\/[a-f0-9]{48}$/.test(pathname))) &&
       (method !== 'POST' || req.headers.origin !== adminOrigin)) return deny(403);
   return { allowed: true, routeKind, ...(principal?{principal}:{}) };
 }

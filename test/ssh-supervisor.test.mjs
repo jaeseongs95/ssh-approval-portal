@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import { Duplex, PassThrough } from 'node:stream';
 import ssh2Channels from 'ssh2/lib/Channel.js';
 import { superviseExecution, DEFAULT_RUN_TIMEOUT_MS } from '../src/adapters/ssh/execution-supervisor.mjs';
 import { executePythonSource, openSshForward, signalSshChannel } from '../src/adapters/ssh/vendor.mjs';
@@ -155,6 +156,38 @@ test('sink failure and a stalled sink are bounded without erasing captured outpu
     assert.equal(result.stdout, 'evidence'); assert.equal(result.execution.captureFailed, true);
     assert.equal(result.execution.outputState, 'partial'); assert.equal(result.exitCode, 0);
   }
+});
+
+for (const [reason, sinkFails] of [['exit', false], ['cancel', false], ['exit', true]]) test(`settlement drains a paused SSH readable after ${reason}; sink failure=${sinkFails}`, { timeout: 2000 }, async t => {
+  const channel = new Duplex({ read() {}, write(_bytes, _encoding, callback) { callback(); } });
+  channel.stderr = new PassThrough();
+  const controller = new AbortController(), sink = Promise.withResolvers(), entered = Promise.withResolvers();
+  let opens = 0, calls = 0, closes = 0;
+  channel.signal = () => {};
+  channel.close = () => {
+    closes++; channel.push(null); channel.stderr.end();
+    if (sinkFails) sink.reject(Error('Synthetic durable sink failure'));
+    else sink.resolve();
+  };
+  t.after(() => { channel.destroy(); channel.stderr.destroy(); });
+  const pending = superviseExecution({ open(_command, callback) { opens++; callback(null, channel); } }, 'command', {
+    signal: controller.signal, stopGraceMs: 30,
+    onOutput() { calls++; entered.resolve(); return sink.promise; },
+  });
+  // Exit/stop can precede the final data packet. Its grace timer must already be
+  // running when output pauses the readable and starts the durable sink wait.
+  if (reason === 'exit') channel.emit('exit', 0);
+  else controller.abort();
+  channel.push(Buffer.from('evidence'));
+  await entered.promise;
+  assert.equal(channel.isPaused(), true); assert.equal(channel.stderr.isPaused(), true);
+  const result = await pending;
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(channel.closed, true, 'A paused readable must drain EOF so SSH close can release its channel');
+  assert.equal(result.stdout, 'evidence'); assert.equal(result.execution.reason, reason);
+  assert.equal(result.execution.remoteState, reason === 'exit' ? 'exited' : 'unknown');
+  assert.equal(result.execution.outputState, 'partial'); assert.equal(result.execution.captureFailed, sinkFails);
+  assert.equal(result.execution.automaticReplay, false); assert.equal(opens, 1); assert.equal(calls, 1); assert.equal(closes, 1);
 });
 
 test('write failure is typed and keeps the channel slot through cleanup', async () => {

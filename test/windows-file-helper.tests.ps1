@@ -3,10 +3,12 @@
 param(
     [string]$PowerShellExe = 'powershell.exe',
     [string]$WorkRoot = (Join-Path 'C:/ProgramData' ('ssh-approval-helper-' + [Guid]::NewGuid().ToString('N'))),
-    [switch]$WriterInheritOnlyOnly
+    [switch]$WriterInheritOnlyOnly,
+    [switch]$ForeignOwnerSnapshotOnly
 )
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+if ($WriterInheritOnlyOnly -and $ForeignOwnerSnapshotOnly) { throw 'select only one isolated regression' }
 if ($WriterInheritOnlyOnly) {
     $parentInputEncoding = [Console]::InputEncoding
     [Console]::Out.WriteLine((@{ parentPSMajor = [int]$PSVersionTable.PSVersion.Major;
@@ -112,6 +114,357 @@ function Assert-PrivateFile([string]$Path, [string]$AccountSid) {
         $_.SecurityIdentifier.Value -cnotin @($AccountSid, 'S-1-5-18', 'S-1-5-32-544')
     })
     Assert-True ($otherAllows.Count -eq 0) 'new file grants access only to account SYSTEM and Administrators'
+}
+function Initialize-ForeignOwnerFixtureNative {
+    # Test-only OS probes. They never invoke private product functions or change a real installation.
+    Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Security.Principal;
+using System.Text;
+using System.Threading;
+using Microsoft.Win32.SafeHandles;
+public static class ForeignOwnerFixtureNative {
+    [StructLayout(LayoutKind.Sequential)] struct Luid { public uint Low; public int High; }
+    [StructLayout(LayoutKind.Sequential)] struct Privileges { public uint Count; public Luid Luid; public uint Attributes; }
+    [StructLayout(LayoutKind.Sequential)] struct UnicodeString { public ushort Length, MaximumLength; public IntPtr Buffer; }
+    [StructLayout(LayoutKind.Sequential)] struct ObjectAttributes {
+        public int Length;
+        public IntPtr RootDirectory, ObjectName;
+        public uint Attributes;
+        public IntPtr SecurityDescriptor, SecurityQualityOfService;
+    }
+    [StructLayout(LayoutKind.Sequential)] struct IoStatus { public IntPtr Status, Information; }
+    [DllImport("ntdll.dll")]
+    static extern int NtCreateFile(out SafeFileHandle handle, uint access, ref ObjectAttributes attributes, out IoStatus status,
+        IntPtr allocation, uint fileAttributes, uint share, uint disposition, uint options, IntPtr ea, uint eaLength);
+    [DllImport("ntdll.dll")]
+    static extern uint RtlNtStatusToDosError(int status);
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern bool LookupPrivilegeValue(string system, string name, out Luid luid);
+    [DllImport("advapi32.dll", SetLastError = true)]
+    static extern bool AdjustTokenPrivileges(IntPtr token, bool disable, ref Privileges requested, uint length, out Privileges previous, out uint needed);
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode)]
+    static extern uint SetNamedSecurityInfo(string path, int type, uint information, IntPtr owner, IntPtr group, IntPtr dacl, IntPtr sacl);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern SafeFileHandle CreateFile(string path, uint access, uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern bool MoveFileEx(string existing, string destination, uint flags);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool DeviceIoControl(SafeFileHandle file, uint code, byte[] input, uint inputLength, IntPtr output, uint outputLength, out uint returned, IntPtr overlapped);
+    public static void SetOwner(string path, string sid) {
+        using (WindowsIdentity current = WindowsIdentity.GetCurrent()) {
+            Luid luid;
+            if (!LookupPrivilegeValue(null, "SeRestorePrivilege", out luid)) throw new Win32Exception(Marshal.GetLastWin32Error());
+            Privileges requested = new Privileges { Count = 1, Luid = luid, Attributes = 2 }, previous;
+            uint needed;
+            if (!AdjustTokenPrivileges(current.Token, false, ref requested, (uint)Marshal.SizeOf(typeof(Privileges)), out previous, out needed))
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            int privilegeError = Marshal.GetLastWin32Error();
+            if (privilegeError != 0) throw new Win32Exception(privilegeError);
+            try {
+                SecurityIdentifier owner = new SecurityIdentifier(sid);
+                byte[] bytes = new byte[owner.BinaryLength]; owner.GetBinaryForm(bytes, 0);
+                GCHandle pin = GCHandle.Alloc(bytes, GCHandleType.Pinned);
+                try {
+                    uint error = SetNamedSecurityInfo(path, 1, 1, pin.AddrOfPinnedObject(), IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
+                    if (error != 0) throw new Win32Exception((int)error);
+                } finally { pin.Free(); }
+            } finally {
+                Privileges ignored; uint unused;
+                if (!AdjustTokenPrivileges(current.Token, false, ref previous, (uint)Marshal.SizeOf(typeof(Privileges)), out ignored, out unused))
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+        }
+    }
+    public static int ProbeAccess(string path, uint access, bool directory) {
+        // Same access/options as product OpenLeaf, including metadata + SYNCHRONIZE,
+        // without FILE_OPEN_FOR_BACKUP_INTENT. CreateFile BACKUP_SEMANTICS can bypass
+        // READ_CONTROL denial when the caller already has enabled backup privileges.
+        // https://learn.microsoft.com/en-us/windows/win32/api/winternl/nf-winternl-ntcreatefile
+        string nativePath = @"\??\" + Path.GetFullPath(path);
+        IntPtr name = Marshal.StringToHGlobalUni(nativePath), unicode = IntPtr.Zero;
+        SafeFileHandle handle = null;
+        try {
+            UnicodeString value = new UnicodeString { Length = checked((ushort)(nativePath.Length * 2)),
+                MaximumLength = checked((ushort)(nativePath.Length * 2 + 2)), Buffer = name };
+            unicode = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(UnicodeString)));
+            Marshal.StructureToPtr(value, unicode, false);
+            ObjectAttributes attributes = new ObjectAttributes { Length = Marshal.SizeOf(typeof(ObjectAttributes)),
+                RootDirectory = IntPtr.Zero, ObjectName = unicode, Attributes = 0x40 };
+            IoStatus io;
+            int status = NtCreateFile(out handle, access | 0x100080, ref attributes, out io, IntPtr.Zero,
+                0x80, 1, 1, 0x200000u | 0x20u | (directory ? 1u : 0x40u), IntPtr.Zero, 0);
+            return status < 0 ? (int)RtlNtStatusToDosError(status) : 0;
+        } finally {
+            if (handle != null) handle.Dispose();
+            if (unicode != IntPtr.Zero) Marshal.FreeHGlobal(unicode);
+            Marshal.FreeHGlobal(name);
+        }
+    }
+    public static int ProbeBackupDirectoryReadControl(string path) {
+        // Diagnostic control only; no token privileges are enabled or changed here.
+        using (SafeFileHandle handle = CreateFile(path, 0x20000, 7, IntPtr.Zero, 3, 0x2200000, IntPtr.Zero))
+            return handle.IsInvalid ? Marshal.GetLastWin32Error() : 0;
+    }
+    static int RenameAndRestore(string path, string parked) {
+        if (!MoveFileEx(path, parked, 0)) return Marshal.GetLastWin32Error();
+        if (!MoveFileEx(parked, path, 0)) throw new Win32Exception(Marshal.GetLastWin32Error());
+        return 0;
+    }
+    public static int PinnedRename(string path, string parked, uint access, uint share, bool directory) {
+        using (SafeFileHandle handle = CreateFile(path, access, share, IntPtr.Zero, 3, 0x200000u | (directory ? 0x2000000u : 0u), IntPtr.Zero)) {
+            if (handle.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error());
+            return RenameAndRestore(path, parked);
+        }
+    }
+    static int ReparseAndRestore(string directory, string target) {
+        using (SafeFileHandle handle = CreateFile(directory, 0x40000000, 7, IntPtr.Zero, 3, 0x2200000, IntPtr.Zero)) {
+            if (handle.IsInvalid) return Marshal.GetLastWin32Error();
+            byte[] substitute = Encoding.Unicode.GetBytes(@"\??\" + target), print = Encoding.Unicode.GetBytes(target);
+            byte[] buffer = new byte[20 + substitute.Length + print.Length];
+            Array.Copy(BitConverter.GetBytes(0xA0000003u), 0, buffer, 0, 4);
+            Array.Copy(BitConverter.GetBytes((ushort)(buffer.Length - 8)), 0, buffer, 4, 2);
+            Array.Copy(BitConverter.GetBytes((ushort)substitute.Length), 0, buffer, 10, 2);
+            Array.Copy(BitConverter.GetBytes((ushort)(substitute.Length + 2)), 0, buffer, 12, 2);
+            Array.Copy(BitConverter.GetBytes((ushort)print.Length), 0, buffer, 14, 2);
+            Array.Copy(substitute, 0, buffer, 16, substitute.Length);
+            Array.Copy(print, 0, buffer, 18 + substitute.Length, print.Length);
+            uint returned;
+            if (!DeviceIoControl(handle, 0x900A4, buffer, (uint)buffer.Length, IntPtr.Zero, 0, out returned, IntPtr.Zero))
+                return Marshal.GetLastWin32Error();
+            byte[] remove = new byte[8]; Array.Copy(BitConverter.GetBytes(0xA0000003u), remove, 4);
+            if (!DeviceIoControl(handle, 0x900AC, remove, 8, IntPtr.Zero, 0, out returned, IntPtr.Zero))
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            return 0;
+        }
+    }
+    public sealed class Race : IDisposable {
+        readonly Thread thread;
+        volatile bool stop;
+        public int Attempts, ParentRenameError = -1, LeafRenameError = -1, ReparseError = -1;
+        public bool StageObserved;
+        public string Failure;
+        public Race(int processId, string parent, string leaf, string decoy, string stage, long size) {
+            thread = new Thread(() => {
+                try {
+                    using (Process process = Process.GetProcessById(processId)) {
+                        Stopwatch watch = Stopwatch.StartNew();
+                        while (!stop && watch.ElapsedMilliseconds < 60000 && !process.HasExited) {
+                            FileInfo part = new FileInfo(stage);
+                            if (!part.Exists || part.Length >= size) { Thread.Sleep(1); continue; }
+                            StageObserved = true;
+                            ParentRenameError = RenameAndRestore(parent, parent + ".parked"); Attempts++;
+                            LeafRenameError = RenameAndRestore(leaf, leaf + ".parked"); Attempts++;
+                            ReparseError = ReparseAndRestore(parent, decoy); Attempts++;
+                            break;
+                        }
+                    }
+                } catch (Exception error) { Failure = error.GetType().Name; }
+            });
+            thread.IsBackground = true; thread.Start();
+        }
+        public void Dispose() {
+            stop = true;
+            if (!thread.Join(10000)) throw new TimeoutException("fixture race worker did not stop");
+        }
+    }
+}
+'@ | Out-Null
+}
+function Assert-ForeignOwnerPolicy($result, [string]$label) {
+    Assert-True ($result.exitCode -eq 1 -and $result.data.errorCode -ceq 'PERMISSION_DENIED' -and
+        $result.data.origin -ceq 'policy' -and $result.data.policyReason -ceq 'UNTRUSTED_OWNER' -and
+        !$result.data.PSObject.Properties['nativeStep']) $label
+}
+function Test-ForeignOwnerSnapshot([string]$Parent, [string]$Root, [string]$Install, [string]$Installer, [string]$AccountSid) {
+    Initialize-ForeignOwnerFixtureNative
+    $foreignSid = 'S-1-5-32-545'
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    try {
+        Assert-True ($foreignSid -cin @($identity.Groups | ForEach-Object { $_.Value }) -and
+            $foreignSid -cnotin @($AccountSid, $identity.User.Value, 'S-1-5-18', 'S-1-5-32-544')) 'FO-SNAPSHOT fixture owner is a real token member outside account installer SYSTEM Administrators'
+    } finally { $identity.Dispose() }
+    $directory = Join-Path $Root 'foreign-owner'
+    $null = [IO.Directory]::CreateDirectory($directory)
+    $source = Join-Path $directory 'source.bin'
+    [IO.File]::WriteAllBytes($source, $script:bytes)
+    [ForeignOwnerFixtureNative]::SetOwner($directory, $foreignSid)
+    $before = (Get-Acl -LiteralPath $directory).Sddl
+    $leafBefore = (Get-Acl -LiteralPath $source).Sddl
+    Assert-True ([Security.AccessControl.RawSecurityDescriptor]::new([string]$before).Owner.Value -ceq $foreignSid) 'FO-SNAPSHOT fixture has the requested foreign parent owner'
+    $snapshot = Request 'snapshot' $source
+    $snapshot.bypassRoot = $true
+    $result = Call $snapshot
+    # This is the unchanged red/green assertion: baseline must fail here for policy/UNTRUSTED_OWNER.
+    if ($result.exitCode -ne 0) {
+        [Console]::Out.WriteLine((@{ caseId = 'FO-SNAPSHOT-01'; exitCode = $result.exitCode;
+            errorCode = $result.data.errorCode; origin = $result.data.origin; policyReason = $result.data.policyReason } | ConvertTo-Json -Compress))
+    }
+    Assert-True ($result.exitCode -eq 0 -and $result.data.sha256 -ceq $script:digest -and
+        $result.data.size -eq $script:bytes.Length -and $result.data.rootPolicyApplied -ceq 'test-server-bypass') ('FO-SNAPSHOT-01 TEST snapshot accepts foreign-owner source parent; ' + (Describe-Result $result))
+    $part = Join-Path $script:stage ($snapshot.id + '.part')
+    Assert-True ([Convert]::ToBase64String([IO.File]::ReadAllBytes($part)) -ceq [Convert]::ToBase64String($script:bytes)) 'FO-SNAPSHOT-01 snapshot has exact independent bytes'
+    Assert-True ((Get-Acl -LiteralPath $directory).Sddl -ceq $before -and (Get-Acl -LiteralPath $source).Sddl -ceq $leafBefore) 'FO-SNAPSHOT-01 source owner and DACL are unchanged'
+    $cleanup = Request 'cleanup'; $cleanup.id = $snapshot.id
+    Assert-True ((Call $cleanup).exitCode -eq 0) 'FO-SNAPSHOT-01 stage is cleaned'
+    foreach ($explicitFalse in @($false, $true)) {
+        $normal = Request 'snapshot' $source
+        if ($explicitFalse) { $normal.bypassRoot = $false }
+        Assert-ForeignOwnerPolicy (Call $normal) 'FO-SNAPSHOT-02 normal in-root snapshot retains owner policy'
+        Assert-True (!(Test-Path -LiteralPath (Join-Path $script:stage ($normal.id + '.part')))) 'FO-SNAPSHOT-02 refused normal snapshot creates no part'
+    }
+    $publish = Request 'publish' (Join-Path $directory 'must-not-publish.bin'); $publish.bypassRoot = $true
+    Stage $publish
+    Assert-ForeignOwnerPolicy (Call $publish) 'FO-SNAPSHOT-02 bypass publish retains owner policy'
+    Assert-True (!(Test-Path -LiteralPath $publish.remotePath) -and (Get-Acl -LiteralPath $directory).Sddl -ceq $before) 'FO-SNAPSHOT-02 publish refusal preserves source parent'
+    $cleanup.id = $publish.id; Assert-True ((Call $cleanup).exitCode -eq 0) 'FO-SNAPSHOT-02 refused publish stage is cleaned'
+    foreach ($trustedPath in @($script:stage, $Install)) {
+        $trustedAcl = Get-Acl -LiteralPath $trustedPath
+        $trustedOwner = $trustedAcl.GetOwner([Security.Principal.SecurityIdentifier]).Value
+        try {
+            [ForeignOwnerFixtureNative]::SetOwner($trustedPath, $foreignSid)
+            $request = Request 'snapshot' $source; $request.bypassRoot = $true
+            Assert-ForeignOwnerPolicy (Call $request) 'FO-SNAPSHOT-03 stage and install retain foreign-owner rejection'
+            Assert-True (!(Test-Path -LiteralPath (Join-Path $script:stage ($request.id + '.part')))) 'FO-SNAPSHOT-03 rejected protected root creates no part'
+        } finally { [ForeignOwnerFixtureNative]::SetOwner($trustedPath, $trustedOwner) }
+        Assert-True ((Get-Acl -LiteralPath $trustedPath).Sddl -ceq $trustedAcl.Sddl) 'FO-SNAPSHOT-03 protected root owner is restored exactly'
+    }
+    $installArguments = '-AccountSid "' + $AccountSid + '" -FileRoot "' + (Join-Path $directory 'new-files') +
+        '" -InstallRoot "' + (Join-Path $directory 'new-helper') + '" -StageRoot "' + (Join-Path $directory 'new-stage') + '"'
+    $result = Invoke-Script $Installer $installArguments
+    Assert-True ($result.exitCode -eq 1 -and $result.data.errorCode -ceq 'PERMISSION_DENIED') 'FO-SNAPSHOT-03 installer rejects foreign-owner parent'
+    foreach ($name in @('new-files', 'new-helper', 'new-stage')) {
+        Assert-True (!(Test-Path -LiteralPath (Join-Path $directory $name))) 'FO-SNAPSHOT-03 refused installer creates no protected root'
+    }
+    $noControl = Join-Path $Root 'foreign-owner-no-read-control'
+    $null = [IO.Directory]::CreateDirectory($noControl)
+    $noControlLeaf = Join-Path $noControl 'source.bin'; [IO.File]::WriteAllBytes($noControlLeaf, $script:bytes)
+    [ForeignOwnerFixtureNative]::SetOwner($noControl, $foreignSid)
+    [ForeignOwnerFixtureNative]::SetOwner($noControlLeaf, $foreignSid)
+    $restoreParent = Get-Acl -LiteralPath $noControl; $restoreLeaf = Get-Acl -LiteralPath $noControlLeaf
+    try {
+        foreach ($path in @($noControl, $noControlLeaf)) {
+            $acl = Get-Acl -LiteralPath $path
+            foreach ($deniedSid in @($AccountSid, 'S-1-3-4')) {
+                $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($deniedSid),
+                    [Security.AccessControl.FileSystemRights]::ReadPermissions, [Security.AccessControl.AccessControlType]::Deny))
+            }
+            Set-Acl -LiteralPath $path -AclObject $acl
+        }
+        $parentSourceAccessError = [ForeignOwnerFixtureNative]::ProbeAccess($noControl, 0xA0, $true)
+        $parentReadControlError = [ForeignOwnerFixtureNative]::ProbeAccess($noControl, 0x20000, $true)
+        $leafSourceAccessError = [ForeignOwnerFixtureNative]::ProbeAccess($noControlLeaf, 0x100081, $false)
+        $leafReadControlError = [ForeignOwnerFixtureNative]::ProbeAccess($noControlLeaf, 0x20000, $false)
+        $backupParentReadControlError = [ForeignOwnerFixtureNative]::ProbeBackupDirectoryReadControl($noControl)
+        [Console]::Out.WriteLine(([ordered]@{ caseId = 'FO-SNAPSHOT-04'; phase = 'fixture-access-probe';
+            probeApi = 'NtCreateFile'; shareMask = '0x1'; backupIntent = $false;
+            directoryOptions = '0x200021'; leafOptions = '0x200060';
+            parentSourceAccessMask = '0x1000A0'; parentSourceAccessError = $parentSourceAccessError;
+            parentReadControlMask = '0x120080'; parentReadControlError = $parentReadControlError;
+            leafSourceAccessMask = '0x100081'; leafSourceAccessError = $leafSourceAccessError;
+            leafReadControlMask = '0x120080'; leafReadControlError = $leafReadControlError;
+            backupControlApi = 'CreateFile'; backupControlFlags = '0x2200000';
+            backupParentReadControlMask = '0x20000'; backupParentReadControlError = $backupParentReadControlError } | ConvertTo-Json -Compress))
+        Assert-True ($parentSourceAccessError -eq 0 -and $parentReadControlError -eq 5 -and
+            $leafSourceAccessError -eq 0 -and $leafReadControlError -eq 5) 'FO-SNAPSHOT-04 fixture permits source access but OS denies READ_CONTROL on parent and leaf'
+        $request = Request 'snapshot' $noControlLeaf; $request.bypassRoot = $true
+        $result = Call $request
+        Assert-True ($result.exitCode -eq 0 -and $result.data.sha256 -ceq $script:digest) ('FO-SNAPSHOT-04 TEST snapshot needs no source READ_CONTROL; ' + (Describe-Result $result))
+        Assert-True ([Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $script:stage ($request.id + '.part')))) -ceq [Convert]::ToBase64String($script:bytes)) 'FO-SNAPSHOT-04 exact independent source bytes'
+        $cleanup.id = $request.id; Assert-True ((Call $cleanup).exitCode -eq 0) 'FO-SNAPSHOT-04 stage is cleaned'
+    } finally {
+        Set-Acl -LiteralPath $noControlLeaf -AclObject $restoreLeaf
+        Set-Acl -LiteralPath $noControl -AclObject $restoreParent
+    }
+    # Keep ACL-mutating fixtures separate from the FO-SNAPSHOT-01 source baseline.
+    # TEST r4 showed Set-Acl restore adds D:AI while the product preserves exact SDDL.
+    $deniedSource = Join-Path $directory 'denied-source.bin'
+    [IO.File]::WriteAllBytes($deniedSource, $script:bytes)
+    $restoreSource = Get-Acl -LiteralPath $deniedSource
+    $deniedAcl = Get-Acl -LiteralPath $deniedSource
+    $deniedAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($AccountSid),
+        [Security.AccessControl.FileSystemRights]::ReadData, [Security.AccessControl.AccessControlType]::Deny))
+    try {
+        Set-Acl -LiteralPath $deniedSource -AclObject $deniedAcl
+        $deniedBefore = (Get-Acl -LiteralPath $deniedSource).Sddl
+        $deniedParentBefore = (Get-Acl -LiteralPath $directory).Sddl
+        $request = Request 'snapshot' $deniedSource; $request.bypassRoot = $true
+        $result = Call $request
+        [Console]::Out.WriteLine(([ordered]@{ caseId = 'FO-SNAPSHOT-05'; phase = 'product-acl-compare';
+            parentSddlBefore = $deniedParentBefore; parentSddlAfter = (Get-Acl -LiteralPath $directory).Sddl;
+            sourceSddlBefore = $deniedBefore; sourceSddlAfter = (Get-Acl -LiteralPath $deniedSource).Sddl } | ConvertTo-Json -Compress))
+        Assert-True ($result.exitCode -eq 1 -and $result.data.errorCode -ceq 'PERMISSION_DENIED' -and
+            $result.data.origin -ceq 'os' -and $result.data.nativeStep -ceq 'open' -and $result.data.nativeError -eq 5 -and
+            !$result.data.PSObject.Properties['policyReason']) 'FO-SNAPSHOT-05 actual OS source read denial stays distinct from policy refusal'
+        Assert-True (!(Test-Path -LiteralPath (Join-Path $script:stage ($request.id + '.part'))) -and
+            (Get-Acl -LiteralPath $deniedSource).Sddl -ceq $deniedBefore) 'FO-SNAPSHOT-05 read denial creates no part and never repairs ACL'
+    } finally { Set-Acl -LiteralPath $deniedSource -AclObject $restoreSource }
+    [Console]::Out.WriteLine(([ordered]@{ caseId = 'FO-SNAPSHOT-05'; phase = 'fixture-restore-compare';
+        parentSddlBefore = $before; parentSddlAfter = (Get-Acl -LiteralPath $directory).Sddl;
+        sourceSddlBefore = $restoreSource.Sddl; sourceSddlAfter = (Get-Acl -LiteralPath $deniedSource).Sddl } | ConvertTo-Json -Compress))
+    $decoy = Join-Path $Parent 'foreign-owner-decoy'; $null = [IO.Directory]::CreateDirectory($decoy)
+    $decoyLeaf = Join-Path $decoy 'source.bin'; $decoyBytes = [Text.Encoding]::UTF8.GetBytes('different-decoy-bytes')
+    [IO.File]::WriteAllBytes($decoyLeaf, $decoyBytes)
+    $junction = Join-Path $directory 'junction'; $null = New-Item -ItemType Junction -Path $junction -Target $decoy
+    $symlink = Join-Path $directory 'symlink.bin'; $null = New-Item -ItemType SymbolicLink -Path $symlink -Target $decoyLeaf
+    $hardlink = Join-Path $directory 'hardlink.bin'; $null = New-Item -ItemType HardLink -Path $hardlink -Target $decoyLeaf
+    foreach ($path in @((Join-Path $junction 'source.bin'), $symlink, $hardlink, ($source + ':stream'))) {
+        $request = Request 'snapshot' $path; $request.bypassRoot = $true
+        Refused $request 'UNSAFE_PATH'
+        Assert-True (!(Test-Path -LiteralPath (Join-Path $script:stage ($request.id + '.part')))) 'FO-SNAPSHOT-06 unsafe source creates no stage part'
+    }
+    Assert-True ([Convert]::ToBase64String([IO.File]::ReadAllBytes($source)) -ceq [Convert]::ToBase64String($script:bytes) -and
+        [Convert]::ToBase64String([IO.File]::ReadAllBytes($decoyLeaf)) -ceq [Convert]::ToBase64String($decoyBytes)) 'FO-SNAPSHOT-06 original and decoy bytes stay unchanged'
+    $pinDirectory = Join-Path $Parent 'foreign-owner-share-probe'; $null = [IO.Directory]::CreateDirectory($pinDirectory)
+    $pinLeaf = Join-Path $pinDirectory 'source.bin'; [IO.File]::WriteAllBytes($pinLeaf, $script:bytes)
+    Assert-True ([ForeignOwnerFixtureNative]::PinnedRename($pinDirectory, ($pinDirectory + '.parked'), 0x80, 3, $true) -eq 0) 'FO-SNAPSHOT-07 control metadata-only parent pin permits actual rename'
+    Assert-True ([ForeignOwnerFixtureNative]::PinnedRename($pinDirectory, ($pinDirectory + '.parked'), 0xA0, 3, $true) -eq 32) 'FO-SNAPSHOT-07 FILE_TRAVERSE parent pin blocks actual rename with sharing violation'
+    Assert-True ([ForeignOwnerFixtureNative]::PinnedRename($pinLeaf, ($pinLeaf + '.parked'), 0x100081, 1, $false) -eq 32) 'FO-SNAPSHOT-07 FILE_READ_DATA leaf pin blocks actual rename with sharing violation'
+    $raceDirectory = Join-Path $Root 'foreign-owner-race'; $null = [IO.Directory]::CreateDirectory($raceDirectory)
+    $raceLeaf = Join-Path $raceDirectory 'source.bin'
+    $raceBytes = [byte[]]::new(67108864); [Array]::Copy($script:bytes, $raceBytes, $script:bytes.Length)
+    $raceBytes[$raceBytes.Length - 1] = 123
+    [IO.File]::WriteAllBytes($raceLeaf, $raceBytes)
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { $raceHash = [BitConverter]::ToString($sha.ComputeHash($raceBytes)).Replace('-', '').ToLowerInvariant() } finally { $sha.Dispose() }
+    [ForeignOwnerFixtureNative]::SetOwner($raceDirectory, $foreignSid)
+    $request = Request 'snapshot' $raceLeaf; $request.bypassRoot = $true
+    $racePart = Join-Path $script:stage ($request.id + '.part')
+    $pending = $null; $race = $null
+    try {
+        $pending = Start-Script $script:helper '' ($request | ConvertTo-Json -Compress)
+        $race = [ForeignOwnerFixtureNative+Race]::new($pending.process.Id, $raceDirectory, $raceLeaf, $decoy, $racePart, $raceBytes.Length)
+        $result = Complete-Script $pending; $pending = $null
+        $race.Dispose()
+        [Console]::Out.WriteLine((@{ caseId = 'FO-SNAPSHOT-08'; stageObserved = $race.StageObserved; attempts = $race.Attempts;
+            parentRenameError = $race.ParentRenameError; leafRenameError = $race.LeafRenameError; reparseError = $race.ReparseError;
+            workerFailure = $race.Failure } | ConvertTo-Json -Compress))
+        Assert-True ([string]::IsNullOrEmpty($race.Failure)) 'FO-SNAPSHOT-08 native race worker completed without fixture failure'
+        Assert-True ($race.StageObserved -and $race.Attempts -eq 3) 'FO-SNAPSHOT-08 RACE_OBSERVATION_MISSING is a preparation gap, not a product red'
+        if ($result.exitCode -eq 0) {
+            Assert-True ($result.data.sha256 -ceq $raceHash -and $result.data.size -eq $raceBytes.Length -and
+                $result.data.rootPolicyApplied -ceq 'test-server-bypass') 'FO-SNAPSHOT-08 successful raced snapshot reports only pinned source hash and size'
+            Assert-True ([Convert]::ToBase64String([IO.File]::ReadAllBytes($racePart)) -ceq [Convert]::ToBase64String($raceBytes)) 'FO-SNAPSHOT-08 successful raced snapshot has exact pinned source bytes'
+        } else {
+            Assert-True ($result.exitCode -eq 1 -and $result.data.errorCode -cin @('UNSAFE_PATH', 'FILE_CHANGED', 'PERMISSION_DENIED', 'FILE_NOT_FOUND', 'PARENT_NOT_FOUND') -and
+                !(Test-Path -LiteralPath $racePart)) ('FO-SNAPSHOT-08 raced refusal leaves no part; ' + (Describe-Result $result))
+        }
+    } finally {
+        if ($null -ne $race) { $race.Dispose() }
+        if ($null -ne $pending) {
+            if (!$pending.process.HasExited) { $pending.process.Kill() }
+            $pending.process.Dispose()
+        }
+    }
+    $cleanup.id = $request.id; Assert-True ((Call $cleanup).exitCode -eq 0) 'FO-SNAPSHOT-08 raced stage is cleaned'
+    [Console]::Out.WriteLine(([ordered]@{ caseId = 'FO-SNAPSHOT-FINAL'; phase = 'source-acl-compare';
+        parentSddlBefore = $before; parentSddlAfter = (Get-Acl -LiteralPath $directory).Sddl;
+        sourceSddlBefore = $leafBefore; sourceSddlAfter = (Get-Acl -LiteralPath $source).Sddl } | ConvertTo-Json -Compress))
+    Assert-True ((Get-Acl -LiteralPath $directory).Sddl -ceq $before -and (Get-Acl -LiteralPath $source).Sddl -ceq $leafBefore) 'FO-SNAPSHOT source ACL and owner remain exact after all cases'
 }
 function Test-InheritOnlyWriter([string]$Parent) {
     # INHERIT_ONLY_ACE is not effective on this directory (Microsoft Win32 contract).
@@ -258,6 +611,11 @@ public static class RestrictedAdministratorTest {
     $sha = [Security.Cryptography.SHA256]::Create()
     try { $script:digest = [BitConverter]::ToString($sha.ComputeHash($script:bytes)).Replace('-', '').ToLowerInvariant() } finally { $sha.Dispose() }
 
+    if (!$WriterInheritOnlyOnly) { Test-ForeignOwnerSnapshot $WorkRoot $root $install $installer $sid }
+    if ($ForeignOwnerSnapshotOnly) {
+        [Console]::Out.WriteLine((@{ passed = $passed; selectedCase = 'FO-SNAPSHOT-01..08' } | ConvertTo-Json -Compress))
+        exit 0
+    }
     Test-InheritOnlyWriter $WorkRoot
     if ($WriterInheritOnlyOnly) {
         [Console]::Out.WriteLine((@{ passed = $passed; selectedCase = 'WRITER-ACL-01' } | ConvertTo-Json -Compress))

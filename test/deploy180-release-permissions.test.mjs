@@ -5,6 +5,26 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { createOperationStore } from '../src/adapters/storage/operation-store.mjs';
+import { prepareDeploymentMigration } from '../scripts/deploy180.mjs';
+
+/* engineering-test-plan: deployment major-2 compatibility (written before execution).
+ * D221-CANDIDATE: inputs 2.0.3/2.1.0/2.2.0/2.2.1/2.10.7 plus
+ * 1.8.0/3.0.0/2.0.0-beta.1; synthetic hash-valid release, no active service.
+ * Call public inspect. Oracle: explicit major-2 release versions succeed; the
+ * three unsupported versions fail UNSUPPORTED_DEPLOY_VERSION; app/stop marker
+ * remain absent. Full manifest verification is real; service/npm are not run.
+ * D221-RECEIPT: previous 1.8.0/2.0.0/2.1.0/2.2.0/2.2.1/2.10.7, isolated
+ * legacy sentinel. Call prepareDeploymentMigration without evidence and with
+ * incomplete migrating evidence. Oracle: LEGACY_MIGRATION_RECEIPT_REQUIRED,
+ * sentinel unchanged and no operations DB/new archive created (no reimport).
+ * D221-REUSE: same previous versions, validated completed empty-history marker
+ * and real operations SQLite. Oracle: reused/originalGeneration preserved,
+ * canonical DB and legacy sentinel byte-identical, no new archive generation.
+ * Linux TEST only; the same test bytes/argv run against frozen 2.2.0 deploy180
+ * in an isolated copy (red) and fixed deploy180 (green). No live service/DB.
+ */
 
 const rootLinux = process.platform === 'linux' && process.getuid() === 0;
 const deployUrl = new URL('../scripts/deploy180.mjs', import.meta.url).href;
@@ -18,14 +38,14 @@ function serviceIdentity(t) {
   assert.notEqual(Number(uid.stdout), 0);
   return { uid: Number(uid.stdout), gid: Number(gid.stdout) };
 }
-async function fixture(t, version = '2.0.0') {
-  const identity = serviceIdentity(t); if (!identity) return null;
+async function fixture(t, version = '2.0.0', serviceAccount = true) {
+  const identity = serviceAccount ? serviceIdentity(t) : null; if (serviceAccount && !identity) return null;
   const root = await mkdtemp(join(tmpdir(), 'portal-release-permissions-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   await chmod(root, 0o755);
   const sourceDir = join(root, 'source'), appRoot = join(root, 'app'), dataRoot = join(root, 'data');
   await mkdir(sourceDir); await mkdir(join(sourceDir, 'src')); await mkdir(dataRoot, { mode: 0o700 });
-  await chmod(dataRoot, 0o700); await chown(dataRoot, identity.uid, identity.gid);
+  await chmod(dataRoot, 0o700); if (identity) await chown(dataRoot, identity.uid, identity.gid);
   const files = {
     'package.json': JSON.stringify({ name: 'deployment-permissions-fixture', version, type: 'module' }),
     'package-lock.json': '{}', 'bridge.mjs': 'export {};\n',
@@ -70,20 +90,66 @@ function stagePrivate(f, stage = 'stage') {
   { encoding: 'utf8', timeout: 30000 });
 }
 
-test('inspect accepts a 2.0 patch candidate and refuses historical or unsupported candidate versions before writing deployment state', { skip: !rootLinux }, async t => {
-  for (const version of ['2.0.3', '1.8.0', '2.1.0', '2.0.0-beta.1']) await t.test(version, async t => {
-    const f = await fixture(t, version); if (!f) return;
+test('D221-CANDIDATE inspect accepts major 2 release versions and refuses historical, major 3 or prerelease candidates before writing state', async t => {
+  for (const version of ['2.0.3', '2.1.0', '2.2.0', '2.2.1', '2.10.7', '1.8.0', '3.0.0', '2.0.0-beta.1']) await t.test(version, async t => {
+    const f = await fixture(t, version, false);
     const result = stagePrivate(f, 'inspect'), receipt = JSON.parse(result.stdout);
-    assert.equal(result.status, version === '2.0.3' ? 0 : 1, result.stdout + result.stderr);
-    if (version === '2.0.3') assert.equal(receipt.version, version);
+    const supported = ['2.0.3', '2.1.0', '2.2.0', '2.2.1', '2.10.7'].includes(version);
+    assert.equal(result.status, supported ? 0 : 1, result.stdout + result.stderr);
+    if (supported) assert.equal(receipt.version, version);
     else assert.equal(receipt.code, 'UNSUPPORTED_DEPLOY_VERSION');
     await assert.rejects(lstat(f.plan.appRoot), { code: 'ENOENT' });
     await assert.rejects(lstat(join(f.root, 'stop-called')), { code: 'ENOENT' });
   });
 });
 
-for (const existingParent of [false, true]) test(`umask077 staging permits real service imports with ${existingParent ? 'existing' : 'new'} public deployment parents`, { skip: !rootLinux }, async t => {
-  const f = await fixture(t); if (!f) return;
+for (const previousVersion of ['1.8.0', '2.0.0', '2.1.0', '2.2.0', '2.2.1', '2.10.7']) test(`D221-RECEIPT ${previousVersion} requires completed migration evidence without reimport`, async t => {
+  const root = await mkdtemp(join(tmpdir(), 'portal-deployment-version-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const appRoot = join(root, 'app'), dataRoot = join(root, 'data'), previousRelease = join(root, 'previous');
+  const control = join(appRoot, 'deployments'), previousGeneration = 'a'.repeat(64), generation = 'b'.repeat(64);
+  await mkdir(control, { recursive: true, mode: 0o700 }); await mkdir(dataRoot); await mkdir(previousRelease);
+  await writeFile(join(previousRelease, 'release-manifest.json'), JSON.stringify({ version: previousVersion }));
+  const sentinel = join(dataRoot, 'command-automation.sqlite'), original = Buffer.from('legacy sentinel: must not be imported');
+  await writeFile(sentinel, original);
+  const plan = { appRoot, dataRoot, generation }, release = fileURLToPath(new URL('../', import.meta.url));
+  for (const partial of [false, true]) {
+    if (partial) await writeFile(join(control, previousGeneration + '.json'), JSON.stringify({ generation: previousGeneration,
+      phase: 'migrating', migration: { type: 'portal.operation-migration.v1', sources: [], imported: 0, unknown: 0 } }));
+    await assert.rejects(prepareDeploymentMigration(plan, release, { previousGeneration, previousRelease }), { code: 'LEGACY_MIGRATION_RECEIPT_REQUIRED' });
+    assert.deepEqual(await readFile(sentinel), original);
+    await assert.rejects(lstat(join(dataRoot, 'operations.sqlite')), { code: 'ENOENT' });
+    await assert.rejects(lstat(join(appRoot, 'legacy-archives')), { code: 'ENOENT' });
+  }
+});
+
+for (const previousVersion of ['1.8.0', '2.0.0', '2.1.0', '2.2.0', '2.2.1', '2.10.7']) test(`D221-REUSE ${previousVersion} preserves authoritative completed migration and canonical data`, async t => {
+  const root = await mkdtemp(join(tmpdir(), 'portal-deployment-version-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const appRoot = join(root, 'app'), dataRoot = join(root, 'data'), previousRelease = join(root, 'previous');
+  const control = join(appRoot, 'deployments'), originalGeneration = 'a'.repeat(64), generation = 'b'.repeat(64);
+  await mkdir(control, { recursive: true, mode: 0o700 }); await mkdir(dataRoot); await mkdir(previousRelease);
+  await writeFile(join(previousRelease, 'release-manifest.json'), JSON.stringify({ version: previousVersion }));
+  await mkdir(join(appRoot, 'legacy-archives', originalGeneration), { recursive: true });
+  const marker = { type: 'portal.deployment-migration.v1', generation: originalGeneration, dataRoot,
+    migration: { type: 'portal.operation-migration.v1', sources: [], imported: 0, unknown: 0 } };
+  await writeFile(join(control, 'legacy-migration.json'), JSON.stringify(marker));
+  const sentinel = join(dataRoot, 'command-automation.sqlite'), original = Buffer.from('live legacy data is not a fresh import source');
+  await writeFile(sentinel, original);
+  // The authoritative journal must exist even when the retained legacy history is empty.
+  const release = fileURLToPath(new URL('../', import.meta.url)), plan = { appRoot, dataRoot, generation };
+  await assert.rejects(prepareDeploymentMigration(plan, release, { previousRelease }), { code: 'LEGACY_MIGRATION_STORE_MISSING' });
+  const store = createOperationStore(dataRoot); store.close();
+  const before = await readFile(join(dataRoot, 'operations.sqlite'));
+  const reused = await prepareDeploymentMigration(plan, release, { previousRelease });
+  assert.equal(reused.reused, true); assert.equal(reused.originalGeneration, originalGeneration); assert.equal(reused.imported, 0);
+  assert.deepEqual(await readFile(join(dataRoot, 'operations.sqlite')), before);
+  assert.deepEqual(await readFile(sentinel), original);
+  await assert.rejects(lstat(join(appRoot, 'legacy-archives', generation)), { code: 'ENOENT' });
+});
+
+for (const version of ['2.0.0', '2.1.0']) for (const existingParent of [false, true]) test(`umask077 ${version} staging permits real service imports with ${existingParent ? 'existing' : 'new'} public deployment parents`, { skip: !rootLinux }, async t => {
+  const f = await fixture(t, version); if (!f) return;
   const releases = join(f.plan.appRoot, 'releases');
   if (existingParent) {
     await mkdir(f.plan.appRoot); await chmod(f.plan.appRoot, 0o751);

@@ -54,6 +54,7 @@ import { preparePythonSource } from './src/adapters/ssh/python-source.mjs';
 import {createAgentCliState} from './src/adapters/storage/agent-cli-state.mjs';
 import {createAgentCliService} from './src/application/agent-cli.mjs';
 import {createAgentReleaseCatalog} from './src/adapters/releases/agent-cli.mjs';
+import {createPortalReleaseChecker} from './src/adapters/releases/portal-release.mjs';
 import {prepareAgentCliPlan,prepareAgentCliStatus} from './src/adapters/ssh/agent-cli.mjs';
 import {agentCliProviders,AGENT_CLI_CONTRACT} from './src/domain/agent-cli.mjs';
 import {platformOf, targetCapabilities, classifyForTarget, requireTargetCapability} from './src/domain/target-platform.mjs';
@@ -69,7 +70,7 @@ const commandExecutor = execute => async (profile, command, beforeDispatch, opti
 };
 
 /** Assemble concrete ports. Business policy belongs to application/domain modules. */
-export async function createApplication({ registry, classify, executeCommand, executePythonSource, executeAgentCli, openDesktopChannel, openDesktopProcessChannel, agentReleaseCatalog, audit, transferRoot, env = process.env, uiHtml, accessKeySet, uploadSource, riskAssessor, policyRiskAssessor, secretResolver, riskEvaluators = {}, environmentTransport, requestAdmission }) {
+export async function createApplication({ registry, classify, executeCommand, executePythonSource, executeAgentCli, openDesktopChannel, openDesktopProcessChannel, agentReleaseCatalog, portalReleaseChecker, audit, transferRoot, env = process.env, uiHtml, accessKeySet, uploadSource, riskAssessor, policyRiskAssessor, secretResolver, riskEvaluators = {}, environmentTransport, requestAdmission }) {
   const settings = parseSettings(env);
   const adminAccess = createAdminAccess(env, accessKeySet);
   const browserSessions=['access','oidc'].includes(adminAccess.mode)?createBrowserSessionAdapter():undefined;
@@ -532,7 +533,8 @@ export async function createApplication({ registry, classify, executeCommand, ex
     verifyCliTarget: id => { targets.select(id).verify(); }, present: presentJob });
   let deploymentGeneration = null;
   try { deploymentGeneration = createHash('sha256').update(await readFile(new URL('./release-manifest.json', import.meta.url))).digest('hex'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
-  protocols = createProtocolAdapters({ queue, commands, files, opaqueFiles, store, lifecycle, settings, signer, adminAccess, browserSessions, targets, requestSafety, retainedHistory, operations, capacity, desktop, deploymentGeneration,
+  const releaseChecker = portalReleaseChecker ?? createPortalReleaseChecker();
+  protocols = createProtocolAdapters({ queue, commands, files, opaqueFiles, store, lifecycle, settings, signer, adminAccess, browserSessions, targets, requestSafety, retainedHistory, operations, capacity, desktop, deploymentGeneration, releaseChecker,
     authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal: shutdown.signal, commandPolicy, commandOutputs, environmentEditor,agentCli, preservation, requestAdmission, automationMetrics: createAutomationMetrics({state:commandState}) });
   const timer = setInterval(() => { lifecycle.reap().catch(() => {}); try { outputs.reap(); } catch { /* Failed deletions stay charged. */ } }, 30_000); timer.unref();
   let closing;

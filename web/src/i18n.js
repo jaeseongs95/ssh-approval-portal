@@ -22,10 +22,10 @@ export const webCatalogs = messageCatalog({
   'SSO에서 확인한 본인 계정으로 요청을 처리합니다.': 'Manage requests with your owner account verified by SSO.',
 });
 export function createWebI18n(language = 'en') {
-const { korean, locale, messageLanguage } = resolveLocale(language);
+const { korean, locale, messageLanguage, dir } = resolveLocale(language);
 
-const t = (value, values) => translate(webCatalogs, locale, value, values);
+const t = (value, values) => translate(webCatalogs, language, value, values);
 const states = Object.fromEntries(Object.entries({ pending: '승인 대기', queued: '실행 대기', evaluating: '위험 평가 중', unknown: '실행 결과 불명', running: '실행 중', completed: '완료', failed: '실패', denied: '거부', expired: '만료' }).map(([key,value]) => [key,t(value)]));
 const kinds = Object.fromEntries(Object.entries({ command: '명령 실행', upload: '파일 업로드', download: '파일 다운로드' }).map(([key,value]) => [key,t(value)]));
-return { t, korean, locale, messageLanguage, ...createFormatters(locale), states, kinds };
+return { t, korean, locale, messageLanguage, dir, ...createFormatters(locale), states, kinds };
 }

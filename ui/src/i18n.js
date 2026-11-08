@@ -1,5 +1,6 @@
 import { resolveLocale, messageCatalog, translate, createFormatters } from '../../web/src/locale.js';
 export const cardCatalogs = messageCatalog({
+  '{count}바이트': '{count} B',
   '위험 평가 중': 'Assessing risk', '실행 결과 불명': 'Execution outcome unknown',
   '대상 ID': 'Target ID', '설정 revision': 'Configuration revision', '호스트 키': 'Host key', '전체 대상': 'All targets',
   '대상 선택에 실패했습니다. 다시 열어 주세요.': 'Could not select the target. Reopen the file card.',

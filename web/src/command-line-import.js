@@ -1,7 +1,8 @@
 import { COMMAND_MAX_BYTES, utf8WithinLimit } from '../../src/contracts/ports.mjs';
 import { commandLineNames } from '../../src/domain/command-line.mjs';
 import { windowsCommandLineNames, windowsPolicyName } from '../../src/domain/windows-command-line.mjs';
-import { uiText as tr } from './ui-text.js';
+import { uiText } from './ui-text.js';
+import { createWebI18n } from './i18n.js';
 const lines = value => value.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
 export function parseCommandImport(source, platform = 'linux') {
   const fail = reason => ({ complete: false, names: [], usesSudo: false, reason });
@@ -14,7 +15,8 @@ export function parseCommandImport(source, platform = 'linux') {
 }
 
 /** Local parsing only. The existing raw name field and reviewed save remain authoritative. */
-export function createCommandLineImport({ document, commands, denied, onChange, onError, getPlatform = () => 'linux' }) {
+export function createCommandLineImport({ document, commands, denied, onChange, onError, i18n = createWebI18n(document.documentElement.lang), getPlatform = () => 'linux' }) {
+  const tr = (value, values) => uiText(value, document, values), { formatNumber } = i18n;
   const key = name => getPlatform() === 'windows' ? windowsPolicyName(name) ?? name.toLowerCase() : name;
   const includes = (values, name) => values.some(value => key(value) === key(name));
   const el = (tag, text = '', cls = '') => { const n = document.createElement(tag); n.textContent = text; n.className = cls; return n; };
@@ -30,7 +32,7 @@ export function createCommandLineImport({ document, commands, denied, onChange, 
   panel.append(el('p', tr('명령줄 원문은 이 페이지에만 두며 추출·선택만으로 서버나 모델에 보내지 않습니다.'), 'policy-help'));
   let choices = [], analyzedSource, allowedBefore, deniedBefore;
   const selected = () => choices.filter(c => c.input.checked && !c.input.disabled).map(c => c.name);
-  const updateSelection = () => { add.disabled = !selected().length; all.disabled = !choices.some(c => !c.input.disabled); none.disabled = !choices.length; status.textContent = tr('선택한 이름: ') + selected().length + ' / ' + choices.length; };
+  const updateSelection = () => { add.disabled = !selected().length; all.disabled = !choices.some(c => !c.input.disabled); none.disabled = !choices.length; status.textContent = tr('선택한 이름: {selected} / {total}', { selected: formatNumber(selected().length), total: formatNumber(choices.length) }); };
   function clearResults(message = '') { analyzedSource = undefined; choices = []; candidates.replaceChildren(); candidates.hidden = true; add.disabled = all.disabled = none.disabled = true; status.textContent = message; }
   function reset() { source.value = ''; source.removeAttribute('aria-invalid'); clearResults(); panel.open = false; }
   function refresh() {
@@ -63,7 +65,7 @@ export function createCommandLineImport({ document, commands, denied, onChange, 
     if (!fresh.length) { refresh(); return; }
     if (existing.length + fresh.length > 128) { const message = tr('각 명령 목록은 최대 128개까지 등록할 수 있습니다.'); status.textContent = message; onError(message); return; }
     commands.value += (commands.value && !commands.value.endsWith('\n') ? '\n' : '') + fresh.join('\n');
-    onChange(); refresh(); status.textContent = fresh.length + tr('개 이름을 초안에 추가했습니다. 검토·저장 전에는 적용되지 않습니다.');
+    onChange(); refresh(); status.textContent = tr('초안에 이름 {count}개를 추가했습니다. 검토·저장 전에는 적용되지 않습니다.', { count: formatNumber(fresh.length) });
   }
   const extractButton = button('명령 이름 추출', extract), clear = button('입력 지우기', () => { reset(); panel.open = true; source.focus(); }); actions.append(extractButton, clear);
   const all = button('전체 선택', () => { choices.forEach(c => { if (!c.input.disabled) c.input.checked = true; }); updateSelection(); });

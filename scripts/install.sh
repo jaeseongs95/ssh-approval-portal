@@ -23,6 +23,27 @@ unit=/etc/systemd/system/ssh-approval-bridge.service
 helper=/usr/local/libexec/ssh-approval-file-helper
 grant=/etc/sudoers.d/90-mcpops-approval-bridge
 runtime=/opt/ssh-approval/node
+origin_preflight_pending=0
+preflight_admin_origin() {
+  if [[ ! -e "$env_file" && ! -L "$env_file" && -z "$admin_origin" ]]; then
+    echo 'Fresh installation requires --admin-origin https://your-admin-domain before any system changes.' >&2
+    return 1
+  fi
+  if [[ -n "$admin_origin" ]]; then
+    if command -v python3 >/dev/null; then
+      # Reuse the lifecycle CLI shape check without executing an installation.
+      python3 -B "$source_dir/scripts/portal.py" install --admin-origin "$admin_origin" --dry-run >/dev/null || {
+        echo 'Invalid --admin-origin: use an HTTPS origin without credentials, path, query, or fragment.' >&2
+        return 1
+      }
+      origin_preflight_pending=0
+    else
+      # Python remains an installer-provided prerequisite on a fresh host.
+      origin_preflight_pending=1
+    fi
+  fi
+}
+preflight_admin_origin
 . "$source_dir/scripts/install-state-guard.sh"
 if ! systemctl is-active --quiet ssh-approval-bridge.service; then
   require_fresh_installation "$active" "$unit" "$env_file"
@@ -34,6 +55,7 @@ for executable in curl xz python3 ssh-keygen sshd sudo flock; do
     break
   fi
 done
+if [[ "$origin_preflight_pending" == 1 ]]; then preflight_admin_origin; fi
 for secret_file in "$env_file" /etc/ssh-approval-portal/docker-secrets.env; do
   probe_port=$(python3 "$source_dir/scripts/settings_contract.py" port "$secret_file" mcp)
   if ! systemctl is-active --quiet ssh-approval-bridge.service && curl -fsS "http://127.0.0.1:$probe_port/health" >/dev/null 2>&1; then

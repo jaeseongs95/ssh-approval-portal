@@ -8,7 +8,7 @@ export const capacityCatalogs = messageCatalog({
   '전역 한도는 등록된 모든 서버에 적용됩니다.': 'Global limits apply across all registered servers.',
   '빈 값은 전역 한도를 상속합니다. 서버 한도와 전역 한도가 함께 적용됩니다.': 'An empty value inherits the global limit. Both target and global limits apply.',
   '한도를 줄여도 실행 중인 작업을 강제 종료하지 않습니다.': 'Reducing limits does not terminate running work.',
-  '가용 CPU {cpus}개 · 설치 기본값: 대기 {queue}, 동시 실행 {running}': '{cpus} available CPUs · installation defaults: queue {queue}, concurrent {running}',
+  '가용 CPU {cpus}개 · 설치 기본값: 대기 {queue}, 동시 실행 {running}': 'Available CPUs: {cpus} · installation defaults: queue {queue}, concurrent {running}',
   '현재 실행 대기 {queued}개 · 실행 중 {running}개': 'Currently queued: {queued} · running: {running}',
   '실효 한도: 대기 {queue}개 · 동시 실행 {running}개': 'Effective limits: queue {queue} · concurrent {running}',
   '설정할 서버를 선택해 주세요.': 'Choose a server to configure.',
@@ -25,8 +25,8 @@ export function parseCapacity(value, inherit = false) {
 }
 
 /** One POST per save; an uncertain result must be reconciled with a fresh GET. */
-export function createCapacityPanel({ document, api, getTarget = () => '', isSignedOut = () => false }) {
-  const { locale, formatNumber } = createWebI18n(document.documentElement.lang);
+export function createCapacityPanel({ document, api, i18n = createWebI18n(document.documentElement.lang), getTarget = () => '', isSignedOut = () => false }) {
+  const { locale, formatNumber } = i18n;
   const t = (key, values) => translate(capacityCatalogs, locale, key, values);
   const el = (tag, text = '') => { const node = document.createElement(tag); node.textContent = text; return node; };
   let snapshot, busy = false, uncertain = false, generation = 0;

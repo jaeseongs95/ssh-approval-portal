@@ -13,7 +13,7 @@ const legacy = threshold => threshold && (threshold.questionVersion !== CURRENT 
 const v4ConversionNotice = '위험 평가는 세 분류에서 두 분류(안전·위험)로 바뀌었습니다. 기존 점수 기준은 자동 승계되지 않습니다. 기존 숫자를 재사용하려면 새 기준에 대한 검증이 필요합니다.';
 
 /** Preserve the owner policy; only explicitly edited settings become a proposal. */
-export function createCommandPolicyEditor({ document, api, onNavigate = () => {}, onRequestTarget, onStateChange = () => {}, isSignedOut = () => false }) {
+export function createCommandPolicyEditor({ document, api, i18n, onNavigate = () => {}, onRequestTarget, onStateChange = () => {}, isSignedOut = () => false }) {
   let importGeneration = 0;
   if (document.body.dataset.commandAutomation !== 'true') return;
   const el = (tag, text, className) => {
@@ -78,7 +78,7 @@ export function createCommandPolicyEditor({ document, api, onNavigate = () => {}
   bulk.append(el('p', tr('행 목록과 같은 초안입니다. 이름을 한 줄에 하나씩 입력합니다. 잘못된 입력은 위험도 확인에서 해당 위치를 알려줍니다.'), 'policy-help'));
   const commands = field(bulk, tr('자동승인할 명령'), 'textarea', '', tr('이름만 한 줄에 하나. 예: ls (-l 같은 옵션은 빼주세요.)')); commands.rows = 5; commands.spellcheck = false;
   const denied = field(bulk, tr('항상 차단할 명령'), 'textarea', '', tr('차단은 자동승인보다 우선합니다. 두 목록에 같은 이름이 있어도 차단이 우선하며, 한쪽을 바꿔도 다른 쪽은 유지됩니다.')); denied.rows = 3;
-  const workspace = createCommandWorkspace({ document, container: workspaceRoot, commands, denied, getOriginal: () => original, getPlatform: () => platform(),
+  const workspace = createCommandWorkspace({ document, container: workspaceRoot, commands, denied, i18n, getOriginal: () => original, getPlatform: () => platform(),
     onChange: () => { loadHint.hidden = false; error(''); clearFieldErrors(); invalidate(); update(); }, onError: text => error(text) });
   document.addEventListener('admin-scope-change', () => { importGeneration++; workspace.resetImport(); });
   const search = workspace.search, selectedFilter = workspace.filter;

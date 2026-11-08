@@ -1,7 +1,7 @@
 import { recordedApprovalMode } from '../../ui/src/decision.js';
 import { createRequestDetail } from './request-detail.js';
 export function createWebView({ document, i18n }) {
-  const { t, korean, locale, states, kinds } = i18n;
+  const { t, korean, locale, states, kinds, formatNumber } = i18n;
   const el = id => document.getElementById(id);
   const bridgeName = document.body.dataset.bridgeDisplayName || document.location?.host || 'SSH Approval Portal';
   const targetName = document.body.dataset.targetDisplayName || 'SSH';
@@ -167,7 +167,17 @@ export function createWebView({ document, i18n }) {
     if (el('running')) reconcile(el('running'), running.length ? running : [placeholders.running]);
     el('pending-count').textContent = pending.length; el('history-count').textContent = historyJobs.length;
     if (el('running-count')) el('running-count').textContent = running.length;
-    if (el('work-summary')) el('work-summary').textContent = korean ? `승인 대기 ${pending.length} · 처리 중 ${running.length}` : `${pending.length} pending · ${running.length} in progress`;
+    const workSummary = el('work-summary');
+    if (workSummary) {
+      const summaryText = korean ? `승인 대기 ${pending.length} · 처리 중 ${running.length} · 보관 이력 ${historyJobs.length}` : `${pending.length} pending · ${running.length} in progress · ${historyJobs.length} retained`;
+      let chip = workSummary.firstElementChild;
+      if (!chip || chip.tagName !== 'SPAN') {
+        workSummary.replaceChildren();
+        chip = text(workSummary, 'span', summaryText, 'summary-chip');
+      } else if (chip.textContent !== summaryText) {
+        chip.textContent = summaryText;
+      }
+    }
     detail?.update(combined, deciding);
     const navigation=el('history-pagination');
     if(navigation){
@@ -198,14 +208,20 @@ export function createWebView({ document, i18n }) {
       if(returnButton)returnButton.hidden=active||!detail?.selected();
     });
     document.documentElement.lang = korean ? 'ko' : 'en';
+    document.documentElement.dir = i18n.dir ?? 'ltr';
     document.title = `${bridgeName} · ${targetName} · ${korean ? 'SSH 승인' : 'SSH approvals'}`;
     const serverIdentity = el('server-identity');
     if (serverIdentity) { serverIdentity.textContent = identity; serverIdentity.ariaLabel = t('서버 식별'); }
     if (!korean) for (const node of document.querySelectorAll('[data-en]')) node.textContent = node.dataset.en;
     document.querySelector?.('.admin-nav')?.setAttribute('aria-label', korean ? '관리 메뉴' : 'Management navigation');
+    el('server-workspace')?.setAttribute('aria-label', korean ? '서버 관리' : 'Server management');
+    el('server-settings-tabs')?.setAttribute('aria-label', korean ? '서버 작업' : 'Server tasks');
+    el('work-summary')?.setAttribute('aria-label', korean ? '요청 요약' : 'Request summary');
+    el('request-close')?.setAttribute('aria-label', korean ? '요청 상세 닫기' : 'Close request details');
     el('history-pagination')?.setAttribute('aria-label', korean ? '승인 이력 페이지' : 'History pages');
     el('token').placeholder = el('token').ariaLabel = t('관리자 토큰');
     el('load').onclick = actions.load; el('logout').onclick = actions.logout;
+    if (el('version-check')) el('version-check').onclick = () => actions.checkVersion?.(true);
     const filters=document.createElement('div');filters.className='history-filters';
     const searchLabel=text(filters,'label',korean?'이력 검색':'Search history');historySearch=text(searchLabel,'input','');historySearch.type='search';historySearch.maxLength=200;historySearch.placeholder=korean?'명령·요청 ID·서버 검색':'Search command, request ID or server';
     const filterLabel=text(filters,'label',korean?'처리 상태':'Request status');historyFilter=text(filterLabel,'select','');historyFilter.setAttribute('aria-label',korean?'처리 상태':'Request status');
@@ -245,7 +261,7 @@ export function createWebView({ document, i18n }) {
     history: data => {
       historyResult=data;historyBusy=false;historyFailure=false;el('history')?.setAttribute('aria-busy','false');
       const incomplete=!!data.coverage?.metadataIncomplete;
-      if(historyStatus)historyStatus.textContent=incomplete ? (korean?`확인 가능한 기록 ${data.items.length}건을 표시합니다. 일부 기록이 제외된 불완전 조회이며, 0건이어도 기록이 없다고 판단할 수 없습니다.`:`Showing ${data.items.length} verifiable requests. Results are incomplete because some records were excluded; zero results do not establish that no history exists.`) : (korean?`${data.items.length}건을 표시합니다. 전체 건수는 제공하지 않습니다.`:`Showing ${data.items.length} requests. An all-time total is not available.`);
+      if(historyStatus)historyStatus.textContent=incomplete ? (korean?`확인 가능한 기록 ${formatNumber(data.items.length)}건을 표시합니다. 일부 기록이 제외된 불완전 조회이며, 0건이어도 기록이 없다고 판단할 수 없습니다.`:`Showing verifiable requests: ${formatNumber(data.items.length)}. Results are incomplete because some records were excluded; zero results do not establish that no history exists.`) : (korean?`${formatNumber(data.items.length)}건을 표시합니다. 전체 건수는 제공하지 않습니다.`:`Showing requests: ${formatNumber(data.items.length)}. An all-time total is not available.`);
       if(historyCoverage){
         historyCoverage.dataset.incomplete=String(incomplete);
         const warning=incomplete ? (korean?'일부 기록 제외: 기록 정보나 현재 연결을 확인하지 못한 기록은 표시하지 않습니다. 아래 목록은 조회 범위의 모든 기록을 보장하지 않습니다. ':'Some records excluded: metadata or the current connection could not be verified. The list does not represent complete history for the selected scope. ') : '';
@@ -277,13 +293,39 @@ export function createWebView({ document, i18n }) {
     deciding: busy => { latestDeciding = busy; detail?.busy(busy); },
     connected: () => {
       el('connection').classList.add('connected'); el('connection-text').textContent = korean ? '관리자 연결됨' : 'Administrator connected'; el('logout').hidden = false; el('sign-in').hidden = true;
+      if (el('version-panel')) el('version-panel').hidden = false;
       el('updated').textContent = `${t('마지막 갱신')} ${new Date().toLocaleTimeString(locale)} · ${t('10초마다 갱신')}`;
+    },
+    versionLoading: busy => {
+      const button = el('version-check');
+      if (button) { button.disabled = busy; button.setAttribute('aria-busy', String(busy)); }
+    },
+    version: info => {
+      const panel = el('version-panel'), status = el('version-status'), link = el('version-link');
+      if (!panel || !status || !info) return;
+      panel.hidden = false;
+      status.dataset.status = info.status ?? 'unavailable';
+      const current = info.currentVersion ? `v${info.currentVersion}` : '';
+      if (info.status === 'update_available' && info.latestVersion) {
+        status.textContent = korean ? `${current} · 새 버전 v${info.latestVersion} 사용 가능` : `${current} · Update v${info.latestVersion} available`;
+      } else if (info.status === 'up_to_date') {
+        status.textContent = korean ? `${current} · 최신 버전` : `${current} · Up to date`;
+      } else if (info.status === 'ahead') {
+        status.textContent = korean ? `${current} · 개발/선행 버전` : `${current} · Ahead of release`;
+      } else {
+        status.textContent = korean ? `${current} · 최신 버전 확인 불가` : `${current} · Update check unavailable`;
+      }
+      if (link) {
+        if (typeof info.releaseUrl === 'string' && info.releaseUrl.startsWith('https://')) link.href = info.releaseUrl;
+        link.hidden = info.status !== 'update_available';
+      }
     },
     disconnected: () => { el('connection').classList.remove('connected'); el('connection-text').textContent = t('연결 확인 필요'); },
     logoutErrorMessage:()=>korean?'관리자 로그아웃을 확인하지 못했습니다. 다시 시도해 주세요.':'Administrator sign-out could not be confirmed. Please retry.',
     logoutRetry:()=>{el('logout').disabled=false;el('logout').textContent=korean?'로그아웃 다시 시도':'Retry sign out';},
     signedOut: () => {
       detail?.clear();if(returnButton)returnButton.hidden=true;historyResult=undefined;historyCursor=undefined;historyPrevious=[];historyBusy=false;
+      if (el('version-panel')) el('version-panel').hidden = true;
       el('token').value = ''; el('jobs').replaceChildren(); el('history').replaceChildren(); records.clear();
       el('running')?.replaceChildren(); el('server-overview')?.replaceChildren(); serverRecords.clear(); targetList = [];
       if (el('overview-section')) el('overview-section').hidden = true;

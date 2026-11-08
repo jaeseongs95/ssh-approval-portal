@@ -174,7 +174,7 @@ for (const locale of ['ko-KR','en-US']) test('UI168 불완전 이력은 정상 0
   if(process.env.UI_SCREENSHOTS)await page.screenshot({path:process.env.UI_SCREENSHOTS+'/history-incomplete-empty-'+locale+'.png',fullPage:true});
   items=[{...job('excluded-with-row-verifiable-retained'),history:{stateSource:'journal',storage:'command',targetStatus:'active'}}];
   await search.fill('excluded-with-row');await historyReady(page);
-  assert.equal(await page.locator('#history article[data-request-id="excluded-with-row-verifiable-retained"]').count(),1);assert.equal(await coverage.getAttribute('data-incomplete'),'true');assert.match(await status.textContent(),korean?/확인 가능한 기록 1건.*불완전 조회/:/Showing 1 verifiable requests.*incomplete/);
+  assert.equal(await page.locator('#history article[data-request-id="excluded-with-row-verifiable-retained"]').count(),1);assert.equal(await coverage.getAttribute('data-incomplete'),'true');assert.match(await status.textContent(),korean?/확인 가능한 기록 1건.*불완전 조회/:/Showing verifiable requests: 1.*incomplete/);
   incomplete=false;items=[];await search.fill('complete-empty');await historyReady(page);
   assert.equal(await coverage.getAttribute('data-incomplete'),'false');assert.equal(await page.locator('#history-count').textContent(),'0');
   assert.doesNotMatch(await coverage.textContent(),/일부 기록 제외|Some records excluded/);assert.doesNotMatch(await status.textContent(),/불완전|incomplete/i);

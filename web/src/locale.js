@@ -1,12 +1,23 @@
-/** Native BCP 47 parsing; unsupported message languages use the English catalog. */
+/** Native Unicode BCP 47 locale parsing; unsupported message languages use English. */
 export function resolveLocale(language = 'en') {
-  let locale;
-  try { locale = Intl.getCanonicalLocales(language)[0]; } catch { /* invalid browser preference */ }
-  locale ||= 'en-US';
-  const messageLanguage = new Intl.Locale(locale).language === 'ko' ? 'ko' : 'en';
+  const candidates = Array.isArray(language) ? language : [language];
+  const canonicals = [];
+  for (const item of candidates) {
+    if (typeof item !== 'string' || !item.trim()) continue;
+    try {
+      const [canonical] = Intl.getCanonicalLocales(item.trim());
+      if (canonical && !canonicals.includes(canonical)) canonicals.push(canonical);
+    } catch { /* invalid browser preference */ }
+  }
+  let locale = canonicals[0] || 'en-US';
+  let messageLanguage = 'en';
+  for (const tag of canonicals) {
+    const base = new Intl.Locale(tag).language;
+    if (base === 'ko' || base === 'en') { messageLanguage = base; break; }
+  }
   if (locale === 'ko') locale = 'ko-KR';
   if (locale === 'en') locale = 'en-US';
-  return { locale, messageLanguage, korean: messageLanguage === 'ko' };
+  return { locale, messageLanguage, korean: messageLanguage === 'ko', dir: 'ltr' };
 }
 
 /** Existing Korean source strings remain stable message identifiers. */
@@ -35,7 +46,9 @@ export function validateCatalogs(catalogs) {
 
 export function translate(catalogs, language, key, values = {}) {
   const { messageLanguage } = resolveLocale(language);
-  const message = catalogs[messageLanguage]?.[key] ?? catalogs.en?.[key] ?? key;
+  const catalog = catalogs[messageLanguage];
+  const message = catalog && Object.hasOwn(catalog, key) ? catalog[key] : catalogs.en && Object.hasOwn(catalogs.en, key) ? catalogs.en[key] : undefined;
+  if (message === undefined) return key;
   return message.replace(/\{([A-Za-z][A-Za-z0-9_]*)\}/g, (placeholder, name) => Object.hasOwn(values, name) ? String(values[name]) : placeholder);
 }
 

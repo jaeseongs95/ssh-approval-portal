@@ -1,0 +1,53 @@
+{
+  "description": "SSH completion inbox; metadata only, explicit handling ACK.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/scripts/portal-files.mjs\" --host codex",
+            "timeout": 10,
+            "commandWindows": "node \"$env:PLUGIN_ROOT\\scripts\\portal-files.mjs\" --host codex"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/scripts/portal-files.mjs\" --host codex",
+            "timeout": 10,
+            "commandWindows": "node \"$env:PLUGIN_ROOT\\scripts\\portal-files.mjs\" --host codex"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/scripts/portal-files.mjs\" --host codex",
+            "timeout": 10,
+            "commandWindows": "node \"$env:PLUGIN_ROOT\\scripts\\portal-files.mjs\" --host codex"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/scripts/portal-files.mjs\" --host codex",
+            "timeout": 10,
+            "commandWindows": "node \"$env:PLUGIN_ROOT\\scripts\\portal-files.mjs\" --host codex"
+          }
+        ]
+      }
+    ]
+  }
+}

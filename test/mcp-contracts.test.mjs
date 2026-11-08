@@ -50,6 +50,35 @@ async function fixture(overrides = {}) {
     async close() { await client.close(); await Promise.all([adapters.mcpHttp, adapters.adminHttp].map(server => new Promise(resolve => server.close(resolve)))); } };
 }
 
+test('owner completion observation reuses existing authenticated GET and returns no command body', async () => {
+  const f = await fixture();
+  try {
+    const url = f.adminBase + '/api/' + identifier + '?observe=1&waitMs=25000';
+    assert.equal((await fetch(url)).status, 401);
+    const response = await fetch(url, { headers: { Authorization: 'Bearer contract-admin' } });
+    assert.equal(response.status, 200); const value = await response.json();
+    assert.equal(value.contractVersion, '2.0'); assert.equal(value.ok, true); assert.equal(value.data.id, identifier);
+    assert.deepEqual(f.calls.observe, [{ id: identifier, waitMs: 25000 }]);
+    assert.doesNotMatch(JSON.stringify(value), /sudo id|frozen-job|contract-admin/);
+    const legacy = await (await fetch(f.adminBase + '/api/' + identifier, { headers: { Authorization: 'Bearer contract-admin' } })).json();
+    assert.equal(legacy.id, identifier);
+    for (const query of ['observe=1&waitMs=60001', 'observe=1&waitMs=-1', 'observe=1&waitMs=2&waitMs=3', 'observe=1&extra=1']) {
+      assert.equal((await fetch(f.adminBase + '/api/' + identifier + '?' + query, { headers: { Authorization: 'Bearer contract-admin' } })).status, 400);
+    }
+    assert.equal(f.calls.observe.length, 1);
+  } finally { await f.close(); }
+});
+
+test('owner completion observation checks current authorization again after waiting', async () => {
+  let authorizations = 0;
+  const f = await fixture({ authorizeAdminRequest: async () => ({ allowed: ++authorizations === 1, status: 401 }) });
+  try {
+    const response = await fetch(f.adminBase + '/api/' + identifier + '?observe=1&waitMs=1');
+    assert.equal(response.status, 401); assert.equal(authorizations, 2);
+    assert.equal((await response.json()).error, 'OWNER_REAUTH_REQUIRED');
+  } finally { await f.close(); }
+});
+
 test('MCP initialization distinguishes remote calls from model-external local file transfer', async () => {
   const f = await fixture();
   try {

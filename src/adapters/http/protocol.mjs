@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { authenticated } from '../security/tickets.mjs';
 import { createMcpAdapter } from '../mcp/server.mjs';
+import { presentOperation } from '../mcp/public-contract.mjs';
 import { createCapabilities } from '../presentation/capabilities.mjs';
 import { presentJob } from '../presentation/results.mjs';
 import { BASELINE_PRESERVATION_CONTRACT } from '../storage/preservation-verification.mjs';
@@ -73,7 +74,7 @@ async function readMcpMessage(req, res) {
   return { message };
 }
 
-export function createProtocolAdapters({ queue, commands, files, opaqueFiles, store, lifecycle, settings, signer, adminAccess, browserSessions, authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal, targets, requestSafety, commandPolicy, commandOutputs, automationMetrics, environmentEditor,agentCli, preservation, retainedHistory, requestAdmission, operations, capacity, desktop, deploymentGeneration = null }) {
+export function createProtocolAdapters({ queue, commands, files, opaqueFiles, store, lifecycle, settings, signer, adminAccess, browserSessions, authorizeAdminRequest, uiHtml, webHtml, webJs, bindFileSource, shutdownSignal, targets, requestSafety, commandPolicy, commandOutputs, automationMetrics, environmentEditor,agentCli, preservation, retainedHistory, requestAdmission, operations, capacity, desktop, deploymentGeneration = null, releaseChecker }) {
   const capabilities = createCapabilities({ queue, store, signer, settings, targets, adminAuthMode: adminAccess.mode });
   const mcpServer = createMcpAdapter({ queue, commands, files, opaqueFiles, settings, capabilities, uiHtml, bindFileSource, shutdownSignal, targets, requestSafety, commandOutputs, operations, desktop });
   const admission = {
@@ -166,6 +167,12 @@ export function createProtocolAdapters({ queue, commands, files, opaqueFiles, st
         finally { if(desktopRoute[1]==='authenticate'){body.value=undefined;for(const part of chunks)part.fill(0);} }
       }
       if (req.method === 'GET' && url.pathname === '/api/session') return json(res, 200, { mode: adminAccess.mode });
+      if (url.pathname === '/api/version') {
+        if (req.method !== 'GET') return json(res, 405, { error: 'Method not allowed' });
+        const refresh = url.searchParams.get('refresh') === '1';
+        if (releaseChecker) return json(res, 200, await releaseChecker.check({ refresh }));
+        return json(res, 200, { currentVersion: metadata.version, latestVersion: null, updateAvailable: false, status: 'unavailable', releaseUrl: 'https://github.com/jaeseongs95/ssh-approval-portal/releases', publishedAt: null, checkedAt: Date.now() });
+      }
       if(agentCli && req.method==='GET' && url.pathname==='/api/agent-cli')return json(res,200,agentCli.get());
       if(agentCli && req.method==='GET' && url.pathname==='/api/agent-cli/history'){
         const keys=url.searchParams.has('before')||url.searchParams.has('beforeId')?['targetId','provider','before','beforeId']:['targetId','provider'];
@@ -239,6 +246,32 @@ export function createProtocolAdapters({ queue, commands, files, opaqueFiles, st
       }
       if (req.method === 'GET' && url.pathname === '/api/pending') return json(res, 200, visible(queue.list()).map(presentJob));
       if (req.method === 'GET' && url.pathname === '/api/requests') return json(res, 200, visible(queue.listAll()).map(presentJob));
+      const observed = /^\/api\/([a-f0-9]{48})$/.exec(url.pathname);
+      const observedByKey = url.pathname === '/api/operations/by-key';
+      if (observedByKey && req.method !== 'GET') return json(res, 405, { error: 'Method not allowed' });
+      if (req.method === 'GET' && (observedByKey || observed && url.searchParams.get('observe') === '1')) {
+        const selector = observedByKey ? 'operationKey' : 'observe';
+        if (url.searchParams.size > 2 || url.searchParams.getAll(selector).length !== 1 || url.searchParams.getAll('waitMs').length > 1 ||
+            [...url.searchParams.keys()].some(key => ![selector, 'waitMs'].includes(key)) ||
+            (observedByKey && !/^[A-Za-z0-9_.:-]{16,128}(?![\s\S])/.test(url.searchParams.get('operationKey') ?? '')) ||
+            !/^(0|[1-9][0-9]{0,4})(?![\s\S])/.test(url.searchParams.get('waitMs') ?? '0') || Number(url.searchParams.get('waitMs') ?? 0) > 60000)
+          return json(res, 400, { error: 'INVALID_OPERATION_OBSERVER' });
+        if (!operations) return json(res, 503, { error: 'OPERATION_OBSERVATION_UNAVAILABLE' });
+        try {
+          const waitMs = Number(url.searchParams.get('waitMs') ?? 0);
+          if (waitMs) lease.detach();
+          const result = await operations.observe({ ...(observedByKey ? { operationKey: url.searchParams.get('operationKey') } : { id: observed[1] }), waitMs }, { signal: scope.signal });
+          // Long observation never extends a principal/session's authority.
+          const current = await authorize();
+          if (!current.allowed) return json(res, current.status ?? 401, { error: 'OWNER_REAUTH_REQUIRED' });
+          return json(res, 200, { contractVersion: '2.0', ok: true, data: presentOperation(result), error: null });
+        } catch (error) {
+          if (error instanceof RequestAdmissionError) throw error;
+          const code = ['OPERATION_NOT_FOUND', 'TARGET_REVISION_CONFLICT', 'OPERATION_OBSERVER_CAPACITY'].includes(error.code)
+            ? error.code : 'OPERATION_OBSERVATION_FAILED';
+          return json(res, code === 'OPERATION_NOT_FOUND' ? 404 : 409, { error: code });
+        }
+      }
       const single = /^\/api\/([a-f0-9]{48})$/.exec(url.pathname);
       if (req.method === 'GET' && single) { const job = queue.get(single[1]); return json(res, 200, job ? presentJob(job) : { error: 'Unknown request' }); }
       if (url.pathname === '/api/maintenance/preservation/capture') { preservation.capture(req.headers['x-maintenance-owner']); return json(res, 200, { captured: true, ownership: 'durable-v1' }); }

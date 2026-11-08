@@ -185,22 +185,39 @@ export function createOperationStore(rootOrOptions) {
     return legacyOutcome ? JSON.parse(body) : job;
   };
   const accept = record => transaction(() => insert(record));
-  const importLegacy = (job, { source, requestKey, digest, requireExisting = false } = {}) => {
+  const validateLegacyImport = (job, { source, requestKey, digest, requireExisting = false } = {}) => {
     required(source, 'LEGACY_SOURCE');
     const key = requestKey ?? `legacy:${source}:${job.id}`;
     const existing = api.find(key);
     if (existing) {
       if (existing.job.id !== job.id || existing.job.legacy?.source !== source || canonical(existing.job.legacy?.original) !== canonical(job) || existing.job.legacy?.digest !== (digest ?? null)) throw operationStoreError('OPERATION_KEY_CONFLICT');
-      return existing.job;
+      return { key, existing: existing.job };
     }
     if (get(job.id)) throw operationStoreError('OPERATION_KEY_CONFLICT');
     if (requireExisting) throw operationStoreError('LEGACY_MIGRATION_RECORD_MISSING');
+    return { key, existing: null };
+  };
+  const importLegacy = (job, options = {}) => {
+    const { key, existing } = validateLegacyImport(job, options);
+    if (existing) return existing;
+    const { source, digest } = options;
     const state = terminal.has(job.state) ? job.state : 'unknown';
     return insert(legacyRecord(job, { source, requestKey: key, digest }),
     { state, version: 2, result: job.result, finishedAt: job.finishedAt, requiresReconciliation: state === 'unknown', recoveryReason: 'legacy_import' });
   };
   const api = {
     filePath, accept, get, update,
+    // SELECT only; the exclusive connection keeps canonical evidence stable.
+    // Check every source before any batch can commit an unrelated leading row.
+    preflightLegacyImports(inventory) {
+      if (poisoned) throw operationStoreError('OPERATION_TRANSACTION_UNCERTAIN');
+      const ids = new Set(), keys = new Set();
+      for (const { source, rows } of inventory) for (const { job, requestKey, digest } of rows) {
+        const { key } = validateLegacyImport(job, { source, requestKey, digest });
+        if (ids.has(job.id) || keys.has(key)) throw operationStoreError('OPERATION_KEY_CONFLICT');
+        ids.add(job.id); keys.add(key);
+      }
+    },
     // Private evidence port: SELECT only on the already exclusive service connection.
     // Consume synchronously while admission/dispatch are fenced; never expose these rows.
     preservationRows() {

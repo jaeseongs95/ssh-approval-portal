@@ -2,7 +2,7 @@ import { renderDecision, requestContext } from '../../ui/src/decision.js';
 
 // 목록 갱신은 선택한 요청의 읽기 영역과 부작용의 대상을 바꾸지 않는다.
 export function createRequestDetail({ document, i18n, bridgeName, targetName, targets, actions, policy, importNames, announce }) {
-  const { t, korean, locale, states, kinds } = i18n;
+  const { t, korean, locale, states, kinds, formatNumber } = i18n;
   const root = document.getElementById('request-detail'), body = document.getElementById('request-detail-body');
   if (!root || !body) return;
   const text = (parent, tag, value = '', className = '') => {
@@ -105,7 +105,7 @@ export function createRequestDetail({ document, i18n, bridgeName, targetName, ta
     saveFile.hidden = job.kind !== 'download' || job.state !== 'completed'; saveFile.disabled = !available;
     const stored = job.kind === 'command' && job.result?.structuredContent?.output;
     readOutput.hidden = !stored; readOutput.disabled = !available || !currentBinding || stored?.state !== 'ready' || outputBusy;
-    outputNote.textContent = stored ? (korean ? `저장된 실행 결과 · ${stored.bytes ?? 0}바이트 · ${stored.state}. 저장 상태와 읽기 권한은 다릅니다. 열 때 대상 활성화·설정·만료를 다시 확인합니다. 전체 SSH 출력의 완전성은 확인되지 않았습니다.` : `Stored result · ${stored.bytes ?? 0} bytes · ${stored.state}. Storage is separate from read access; opening rechecks target, revision and expiry. Complete SSH capture is not guaranteed.`) : job.kind === 'download' && job.state === 'completed' ? (korean ? '서버 파일 준비 완료. PC 저장이나 에이전트 수신은 아직 확인되지 않았습니다.' : 'Server file ready. Device save or agent receipt is not confirmed.') : '';
+    outputNote.textContent = stored ? (korean ? `저장된 실행 결과 · ${formatNumber(stored.bytes ?? 0)}바이트 · ${stored.state}. 저장 상태와 읽기 권한은 다릅니다. 열 때 대상 활성화·설정·만료를 다시 확인합니다. 전체 SSH 출력의 완전성은 확인되지 않았습니다.` : `Stored result · ${formatNumber(stored.bytes ?? 0)} B · ${stored.state}. Storage is separate from read access; opening rechecks target, revision and expiry. Complete SSH capture is not guaranteed.`) : job.kind === 'download' && job.state === 'completed' ? (korean ? '서버 파일 준비 완료. PC 저장이나 에이전트 수신은 아직 확인되지 않았습니다.' : 'Server file ready. Device save or agent receipt is not confirmed.') : '';
     if (stored?.id !== outputKey) {
       outputRead++; outputKey = stored?.id; outputPage = undefined; outputBusy = false; previousOffsets = []; output.textContent = ''; output.hidden = true; outputRange.textContent = '';
     }
@@ -133,8 +133,8 @@ export function createRequestDetail({ document, i18n, bridgeName, targetName, ta
       else if (direction === 'previous') previousOffsets.pop();
       else previousOffsets = [];
       outputPage = page; output.textContent = page.text; output.hidden = false; output.scrollTop = 0;
-      outputRange.textContent = `${page.offsetBytes}–${page.nextOffset} / ${page.totalBytes} bytes`;
-      announce(korean ? `실행 출력 ${page.offsetBytes}–${page.nextOffset}바이트를 불러왔습니다.` : `Execution output ${page.offsetBytes}–${page.nextOffset} bytes loaded.`);
+      outputRange.textContent = `${formatNumber(page.offsetBytes)}–${formatNumber(page.nextOffset)} / ${formatNumber(page.totalBytes)} ${korean ? '바이트' : 'B'}`;
+      announce(korean ? `실행 출력 ${formatNumber(page.offsetBytes)}–${formatNumber(page.nextOffset)}바이트를 불러왔습니다.` : `Execution output ${formatNumber(page.offsetBytes)}–${formatNumber(page.nextOffset)} B loaded.`);
       if (reading && [trigger, document.body].includes(document.activeElement)) output.focus();
     } catch {
       if (revision === epoch && read === outputRead) fail(korean ? '출력을 읽을 수 없습니다. 만료·연결·대상 상태를 확인하세요. 명령은 다시 실행하지 않습니다.' : 'Output unavailable. Check expiry, connection and target state; the command is not rerun.');

@@ -54,6 +54,8 @@ export function readLegacyOperationHistory(legacyRoot) {
 export function migrateLegacyOperations({ legacyRoot, archiveRoot, store, now = Date.now() }) {
   if (resolve(legacyRoot) === resolve(archiveRoot) || typeof store?.importLegacy !== 'function') fail('INVALID_MIGRATION_TARGET');
   const inventory = readLegacyOperationHistory(legacyRoot);
+  if (typeof store.preflightLegacyImports !== 'function') fail('INVALID_MIGRATION_TARGET');
+  store.preflightLegacyImports(inventory);
   mkdirSync(archiveRoot, { recursive: true, mode: 0o700 });
   if (!lstatSync(archiveRoot).isDirectory() || lstatSync(archiveRoot).isSymbolicLink()) fail('UNSAFE_LEGACY_ARCHIVE');
   const receipt = { type: 'portal.operation-migration.v1', at: now, sources: [], imported: 0, unknown: 0,

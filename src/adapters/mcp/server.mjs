@@ -17,11 +17,22 @@ export function createMcpAdapter({ queue, files, opaqueFiles, settings, capabili
     const server = new McpServer({ name: 'SSH Approval Portal', version: metadata.version }, {
       // Seven desktop-input members plus 128 pointer actions (one array slot + four members each).
       maxToolInputElements: 7 + 128 * 5,
-      instructions: 'Contract 2.0. Start with targets. Submit native JSON operations using a stable operationKey, then observe the same ID or key. Owner approval and server policy remain authoritative. Observe includes output only when includeOutput=true; its wait timeout does not stop execution. For local files, the packaged portal-files client reads and transmits bytes outside the model and returns a UUID; use files to copy or move that staged UUID to a target. One remote MCP connection is sufficient; a second local MCP server is optional. This remote server cannot read a path on the caller computer. Do not transcribe large file bytes into model tool arguments. For authorized bytes already available to the caller, artifact-begin/chunk/status/finish remain available; downloads use submit(kind=download)/artifact-read or the packaged client. Shell-based transfer is not categorically prohibited; exact encoding, escaping, approval and server policy still apply. Never expose credentials, self-approve, or replay an unknown outcome. show-* tools display optional owner UI cards. Only ui-* tools are private owner UI actions. Desktop support is available only when explicitly reported and connected.',
+      instructions: 'Contract 2.0. Start with targets; use stable operationKey and exact target revision. submit accepts work; observe defaults to immediate status. A configured native completion hook automatically observes the same operation after submit/observe; continue independent work without starting another watcher. On the hook body, handle its same operation ID and ACK the exact receipt/claim. Installed/registered, watcher started and wake requested are not receipt evidence. Without native hook support, immediate observe and the packaged background watch remain explicit fallback paths. The packaged portal-files client transmits PC bytes outside the model and returns a UUID. One remote MCP connection is sufficient; local file MCP is optional. The remote server cannot read PC paths. Do not transcribe large file bytes into model arguments. Preserve IDs after uncertainty; never replay unknown outcomes, expose credentials or self-approve. show-* is optional owner UI; private ui-* is not for agents. GUI leases support agent interaction within advertised capabilities.',
     });
     registerPublicTools(server, { operations, files, opaqueFiles, settings, targets, shutdownSignal, requestSignal, admission, desktop });
     server.registerResource('SSH approval card', URI, { mimeType: 'text/html;profile=mcp-app' }, async () => ({ contents: [{ uri: URI, mimeType: 'text/html;profile=mcp-app', text: uiHtml, _meta: { ui: { csp: { connectDomains: [], resourceDomains: [] }, prefersBorder: true } } }] }));
-    const tool = (name, schema, outputSchema, handler, { description = name, readOnly = false, appOnly = false } = {}) => server.registerTool(name, {
+    const toolDescriptions = {
+  "show-ui-probe": "Show an optional owner UI probe. Text reports availability, not proof that the host rendered a card.",
+  "show-approval": "Show the owner approval card for an existing request id. Displaying a card never approves or executes it.",
+  "show-file-transfer": "Show an owner file picker/download card for target and remotePath. Without card rendering, use packaged portal-files for PC bytes. This tool cannot read PC paths.",
+  "ui-decide-request": "Owner UI only: approve/deny the original request with its bound ticket. Agents must not self-approve.",
+  "ui-upload-begin": "Owner UI only: reserve the selected upload with its ticket, size and SHA-256.",
+  "ui-upload-chunk": "Owner UI only: append the next upload chunk using its ticket and sequence.",
+  "ui-upload-finish": "Owner UI only: verify and submit that upload; inspect its request for publication.",
+  "ui-download-link": "Owner UI only: get the authorized download link in private metadata.",
+  "ui-read-command-output": "Owner UI only: read a bounded output page for the original approval card, in private metadata."
+};
+    const tool = (name, schema, outputSchema, handler, { description = toolDescriptions[name], readOnly = false, appOnly = false } = {}) => server.registerTool(name, {
       description, inputSchema: z.object(schema).strict(), outputSchema,
       annotations: { readOnlyHint: readOnly, destructiveHint: !readOnly },
       _meta: { ui: appOnly ? { visibility: ['app'] } : { resourceUri: URI, visibility: ['model', 'app'] } },

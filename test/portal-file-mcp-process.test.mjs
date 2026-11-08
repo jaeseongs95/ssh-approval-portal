@@ -32,12 +32,12 @@ async function fixture(t){
 }
 test('native SDK exposes strict opaque schemas and refuses additional authority without effects',{timeout:20000},async t=>{
  const f=await fixture(t),p=await f.connect(),listed=await p.c.listTools();
- assert.equal(listed.tools.length,6);
+ assert.equal(listed.tools.length,7);
  const caps=await p.call('file_capabilities');assert.equal(caps.structuredContent.capabilities[0].capabilityId,capabilityId);assert.equal(JSON.stringify(caps).includes('PRIVATE-'),false);
  for(const bad of [{...args,path:f.cap.source},{...args,origin:'https://other.invalid'},{...args,approve:true},{capabilityId:'f'.repeat(48)}]){
   const r=await p.call('file_upload',bad).catch(()=>({isError:true}));assert.equal((await f.effects()).filter(x=>x.effect==='upload').length,0,'Rejected extra arguments must not start a file mutation');assert.equal(r.isError,true);
  }
- for(const tool of listed.tools){assert.equal(tool.inputSchema.additionalProperties,false);assert.deepEqual(Object.keys(tool.inputSchema.properties),tool.name==='file_capabilities'?[]:['capabilityId']);}
+ for(const tool of listed.tools){assert.equal(tool.inputSchema.additionalProperties,false);assert.deepEqual(Object.keys(tool.inputSchema.properties),['file_capabilities','file_runtime'].includes(tool.name)?[]:['capabilityId']);}
  assert.deepEqual(await f.effects(),[]);assert.deepEqual(await readdir(f.journal),[]);await p.close();
 });
 test('fresh native processes race one durable initial claim and observe after restart',{timeout:20000},async t=>{

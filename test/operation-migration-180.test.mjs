@@ -54,7 +54,7 @@ test('migration retains exact history/policies and source bytes, archives readon
   } finally { store.close(); }
 });
 
-test('legacy global request-key collisions fail explicitly without overwriting either original journal', async t => {
+test('legacy global request-key collisions fail before adding canonical rows or changing original journals', async t => {
   const { root, dataRoot } = await fixture(t), requestKey = 'shared-original-request-key';
   const firstPath = join(dataRoot, 'command-automation.sqlite'), secondPath = join(dataRoot, 'agent-cli.sqlite');
   legacy(firstPath, [{ id: 'a'.repeat(48), requestKey, state: 'completed', createdAt: 10 }]);
@@ -62,7 +62,8 @@ test('legacy global request-key collisions fail explicitly without overwriting e
   const firstBytes = await readFile(firstPath), secondBytes = await readFile(secondPath), store = createOperationStore(dataRoot);
   try {
     assert.throws(() => migrateLegacyOperations({ legacyRoot: dataRoot, archiveRoot: join(root, 'archive'), store }), { code: 'OPERATION_KEY_CONFLICT' });
-    assert.equal(store.find(requestKey).job.id, 'a'.repeat(48));
+    assert.equal(store.find(requestKey), null);
+    assert.equal(store.get('a'.repeat(48)), null);
     assert.equal(store.get('b'.repeat(48)), null);
     assert.deepEqual(await readFile(firstPath), firstBytes); assert.deepEqual(await readFile(secondPath), secondBytes);
   } finally { store.close(); }

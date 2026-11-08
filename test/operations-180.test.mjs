@@ -74,6 +74,17 @@ test('parallel same-key submissions share one durable identity and one approval/
   assert.equal((await f.operations.submit(input())).id, one.id); assert.equal(f.admissions.length, 1);
 });
 
+test('observation rechecks target revision after waiting before delivering the state', { timeout: 5000 }, async t => {
+  const f = fixture(t, { beforeExecute: execution => execution.promise }), entered = Promise.withResolvers(), gate = Promise.withResolvers();
+  const record = await f.operations.submit(input('observe-revision-after-wait'));
+  const current = f.journal.get(record.id);
+  // Hold the actual application wait boundary independently from execution.
+  f.scheduler.observe = async () => { entered.resolve(); await gate.promise; return current; };
+  const waiting = f.operations.observe({ id: record.id, waitMs: 1000 });
+  await entered.promise; f.target.revision = 'c'.repeat(64); gate.resolve();
+  await assert.rejects(waiting, { code: 'TARGET_REVISION_CONFLICT' });
+});
+
 test('an in-flight key rejects changed bytes before the second port call while independent keys progress', { timeout: 5000 }, async t => {
   const gate = Promise.withResolvers(), firstKey = 'blocked-operation-0001';
   const f = fixture(t, { beforeAdmission: key => key === firstKey ? gate.promise : undefined });
@@ -151,4 +162,23 @@ test('cancellation targets the original operation and never submits a replacemen
   assert.equal(f.effects[0].signal.aborted, true); assert.equal(f.admissions.length, 1);
   f.executions[0].resolve(); await tick();
   assert.equal(f.journal.usage().count, 1); assert.equal(f.effects.length, 1);
+});
+
+
+// OBS01: default observe returns before held execution; an independent timer detects blocking.
+test('default observe returns running state without waiting for held execution', { timeout: 5000 }, async t => {
+  const f = fixture(t, { beforeExecute: execution => execution.promise });
+  const record = await f.operations.submit(input('observe-default-immediate-230'));
+  await tick();
+  assert.equal(f.executions.length, 1);
+  let timeout;
+  try {
+    const result = await Promise.race([
+      f.operations.observe({ id: record.id }),
+      new Promise((_, reject) => { timeout = setTimeout(() => reject(Error('observe blocked on execution')), 1000); }),
+    ]);
+    assert.equal(result.job.id, record.id);
+    assert.equal(result.job.state, 'running');
+    assert.equal(f.effects.length, 1);
+  } finally { clearTimeout(timeout); f.executions[0].resolve(); }
 });

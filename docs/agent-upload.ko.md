@@ -148,7 +148,11 @@ node scripts/portal-file-mcp.mjs --manifest 절대설정경로 --journal 기존�
 
 이 명령을 로컬 MCP 클라이언트의 stdio 서버로 등록합니다. 인증은 기존 cloudflared 로그인 캐시를 공식 실행 파일로 조회하며, 토큰을 모델·명령 인수·로그에 전달하지 않습니다. 새 로그인이나 관리자 승인을 자동으로 수행하지 않습니다. 도구 호출마다 별도 관리자 앱 세션을 열고 닫으며 파일 의도의 만료 시각으로 네트워크 deadline을 제한합니다.
 
-도구는 `file_capabilities`, `file_upload`, `file_download_request`, `file_status`, `file_upload_resume`, `file_save`입니다. 목록 조회는 빈 객체를, 나머지는 `{"capabilityId":"고정된48자ID"}`만 받습니다. 추가 인수는 거절합니다. 승인 대기 `pending`, 서버 준비 `prepared`, 검증된 PC 저장 `saved`는 서로 다릅니다.
+`file_runtime({})`은 현재 stdio MCP의 제품·Node 버전과 시작 시 읽은 프로그램 파일 SHA-256을 반환합니다. 파일 경로·인증·journal 본문을 반환하거나 네트워크 작업을 실행하지 않습니다. `sourceObservation: startup-files`는 시작 시 디스크 파일 관측이며 서명된 실행 코드 증명은 아닙니다. 별도 `portal-files doctor`의 성공으로 이 프로세스까지 검증됐다고 판단하지 마세요.
+
+파일 도구는 `file_capabilities`, `file_upload`, `file_download_request`, `file_status`, `file_upload_resume`, `file_save`입니다. 목록·실행본 조회는 빈 객체를, 나머지는 `{"capabilityId":"고정된48자ID"}`만 받습니다. 추가 인수는 거절합니다. 승인 대기 `pending`, 서버 준비 `prepared`, 검증된 PC 저장 `saved`는 서로 다릅니다.
+
+명시적 `--agent-uploads` 모드에서는 `file_upload_select`로 일반 파일과 대상 경로를 선택한 뒤 반환 ID를 `file_upload`에 사용합니다. 선택은 전송이 아닙니다. 거절 응답의 `error`와 `stage`를 함께 확인하세요. 예를 들어 `CAPABILITY_LOCAL_NOT_FOUND/local-snapshot`은 로컬 파일·임시 저장 경로, `INVALID_FILE_MANIFEST/capability-load`는 선택 기록의 형식, `PORTAL_READ_FAILED/target-query`는 대상 조회 실패를 구분합니다. 알려지지 않은 원인은 일반 코드로 보존하되 예외 원문·경로·토큰을 반영하지 않습니다. 한 파일 총량은 64MiB이며 청크 분할이 이 상한을 늘리지는 않습니다. 실패·불명 기록을 지우거나 새 ID로 자동 재전송하지 마세요.
 
 시작 기록은 원격 파일 작업 전에 배타 생성·동기화됩니다. 알려진 전송·요청 ID와 성공 저장 영수증은 별도 기록합니다. 프로세스 재시작이나 응답 유실은 새 작업을 시작할 권한이 아닙니다. 전송 ID가 알려져 있으면 `file_upload_resume`으로 같은 바이트·대상·경로만 명시적으로 재개할 수 있습니다. ID를 받지 못한 `unknown`은 새 업로드로 자동 대체하지 않습니다.
 
