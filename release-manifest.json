@@ -2825,8 +2825,8 @@
     },
     {
       "path": "web/dist/app.js",
-      "size": 350121,
-      "sha256": "2b69b969ac99d36e65e7b1bbd4d48618e1d84e2c45ed81499cfbde0ea066bdf4"
+      "size": 350146,
+      "sha256": "7772ff3067b938ff37698184778ded1254626c4dc2041a6d08d1038fba93ca1d"
     },
     {
       "path": "web/index.html",
@@ -2870,8 +2870,8 @@
     },
     {
       "path": "web/src/desktop.js",
-      "size": 24821,
-      "sha256": "40b577d45594aa267b0e6c0000f6e7d57e631d183f632bc67b8326f68114c2ed"
+      "size": 24851,
+      "sha256": "0201ee98246f8c837ffb018aced11e229aa86cae340ac034619c360b4f663064"
     },
     {
       "path": "web/src/environment.js",

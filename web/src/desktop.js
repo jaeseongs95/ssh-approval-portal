@@ -149,7 +149,7 @@ export function createDesktopPanel({ document, api, getTarget, i18n, isSignedOut
       if (token !== generation) return;
       showReadiness(value.readiness);
       if (value.mimeType !== 'image/png' || !Number.isSafeInteger(value.width) || value.width < 1 || !Number.isSafeInteger(value.height) || value.height < 1 || !Number.isSafeInteger(value.nextInputSequence) || value.nextInputSequence < 1 || typeof value.frameId !== 'string' || typeof value.data !== 'string' || !/^[A-Za-z0-9+/=]+$/.test(value.data)) throw Error(t('화면을 읽을 수 없습니다.'));
-      pendingFrame = value; frame = undefined; image.hidden = false; image.src = 'data:image/png;base64,' + value.data;
+      pendingFrame = value; frame = undefined; image.hidden = false; image.removeAttribute('src'); image.src = 'data:image/png;base64,' + value.data;
     } catch (failure) { if (token === generation) { uncertain = true; error.textContent = uiText(t(failure.message), document); } }
     finally { settled(); }
   }
