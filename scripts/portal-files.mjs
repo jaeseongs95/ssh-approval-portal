@@ -103,7 +103,7 @@ export async function main(argv = process.argv.slice(2), output = process.stdout
     }
     if (command === 'doctor') {
       result = await diagnose({ origin: values.origin, cloudflared: values.cloudflared, env: environment, runCredential });
-      if (result.state === 'ready') result.next = 'Use portal-files upload --file ABSOLUTE_FILE --operation-key STABLE_KEY and pass the returned UUID to the existing remote MCP files tool. In hosts with configured native completion hooks (Codex, Claude Code), calling MCP observe starts background completion watching automatically without running portal-files watch manually. In hosts without completion hooks, launch portal-files watch REQUEST_ID through the host background-process facility, continue independent work, and consume its completion. Preserve IDs and keys after unknown outcomes; never create replacements.';
+      if (result.state === 'ready') result.next = 'Use portal-files upload --file ABSOLUTE_FILE --operation-key STABLE_KEY and pass the returned UUID to the existing remote MCP files tool. In hosts with configured native completion hooks (Codex, Claude Code, Antigravity), calling MCP submit/observe starts background completion watching automatically without running portal-files watch manually. In hosts without completion hooks, launch portal-files watch REQUEST_ID through the host background-process facility, continue independent work, and consume its completion. Preserve IDs and keys after unknown outcomes; never create replacements.';
       output.write(JSON.stringify(result) + '\n');
       return result.state === 'ready' ? 0 : 1;
     }

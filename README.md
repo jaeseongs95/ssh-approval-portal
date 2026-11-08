@@ -99,7 +99,7 @@ node @portalFiles doctor
 node @portalFiles upload --file 'C:/work/package.tar.gz' --operation-key 'package-upload-0001'
 ```
 
-In hosts with configured native completion hooks (Codex, Claude Code), calling `observe` automatically connects background completion watching without running `watch` manually. In hosts without completion hooks, run `node @portalFiles watch REQUEST_ID` through your agent host's background-process tool to keep working while SSH runs. The existing client waits outside the model and prints one terminal event. Completion delivery and automatic resumption depend on the host; see [client completion guidance](docs/client-files.ko.md#작업-완료를-모델-밖에서-기다리기).
+In hosts with configured native completion hooks, `submit` and `observe` automatically connect background completion watching without running `watch` manually. In hosts without completion hooks, run `node @portalFiles watch REQUEST_ID` through your agent host's background-process tool to keep working while SSH runs. The existing client waits outside the model and prints one terminal event. Completion delivery and automatic resumption depend on the host; see [client completion guidance](docs/client-files.ko.md#작업-완료를-모델-밖에서-기다리기).
 
 `doctor` diagnoses the existing runtime, authentication and connection. It does not log in, upload a file, approve a request or execute SSH commands. Upload success prints one JSON object:
 

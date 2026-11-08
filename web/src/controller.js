@@ -42,7 +42,6 @@ export function createWebController({ state, view, api, document, location, time
       const matches = uncertainDecision ? jobs.filter(job => job.id === uncertainDecision) : [];
       if (matches.length === 1 && ['queued', 'running', 'completed', 'failed', 'denied', 'expired', 'unknown'].includes(matches[0].state)) uncertainDecision = undefined;
       latestJobs = jobs; view.render(jobs, state.deciding || !!uncertainDecision); view.connected(); view.error(uncertainDecision ? uncertainMessage() : '');
-      if (!versionChecked) void checkVersion(false);
       if (document.body?.dataset.page === 'history') loadHistory();
     } catch (error) {
       if (!state.signedOut && token === generation && !read.signal.aborted && current(context)) {

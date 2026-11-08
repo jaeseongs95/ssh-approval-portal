@@ -117,16 +117,6 @@ export async function autoWatchCompletion({ host, input, inboxPath, configPath, 
       }
       return { state: 'settled', ...selected };
     }
-    if (!isObserve) {
-      if (typeof inbox.deferWatch === 'function') {
-        const deferred = inbox.deferWatch({ bindingId: binding.bindingId, origin: route.origin, operationKey, payload: selected });
-        if (deferred?.settled) return { state: 'settled', ...selected };
-      }
-      return { state: 'deferred', ...selected };
-    }
-    if (typeof inbox.consumeDeferredWatches === 'function') {
-      inbox.consumeDeferredWatches({ bindingId: binding.bindingId, operationKey });
-    }
     const fingerprint = createHash('sha256').update(JSON.stringify([binding.bindingId, route.origin, operationKey])).digest('hex');
     lease = inbox.acquireWatch({ bindingId: binding.bindingId, watchKey: fingerprint });
     if (!lease.acquired) return { state: 'duplicate', ...selected };

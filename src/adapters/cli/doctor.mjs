@@ -33,7 +33,7 @@ export async function diagnoseClient({ origin, cloudflared, env = process.env, r
     result.targets = listed.targets.map(({ id, enabled }) => ({ id, enabled }));
     result.checks.push({ stage, state: 'readable' });
     result.state = 'ready';
-    result.next = 'Use portal-files upload --file LOCAL_ABSOLUTE_PATH --operation-key STABLE_KEY and pass the returned UUID to the remote MCP files tool, or inspect an existing UUID with status UUID. Pending requests require owner approval; never automatically resubmit unknown or failed operations.';
+    result.next = 'Use portal-files upload --file ABSOLUTE_FILE --operation-key STABLE_KEY and pass the returned UUID to the existing remote MCP files tool. In hosts with configured native completion hooks (Codex, Claude Code, Antigravity), calling MCP submit/observe starts background completion watching automatically without running portal-files watch manually. In hosts without completion hooks, launch portal-files watch REQUEST_ID through the host background-process facility, continue independent work, and consume its completion. Preserve IDs and keys after unknown outcomes; never create replacements.';
   } catch (error) {
     const code = error.code === 'UNSUPPORTED_NODE_VERSION' || publicCodes.has(error.code) ? error.code : 'DIAGNOSTIC_FAILED';
     result.checks.push({ stage, state: 'blocked', error: code });

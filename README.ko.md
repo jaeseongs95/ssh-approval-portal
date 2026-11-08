@@ -99,7 +99,7 @@ node @portalFiles doctor
 node @portalFiles upload --file 'C:/work/package.tar.gz' --operation-key 'package-upload-0001'
 ```
 
-네이티브 완료 훅이 구성된 호스트(Codex, Claude Code)에서는 `observe`를 호출하면 완료 훅이 백그라운드 감시를 자동으로 연결하므로 수동으로 `watch`를 실행할 필요가 없습니다. 완료 훅이 없는 호스트에서 SSH 실행 중 다른 작업을 하려면 호스트의 백그라운드 실행 도구로 `node @portalFiles watch REQUEST_ID`를 시작합니다. 기존 클라이언트가 모델 밖에서 대기하고 종료 이벤트 한 줄을 반환합니다. 완료 통지·자동 재개는 호스트별 지원을 확인해야 합니다. [클라이언트 완료 관찰 안내](docs/client-files.ko.md#작업-완료를-모델-밖에서-기다리기)를 참고하세요.
+네이티브 완료 훅이 구성된 호스트에서는 `submit`·`observe`가 백그라운드 감시를 자동으로 연결하므로 수동으로 `watch`를 실행할 필요가 없습니다. 완료 훅이 없는 호스트에서 SSH 실행 중 다른 작업을 하려면 호스트의 백그라운드 실행 도구로 `node @portalFiles watch REQUEST_ID`를 시작합니다. 기존 클라이언트가 모델 밖에서 대기하고 종료 이벤트 한 줄을 반환합니다. 완료 통지·자동 재개는 호스트별 지원을 확인해야 합니다. [클라이언트 완료 관찰 안내](docs/client-files.ko.md#작업-완료를-모델-밖에서-기다리기)를 참고하세요.
 
 `doctor`는 기존 실행 환경·인증·연결을 진단합니다. 로그인, 파일 업로드, 승인, SSH 명령 실행을 하지 않습니다. 업로드가 성공하면 JSON 객체 하나를 출력합니다.
 

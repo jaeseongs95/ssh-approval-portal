@@ -25,13 +25,13 @@
     },
     {
       "path": "README.ko.md",
-      "size": 22385,
-      "sha256": "dec584fc862ab5168a737adff008e646bc99e026ba75fc6fc34b12063fe65dd3"
+      "size": 22348,
+      "sha256": "3bc146740113bb928e6e1a094263e4ff176a6667deca594d5c22a5dd74784255"
     },
     {
       "path": "README.md",
-      "size": 20272,
-      "sha256": "da2996b30b7c4622c8f99cd6e8ce4974c03e095d5ab4f2e99cd743758a340004"
+      "size": 20255,
+      "sha256": "2501a632e0661920494f8af9469c879ca4e46fc6cc8f0fe2f559e329d6a7e3cd"
     },
     {
       "path": "THIRD_PARTY_NOTICES.json",
@@ -640,8 +640,8 @@
     },
     {
       "path": "scripts/portal-files.mjs",
-      "size": 14488,
-      "sha256": "3cf4a96ff31b87f21283766c4fd55c6e09f071d9f58d18c0d160114702fe1fe0"
+      "size": 14508,
+      "sha256": "e081dc898b3b90763233bc3a2ed5d93970a7b5adec3ea690ed83b0564d6d7028"
     },
     {
       "path": "scripts/portal.py",
@@ -755,8 +755,8 @@
     },
     {
       "path": "src/adapters/cli/completion-auto-watch.mjs",
-      "size": 9606,
-      "sha256": "875d826729ca7948a80da375aa03ae196be748122200828bce4da922937c08d1"
+      "size": 9112,
+      "sha256": "3eb08e9d03dec839dfb16d7dbadff448348ab23d145256a720aedc27daf909da"
     },
     {
       "path": "src/adapters/cli/completion-delivery.mjs",
@@ -770,13 +770,13 @@
     },
     {
       "path": "src/adapters/cli/completion-hook.mjs",
-      "size": 14770,
-      "sha256": "3d27526a399325818e233911d5572ad749bab00dc469ca60126a2ae94a80868c"
+      "size": 14709,
+      "sha256": "2442377d2a6cdadae7d3c3f5fa6cbbe251eef22599cdc2d23c201b6fbfd44a99"
     },
     {
       "path": "src/adapters/cli/completion-inbox.mjs",
-      "size": 27136,
-      "sha256": "c4f41b6142b1f954a9e0c58a38edf0d939ea4cf47542f186e2034dc0ce858d95"
+      "size": 23432,
+      "sha256": "7c7735faebc217b0c0cc35ff8375012ee3bafb1bc4b60bd17357cc604f2c3bbf"
     },
     {
       "path": "src/adapters/cli/completion-wake.mjs",
@@ -785,8 +785,8 @@
     },
     {
       "path": "src/adapters/cli/doctor.mjs",
-      "size": 4152,
-      "sha256": "08fc8b11850154d9608763beb4677f64d1ea52f9ae497604d3b681e401fd60bb"
+      "size": 4463,
+      "sha256": "fd1db3881a9dc6abb4241f7bee56c16086901f2350218412476d75c9ec1b51f0"
     },
     {
       "path": "src/adapters/cli/file-forwarder.mjs",
@@ -920,13 +920,13 @@
     },
     {
       "path": "src/adapters/mcp/public-contract.mjs",
-      "size": 31561,
-      "sha256": "794bce79c1ee2de8d702b53c248f68df64797f597aff69ecf38385a9c462d0e6"
+      "size": 31456,
+      "sha256": "8647ea2c8d997193af49f2e4c09a31d5a12c2f4a45a1b01b98c7f2350ebfa2a3"
     },
     {
       "path": "src/adapters/mcp/server.mjs",
-      "size": 10032,
-      "sha256": "0616a0ec2471b2cb30dcace3ef6863f3657ba67e14edae3c4f4084576c8cad86"
+      "size": 10039,
+      "sha256": "e8f376be54b3542ab187da305ee3d11764f7e4f0c83e7dfe5a9a9c512a341057"
     },
     {
       "path": "src/adapters/presentation/capabilities.mjs",
@@ -1665,13 +1665,13 @@
     },
     {
       "path": "test/completion-auto-watch.test.mjs",
-      "size": 26627,
-      "sha256": "a7a1763abe409e9fd0f09164c9e81180de3162c55c7111d6072f3b6ce51cbc0a"
+      "size": 24238,
+      "sha256": "760ebafa7cf1c24d941fda1ecebc0d47a0704ee36888956662c59eaf84ccaa6f"
     },
     {
       "path": "test/completion-hook.test.mjs",
-      "size": 33619,
-      "sha256": "28b39ecb9945518d26806a4258b10c6d78435e072c41882d3ad66b68784adca3"
+      "size": 33506,
+      "sha256": "58e322097fd408653602eb4b9bac1e7416d27c838a5e0644b1b61f289df7bdc5"
     },
     {
       "path": "test/completion-inbox.test.mjs",
@@ -2825,8 +2825,8 @@
     },
     {
       "path": "web/dist/app.js",
-      "size": 350544,
-      "sha256": "57d44f9c6060190b58e02667429c5a9892751f3de3bbf464e1b3ce7657e45fef"
+      "size": 350535,
+      "sha256": "8155b33f65cc2c6c8a2b9b9fa817c1cee3076d91d5478a89feb96e6d0b3f8bca"
     },
     {
       "path": "web/index.html",
@@ -2865,8 +2865,8 @@
     },
     {
       "path": "web/src/controller.js",
-      "size": 8667,
-      "sha256": "818ac7632970de0cdc156f1223db036fe02282f63c39b5b7f34e529e8b5e19a1"
+      "size": 8614,
+      "sha256": "5e1ece6ddc37f1f1708d74a79ffa5f6d25f3f8313a1b534c5dc01768bdd10c58"
     },
     {
       "path": "web/src/desktop.js",

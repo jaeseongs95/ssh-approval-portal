@@ -53,7 +53,7 @@ export function renderCompletionContext({ host, sessionId, inboxPath }, messages
 }
 
 export function renderCompletionHookOutput({ host, event }, context) {
-  if (event === 'Stop') return { decision: 'continue', reason: context };
+  if (event === 'Stop') return host === 'antigravity' ? { decision: 'continue', reason: context } : { decision: 'block', reason: context };
   if (host === 'antigravity') return { injectSteps: [{ systemMessage: { systemMessage: context } }] };
   return { hookSpecificOutput: { hookEventName: event, additionalContext: context } };
 }
@@ -144,7 +144,7 @@ export function acknowledgeCompletion({ host, sessionId, receiptId, claimToken, 
 
 const hookUsage = 'portal-files [hook|ack] [--host codex|claude-code|antigravity|generic] [--inbox ABSOLUTE_DB]\n' +
   'Hooks read native JSON from stdin. ack requires --receipt UUID --claim UUID (and optionally --host HOST --session SESSION).\n' +
-  'AsyncRewake hooks use --wait [--wait-timeout-ms 86340000]; pending metadata goes to stdout JSON with exit 0. Waiting is bounded to less than 24 hours.\n';
+  'AsyncRewake hooks use --wait [--wait-timeout-ms 86340000]; pending metadata goes to stderr with exit 2. Waiting is bounded to less than 24 hours.\n';
 
 async function readHookInput(input) {
   let bytes = 0; const chunks = [];
@@ -190,6 +190,7 @@ export async function runCompletionHookCli(argv = process.argv.slice(2), input =
     const resolvedHost = ack ? values.host : detectCompletionHost(native, values.host);
     let hookResult;
     if (!ack) {
+      if (!wait) hookResult = runCompletionHook({ host: resolvedHost, input: native, inboxPath: values.inbox, environment }, services);
       if (services.autoWatch) {
         try {
           await services.autoWatch({ host: resolvedHost, input: native, inboxPath: values.inbox,
@@ -199,7 +200,6 @@ export async function runCompletionHookCli(argv = process.argv.slice(2), input =
           errorOutput.write(JSON.stringify({ error: code, automaticRetry: false }) + '\n');
         }
       }
-      if (!wait) hookResult = runCompletionHook({ host: resolvedHost, input: native, inboxPath: values.inbox, environment }, services);
     }
     if (wait) {
       const abort = new AbortController();
@@ -208,10 +208,7 @@ export async function runCompletionHookCli(argv = process.argv.slice(2), input =
       try {
         const result = await waitForCompletionHook({ host: resolvedHost, input: native, inboxPath: values.inbox, environment,
           timeoutMs: Number(values['wait-timeout-ms'] ?? completionWaitTimeoutMs), signal: abort.signal }, services);
-        if (result.context) {
-          output.write(JSON.stringify(renderCompletionHookOutput({ host: resolvedHost, event: native.hook_event_name }, result.context)) + '\n');
-          return 0;
-        }
+        if (result.context) { errorOutput.write(result.context + '\n'); return 2; }
         return 0;
       } finally { process.removeListener('SIGINT', stop); process.removeListener('SIGTERM', stop); }
     }
