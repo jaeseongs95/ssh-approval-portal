@@ -16,6 +16,7 @@ const key = value => typeof value === 'string' && /^[A-Za-z0-9_.:-]{16,128}(?![\
 const revision = value => typeof value === 'string' && /^[a-f0-9]{64}(?![\s\S])/.test(value);
 const target = value => typeof value === 'string' && /^[a-z][a-z0-9_-]{0,31}(?![\s\S])/.test(value);
 const states = new Set(['accepted', 'pending', 'evaluating', 'queued', 'starting', 'running', 'terminating', 'completed', 'failed', 'cancelled', 'denied', 'expired', 'unknown']);
+const terminalStates = new Set(['completed', 'failed', 'cancelled', 'denied', 'expired']);
 const ignored = () => ({ state: 'ignored' });
 function json(value) {
   if (object(value)) return value;
@@ -93,6 +94,17 @@ export async function autoWatchCompletion({ host, input, inboxPath, configPath, 
         !object(data) || !id(data.id) || !states.has(data.state) || !target(data.targetId) || !revision(data.targetRevision)) return ignored();
     selected = { operationId: data.id, ...(key(data.operationKey) ? { operationKey: data.operationKey } : {}),
       targetId: data.targetId, targetRevision: data.targetRevision };
+    if (terminalStates.has(data.state)) {
+      const location = inboxPath ?? defaultCompletionInboxPath(environment);
+      const binding = validateCompletionDeliveryTarget({ host, sessionId: observation.sessionId, inboxPath: location, environment });
+      const inbox = openInbox({ filePath: location });
+      try {
+        if (selected.operationId && typeof inbox.acknowledgeOperation === 'function') {
+          inbox.acknowledgeOperation({ bindingId: binding.bindingId, operationId: selected.operationId });
+        }
+      } finally { inbox.close(); }
+      return { state: 'settled', ...selected };
+    }
   }
   const location = inboxPath ?? defaultCompletionInboxPath(environment);
   const binding = validateCompletionDeliveryTarget({ host, sessionId: observation.sessionId, inboxPath: location, environment });

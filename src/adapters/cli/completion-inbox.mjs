@@ -345,6 +345,22 @@ export function openCompletionInbox(options = {}) {
         });
       });
     },
+    acknowledgeOperation(input = {}) {
+      return call(() => {
+        const { bindingId, operationId } = argumentsObject(input);
+        identifier(bindingId);
+        if (typeof operationId !== 'string' || !/^[a-f0-9]{48}(?![\s\S])/.test(operationId)) throw fail('COMPLETION_INBOX_INVALID_OPERATION');
+        return transaction(() => {
+          binding(bindingId);
+          const autoToken = randomUUID();
+          const updated = db.prepare(`UPDATE completion_events SET state = 'acknowledged',
+            claim_token = coalesce(claim_token, ?), lease_until = NULL, attempt = max(attempt, 1)
+            WHERE binding_id = ? AND operation_id = ? AND state != 'acknowledged'`)
+            .run(autoToken, bindingId, operationId);
+          return { acknowledged: updated.changes > 0, count: updated.changes };
+        });
+      });
+    },
     pending(input = {}) {
       return call(() => {
         const { bindingId } = argumentsObject(input);

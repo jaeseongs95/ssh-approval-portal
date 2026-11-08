@@ -351,3 +351,20 @@ for (const host of ['codex', 'claude-code', 'antigravity']) {
     assert.deepEqual(JSON.parse(stdout), {});
   });
 }
+
+test('AW17 observe response in terminal state does not spawn a watcher and auto-acknowledges inbox receipt', async t => {
+  const f = await fixture(t);
+  const binding = f.db(inbox => inbox.findBinding({ host: 'codex', sessionId: sessionA }));
+  const enqueued = f.db(inbox => inbox.enqueue({ bindingId: binding.bindingId, origin,
+    event: { event: 'operation.finished', id, state: 'completed', targetId: 'default', targetRevision: revision, finishedAt: 1000, failed: false,
+      auditFailure: false, failureCode: null, exitCode: 0, reason: 'exit', remoteOutcome: 'completed', outputState: 'ready' } }));
+  assert.equal(enqueued.state, 'pending');
+  assert.deepEqual(f.db(inbox => inbox.pending({ bindingId: binding.bindingId })), { pending: 1, claimed: 0, acknowledged: 0 });
+
+  const result = await f.run(native({ tool_name: 'mcp__ssh_test_observe', tool_input: { id },
+    tool_response: { structuredContent: envelope({ data: operation({ state: 'completed' }) }) } }));
+  assert.equal(result.state, 'settled');
+  assert.equal(f.calls.length, 0, 'terminal observe must never spawn a watcher');
+
+  assert.deepEqual(f.db(inbox => inbox.pending({ bindingId: binding.bindingId })), { pending: 0, claimed: 0, acknowledged: 1 });
+});

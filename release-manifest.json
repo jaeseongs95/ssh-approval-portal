@@ -755,8 +755,8 @@
     },
     {
       "path": "src/adapters/cli/completion-auto-watch.mjs",
-      "size": 7905,
-      "sha256": "937bfd758d1b6202550983e7c1ce1929ef3795befd9442873f74d5f4a4e77689"
+      "size": 8610,
+      "sha256": "a9a8fb86e3f40c2db2a649cce1731dd686dc7259eac2aef6952a7edc5bb95d55"
     },
     {
       "path": "src/adapters/cli/completion-delivery.mjs",
@@ -770,13 +770,13 @@
     },
     {
       "path": "src/adapters/cli/completion-hook.mjs",
-      "size": 12941,
-      "sha256": "d328e16d8afabd494de90357acef8826aac7402a0ef39ce61835960ddc68a4c5"
+      "size": 12984,
+      "sha256": "0d447f67b7fb71a61f006116681826e708f7bacf11c8c6f22a092974bf7c6eb6"
     },
     {
       "path": "src/adapters/cli/completion-inbox.mjs",
-      "size": 19964,
-      "sha256": "7d2c06974d8094f7d88c99c49e2bd4aaee8cd3617657ad4c52f616ffe666d425"
+      "size": 20812,
+      "sha256": "d2bfd304f52adae9cb8c123acfb65b77b4c27d1e79e84c8609fb4fe2730ad47f"
     },
     {
       "path": "src/adapters/cli/completion-wake.mjs",
@@ -1665,8 +1665,8 @@
     },
     {
       "path": "test/completion-auto-watch.test.mjs",
-      "size": 21171,
-      "sha256": "2ff78b9ce6ae31a3ad1977ac5a4174d3811c365ac08b272776f00d1d0b51a9d5"
+      "size": 22405,
+      "sha256": "197e1a858226a760744e32078c3dc54e35037dcc37407aea2f3c46e1088a2338"
     },
     {
       "path": "test/completion-hook.test.mjs",
