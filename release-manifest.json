@@ -1,6 +1,6 @@
 {
   "version": "2.4.0",
-  "status": "candidate-pending-live-host-verification",
+  "status": "release",
   "runtime": "Node.js 24",
   "files": [
     {
@@ -305,8 +305,8 @@
     },
     {
       "path": "hooks/claude-code.json",
-      "size": 1378,
-      "sha256": "1c87d170a611d4eb51d2ddee296562d8d088d0deebd3996aa94bab80d671945c"
+      "size": 1329,
+      "sha256": "575cd67b56cb7ae4cd2c58aa64e0a8af5860ff1728e84a1cd13163603a0f083c"
     },
     {
       "path": "hooks/codex.json",
@@ -640,8 +640,8 @@
     },
     {
       "path": "scripts/portal-files.mjs",
-      "size": 13633,
-      "sha256": "dd9bb06b3748859792782bdc0faa7017e189fa4ed73e0a4f6e3bf1ffc90e883b"
+      "size": 13971,
+      "sha256": "9e5350adce64fcbdf6e5608102d914dc1ff06c23f86928470150b107948db679"
     },
     {
       "path": "scripts/portal.py",
@@ -755,13 +755,13 @@
     },
     {
       "path": "src/adapters/cli/completion-auto-watch.mjs",
-      "size": 8610,
-      "sha256": "a9a8fb86e3f40c2db2a649cce1731dd686dc7259eac2aef6952a7edc5bb95d55"
+      "size": 8733,
+      "sha256": "9f6ff27b99d2cc435354e90186e8568c7944e7dc98e9d9529b21f6a1923973a8"
     },
     {
       "path": "src/adapters/cli/completion-delivery.mjs",
-      "size": 2823,
-      "sha256": "1bbf428b6c6558d66c41916726c77e944ad538ed74a6eeeddc272eeb9392bed0"
+      "size": 3386,
+      "sha256": "462bce6d5dc9a64b7341036a49d60f1cae7478c805cd6b8a159554512dfb94c5"
     },
     {
       "path": "src/adapters/cli/completion-event.mjs",
@@ -770,13 +770,13 @@
     },
     {
       "path": "src/adapters/cli/completion-hook.mjs",
-      "size": 12984,
-      "sha256": "0d447f67b7fb71a61f006116681826e708f7bacf11c8c6f22a092974bf7c6eb6"
+      "size": 14707,
+      "sha256": "67f8949cfa81311d4c9cf0b4d48d31efb6fea28be93726911f691196b1786f88"
     },
     {
       "path": "src/adapters/cli/completion-inbox.mjs",
-      "size": 20812,
-      "sha256": "d2bfd304f52adae9cb8c123acfb65b77b4c27d1e79e84c8609fb4fe2730ad47f"
+      "size": 25151,
+      "sha256": "25c72131338c99501f9967bde022229c7a96d83abe50ec18234b2b3b94083393"
     },
     {
       "path": "src/adapters/cli/completion-wake.mjs",
@@ -1665,13 +1665,13 @@
     },
     {
       "path": "test/completion-auto-watch.test.mjs",
-      "size": 22405,
-      "sha256": "197e1a858226a760744e32078c3dc54e35037dcc37407aea2f3c46e1088a2338"
+      "size": 22982,
+      "sha256": "a55df61d153e8271c93447a9654796d162d60f03fa97ff8cc1a3a01fc492b4cb"
     },
     {
       "path": "test/completion-hook.test.mjs",
-      "size": 32040,
-      "sha256": "d184400b10af6f0e905a56ac53ee3610a368ca7abfd4c9765f9acc4e8bd74749"
+      "size": 33506,
+      "sha256": "58e322097fd408653602eb4b9bac1e7416d27c838a5e0644b1b61f289df7bdc5"
     },
     {
       "path": "test/completion-inbox.test.mjs",
