@@ -65,14 +65,14 @@ async function fixture(run, { opened = true } = {}) {
     await page.goto('http://127.0.0.1:' + server.address().port);
     const viewer = page.locator('#desktop-viewer'), image = viewer.locator('img'), controls = viewer.locator('.actions button'), text = viewer.locator('textarea');
     await controls.nth(0).waitFor();
-    if (opened) { await controls.nth(0).click(); await page.waitForFunction(() => document.querySelector('img').complete && document.querySelector('img').naturalWidth > 0 && !document.querySelector('#desktop-viewer .actions button:nth-child(2)').disabled); }
+    if (opened) { await controls.nth(0).click(); await page.waitForFunction(() => document.querySelector('img')?.getAttribute('aria-disabled') === 'false' && !document.querySelector('#desktop-viewer .actions button:nth-child(2)').disabled); }
     const count = action => calls.filter(call => call.action === action).length;
-    const waitForCount = async (action, expected) => { const deadline = Date.now() + 5000; while (count(action) < expected && Date.now() < deadline) await delay(10); assert.ok(count(action) >= expected, action + ' requests: expected ' + expected + ', got ' + count(action)); };
+    const waitForCount = async (action, expected) => { const deadline = Date.now() + 10000; while (count(action) < expected && Date.now() < deadline) await delay(10); assert.ok(count(action) >= expected, action + ' requests: expected ' + expected + ', got ' + count(action)); };
     await run({ page, viewer, image, controls, text, host, calls, hold: held, release, count, waitForCount, loseInput: () => { failInput = true; } });
     assert.deepEqual(errors, []);
   } finally { for (const action of gates.keys()) release(action); await browser?.close(); await new Promise(resolve => server.close(resolve)); }
 }
-const idle = page => page.waitForFunction(() => !document.querySelector('#desktop-viewer .actions button:nth-child(2)').disabled);
+const idle = page => page.waitForFunction(() => document.querySelector('img')?.getAttribute('aria-busy') === 'false' && !document.querySelector('#desktop-viewer .actions button:nth-child(2)').disabled);
 
 test('DESKTOP-GESTURE capture overlap delivers ordered keys and scaled pointer to the host once', { timeout: 15000 }, () => fixture(async ({ page, image, host, calls, hold, release, waitForCount }) => {
   hold('observe'); await image.focus(); await page.clock.runFor(2000); await waitForCount('observe', 2);

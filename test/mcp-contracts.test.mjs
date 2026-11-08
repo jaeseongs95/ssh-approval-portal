@@ -11,6 +11,7 @@ import { createProtocolAdapters } from '../src/adapters/http/protocol.mjs';
 import { Tickets } from '../src/adapters/security/tickets.mjs';
 import { authorizeAdminRequest } from '../src/adapters/security/admin-policy.mjs';
 import { callerContext } from '../src/domain/execution-context.mjs';
+import { ApprovalQueue } from '../src/domain/approval-queue.mjs';
 
 // Contract 1.8 replaces legacy setup and command envelopes. Retain their HTTP,
 // strict-schema, exact-byte, context, redaction, cardless, paging and private UI coverage.
@@ -170,7 +171,11 @@ test('actual MCP HTTP refuses invalid or secret descriptions without dispatch or
     assert.equal(f.calls.submit.length, 0); f.operations.submit = async () => { throw Error('untrusted-error synthetic-private-marker'); };
     const result = await f.call('submit', { kind: 'command', operationKey, command: 'printf fixture' });
     assert.equal(result.structuredContent.error.code, 'REQUEST_REFUSED'); assert.doesNotMatch(JSON.stringify(result), /synthetic-private-marker/);
-    f.operations.submit = async () => { throw Object.assign(Error('Maintenance in progress'), { code: 'MAINTENANCE_ACTIVE', retryable: true, executionAttempted: false }); };
+    f.operations.submit = async input => {
+      const realQueue = new ApprovalQueue({ classify: () => ({ class: 'privileged' }), profile: 'aws-local', target: 'fixture@localhost:22', executeOperation: async () => ({ failed: false, texts: [] }), audit() {} });
+      realQueue.maintenance = true;
+      return realQueue.submit(input.command, false, input.context, input.displayContext);
+    };
     const maint = await f.call('submit', { kind: 'command', operationKey, command: 'printf fixture' });
     assert.equal(maint.isError, true);
     assert.deepEqual(maint.structuredContent.error, { code: 'MAINTENANCE_ACTIVE', retryable: true, executionAttempted: false });

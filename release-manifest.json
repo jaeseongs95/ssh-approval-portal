@@ -1515,8 +1515,8 @@
     },
     {
       "path": "test/browser/desktop-gestures.test.mjs",
-      "size": 14580,
-      "sha256": "7c082bb6a9c0f8588d5ac3e8c76d78d00f60d6413203a430068fa4e24b6df15d"
+      "size": 14637,
+      "sha256": "a5a1e8969f4882d41fc800ecfca95e17553f1994e31f8ecd1a8b0a4844be05c6"
     },
     {
       "path": "test/browser/environment.test.mjs",
@@ -2065,8 +2065,8 @@
     },
     {
       "path": "test/mcp-contracts.test.mjs",
-      "size": 31055,
-      "sha256": "6a8772aa494c26dd7bfe91b6d611f6290af2792aeab19076a4569298e3e93153"
+      "size": 31341,
+      "sha256": "7f0f49b8e2a1aa738bc6931cbe8546a395fa3380bff2f09bdc92a0f9b942c756"
     },
     {
       "path": "test/mcp-input-limits.test.mjs",
@@ -2830,8 +2830,8 @@
     },
     {
       "path": "web/index.html",
-      "size": 42153,
-      "sha256": "bb2836b565790c67079b17e2f99c4eea886f80a5f8c873e762cbfdfe0bb7c079"
+      "size": 42380,
+      "sha256": "f6a4c2d6a85289b593f6ef0b694ad4e95697123824d2cdc310cee88ee2b223d5"
     },
     {
       "path": "web/src/agent-cli.js",

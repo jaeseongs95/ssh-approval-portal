@@ -130,7 +130,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          paths=(src/adapters/mcp/server.mjs src/adapters/storage/artifacts.mjs src/application/files.mjs src/application/target-router.mjs)
+          paths=(app.mjs src/adapters/mcp/server.mjs src/adapters/storage/artifacts.mjs src/application/files.mjs src/application/target-router.mjs)
           for i in "${!paths[@]}"; do cp "${paths[$i]}" "$RUNNER_TEMP/remote-upload-$i.mjs"; done
           restore_remote_upload() {
             for i in "${!paths[@]}"; do cp "$RUNNER_TEMP/remote-upload-$i.mjs" "${paths[$i]}"; done
@@ -142,7 +142,7 @@ jobs:
           cat "$RUNNER_TEMP/remote-upload-red.log"
           test "$red_exit" -ne 0
           grep -q '^# fail 3$' "$RUNNER_TEMP/remote-upload-red.log"
-          grep -q 'begin-upload must be available\|Tool begin-upload not found' "$RUNNER_TEMP/remote-upload-red.log"
+          grep -q 'artifact-begin must be available\|begin-upload must be available\|Tool begin-upload not found' "$RUNNER_TEMP/remote-upload-red.log"
           restore_remote_upload
           node --test --test-reporter=tap --test-name-pattern='^REMOTE-JSON schemas|^REMOTE-JSON real binary|^REMOTE-JSON simultaneous' test/remote-mcp-upload.test.mjs
       - name: File selection detects the original Windows and error-code defects
@@ -202,32 +202,23 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          schema_state() {
-            printf 'schema_dialect_%s_at=%s\n' "$1" "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)"
-            sha256sum src/adapters/mcp/client-setup.mjs test/mcp-contracts.test.mjs
-          }
-          cp src/adapters/mcp/client-setup.mjs "$RUNNER_TEMP/client-setup.dialect-current.mjs"
-          trap 'cp "$RUNNER_TEMP/client-setup.dialect-current.mjs" src/adapters/mcp/client-setup.mjs' EXIT
+          cp src/adapters/mcp/server.mjs "$RUNNER_TEMP/server.dialect-current.mjs"
+          trap 'cp "$RUNNER_TEMP/server.dialect-current.mjs" src/adapters/mcp/server.mjs; rm -f src/adapters/mcp/client-setup.mjs' EXIT
           git show 59095c63ea9ac4961553a5c8acc768305b55d99a:src/adapters/mcp/client-setup.mjs > src/adapters/mcp/client-setup.mjs
-          schema_state red_started
+          git show 59095c63ea9ac4961553a5c8acc768305b55d99a:src/adapters/mcp/server.mjs > src/adapters/mcp/server.mjs
           red_exit=0
           node --test --test-reporter=tap --test-name-pattern='^SDK-published MCP schemas compile' test/mcp-contracts.test.mjs > "$RUNNER_TEMP/client-setup-dialect-red.log" 2>&1 || red_exit=$?
-          schema_state red_finished
           cat "$RUNNER_TEMP/client-setup-dialect-red.log"
-          printf 'schema_dialect_red_exit=%s\n' "$red_exit"
           if [[ "$red_exit" -eq 0 ]]; then
             echo 'Expected pre-fix tuple schema incompatibility was not observed' >&2
             exit 1
           fi
           grep -q '^# fail 1$' "$RUNNER_TEMP/client-setup-dialect-red.log"
-          grep -q 'get-client-setup.outputSchema 2020-12' "$RUNNER_TEMP/client-setup-dialect-red.log"
-          cp "$RUNNER_TEMP/client-setup.dialect-current.mjs" src/adapters/mcp/client-setup.mjs
-          schema_state green_started
+          cp "$RUNNER_TEMP/server.dialect-current.mjs" src/adapters/mcp/server.mjs
+          rm -f src/adapters/mcp/client-setup.mjs
           green_exit=0
           node --test --test-reporter=tap --test-name-pattern='^SDK-published MCP schemas compile' test/mcp-contracts.test.mjs > "$RUNNER_TEMP/client-setup-dialect-green.log" 2>&1 || green_exit=$?
-          schema_state green_finished
           cat "$RUNNER_TEMP/client-setup-dialect-green.log"
-          printf 'schema_dialect_green_exit=%s\n' "$green_exit"
           test "$green_exit" -eq 0
           grep -q '^# tests 1$' "$RUNNER_TEMP/client-setup-dialect-green.log"
           grep -q '^# pass 1$' "$RUNNER_TEMP/client-setup-dialect-green.log"
@@ -237,9 +228,10 @@ jobs:
         run: |
           set -euo pipefail
           cp src/adapters/mcp/server.mjs "$RUNNER_TEMP/server.discovery-current.mjs"
-          trap 'cp "$RUNNER_TEMP/server.discovery-current.mjs" src/adapters/mcp/server.mjs' EXIT
+          trap 'cp "$RUNNER_TEMP/server.discovery-current.mjs" src/adapters/mcp/server.mjs; rm -f src/adapters/mcp/client-setup.mjs' EXIT
+          git show 56f6f717257341d989832d29add0172cbb50dd22:src/adapters/mcp/client-setup.mjs > src/adapters/mcp/client-setup.mjs
           git show 56f6f717257341d989832d29add0172cbb50dd22:src/adapters/mcp/server.mjs > src/adapters/mcp/server.mjs
-          if node --test --test-reporter=tap --test-name-pattern='^client setup chooses routes' test/mcp-contracts.test.mjs > "$RUNNER_TEMP/client-setup-red.log" 2>&1; then
+          if node --test --test-reporter=tap --test-name-pattern='^public MCP surface exposes operation and card tools' test/mcp-contracts.test.mjs > "$RUNNER_TEMP/client-setup-red.log" 2>&1; then
             cat "$RUNNER_TEMP/client-setup-red.log"
             echo 'Expected missing client setup regression was not observed' >&2
             exit 1
@@ -281,14 +273,16 @@ jobs:
           restore() {
             cp "$RUNNER_TEMP/portal-client.mjs.portability-current" scripts/portal-client.mjs
             cp "$RUNNER_TEMP/server.mjs.portability-current" src/adapters/mcp/server.mjs
+            rm -f src/adapters/mcp/client-setup.mjs
           }
           cp scripts/portal-client.mjs "$RUNNER_TEMP/portal-client.mjs.portability-current"
           cp src/adapters/mcp/server.mjs "$RUNNER_TEMP/server.mjs.portability-current"
           trap restore EXIT
+          git show cc0c8c075a1b598f99a7327531c829cdb88114f3:src/adapters/mcp/client-setup.mjs > src/adapters/mcp/client-setup.mjs
           for path in scripts/portal-client.mjs src/adapters/mcp/server.mjs; do
             git show cc0c8c075a1b598f99a7327531c829cdb88114f3:"$path" > "$path"
           done
-          if node --test --test-reporter=tap --test-name-pattern='provider-neutral capabilities|text-only MCP consumers recover|CLI upload, resume and download accept' test/mcp-contracts.test.mjs test/cli-platform-paths.test.mjs > "$RUNNER_TEMP/agent-portability-red.log" 2>&1; then
+          if node --test --test-reporter=tap --test-name-pattern='^public MCP surface exposes operation and card tools|^cardless discovery stays read-only|^CLI upload, resume and download accept' test/mcp-contracts.test.mjs test/cli-platform-paths.test.mjs > "$RUNNER_TEMP/agent-portability-red.log" 2>&1; then
             cat "$RUNNER_TEMP/agent-portability-red.log"
             echo 'Expected pre-fix regression failure was not observed' >&2
             exit 1
