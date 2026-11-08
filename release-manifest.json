@@ -50,8 +50,8 @@
     },
     {
       "path": "config/bridge.env.example",
-      "size": 2657,
-      "sha256": "9d7f46e8212a5d69059f9a1cdcfaaae3e45612d54eaef2a71282e640c94f9a24"
+      "size": 2613,
+      "sha256": "44b1e3cedf137d2dea77b9a02aa433eb9d17a535e977dae50ed91cd965076664"
     },
     {
       "path": "config/config.example.toml",
@@ -60,8 +60,8 @@
     },
     {
       "path": "config/docker.example.env",
-      "size": 76,
-      "sha256": "bb164a6527ef212e9b9b10cf7f66ac8b387ada97d5dd8a4e096c41f31c471b7f"
+      "size": 73,
+      "sha256": "69f516a56cdcb67e74c38d0bdba4a2457344e8ae8568258a89c8f5ed34d05231"
     },
     {
       "path": "config/settings-contract.json",
