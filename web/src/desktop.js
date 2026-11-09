@@ -29,6 +29,41 @@ export const desktopCatalogs = messageCatalog({
   '데스크톱 준비가 확인되었습니다.': 'Desktop readiness has been verified.',
   '서버의 GUI 상태를 확인하지 못했습니다. 연결 상태를 다시 확인하세요.': 'The server GUI state could not be verified. Check the connection state again.',
   'RDP 창을 계속 열어 둘 필요는 없습니다. Windows 계정 인증과 화면 준비 상태는 별도로 확인합니다.': 'An RDP window does not need to stay open. Windows account authentication and screen readiness are checked separately.',
+  'Linux Xvnc 가상 디스플레이를 시작하지 못했습니다. 서버의 TigerVNC(Xvnc) 설치 상태와 /tmp 및 /tmp/.X11-unix 디렉터리 권한(1777)을 확인하세요. (DESKTOP_XVNC_START_FAILED)': 'Could not start the Linux Xvnc virtual display. Check TigerVNC (Xvnc) installation and 1777 permissions on /tmp and /tmp/.X11-unix. (DESKTOP_XVNC_START_FAILED)',
+  '서버 데스크톱 백엔드 실행에 필요한 구성 요소(Xvnc, openbox, xterm, x11-utils)가 준비되지 않았습니다. (DESKTOP_BACKEND_UNAVAILABLE)': 'Required server desktop backend components (Xvnc, openbox, xterm, x11-utils) are unavailable. (DESKTOP_BACKEND_UNAVAILABLE)',
+  '가상 디스플레이 연결을 확인하지 못했습니다. X11 디스플레이 상태를 확인하세요. (DESKTOP_DISPLAY_UNAVAILABLE)': 'Could not verify the virtual display connection. Check the X11 display state. (DESKTOP_DISPLAY_UNAVAILABLE)',
+  '창 관리자(openbox)가 제한 시간 안에 준비되지 않았습니다. (DESKTOP_WINDOW_MANAGER_NOT_READY)': 'The window manager (openbox) did not become ready within the time limit. (DESKTOP_WINDOW_MANAGER_NOT_READY)',
+  '창 관리자(openbox) 프로세스가 비정상 종료되었습니다. (DESKTOP_WINDOW_MANAGER_FAILED)': 'The window manager (openbox) process exited unexpectedly. (DESKTOP_WINDOW_MANAGER_FAILED)',
+  '데스크톱 애플리케이션 창이 제한 시간 안에 표시되지 않았습니다. (DESKTOP_WINDOW_NOT_READY)': 'The desktop application window did not become viewable within the time limit. (DESKTOP_WINDOW_NOT_READY)',
+  '데스크톱 애플리케이션(xterm 또는 RDP 클라이언트) 시작에 실패했습니다. (DESKTOP_APPLICATION_START_FAILED)': 'The desktop application (xterm or RDP client) failed to start. (DESKTOP_APPLICATION_START_FAILED)',
+  '데스크톱 세션 시작 시간이 초과되었습니다. 서버 부하와 디스플레이 상태를 확인하세요. (DESKTOP_START_TIMEOUT)': 'Timed out while starting the desktop session. Check server load and display state. (DESKTOP_START_TIMEOUT)',
+  '이 서버에는 데스크톱 기능이 활성화되어 있지 않습니다. (DESKTOP_UNAVAILABLE)': 'Desktop access is not enabled for this server. (DESKTOP_UNAVAILABLE)',
+  '서버 설정이 변경되었거나 유지보수 중입니다. 페이지를 새로고침한 뒤 다시 시도하세요. (DESKTOP_STALE_TARGET)': 'Server settings changed or maintenance is active. Refresh and try again. (DESKTOP_STALE_TARGET)',
+  '이미 해당 서버의 데스크톱 세션이 열려 있거나 리소스가 사용 중입니다. (DESKTOP_RESOURCE_BUSY)': 'A desktop session for this server is already active or its resource is busy. (DESKTOP_RESOURCE_BUSY)',
+  '동시에 열 수 있는 데스크톱 세션 한도에 도달했습니다. 기존 세션을 닫고 다시 시도하세요. (DESKTOP_CAPACITY)': 'The maximum number of concurrent desktop sessions has been reached. Close an existing session and try again. (DESKTOP_CAPACITY)',
+  '데스크톱 세션 유효 시간이 만료되었습니다. 데스크톱을 다시 열어 주세요. (DESKTOP_EXPIRED)': 'The desktop session has expired. Open the desktop again. (DESKTOP_EXPIRED)',
+  '데스크톱 화면 전송 연결이 닫혔습니다. 데스크톱을 다시 열어 주세요. (DESKTOP_TRANSPORT_CLOSED)': 'The desktop transport connection closed. Open the desktop again. (DESKTOP_TRANSPORT_CLOSED)',
+  '이 서버의 데스크톱을 열 권한이 없습니다. (DESKTOP_NOT_AUTHORIZED)': 'You are not authorized to open this server desktop. (DESKTOP_NOT_AUTHORIZED)',
+  '서버 데스크톱 세션 실행 중 시스템 오류가 발생했습니다. (DESKTOP_SESSION_FAILED)': 'A system error occurred while running the server desktop session. (DESKTOP_SESSION_FAILED)',
+});
+
+const desktopErrorKeys = Object.freeze({
+  DESKTOP_XVNC_START_FAILED: 'Linux Xvnc 가상 디스플레이를 시작하지 못했습니다. 서버의 TigerVNC(Xvnc) 설치 상태와 /tmp 및 /tmp/.X11-unix 디렉터리 권한(1777)을 확인하세요. (DESKTOP_XVNC_START_FAILED)',
+  DESKTOP_BACKEND_UNAVAILABLE: '서버 데스크톱 백엔드 실행에 필요한 구성 요소(Xvnc, openbox, xterm, x11-utils)가 준비되지 않았습니다. (DESKTOP_BACKEND_UNAVAILABLE)',
+  DESKTOP_DISPLAY_UNAVAILABLE: '가상 디스플레이 연결을 확인하지 못했습니다. X11 디스플레이 상태를 확인하세요. (DESKTOP_DISPLAY_UNAVAILABLE)',
+  DESKTOP_WINDOW_MANAGER_NOT_READY: '창 관리자(openbox)가 제한 시간 안에 준비되지 않았습니다. (DESKTOP_WINDOW_MANAGER_NOT_READY)',
+  DESKTOP_WINDOW_MANAGER_FAILED: '창 관리자(openbox) 프로세스가 비정상 종료되었습니다. (DESKTOP_WINDOW_MANAGER_FAILED)',
+  DESKTOP_WINDOW_NOT_READY: '데스크톱 애플리케이션 창이 제한 시간 안에 표시되지 않았습니다. (DESKTOP_WINDOW_NOT_READY)',
+  DESKTOP_APPLICATION_START_FAILED: '데스크톱 애플리케이션(xterm 또는 RDP 클라이언트) 시작에 실패했습니다. (DESKTOP_APPLICATION_START_FAILED)',
+  DESKTOP_START_TIMEOUT: '데스크톱 세션 시작 시간이 초과되었습니다. 서버 부하와 디스플레이 상태를 확인하세요. (DESKTOP_START_TIMEOUT)',
+  DESKTOP_UNAVAILABLE: '이 서버에는 데스크톱 기능이 활성화되어 있지 않습니다. (DESKTOP_UNAVAILABLE)',
+  DESKTOP_STALE_TARGET: '서버 설정이 변경되었거나 유지보수 중입니다. 페이지를 새로고침한 뒤 다시 시도하세요. (DESKTOP_STALE_TARGET)',
+  DESKTOP_RESOURCE_BUSY: '이미 해당 서버의 데스크톱 세션이 열려 있거나 리소스가 사용 중입니다. (DESKTOP_RESOURCE_BUSY)',
+  DESKTOP_CAPACITY: '동시에 열 수 있는 데스크톱 세션 한도에 도달했습니다. 기존 세션을 닫고 다시 시도하세요. (DESKTOP_CAPACITY)',
+  DESKTOP_EXPIRED: '데스크톱 세션 유효 시간이 만료되었습니다. 데스크톱을 다시 열어 주세요. (DESKTOP_EXPIRED)',
+  DESKTOP_TRANSPORT_CLOSED: '데스크톱 화면 전송 연결이 닫혔습니다. 데스크톱을 다시 열어 주세요. (DESKTOP_TRANSPORT_CLOSED)',
+  DESKTOP_NOT_AUTHORIZED: '이 서버의 데스크톱을 열 권한이 없습니다. (DESKTOP_NOT_AUTHORIZED)',
+  DESKTOP_SESSION_FAILED: '서버 데스크톱 세션 실행 중 시스템 오류가 발생했습니다. (DESKTOP_SESSION_FAILED)',
 });
 
 const namedKeys = { Enter: 0xff0d, Tab: 0xff09, Escape: 0xff1b, Backspace: 0xff08, Delete: 0xffff, Insert: 0xff63,
@@ -54,7 +89,7 @@ export function desktopPointerActions(event, bounds, width, height) {
 
 export function createDesktopPanel({ document, api, getTarget, i18n, isSignedOut = () => false, timers = globalThis, randomKey = () => globalThis.crypto.randomUUID(), onStateChange = () => {} }) {
   const { locale } = i18n ?? resolveLocale(document.documentElement.lang);
-  const number = new Intl.NumberFormat(locale), t = (key, values) => translate(desktopCatalogs, locale, key, values);
+  const number = new Intl.NumberFormat(locale), t = (key, values) => translate(desktopCatalogs, locale, desktopErrorKeys[key] ?? key, values);
   const el = (tag, text = '') => { const node = document.createElement(tag); node.textContent = text; return node; };
   const root = el('section'); root.id = 'desktop-viewer'; root.className = 'request';
   root.append(el('h2', t('서버 데스크톱')), el('p', t('선택한 서버의 실제 OS 화면을 표시합니다. 화면을 클릭한 뒤 키보드로 조작하세요.')), el('p', t('데스크톱은 서버 설정과 권한 안에서만 열립니다. 열려 있는 동안 서버 선택을 유지합니다.')));

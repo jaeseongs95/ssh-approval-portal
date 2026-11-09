@@ -118,6 +118,19 @@ async function swapActive(plan, target) {
   const next = join(plan.appRoot, '.deploy180-next-' + token());
   await symlink(target, next, 'dir'); await rename(next, plan.activePath); await syncDirectory(plan.appRoot);
 }
+async function ensureLinuxX11TempDirectories() {
+  if (process.platform !== 'linux' || typeof process.getuid !== 'function' || process.getuid() !== 0) return;
+  for (const path of ['/tmp', '/tmp/.X11-unix']) {
+    const st = await optionalStat(path);
+    if (!st && path === '/tmp/.X11-unix') {
+      try { await mkdir(path, { mode: 0o1777 }); } catch (error) { if (error.code !== 'EEXIST') throw error; }
+    }
+    const current = await optionalStat(path);
+    if (current?.isDirectory() && !current.isSymbolicLink() && (current.mode & 0o7777) !== 0o1777) {
+      await chmod(path, 0o1777);
+    }
+  }
+}
 async function fileDigest(path) {
   const digest = createHash('sha256');
   for await (const chunk of createReadStream(path, { flags: constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) })) digest.update(chunk);
@@ -300,6 +313,7 @@ export async function runDeployment(stage, input, { fetchImpl = fetch } = {}) {
         const baseline = await durableFingerprint(plan.dataRoot);
         await save({ phase: 'switching', migration, baseline });
         await swapActive(plan, release);
+        await ensureLinuxX11TempDirectories();
         // Persist the barrier before start: a failed/lost start reply may still have admitted writes.
         await save({ phase: 'start-attempted' });
         command(plan.service.start, { failureCode: 'DEPLOY_SERVICE_START_FAILED' });

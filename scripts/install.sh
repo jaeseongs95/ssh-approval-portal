@@ -159,6 +159,7 @@ if ! id mcpbridge >/dev/null 2>&1; then useradd --system --home-dir "$base" --sh
 if ! id mcpops >/dev/null 2>&1; then useradd --create-home --shell /bin/bash --password '*' mcpops; fi
 install -d -o mcpbridge -g mcpbridge -m 0700 "$base/.config/ssh-mcp" "$base/.ssh" "$base/.local/share/ssh-mcp" "$base/transfers"
 install -d -o root -g root -m 0755 /var/lib/ssh-approval-transfer /usr/local/libexec
+install -d -o root -g root -m 1777 /tmp /tmp/.X11-unix
 install -d -o mcpops -g mcpops -m 0700 /var/lib/ssh-approval-transfer/incoming
 config=$base/.config/ssh-mcp/config.toml
 if [[ ! -e "$config" ]]; then

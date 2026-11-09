@@ -1,6 +1,6 @@
 {
   "name": "ssh-completion-client",
-  "version": "2.4.1",
+  "version": "2.4.2",
   "description": "Local durable completion hooks for the existing SSH MCP connection.",
   "hooks": "./hooks/claude-code.json"
 }

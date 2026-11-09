@@ -14,7 +14,7 @@ import { validateCompletionDeliveryTarget, deliverCompletion } from '../src/adap
 import { runCompletionHookCli } from '../src/adapters/cli/completion-hook.mjs';
 import { autoWatchCompletion } from '../src/adapters/cli/completion-auto-watch.mjs';
 
-const usage = 'SSH Approval Portal file client2.4.1 (Node.js24.2+ within major24)\n' +
+const usage = 'SSH Approval Portal file client2.4.2 (Node.js24.2+ within major24)\n' +
   'node scripts/portal-files.mjs --origin HTTPS_ORIGIN [--cloudflared EXISTING_ABSOLUTE_PATH] doctor\n' +
   'node scripts/portal-files.mjs --origin HTTPS_ORIGIN [--cloudflared EXISTING_ABSOLUTE_PATH] upload --file ABSOLUTE_FILE --operation-key STABLE_KEY\n' +
   'node scripts/portal-files.mjs --origin HTTPS_ORIGIN [--cloudflared EXISTING_ABSOLUTE_PATH] status UUID\n' +

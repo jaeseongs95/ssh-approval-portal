@@ -55,7 +55,7 @@ async function fixture(t, options = {}) {
   } };
 }
 
-function panel(api) {
+function panel(api, lang = 'en') {
   class Element {
     constructor(tag) { this.tagName = tag; this.children = []; this.style = {}; this.value = ''; }
     append(...nodes) { this.children.push(...nodes); }
@@ -63,7 +63,7 @@ function panel(api) {
     removeAttribute(key) { delete this[key]; }
   }
   const workspace = new Element('div');
-  const document = { documentElement: { lang: 'en' }, body: { dataset: { page: 'settings' } }, createElement: tag => new Element(tag),
+  const document = { documentElement: { lang }, body: { dataset: { page: 'settings' } }, createElement: tag => new Element(tag),
     getElementById: id => id === 'server-workspace' ? workspace : undefined, addEventListener() {} };
   const value = createDesktopPanel({ document, api, getTarget: () => 'beta', timers: { setInterval() {}, clearInterval() {} } });
   return { value, open: value.root.children.find(node => node.tagName === 'div').children[0], image: value.root.children.find(node => node.tagName === 'img'), error: value.root.children.find(node => node.className === 'error'), auth: value.root.children.find(node => node.id === 'desktop-authentication') };
@@ -131,4 +131,24 @@ test('DESKTOP-HTTP owner login screen, nonstored credential field and SAS cross 
   assert.equal(status.readiness.state, 'auth_required'); assert.equal(status.readiness.sessionBindingVerified, false);
   assert.doesNotMatch(JSON.stringify(status), /SYNTHETIC-PRIVATE|image\/png/);
   await p.value.close();
+});
+
+test('DESKTOP-HTTP renders localized guidance and diagnostic code when desktop open fails with DESKTOP_XVNC_START_FAILED', async () => {
+  const revision = 'a'.repeat(64);
+  const failingApi = async path => {
+    if (path === '/api/targets') return { targets: [{ id: 'beta', revision, platform: 'linux' }] };
+    if (path === '/api/desktop/open') throw Object.assign(Error('DESKTOP_XVNC_START_FAILED'), { status: 409 });
+    throw Error('unexpected path: ' + path);
+  };
+  const koPanel = panel(failingApi, 'ko');
+  await koPanel.open.onclick();
+  assert.match(koPanel.error.textContent, /Linux Xvnc 가상 디스플레이를 시작하지 못했습니다/);
+  assert.match(koPanel.error.textContent, /1777/);
+  assert.match(koPanel.error.textContent, /\(DESKTOP_XVNC_START_FAILED\)/);
+
+  const enPanel = panel(failingApi, 'en');
+  await enPanel.open.onclick();
+  assert.match(enPanel.error.textContent, /Could not start the Linux Xvnc virtual display/);
+  assert.match(enPanel.error.textContent, /1777/);
+  assert.match(enPanel.error.textContent, /\(DESKTOP_XVNC_START_FAILED\)/);
 });

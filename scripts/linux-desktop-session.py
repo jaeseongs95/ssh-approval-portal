@@ -266,6 +266,17 @@ def relay(peer, children, deadline):
     return "ttl"
 
 
+def create_session_root():
+    for candidate in (None, os.path.join(os.path.expanduser("~"), ".cache")):
+        try:
+            if candidate is not None:
+                os.makedirs(candidate, mode=0o700, exist_ok=True)
+            return tempfile.TemporaryDirectory(prefix="ags-gui-", dir=candidate)
+        except OSError:
+            continue
+    raise SessionError("DESKTOP_XVNC_START_FAILED")
+
+
 def run(options):
     app_name = "xterm" if options.application == "terminal" else "rdp-native"
     native_executable = validate_native_rdp(options) if options.application == "rdp" else None
@@ -280,8 +291,10 @@ def run(options):
     display_read = display_write = None
     native_fd = 3 if native_executable else None
     closed = False
-    with tempfile.TemporaryDirectory(prefix="ags-gui-") as root:
+    with create_session_root() as root:
         os.chmod(root, 0o700)
+        if not os.access("/tmp", os.W_OK | os.X_OK):
+            raise SessionError("DESKTOP_XVNC_START_FAILED")
         auth = os.path.join(root, "Xauthority")
         cookie = secrets.token_bytes(16)
         authority(auth, 0, cookie)

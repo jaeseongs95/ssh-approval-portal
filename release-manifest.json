@@ -1,22 +1,22 @@
 {
-  "version": "2.4.1",
-  "status": "release",
+  "version": "2.4.2",
+  "status": "candidate-pending-live-host-verification",
   "runtime": "Node.js 24",
   "files": [
     {
       "path": ".claude-plugin/plugin.json",
       "size": 187,
-      "sha256": "60225c7a4e3b72be08f75b83de909c717d5cf11950b2ebde652810deb95031c2"
+      "sha256": "da1776390a729e5d56d777d5d8c47e90d47e153c16cf6983512015210775b0c9"
     },
     {
       "path": ".codex-plugin/plugin.json",
       "size": 181,
-      "sha256": "74763cc377bff7b4c1047efca167c0e7033c8a9e27ad21db463fcacdbae7f6c1"
+      "sha256": "ed82fb676d7b8a25aba57457a2ba8aa6ffab1207762883208fefa308fbd3d4a6"
     },
     {
       "path": ".dockerignore",
       "size": 589,
-      "sha256": "b39419ffc6fa8c237224bbba8b8a58688d70082bf6187e1b0a17aa338192cacf"
+      "sha256": "e353166e308aa3777856743023db70418e18cb0629f9c4e4fdcdde30e1fb5307"
     },
     {
       "path": "LICENSE",
@@ -26,12 +26,12 @@
     {
       "path": "README.ko.md",
       "size": 22348,
-      "sha256": "eb3abf36362e8343e8033e478aae88f75afeaa781a01460a5bbcb3254a6f8a3b"
+      "sha256": "3790cadc5ee5c4e6338996a36a6e0635207938e04f45f593865d7d9e85aa0eab"
     },
     {
       "path": "README.md",
       "size": 20255,
-      "sha256": "1117af8b2465b3769663699b47a6e4f0e9fbf54b17e1758d01d4ac17584922eb"
+      "sha256": "a0c5899b0c72da9e508a906390d5a5b87c8ef78cd8dbc4c8e669e8ad9d2a2090"
     },
     {
       "path": "THIRD_PARTY_NOTICES.json",
@@ -61,7 +61,7 @@
     {
       "path": "config/docker.example.env",
       "size": 73,
-      "sha256": "62d1139d1d3aa6c99ad611985a82aa58dcb367a694e9a6a00e1f9aebef2ac8d3"
+      "sha256": "110227083caec1bc48b2a00153faeaebed8bb8e22d04816eac4225b3f284efa7"
     },
     {
       "path": "config/settings-contract.json",
@@ -96,12 +96,12 @@
     {
       "path": "docker/Dockerfile",
       "size": 1935,
-      "sha256": "4c02841412881eb12bd11ed7503c47b94f221d71a6eb6f7deb4c84a94f126e82"
+      "sha256": "864b4c0ea55221f90f1cf631d983a771e796b8a595973fe72361b2c5fdc9b342"
     },
     {
       "path": "docker/compose.yaml",
       "size": 1128,
-      "sha256": "76b95ce41887afc7d48dbd5a513e4fefac15f13cccee245d6e75b28517720565"
+      "sha256": "6675d8f40978fa7dac1ace624099bfaacd97871e6ab525d11a93d093f3480514"
     },
     {
       "path": "docs/admin-login.en.md",
@@ -166,12 +166,12 @@
     {
       "path": "docs/client-files.ko.md",
       "size": 19294,
-      "sha256": "5311b8648d76cb9acf8f6349454957dab8e43c03b549b1389a2e34ba76b68a68"
+      "sha256": "0808333bf17f969619bb92edb7e8c08c0e64b5c84813beaad3c2e1e53067623d"
     },
     {
       "path": "docs/client-install.ko.md",
       "size": 12920,
-      "sha256": "6170930d2d3edd80eb0cbb4dd269303d1ed3e77ba37034611b182aa43a3fd1d3"
+      "sha256": "57ca4d220ce9820dba0041e90be728a3a417109f1076449e8a2c1fb34a853149"
     },
     {
       "path": "docs/command-automation.ko.md",
@@ -396,12 +396,12 @@
     {
       "path": "package-lock.json",
       "size": 100104,
-      "sha256": "d3300441257db6e1d3699db8cfbb808573f146c17bbbd85cdebcdabf99279e82"
+      "sha256": "2df0dcb0336bb129d41f5b9f1a0d84c671b4cd179cc92f54a573878c7f5869e1"
     },
     {
       "path": "package.json",
       "size": 860,
-      "sha256": "f02d05fa8507d3c8fc79ee4b5749c1d0c5047b52d7e46e7c14889fcd11c0a7b3"
+      "sha256": "a59a72ebd55131a1e109604a100bcf1222302430140245f21dfc157f7266b644"
     },
     {
       "path": "scripts/admin-access-config.mjs",
@@ -505,8 +505,8 @@
     },
     {
       "path": "scripts/deploy180.mjs",
-      "size": 26167,
-      "sha256": "b971ef998e1853b69d6675e104285014fa991bf0cfae5494770d607178cd3376"
+      "size": 26818,
+      "sha256": "ccba4d3d24f4c0c13849c61b6a8082c801eab8cdd3c7ad136b193dfbfd5267f5"
     },
     {
       "path": "scripts/docker-secrets.py",
@@ -560,8 +560,8 @@
     },
     {
       "path": "scripts/install.sh",
-      "size": 12677,
-      "sha256": "9c211863d517e48ae081afa1b1e49cbda119a3b31024e01a08428119de0b1918"
+      "size": 12732,
+      "sha256": "a2996834bbb822bd0d38ec204234daa62af09c0b0ec263a13418fccc78dd71b0"
     },
     {
       "path": "scripts/jev-shadow-protocol.mjs",
@@ -575,8 +575,8 @@
     },
     {
       "path": "scripts/linux-desktop-session.py",
-      "size": 22355,
-      "sha256": "6b9a4d131d89eb1184885a0efb29fe14f66dce2f8e380a060e25918fac00ce7f"
+      "size": 22845,
+      "sha256": "8964bb9be0a59f11ff9e6ff1efc11901dfc3fad61b0e458a2304fbfd6b0a2bbb"
     },
     {
       "path": "scripts/maintenance-owner.sh",
@@ -641,7 +641,7 @@
     {
       "path": "scripts/portal-files.mjs",
       "size": 15809,
-      "sha256": "14b7bd342c3ec9bc6110c3b8a5e723b1392389fb9767abd7f52019a84f5e4114"
+      "sha256": "c21f7d4e0fc730d6d43986cbe5dd56da1b5767fe6c31a946129d1ad052d3d197"
     },
     {
       "path": "scripts/portal.py",
@@ -1526,7 +1526,7 @@
     {
       "path": "test/browser/fixture-server.mjs",
       "size": 9132,
-      "sha256": "96854e6c647a493ec5cc4389b56dacfcc1dcf5f510b2e89a56b02d8e0fbcde35"
+      "sha256": "396d726756ab52fe847fb320af02c413145327bea7121404a9da9b0cf92b4e05"
     },
     {
       "path": "test/browser/history-language.test.mjs",
@@ -1785,8 +1785,8 @@
     },
     {
       "path": "test/desktop-http.test.mjs",
-      "size": 9770,
-      "sha256": "96746f60ae1f0e5df70adb80c153317a2a457bd4b7290fe3a23d2d1924c5a55c"
+      "size": 10863,
+      "sha256": "5ef054b018727022742046e5a3f355c9daddb4f8a1459bc6b2c42cd06e9994b7"
     },
     {
       "path": "test/desktop-local-process.test.mjs",
@@ -2560,8 +2560,8 @@
     },
     {
       "path": "test/test_linux_desktop_session.py",
-      "size": 13003,
-      "sha256": "5c25eb1109f51a29d2a0f74d355a49d084d680fcf1fe28f93f35a6df252e3917"
+      "size": 14110,
+      "sha256": "a8980ffc4fe5a5870232c3ec1f90368d11052e412ae67b021bfa98316c0b87b1"
     },
     {
       "path": "test/test_node_runtime.py",
@@ -2825,8 +2825,8 @@
     },
     {
       "path": "web/dist/app.js",
-      "size": 350146,
-      "sha256": "7772ff3067b938ff37698184778ded1254626c4dc2041a6d08d1038fba93ca1d"
+      "size": 359080,
+      "sha256": "2c1dec6dd35bdb55535a512aca8839750f80cfd6c8d636ac3963edb3c7c06032"
     },
     {
       "path": "web/index.html",
@@ -2870,8 +2870,8 @@
     },
     {
       "path": "web/src/desktop.js",
-      "size": 24851,
-      "sha256": "0201ee98246f8c837ffb018aced11e229aa86cae340ac034619c360b4f663064"
+      "size": 31263,
+      "sha256": "ffa9f8399fa5f62cba2a57ed62933eda55b6748526b85f3b5d05063830f04ea2"
     },
     {
       "path": "web/src/environment.js",

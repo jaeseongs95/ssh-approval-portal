@@ -155,6 +155,7 @@ class NativeRdpValidationTest(unittest.TestCase):
             return SimpleNamespace(returncode=0, stdout=output)
 
         with descriptor_three(local.fileno()), patch.object(helper.shutil, "which", side_effect=lambda name, **_: "/usr/bin/" + name), \
+                patch.object(helper.os, "access", return_value=True), \
                 patch.object(helper, "read_bootstrap", return_value=dict(username="test-user", domain="", password="test-only")), \
                 patch.object(helper.subprocess, "Popen", side_effect=popen), \
                 patch.object(helper.subprocess, "run", side_effect=command), \
@@ -222,6 +223,7 @@ class StartupDeadlineTest(unittest.TestCase):
 
         with contextlib.ExitStack() as stack:
             stack.enter_context(patch.object(helper.shutil, "which", side_effect=lambda name, **_: "/usr/bin/" + name))
+            stack.enter_context(patch.object(helper.os, "access", return_value=True))
             stack.enter_context(patch.object(helper.subprocess, "Popen", side_effect=popen))
             stack.enter_context(patch.object(helper.subprocess, "run", side_effect=command))
             stack.enter_context(patch.object(helper.time, "monotonic", side_effect=lambda: clock[0]))
@@ -263,6 +265,23 @@ class StartupDeadlineTest(unittest.TestCase):
                                ("display_phase", "DESKTOP_START_TIMEOUT")):
             with self.subTest(mode=mode):
                 self.scenario(mode, 30000, expected)
+
+    def test_unwritable_tmp_falls_back_for_session_root_and_reports_xvnc_start_failed(self):
+        options = SimpleNamespace(application="terminal", ttl_ms=30000, width=800, height=600,
+                                  session_ref="a" * 48)
+        real_tempdir = helper.tempfile.TemporaryDirectory
+
+        def tempdir_fallback(prefix=None, dir=None):
+            if dir is None:
+                raise PermissionError("unwritable /tmp")
+            return real_tempdir(prefix=prefix)
+
+        with patch.object(helper.shutil, "which", side_effect=lambda name, **_: "/usr/bin/" + name), \
+                patch.object(helper.os, "makedirs"), \
+                patch.object(helper.tempfile, "TemporaryDirectory", side_effect=tempdir_fallback), \
+                patch.object(helper.os, "access", return_value=False):
+            with self.assertRaisesRegex(helper.SessionError, "^DESKTOP_XVNC_START_FAILED$"):
+                helper.run(options)
 
 
 if __name__ == "__main__":
