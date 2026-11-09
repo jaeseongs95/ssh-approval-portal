@@ -157,6 +157,12 @@ export function openCompletionInbox(options = {}) {
           owner_token TEXT NOT NULL, lease_until INTEGER NOT NULL CHECK(lease_until >= 0),
           PRIMARY KEY(binding_id, watch_key)
         ) STRICT;
+        CREATE TABLE IF NOT EXISTS completion_deferred_watches (
+          binding_id TEXT NOT NULL REFERENCES completion_bindings(binding_id),
+          origin TEXT NOT NULL, operation_key TEXT NOT NULL,
+          payload TEXT NOT NULL,
+          PRIMARY KEY(binding_id, origin, operation_key)
+        ) STRICT;
         CREATE TABLE IF NOT EXISTS completion_settled_operations (
           binding_id TEXT NOT NULL REFERENCES completion_bindings(binding_id),
           operation_id TEXT NOT NULL,
@@ -260,6 +266,50 @@ export function openCompletionInbox(options = {}) {
         const { host, sessionId } = session(input);
         return registration(db.prepare('SELECT * FROM completion_bindings WHERE host = ? AND session_id = ?').get(host, sessionId));
       });
+    },
+    deferWatch({ bindingId, origin, operationKey, payload }) {
+      return call(() => {
+        binding(bindingId);
+        try { validateOrigin(origin); } catch { throw fail('COMPLETION_INBOX_INVALID_ORIGIN'); }
+        if (typeof operationKey !== 'string' || !operationKey.length || Buffer.byteLength(operationKey) > 256 || !payload || typeof payload !== 'object' || Array.isArray(payload)) {
+          throw fail('COMPLETION_INBOX_INVALID_INPUT');
+        }
+        return transaction(() => {
+          if ((typeof payload.operationId === 'string' && db.prepare('SELECT 1 FROM completion_settled_operations WHERE binding_id = ? AND operation_id = ?').get(bindingId, payload.operationId)) ||
+              db.prepare('SELECT 1 FROM completion_settled_operations WHERE binding_id = ? AND operation_id = ?').get(bindingId, operationKey)) {
+            return { deferred: false, settled: true };
+          }
+          db.prepare(`INSERT INTO completion_deferred_watches(binding_id, origin, operation_key, payload) VALUES (?, ?, ?, ?)
+            ON CONFLICT(binding_id, origin, operation_key) DO UPDATE SET payload = excluded.payload`)
+            .run(bindingId, origin, operationKey, JSON.stringify(payload));
+          return { deferred: true };
+        });
+      });
+    },
+    consumeDeferredWatches({ bindingId, operationKey } = {}) {
+      return call(() => transaction(() => {
+        binding(bindingId);
+        const rows = db.prepare('SELECT origin, operation_key, payload FROM completion_deferred_watches WHERE binding_id = ?').all(bindingId);
+        const matched = [], retained = [];
+        for (const row of rows) {
+          const item = { origin: row.origin, operationKey: row.operation_key, ...JSON.parse(row.payload) };
+          const settled = (typeof item.operationId === 'string' && db.prepare('SELECT 1 FROM completion_settled_operations WHERE binding_id = ? AND operation_id = ?').get(bindingId, item.operationId)) ||
+            db.prepare('SELECT 1 FROM completion_settled_operations WHERE binding_id = ? AND operation_id = ?').get(bindingId, row.operation_key);
+          if (settled) {
+            db.prepare('DELETE FROM completion_deferred_watches WHERE binding_id = ? AND origin = ? AND operation_key = ?')
+              .run(bindingId, row.origin, row.operation_key);
+            continue;
+          }
+          if (operationKey === undefined || row.operation_key === operationKey || item.operationId === operationKey || item.operationKey === operationKey) {
+            db.prepare('DELETE FROM completion_deferred_watches WHERE binding_id = ? AND origin = ? AND operation_key = ?')
+              .run(bindingId, row.origin, row.operation_key);
+            matched.push(item);
+          } else {
+            retained.push(item);
+          }
+        }
+        return matched;
+      }));
     },
     enqueue(input = {}) {
       return call(() => {
@@ -379,6 +429,14 @@ export function openCompletionInbox(options = {}) {
           binding(bindingId);
           db.prepare('INSERT INTO completion_settled_operations(binding_id, operation_id) VALUES (?, ?) ON CONFLICT(binding_id, operation_id) DO NOTHING')
             .run(bindingId, operationId);
+          for (const row of db.prepare('SELECT origin, operation_key, payload FROM completion_deferred_watches WHERE binding_id = ?').all(bindingId)) {
+            let parsed;
+            try { parsed = JSON.parse(row.payload); } catch { parsed = null; }
+            if (row.operation_key === operationId || parsed?.operationId === operationId) {
+              db.prepare('DELETE FROM completion_deferred_watches WHERE binding_id = ? AND origin = ? AND operation_key = ?')
+                .run(bindingId, row.origin, row.operation_key);
+            }
+          }
           const autoToken = randomUUID();
           const updated = db.prepare(`UPDATE completion_events SET state = 'acknowledged',
             claim_token = coalesce(claim_token, ?), lease_until = NULL, attempt = max(attempt, 1)

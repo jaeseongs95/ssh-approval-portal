@@ -23,7 +23,7 @@ const cli = fileURLToPath(new URL('../scripts/portal-files.mjs', import.meta.url
 const operation = extra => ({ id, state: 'queued', targetId: 'default', targetRevision: revision, ...extra });
 const envelope = extra => ({ contractVersion: '2.0', ok: true, error: null, data: operation(), ...extra });
 const native = (extra = {}) => ({ hook_event_name: 'PostToolUse', session_id: sessionA,
-  tool_name: 'mcp__ssh_test_submit', tool_input: {}, tool_response: { structuredContent: envelope() }, ...extra });
+  tool_name: 'mcp__ssh_test_observe', tool_input: { id }, tool_response: { structuredContent: envelope() }, ...extra });
 const safeError = error => error instanceof Error && !String(error.stack).includes(marker) &&
   !JSON.stringify(error).includes(marker);
 
@@ -65,8 +65,12 @@ async function fixture(t) {
 
 const option = (args, flag) => args[args.indexOf(flag) + 1];
 
-test('AW01 configured submit automatically starts the existing watch for the exact host session', async t => {
-  const f = await fixture(t), result = await f.run();
+test('AW01 configured submit defers watch until observe is invoked for the exact host session', async t => {
+  const f = await fixture(t);
+  const deferred = await f.run(native({ tool_name: 'mcp__ssh_test_submit', tool_input: {} }));
+  assert.equal(deferred.state, 'deferred');
+  assert.equal(f.calls.length, 0, 'submit alone must not spawn a background watcher');
+  const result = await f.run();
   assert.equal(result.state, 'started'); assert.equal(f.calls.length, 1);
   const { command, args } = f.calls[0];
   assert.equal(command, process.execPath); assert.equal(args[0], cli);
@@ -293,11 +297,17 @@ test('AW15 automatic watch arguments keep the existing inbox hook and explicit A
   assert.deepEqual(f.db(inbox => inbox.pending({ bindingId: binding.bindingId })), { pending: 0, claimed: 0, acknowledged: 1 });
 });
 
-test('AW16 Antigravity native call wrapper watches its existing stable operation key', async t => {
+test('AW16 Antigravity native call wrapper defers on submit and watches its stable operation key on observe', async t => {
   const f = await fixture(t);
-  await f.configure({ ...f.config, routes: [{ origin, tools: ['mcp__ssh-test__submit'] }] });
-  const input = { hook_event_name: 'PostToolUse', conversationId: sessionA,
+  await f.configure({ ...f.config, routes: [{ origin, tools: ['mcp__ssh-test__submit', 'mcp__ssh-test__observe'] }] });
+  const submitInput = { hook_event_name: 'PostToolUse', conversationId: sessionA,
     toolCall: { name: 'call_mcp_tool', args: { ServerName: 'ssh-test', ToolName: 'submit',
+      Arguments: { operationKey: 'stable-operation-key-1', target: 'default', expectedTargetRevision: revision,
+        command: marker, origin: 'https://attacker.test' } } } };
+  assert.equal((await f.run(submitInput, { host: 'antigravity' })).state, 'deferred');
+  assert.equal(f.calls.length, 0);
+  const input = { hook_event_name: 'PostToolUse', conversationId: sessionA,
+    toolCall: { name: 'call_mcp_tool', args: { ServerName: 'ssh-test', ToolName: 'observe',
       Arguments: { operationKey: 'stable-operation-key-1', target: 'default', expectedTargetRevision: revision,
         command: marker, origin: 'https://attacker.test' } } } };
   assert.equal((await f.run(input, { host: 'antigravity' })).state, 'started');
@@ -319,20 +329,33 @@ for (const host of ['codex', 'claude-code', 'antigravity']) {
     const root = await mkdtemp(join(tmpdir(), 'auto-watch-wiring-'));
     t.after(() => rm(root, { recursive: true, force: true }));
     const inbox = join(root, 'private', 'completion.sqlite'), config = join(root, 'watch.json');
-    const tool = host === 'antigravity' ? 'mcp__ssh-test__submit' : 'mcp__ssh_test_submit';
+    const submitTool = host === 'antigravity' ? 'mcp__ssh-test__submit' : 'mcp__ssh_test_submit';
+    const observeTool = host === 'antigravity' ? 'mcp__ssh-test__observe' : 'mcp__ssh_test_observe';
     const session = sessionA, operationKey = 'stable-operation-key-1';
     await writeFile(config, JSON.stringify({ version: 1, cloudflared: process.execPath,
-      routes: [{ origin: 'https://owner.example.test', tools: [tool] }] }));
-    const native = host === 'antigravity' ? { hook_event_name: 'PostToolUse', conversationId: session,
+      routes: [{ origin: 'https://owner.example.test', tools: [submitTool, observeTool] }] }));
+    const submitPayload = host === 'antigravity' ? { hook_event_name: 'PostToolUse', conversationId: session,
       toolCall: { name: 'call_mcp_tool', args: { ServerName: 'ssh-test', ToolName: 'submit',
         Arguments: { operationKey, target: 'default', expectedTargetRevision: revision } } } }
-      : { hook_event_name: 'PostToolUse', session_id: session, tool_name: tool, tool_input: {},
+      : { hook_event_name: 'PostToolUse', session_id: session, tool_name: submitTool, tool_input: {},
+        tool_response: { structuredContent: { contractVersion: '2.0', ok: true, error: null,
+          data: { id, state: 'queued', targetId: 'default', targetRevision: revision } } } };
+    const observePayload = host === 'antigravity' ? { hook_event_name: 'PostToolUse', conversationId: session,
+      toolCall: { name: 'call_mcp_tool', args: { ServerName: 'ssh-test', ToolName: 'observe',
+        Arguments: { operationKey, target: 'default', expectedTargetRevision: revision } } } }
+      : { hook_event_name: 'PostToolUse', session_id: session, tool_name: observeTool, tool_input: { id },
         tool_response: { structuredContent: { contractVersion: '2.0', ok: true, error: null,
           data: { id, state: 'queued', targetId: 'default', targetRevision: revision } } } };
     const calls = [];
     let stdout = '', stderr = '';
+    const code1 = await completionHook(['--host', host, '--inbox', inbox, '--watch-config', config],
+      Readable.from([JSON.stringify(submitPayload)]), { write(value) { stdout += value; } },
+      { write(value) { stderr += value; } }, {}, { spawn() { calls.push('unexpected'); } });
+    assert.equal(code1, 0);
+    assert.equal(calls.length, 0, 'submit must defer watch until observe');
+    stdout = ''; stderr = '';
     const code = await completionHook(['--host', host, '--inbox', inbox, '--watch-config', config],
-      Readable.from([JSON.stringify(native)]), { write(value) { stdout += value; } },
+      Readable.from([JSON.stringify(observePayload)]), { write(value) { stdout += value; } },
       { write(value) { stderr += value; } }, {}, { spawn(command, args, options) {
         calls.push({ command, args, options });
         const child = new EventEmitter(); child.unref = () => {};
@@ -352,7 +375,7 @@ for (const host of ['codex', 'claude-code', 'antigravity']) {
   });
 }
 
-test('AW17 observe response in terminal state does not spawn a watcher and auto-acknowledges inbox receipt', async t => {
+test('AW17 observe response in terminal state does not spawn a watcher and auto-acknowledges inbox receipt before hook output', async t => {
   const f = await fixture(t);
   const binding = f.db(inbox => inbox.findBinding({ host: 'codex', sessionId: sessionA }));
   const enqueued = f.db(inbox => inbox.enqueue({ bindingId: binding.bindingId, origin,
@@ -361,9 +384,15 @@ test('AW17 observe response in terminal state does not spawn a watcher and auto-
   assert.equal(enqueued.state, 'pending');
   assert.deepEqual(f.db(inbox => inbox.pending({ bindingId: binding.bindingId })), { pending: 1, claimed: 0, acknowledged: 0 });
 
-  const result = await f.run(native({ tool_name: 'mcp__ssh_test_observe', tool_input: { id },
-    tool_response: { structuredContent: envelope({ data: operation({ state: 'completed' }) }) } }));
-  assert.equal(result.state, 'settled');
+  let stdout = '', stderr = '';
+  const terminalInput = native({ tool_name: 'mcp__ssh_test_observe', tool_input: { id },
+    tool_response: { structuredContent: envelope({ data: operation({ state: 'completed' }) }) } });
+  const code = await completionHook(['--host', 'codex', '--inbox', f.inboxPath, '--watch-config', f.configPath],
+    Readable.from([JSON.stringify(terminalInput)]), { write(value) { stdout += value; } },
+    { write(value) { stderr += value; } }, {}, { spawn() { f.calls.push('unexpected'); } });
+  assert.equal(code, 0);
+  assert.equal(stderr, '');
+  assert.deepEqual(JSON.parse(stdout), {}, 'autoWatch must settle before runCompletionHook claims the receipt');
   assert.equal(f.calls.length, 0, 'terminal observe must never spawn a watcher');
 
   assert.deepEqual(f.db(inbox => inbox.pending({ bindingId: binding.bindingId })), { pending: 0, claimed: 0, acknowledged: 1 });
