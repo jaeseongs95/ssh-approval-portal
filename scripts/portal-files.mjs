@@ -14,7 +14,7 @@ import { validateCompletionDeliveryTarget, deliverCompletion } from '../src/adap
 import { runCompletionHookCli } from '../src/adapters/cli/completion-hook.mjs';
 import { autoWatchCompletion } from '../src/adapters/cli/completion-auto-watch.mjs';
 
-const usage = 'SSH Approval Portal file client2.4.0 (Node.js24.2+ within major24)\n' +
+const usage = 'SSH Approval Portal file client2.4.1 (Node.js24.2+ within major24)\n' +
   'node scripts/portal-files.mjs --origin HTTPS_ORIGIN [--cloudflared EXISTING_ABSOLUTE_PATH] doctor\n' +
   'node scripts/portal-files.mjs --origin HTTPS_ORIGIN [--cloudflared EXISTING_ABSOLUTE_PATH] upload --file ABSOLUTE_FILE --operation-key STABLE_KEY\n' +
   'node scripts/portal-files.mjs --origin HTTPS_ORIGIN [--cloudflared EXISTING_ABSOLUTE_PATH] status UUID\n' +
@@ -50,7 +50,7 @@ export async function main(argv = process.argv.slice(2), output = process.stdout
       target: { type: 'string' }, 'expected-target-revision': { type: 'string' },
       'notify-codex': { type: 'string' }, thread: { type: 'string' },
       'notify-hook': { type: 'boolean' }, binding: { type: 'string' }, host: { type: 'string' }, session: { type: 'string' },
-      inbox: { type: 'string' }, 'wake-executable': { type: 'string' },
+      inbox: { type: 'string' }, 'wake-executable': { type: 'string' }, 'skip-initial-terminal': { type: 'boolean' },
     } });
     if (values.help === true && argv.length === 1) { output.write(usage); return 0; }
     command = positionals[0];
@@ -75,6 +75,12 @@ export async function main(argv = process.argv.slice(2), output = process.stdout
       if (command !== 'watch' || !/^[a-z][a-z0-9_-]{0,31}(?![\s\S])/.test(values.target ?? '') ||
           !/^[a-f0-9]{64}(?![\s\S])/.test(values['expected-target-revision'] ?? '')) throw Object.assign(Error(), { code: 'INVALID_OPERATION_BINDING' });
       watchSelector = { ...(operationKey === undefined ? { id: requestId } : { operationKey }), target: values.target, expectedTargetRevision: values['expected-target-revision'] };
+    }
+    if (values['skip-initial-terminal'] !== undefined) {
+      if (command !== 'watch' || values['notify-hook'] !== true) throw Object.assign(Error(), { code: 'INVALID_ARGUMENTS' });
+      watchSelector = typeof watchSelector === 'string'
+        ? { id: watchSelector, requireInitialNonTerminal: true }
+        : { ...watchSelector, requireInitialNonTerminal: true };
     }
     const hookOptions = ['notify-hook', 'binding', 'host', 'session', 'inbox', 'wake-executable'];
     if (hookOptions.some(key => values[key] !== undefined)) {
@@ -119,17 +125,30 @@ export async function main(argv = process.argv.slice(2), output = process.stdout
       result = await client.watch(watchSelector);
       requestId = result.id;
       if (completionTarget) {
-        try {
-          const notification = await deliverCompletion({ target: completionTarget, origin: values.origin, event: result, environment }, deliveryServices);
-          notificationFailed = !['requested', 'deferred'].includes(notification.wake.state);
-          result = { ...result, notification };
-          if (notificationFailed) errorOutput.write(JSON.stringify({ error: 'COMPLETION_WAKE_UNCONFIRMED', requestId,
-            receiptId: notification.receiptId, wakeState: notification.wake.state }) + '\n');
-        } catch (error) {
-          notificationFailed = true;
-          result = { ...result, notification: { state: 'unknown', automaticRetry: false } };
-          const code = /^[A-Z_]{3,64}$/.test(error.code ?? '') ? error.code : 'COMPLETION_NOTIFICATION_FAILED';
-          errorOutput.write(JSON.stringify({ error: code, requestId }) + '\n');
+        if (result.alreadySettledOnFirstPoll) {
+          try {
+            const inbox = (deliveryServices.openInbox ?? (await import('../src/adapters/cli/completion-inbox.mjs')).openCompletionInbox)({ filePath: completionTarget.inboxPath });
+            try {
+              if (typeof inbox.acknowledgeOperation === 'function') {
+                inbox.acknowledgeOperation({ bindingId: completionTarget.bindingId, operationId: requestId });
+              }
+            } finally { inbox.close(); }
+          } catch { /* best-effort settle marker */ }
+          const { alreadySettledOnFirstPoll: _, ...cleanResult } = result;
+          result = { ...cleanResult, notification: { state: 'settled', deliveryState: 'acknowledged', wake: { state: 'deferred', reasonCode: 'COMPLETION_ALREADY_SETTLED' }, automaticRetry: false } };
+        } else {
+          try {
+            const notification = await deliverCompletion({ target: completionTarget, origin: values.origin, event: result, environment }, deliveryServices);
+            notificationFailed = !['requested', 'deferred'].includes(notification.wake.state);
+            result = { ...result, notification };
+            if (notificationFailed) errorOutput.write(JSON.stringify({ error: 'COMPLETION_WAKE_UNCONFIRMED', requestId,
+              receiptId: notification.receiptId, wakeState: notification.wake.state }) + '\n');
+          } catch (error) {
+            notificationFailed = true;
+            result = { ...result, notification: { state: 'unknown', automaticRetry: false } };
+            const code = /^[A-Z_]{3,64}$/.test(error.code ?? '') ? error.code : 'COMPLETION_NOTIFICATION_FAILED';
+            errorOutput.write(JSON.stringify({ error: code, requestId }) + '\n');
+          }
         }
       }
       if (values['notify-codex']) {

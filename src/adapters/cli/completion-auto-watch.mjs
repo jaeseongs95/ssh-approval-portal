@@ -142,6 +142,7 @@ export async function autoWatchCompletion({ host, input, inboxPath, configPath, 
       '--cloudflared', config.cloudflared, 'watch',
       ...(selected.operationId ? [selected.operationId] : ['--operation-key', selected.operationKey]),
       '--notify-hook', '--host', resolvedHost, '--session', observation.sessionId, '--inbox', location,
+      ...(resolvedHost === 'antigravity' && isObserve ? ['--skip-initial-terminal'] : []),
       ...(selected.targetId ? ['--target', selected.targetId, '--expected-target-revision', selected.targetRevision] : [])];
     const child = spawn(process.execPath, args, { detached: true, windowsHide: true, shell: false,
       stdio: ['ignore', log.fd, log.fd], env: environment });

@@ -419,3 +419,39 @@ test('AW20 Antigravity observe settles and suppresses watcher when operation com
   assert.equal(f.calls.length, 0);
   assert.deepEqual(f.db(inbox => inbox.pending({ bindingId: binding.bindingId })), { pending: 0, claimed: 0, acknowledged: 1 });
 });
+
+test('AW21 Antigravity first observe completion without prior inbox seed suppresses duplicate notification via --skip-initial-terminal', async t => {
+  const f = await fixture(t);
+  await f.configure({ ...f.config, routes: [{ origin, tools: ['mcp__ssh-test__submit', 'mcp__ssh-test__observe'] }] });
+  const binding = f.db(inbox => inbox.findBinding({ host: 'antigravity', sessionId: sessionA }));
+  const submitInput = { hook_event_name: 'PostToolUse', conversationId: sessionA,
+    toolCall: { name: 'call_mcp_tool', args: { ServerName: 'ssh-test', ToolName: 'submit',
+      Arguments: { operationKey: 'stable-operation-key-1', target: 'default', expectedTargetRevision: revision } } } };
+  assert.equal((await f.run(submitInput, { host: 'antigravity' })).state, 'deferred');
+  assert.equal(f.calls.length, 0);
+
+  const observeInput = { hook_event_name: 'PostToolUse', conversationId: sessionA,
+    toolCall: { name: 'call_mcp_tool', args: { ServerName: 'ssh-test', ToolName: 'observe',
+      Arguments: { id, target: 'default', expectedTargetRevision: revision } } } };
+  assert.equal((await f.run(observeInput, { host: 'antigravity' })).state, 'started');
+  assert.equal(f.calls.length, 1);
+  const args = f.calls[0].args;
+  assert.equal(args.includes('--skip-initial-terminal'), true);
+
+  let stdout = '', stderr = '', wakeCalled = 0;
+  const exitCode = await portalFiles(args.slice(1), { write(value) { stdout += value; } },
+    { write(value) { stderr += value; } }, () => 'synthetic.header.signature', {},
+    () => assert.fail('must not create upload client'), undefined,
+    () => ({ async connect() {}, async close() {}, async watch(selector) {
+      assert.equal(selector.requireInitialNonTerminal, true);
+      return { event: 'operation.finished', id, state: 'completed', targetId: 'default', targetRevision: revision,
+        finishedAt: 1000, failed: false, auditFailure: false, failureCode: null, exitCode: 0, reason: 'exit',
+        remoteOutcome: 'completed', outputState: 'ready', alreadySettledOnFirstPoll: true };
+    } }), undefined, { wake: async () => { wakeCalled++; return { state: 'requested' }; } });
+  assert.equal(exitCode, 0, stderr);
+  assert.equal(wakeCalled, 0, 'already settled operation on first poll must not wake or enqueue unacknowledged notification');
+  const delivered = JSON.parse(stdout);
+  assert.equal(delivered.notification.state, 'settled');
+  assert.deepEqual(f.db(inbox => inbox.pending({ bindingId: binding.bindingId })), { pending: 0, claimed: 0, acknowledged: 0 });
+  assert.equal(f.db(inbox => inbox.hasOperationEvent({ bindingId: binding.bindingId, operationId: id })), true);
+});

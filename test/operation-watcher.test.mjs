@@ -223,3 +223,13 @@ test('WK06 ID object selector enforces the expected binding on first response', 
   await assert.rejects(f.watcher.watch({ id, target: 'beta', expectedTargetRevision: revision }), error => typedFailure(error, 'OPERATION_BINDING_CONFLICT'));
   noRemoteEffects(f);
 });
+
+test('WK07 requireInitialNonTerminal marks alreadySettledOnFirstPoll only when terminal on first poll', async t => {
+  const f1 = fixture(t, { pages: [operation('completed')] });
+  await f1.watcher.connect();
+  assert.deepEqual(await f1.watcher.watch({ id, requireInitialNonTerminal: true }), expected({ alreadySettledOnFirstPoll: true }));
+
+  const f2 = fixture(t, { pages: [operation('running', { finishedAt: null }), operation('completed')] });
+  await f2.watcher.connect();
+  assert.deepEqual(await f2.watcher.watch({ id, requireInitialNonTerminal: true }), expected());
+});

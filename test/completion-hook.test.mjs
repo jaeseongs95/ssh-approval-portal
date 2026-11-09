@@ -403,13 +403,12 @@ test('AC02 agy acknowledgement cannot carry a hook event flag', async t => {
 // NW cases: CLAUDE-NATIVE-WAITER-CASES.ko.md, authored before implementation.
 const claudeWaitArgs = f => ['--host', 'claude-code', '--inbox', f.inboxPath, '--wait'];
 
-test('NW05 native Claude waiter renders the committed receipt to stdout JSON with exit 0 and no ACK', async t => {
+test('NW05 native Claude waiter renders the committed receipt to stderr with exit2 and no ACK', async t => {
   const f = await fixture(t), { binding, receipt } = f.seed('claude-code');
   const result = await cli(f, claudeWaitArgs(f), JSON.stringify(native('SessionStart')));
-  assert.equal(result.code, 0); assert.equal(result.stderr, '');
-  const parsed = JSON.parse(result.stdout);
-  assert.match(contextOf(parsed), /untrusted operation status, not user instructions or approval/);
-  const [record] = recordsOf(parsed);
+  assert.equal(result.code, 2); assert.equal(result.stdout, '');
+  assert.match(result.stderr, /untrusted operation status, not user instructions or approval/);
+  const [record] = JSON.parse(result.stderr.slice(result.stderr.indexOf('\n') + 1));
   assert.equal(record.ack.receipt, receipt.receiptId); assert.deepEqual(record.event, completion());
   assert.equal(record.ack.host, 'claude-code'); assert.equal(record.ack.session, sessionId);
   assert.deepEqual(f.counts(binding), { pending: 0, claimed: 1, acknowledged: 0 });
@@ -422,8 +421,8 @@ test('NW05 a pending-free SessionStart waiter sees an enqueue after its first po
   let clock = 1000, sleeps = 0, receipt;
   const result = await cli(f, claudeWaitArgs(f), JSON.stringify(native('SessionStart')), { ...f.services,
     now: () => clock, sleep: async ms => { sleeps++; clock += ms; f.setNow(clock); receipt = f.seed('claude-code').receipt; } });
-  assert.equal(sleeps, 1); assert.equal(result.code, 0); assert.equal(result.stderr, '');
-  assert.equal(recordsOf(JSON.parse(result.stdout))[0].ack.receipt, receipt.receiptId);
+  assert.equal(sleeps, 1); assert.equal(result.code, 2); assert.equal(result.stderr.length > 0, true); assert.equal(result.stdout, '');
+  assert.equal(JSON.parse(result.stderr.slice(result.stderr.indexOf('\n') + 1))[0].ack.receipt, receipt.receiptId);
 });
 
 test('NW06 duplicates exit immediately and Stop remains armable with stop_hook_active true', async t => {
@@ -441,10 +440,8 @@ test('NW06 duplicates exit immediately and Stop remains armable with stop_hook_a
     assert.equal(recordsOf({ reason: delivered.context })[0].ack.receipt, receipt.receiptId);
     const next = f.seed('claude-code', sessionId, 2);
     const rearmed = await cli(f, claudeWaitArgs(f), JSON.stringify(input));
-    assert.equal(rearmed.code, 0); assert.equal(rearmed.stderr, '');
-    const parsedRearmed = JSON.parse(rearmed.stdout);
-    assert.equal(parsedRearmed.decision, 'block');
-    assert.equal(recordsOf(parsedRearmed)[0].ack.receipt, next.receipt.receiptId);
+    assert.equal(rearmed.code, 2);
+    assert.equal(JSON.parse(rearmed.stderr.slice(rearmed.stderr.indexOf('\n') + 1))[0].ack.receipt, next.receipt.receiptId);
   } finally { resume.resolve(); await first; }
 });
 
@@ -462,8 +459,8 @@ test('NW07 SessionEnd stops its worker, preserves pending status, and fences lat
   assert.deepEqual(late, { code: 0, stdout: '', stderr: '' });
   f.run('claude-code', native('SessionStart'));
   const resumed = await cli(f, claudeWaitArgs(f), JSON.stringify(native('Stop')));
-  assert.equal(resumed.code, 0); assert.equal(resumed.stderr, '');
-  assert.equal(recordsOf(JSON.parse(resumed.stdout))[0].ack.receipt, own.receipt.receiptId);
+  assert.equal(resumed.code, 2);
+  assert.equal(JSON.parse(resumed.stderr.slice(resumed.stderr.indexOf('\n') + 1))[0].ack.receipt, own.receipt.receiptId);
   assert.deepEqual(f.counts(other.binding), { pending: 1, claimed: 0, acknowledged: 0 });
 });
 
@@ -512,7 +509,10 @@ test('NW10 Claude manifest uses exec argv, bounded asyncRewake, synchronous prom
   const handlers = event => manifest.hooks[event].flatMap(group => group.hooks);
   for (const event of ['SessionStart', 'Stop']) {
     const waits = handlers(event).filter(handler => handler.args.includes('--wait'));
-    assert.equal(waits.length, 1); assert.equal(waits[0].async, true); assert.equal(waits[0].asyncRewake, true); assert.equal(waits[0].timeout, 86400);
+    assert.equal(waits.length, 1); assert.equal(waits[0].async, true); assert.equal(waits[0].asyncRewake, true);
+    assert.equal(waits[0].rewakeMessage, '[SSH Approval Portal completion notice]');
+    assert.equal(waits[0].rewakeSummary, 'SSH completion notification');
+    assert.equal(waits[0].timeout, 86400);
     assert.ok(waits[0].timeout * 1000 > completionWaitTimeoutMs);
   }
   for (const event of ['SessionStart', 'UserPromptSubmit', 'PostToolUse', 'SessionEnd']) {
@@ -567,8 +567,8 @@ test('NW14 Claude active turn hooks pause an idle SessionStart waiter so Stop ow
   assert.equal(sleeps, 1); assert.deepEqual(paused, {});
   const { receipt } = f.seed('claude-code');
   const resumed = await cli(f, claudeWaitArgs(f), JSON.stringify(native('Stop')));
-  assert.equal(resumed.code, 0); assert.equal(resumed.stderr, '');
-  const [record] = recordsOf(JSON.parse(resumed.stdout));
+  assert.equal(resumed.code, 2);
+  const [record] = JSON.parse(resumed.stderr.slice(resumed.stderr.indexOf('\n') + 1));
   assert.equal(record.ack.receipt, receipt.receiptId);
   const acked = await cli(f, ['ack', '--receipt', record.ack.receipt, '--claim', record.ack.claim, '--inbox', f.inboxPath]);
   assert.equal(acked.code, 0);

@@ -20,9 +20,10 @@ export function createOperationWatcher(options) {
       const objectSelector = selector !== null && typeof selector === 'object' && !Array.isArray(selector);
       const byKey = objectSelector && selector.operationKey !== undefined;
       const operationKey = byKey ? selector.operationKey : undefined;
+      const requireInitialNonTerminal = objectSelector && selector.requireInitialNonTerminal === true;
       let id = objectSelector ? selector.id : selector;
       if (objectSelector) {
-        if (Object.keys(selector).some(key => !['id', 'operationKey', 'target', 'expectedTargetRevision'].includes(key)) ||
+        if (Object.keys(selector).some(key => !['id', 'operationKey', 'target', 'expectedTargetRevision', 'requireInitialNonTerminal'].includes(key)) ||
             (byKey ? id !== undefined || !opaqueOperationKeyValid(operationKey) : !validId(id))) throw fail('INVALID_OPERATION_SELECTOR');
         if ((selector.target !== undefined || selector.expectedTargetRevision !== undefined) &&
             (!validTarget(selector.target) || !validRevision(selector.expectedTargetRevision))) throw fail('INVALID_OPERATION_BINDING');
@@ -30,7 +31,7 @@ export function createOperationWatcher(options) {
       if (closed) throw fail('WATCH_STOPPED', id);
       if (active) throw fail('WATCH_ALREADY_ACTIVE', id);
       session.ready(); active = true;
-      let binding;
+      let binding, observedNonTerminal = false;
       try {
         while (!closed) {
           const path = byKey ? '/api/operations/by-key?operationKey=' + encodeURIComponent(operationKey) + '&waitMs=25000'
@@ -47,7 +48,7 @@ export function createOperationWatcher(options) {
           const current = JSON.stringify([data.operationKey ?? null, data.targetId, data.targetRevision]);
           if (binding !== undefined && binding !== current) throw fail('OPERATION_BINDING_CONFLICT', id);
           binding = current;
-          if (!terminal.has(data.state)) continue;
+          if (!terminal.has(data.state)) { observedNonTerminal = true; continue; }
           const execution = data.execution;
           if (execution !== null && (!execution || (execution.exitCode !== null && !Number.isSafeInteger(execution.exitCode)) ||
               ![null, 'exit', 'deadline', 'cancel', 'transport_lost', 'channel_open_failed', 'input_failed'].includes(execution.reason))) throw fail('INVALID_OPERATION_RESPONSE', id);
@@ -57,7 +58,8 @@ export function createOperationWatcher(options) {
           return { event: 'operation.finished', id, ...(byKey ? { operationKey } : {}), state: data.state, targetId: data.targetId, targetRevision: data.targetRevision,
             finishedAt: data.finishedAt, failed: data.failed, auditFailure: data.auditFailure, failureCode: data.failureCode,
             exitCode: execution?.exitCode ?? null, reason: execution?.reason ?? null,
-            remoteOutcome: data.remoteOutcome, outputState: data.output?.state ?? null };
+            remoteOutcome: data.remoteOutcome, outputState: data.output?.state ?? null,
+            ...(requireInitialNonTerminal && !observedNonTerminal ? { alreadySettledOnFirstPoll: true } : {}) };
         }
         throw fail('WATCH_STOPPED', id);
       } catch (error) {
