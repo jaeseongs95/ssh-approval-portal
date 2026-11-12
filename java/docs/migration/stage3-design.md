@@ -796,7 +796,7 @@ Java 판에 같은 행동이 없다. 각 묶음의 대체 사례는 8.5절에서
 | D3-08 | (a) 채택 | 채널 열기 재시도는 없다. 거절은 `SSH_CHANNEL_OPEN_FAILED`(`NOT_STARTED`)로 돌려준다. 세션당 채널 허가 8개로 서버 `MaxSessions` 초과를 미리 막는다. 연속 거절 3회면 그 세션은 쓰는 채널이 없을 때 닫는다. B-474~B-477의 기대는 이 동작으로 다시 쓴다. 다시 쓴 근거는 사례 표 비고에 적는다. |
 | D3-09 | (a) 채택 | `SSH_MCP_*` 이름을 유지한다. Spring `Environment`에서 읽고 keychain은 `Unsupported`로 돌려준다. |
 | D3-10 | (a) 채택 | `known_hosts` 파일에 영속한다. 경로는 설정값이고 기본은 데이터 디렉터리 아래다. `PrivateStorage` 규칙을 따른다. `insecure` 모드는 호환용으로 남기고 시작 시 WARN 로그를 남긴다. 업그레이드 안내에 「동작 강화」로 적는다. |
-| D3-11 | (b) 채택 | 실제 OpenSSH 시험 환경은 다음과 같이 준비한다. Linux CI는 서비스 컨테이너 또는 러너에 sshd를 준비하고, Windows CI는 `ci/openssh-windows.cmd`로 준비한다. 시험은 Java(Gradle 작업 `realOpenSshTest`, 명시 호출 전용)다. 소결정으로 임시 파일 재읽기 해시는 기본 켬이다(파일 상한 64MiB라 비용 한정). |
+| D3-11 | (a) 채택(수정) | 실제 OpenSSH 시험 환경은 CI 러너 자체에 준비한다. Linux는 `java/ci/openssh-linux.sh`, Windows는 `java/ci/openssh-windows.cmd`가 맡는다. Linux도 서비스 컨테이너가 아니라 러너에 둔다. P3-4(`sudo -n sftp-server`)를 시험하려면 sudo가 있는 실제 계정이 필요하기 때문이다. 이 PC에서는 실행하지 않는다. 시험은 Java(Gradle 작업 `realOpenSshTest`, 명시 호출 전용)다. 소결정으로 임시 파일 재읽기 해시는 기본 켬이다(파일 상한 64MiB라 비용 한정). |
 | D3-12 | (a) 채택 | `portal-server` 최소 조립과 store+ssh 통합 시험을 3단계에서 한다. 바인딩(`BridgeProperties`)은 4단계다. 3단계는 시험용 값으로 생성자 주입한다. |
 | D3-13 | (a) 채택 | 기존 주제별 enum에 추가하고 `envelope.schema.json`의 `x-portal-errorCodes`를 갱신한다. |
 | D3-14 | (b) 채택 | `AuditFailedException`은 인프라(어댑터) 예외로 둔다. 실행 유스케이스가 원인을 보존해 `DispatchRefusedException(AUDIT_FAILED)`로 변환한다. S2 13.6의 「`PortalException` 편입」 이월 문구는 이 판정으로 대체한다. 4단계 관리자 경로의 감사 실패 변환은 4단계가 같은 원칙(유스케이스 경계에서 업무 결과로 변환)으로 정한다. A-AUDIT-BOUNDARY 규칙을 둔다. |
