@@ -34,17 +34,15 @@ class JdbcArtifactRegistryDiskTest {
 
     private final ArtifactFixtures fixtures = new ArtifactFixtures();
     private final ArtifactRegistry registry;
-    private final ArtifactInventory inventory;
     private final ArtifactPayloadStore payloads;
 
-    JdbcArtifactRegistryDiskTest(ArtifactRegistry registry, ArtifactInventory inventory, ArtifactPayloadStore payloads) {
+    JdbcArtifactRegistryDiskTest(ArtifactRegistry registry, ArtifactPayloadStore payloads) {
         this.registry = registry;
-        this.inventory = inventory;
         this.payloads = payloads;
     }
 
     @Test
-    @DisplayName("RC-A-160 / RC-B-094 (D-0012): a 1 byte file on a disk without room is refused as DiskSpaceInsufficient, not as a budget refusal, and no row is created")
+    @DisplayName("RC-A-160 / RC-B-094 / S3-AR-03 (D-0012): a 1 byte file on a disk without room is refused as DiskSpaceInsufficient, not as a budget refusal, with the usable space and the margin, and no row is created")
     void aSmallFileIsRefusedByTheDiskNotByTheBudget() {
         ArtifactReservation refused = registry.reserve(fixtures.upload(1), fixtures.at());
 
@@ -52,7 +50,8 @@ class JdbcArtifactRegistryDiskTest {
         ArtifactReservation.DiskSpaceInsufficient disk = (ArtifactReservation.DiskSpaceInsufficient) refused;
         assertThat(disk.requestedBytes()).isEqualTo(1);
         assertThat(disk.usableBytes()).isPositive();
-        assertThat(inventory.holding()).isEmpty();
+        assertThat(disk.marginBytes()).isEqualTo(Long.MAX_VALUE);
+        assertThat(registry.holding()).isEmpty();
         assertThat(registry.budget().chargedBytes()).isZero();
         assertThat(registry.budget().remainingBytes()).isEqualTo(ArtifactLimits.DEFAULT_BUDGET_BYTES);
         assertThat(payloads.usable().usableBytes()).isPositive();
@@ -62,6 +61,6 @@ class JdbcArtifactRegistryDiskTest {
     @DisplayName("RC-A-160: the per-file limit is answered before the disk is asked")
     void thePerFileLimitComesBeforeTheDisk() {
         assertThat(registry.reserve(fixtures.upload(ArtifactLimits.MAX_FILE_BYTES + 1), fixtures.at())).isEqualTo(
-            new ArtifactReservation.FileTooLarge(ArtifactLimits.MAX_FILE_BYTES));
+            new ArtifactReservation.FileTooLarge(ArtifactLimits.MAX_FILE_BYTES + 1, ArtifactLimits.MAX_FILE_BYTES));
     }
 }

@@ -1,6 +1,7 @@
 package io.github.jaeseongs95.portal.domain.path;
 
 import io.github.jaeseongs95.portal.domain.text.Utf8Text;
+import java.util.Objects;
 import java.util.regex.Pattern;
 
 /**
@@ -36,6 +37,40 @@ public record WindowsRemotePath(String value) implements RemotePath {
     public String basename() {
         String[] parts = SEPARATOR.split(value, -1);
         return parts[parts.length - 1];
+    }
+
+    @Override
+    public boolean isWithin(RemotePath root) {
+        Objects.requireNonNull(root, "root");
+        if (!(root instanceof WindowsRemotePath windowsRoot)) {
+            return false;
+        }
+        String[] own = SEPARATOR.split(value.substring(3), -1);
+        String[] prefix = SEPARATOR.split(windowsRoot.value.substring(3), -1);
+        if (!value.substring(0, 1).equalsIgnoreCase(windowsRoot.value.substring(0, 1)) || own.length < prefix.length) {
+            return false;
+        }
+        for (int index = 0; index < prefix.length; index++) {
+            if (!own[index].equalsIgnoreCase(prefix[index])) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    @Override
+    public String directory() {
+        int separator = Math.max(value.lastIndexOf('\\'), value.lastIndexOf('/'));
+        return separator == 2 ? value.substring(0, 3) : value.substring(0, separator);
+    }
+
+    @Override
+    public RemotePath sibling(String name) {
+        Objects.requireNonNull(name, "name");
+        String directory = directory();
+        boolean atTheRoot = directory.length() == 3;
+        // A path below the root has a separator after its directory (the one the path itself uses); the root text already ends in one.
+        return new WindowsRemotePath(atTheRoot ? directory + name : directory + value.charAt(directory.length()) + name);
     }
 
     private static boolean hasForbiddenCharacter(String part) {

@@ -28,6 +28,7 @@ import io.github.jaeseongs95.portal.app.output.OutputPayloadStore;
 import io.github.jaeseongs95.portal.app.output.OutputReservation;
 import io.github.jaeseongs95.portal.app.output.OutputState;
 import io.github.jaeseongs95.portal.domain.error.ExecutionErrorCode;
+import io.github.jaeseongs95.portal.domain.error.OperationErrorCode;
 import io.github.jaeseongs95.portal.domain.error.RequestRefusedException;
 import io.github.jaeseongs95.portal.store.StoreTest;
 
@@ -71,7 +72,8 @@ class OutputConcurrencyTest {
                     manifests.markReady(id, finished, 6);
                     return true;
                 } catch (RequestRefusedException refused) {
-                    assertThat(refused.code()).isEqualTo(ExecutionErrorCode.OUTPUT_CAPTURE_FAILED);
+                    // The loser either lost the compare-and-set (OUTPUT_VERSION_CONFLICT, S3-UC-07) or read the row after the winner committed (the row is READY).
+                    assertThat(refused.code()).isIn(OperationErrorCode.OUTPUT_VERSION_CONFLICT, ExecutionErrorCode.OUTPUT_CAPTURE_FAILED);
                     return false;
                 }
             };

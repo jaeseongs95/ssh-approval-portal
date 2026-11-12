@@ -48,10 +48,10 @@ class SchemaMigrationTest {
     }
 
     @Test
-    @DisplayName("S2-DB-01: the applied scripts are V1, V1.1, V2 to V6 and V6.1, and a second migration runs nothing")
+    @DisplayName("S2-DB-01 / D3-04: the applied scripts are V1, V1.1, V2 to V6, V6.1 and V7 (the execution timeline), and a second migration runs nothing")
     void aSecondRunChangesNothing() {
         List<String> applied = Arrays.stream(flyway.info().applied()).map(info -> info.getVersion().getVersion()).toList();
-        assertThat(applied).containsExactly("1", "1.1", "2", "3", "4", "5", "6", "6.1");
+        assertThat(applied).containsExactly("1", "1.1", "2", "3", "4", "5", "6", "6.1", "7");
         assertThat(Arrays.stream(flyway.info().applied()).map(MigrationInfo::getState).allMatch(state -> state.isApplied())).isTrue();
         assertThat(flyway.info().pending()).isEmpty();
 

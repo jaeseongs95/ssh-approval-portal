@@ -32,7 +32,19 @@ public record OperationResultRow(@Id String operationId, ResultKind resultKind, 
                                  Truncation stdoutTruncated, Long stderrReceivedBytes, Long stderrRetainedBytes, Long stderrCursor, Truncation stderrTruncated,
                                  FailureKind failureKind, ExecutionStage failureStage, ExecutionErrorCode failureCode, RemoteOutcome failureRemoteOutcome,
                                  DispatchKind dispatchKind, DispatchReason dispatchReason, DispatchStage dispatchStage, EvidenceKind evidenceKind, Integer evidenceExitCode,
-                                 Instant evidenceConfirmedAt, String evidenceSha256, EvidenceRead evidenceRead, String resultTexts) {
+                                 Instant evidenceConfirmedAt, String evidenceSha256, EvidenceRead evidenceRead, String resultTexts, Instant execConnectedAt,
+                                 Instant execDispatchedAt, Instant execClosedAt) {
+
+    /**
+     * The row with the three instants of the execution timeline (V7: connected, request sent, channel closed); {@code null} where the step was not reached. The
+     * timeline belongs to the execution, not to the outcome, so it is written after the outcome and is kept when the same outcome is stored again.
+     */
+    public OperationResultRow withTimeline(Instant connectedAt, Instant dispatchedAt, Instant closedAt) {
+        return new OperationResultRow(operationId, resultKind, resultFlag, execReason, remoteState, exitKind, exitCode, exitSignal, signalDelivery, timeoutMs, cleanup,
+            execReconciliation, outputState, capture, stdoutReceivedBytes, stdoutRetainedBytes, stdoutCursor, stdoutTruncated, stderrReceivedBytes, stderrRetainedBytes,
+            stderrCursor, stderrTruncated, failureKind, failureStage, failureCode, failureRemoteOutcome, dispatchKind, dispatchReason, dispatchStage, evidenceKind,
+            evidenceExitCode, evidenceConfirmedAt, evidenceSha256, evidenceRead, resultTexts, connectedAt, dispatchedAt, closedAt);
+    }
 
     /** Which shape the row has. */
     public enum ResultKind {

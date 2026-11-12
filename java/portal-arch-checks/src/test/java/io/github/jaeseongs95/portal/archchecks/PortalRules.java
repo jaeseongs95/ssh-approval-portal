@@ -203,13 +203,16 @@ final class PortalRules {
      * A-SSH-NO-PLATFORM-BRANCH (S3-AB-09), pattern 8.12: the target OS is chosen by the {@code List<TargetPlatform>} the registry collects, not by a branch in the shared
      * code. In the classes of portal-ssh the bytecode of a branch on {@code TargetOs} shows as {@code ordinal()}, {@code values()}, {@code valueOf}, {@code equals},
      * {@code compareTo}, a {@code $SwitchMap$...TargetOs} read (the old-style switch), or a read of one of its constants outside a {@code TargetPlatform}
-     * implementation (the {@code ==} comparison). A {@code TargetPlatform} may name its own constant ({@code return TargetOs.WINDOWS}). The registry sits in portal-app.
-     * Not visible: a pattern switch (invokedynamic) and an {@code ==} inside a {@code TargetPlatform}; those are review items.
+     * implementation (the {@code ==} comparison). A {@code TargetPlatform} may name its own constant ({@code return TargetOs.WINDOWS}), and so may a
+     * {@code CommandLineGrammar} ({@code platform()} answers the OS whose command line it quotes; the registry joins the grammars by that answer as it joins the
+     * platforms). The registry sits in portal-app.
+     * Not visible: a pattern switch (invokedynamic) and an {@code ==} inside a {@code TargetPlatform} or a {@code CommandLineGrammar}; those are review items.
      */
     static List<ArchRule> noPlatformBranch(ModuleTable table) {
         String ssh = table.packageOf("ssh") + "..";
         String targetOs = table.packageOf("domain") + ".target.TargetOs";
         String targetPlatform = table.packageOf("app") + ".target.TargetPlatform";
+        String commandLineGrammar = table.packageOf("domain") + ".command.CommandLineGrammar";
         String switchMap = "$SwitchMap$" + targetOs.replace('.', '$');
         return List.of(
             ArchRuleDefinition.noClasses().that().resideInAPackage(ssh)
@@ -219,10 +222,10 @@ final class PortalRules {
             ArchRuleDefinition.noClasses().that().resideInAPackage(ssh)
                 .should().accessFieldWhere(DescribedPredicate.<JavaFieldAccess>describe("read the switch map of the target OS", a -> switchMap.equals(a.getTarget().getName())))
                 .as("A-SSH-NO-PLATFORM-BRANCH: no class of portal-ssh switches on TargetOs (pattern 8.12)"),
-            ArchRuleDefinition.noClasses().that().resideInAPackage(ssh).and().areNotAssignableTo(targetPlatform)
+            ArchRuleDefinition.noClasses().that().resideInAPackage(ssh).and().areNotAssignableTo(targetPlatform).and().areNotAssignableTo(commandLineGrammar)
                 .should().accessFieldWhere(DescribedPredicate.<JavaFieldAccess>describe("read a TargetOs constant",
                     a -> targetOs.equals(a.getTarget().getOwner().getName())))
-                .as("A-SSH-NO-PLATFORM-BRANCH: only a TargetPlatform implementation of portal-ssh reads a TargetOs constant (pattern 8.12)"));
+                .as("A-SSH-NO-PLATFORM-BRANCH: only a TargetPlatform or CommandLineGrammar implementation of portal-ssh reads a TargetOs constant (pattern 8.12)"));
     }
 
     /**

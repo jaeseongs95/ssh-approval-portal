@@ -131,6 +131,37 @@ class ApprovalPolicyTest {
             .isEqualTo(refused(DispatchReason.AUTHORITY, DispatchStage.AUTHORITY));
     }
 
+    @Test
+    @DisplayName("RC-A-467 RC-A-469 a command that the server's read authority started (automatic, on the read profile, no decision) is dispatched under the same guards; no other automatic start is let through")
+    void aReadStartIsDispatchedWithoutADecision() {
+        ProfileAlias readProfile = new ProfileAlias("write-profile");
+        Operation read = pending().enqueue(new StartAuthority.Policy(StartAuthority.PolicyScope.READ), T0.plusSeconds(2)).claim(T0.plusSeconds(3));
+        assertThat(policy.checkDispatch(read, readProfile, open, NOW)).isEqualTo(new StartDecision.Startable());
+        assertThat(policy.checkDispatch(read, readProfile, reserved, NOW)).isEqualTo(refused(DispatchReason.MAINTENANCE, DispatchStage.MAINTENANCE));
+        assertThat(policy.checkDispatch(read, readProfile, open, T0.plus(Duration.ofHours(1)))).isEqualTo(refused(DispatchReason.REQUEST_STATE, DispatchStage.REQUEST_STATE));
+        Operation notClaimed = pending().enqueue(new StartAuthority.Policy(StartAuthority.PolicyScope.READ), T0.plusSeconds(2));
+        assertThat(policy.checkDispatch(notClaimed, readProfile, open, NOW)).as("only a claimed operation is dispatched").isEqualTo(refused(DispatchReason.REQUEST_STATE, DispatchStage.REQUEST_STATE));
+
+        assertThat(policy.checkDispatch(read, new ProfileAlias("another-profile"), open, NOW)).as("on a profile that is not the read profile it is a command start without a decision")
+            .isEqualTo(refused(DispatchReason.AUTHORITY, DispatchStage.AUTHORITY));
+        Operation owner = pending().enqueue(new StartAuthority.Owner(), T0.plusSeconds(2)).claim(T0.plusSeconds(3));
+        assertThat(policy.checkDispatch(owner, new ProfileAlias("another-profile"), open, NOW)).as("an owner start is judged as before").isEqualTo(new StartDecision.Startable());
+        assertThat(policy.checkDispatch(owner, readProfile, open, NOW)).isEqualTo(new StartDecision.Startable());
+        Operation upload = pendingUpload().enqueue(new StartAuthority.Policy(StartAuthority.PolicyScope.UPLOAD), T0.plusSeconds(2)).claim(T0.plusSeconds(3));
+        assertThat(policy.checkDispatch(upload, new ProfileAlias("write-profile"), open, NOW)).as("a file operation has no read authority").isEqualTo(refused(DispatchReason.AUTHORITY, DispatchStage.FILE_GUARD));
+        assertThatThrownBy(() -> policy.checkDispatch(read, null, open, NOW)).isInstanceOf(NullPointerException.class);
+    }
+
+    @Test
+    @DisplayName("RC-A-467 the read start is no way round the decision rule: under the command authority a command without a decision to execute is not queued, so it is never dispatched as a read start")
+    void theCommandAuthorityStillNeedsTheDecision() {
+        StartAuthority command = new StartAuthority.Policy(StartAuthority.PolicyScope.COMMAND);
+        assertThat(policy.checkStart(pending(), command, open, NOW)).isEqualTo(refused(DispatchReason.AUTHORITY, DispatchStage.AUTHORITY));
+        Operation executeDecision = pending().recordDecision(new DecisionRecord.Decided(DecisionKind.EXECUTE, DecisionReason.COMMAND_SET, ReviewReason.NONE, 3), T0.plusSeconds(2))
+            .enqueue(command, T0.plusSeconds(3)).claim(T0.plusSeconds(4));
+        assertThat(policy.checkDispatch(executeDecision, new ProfileAlias("write-profile"), open, NOW)).isEqualTo(new StartDecision.Startable());
+    }
+
     private static StartDecision refused(DispatchReason reason, DispatchStage stage) {
         return new StartDecision.Refused(DispatchFailure.refused(reason, stage));
     }

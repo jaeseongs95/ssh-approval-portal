@@ -28,9 +28,11 @@ import io.github.jaeseongs95.portal.app.artifact.ConsumeReason;
 import io.github.jaeseongs95.portal.app.artifact.ConsumeState;
 import io.github.jaeseongs95.portal.app.artifact.ContentDigest;
 import io.github.jaeseongs95.portal.app.artifact.ReleaseReason;
+import io.github.jaeseongs95.portal.app.artifact.ReservedSplit;
 import io.github.jaeseongs95.portal.app.artifact.StagedAction;
 import io.github.jaeseongs95.portal.app.artifact.StagedActionKind;
 import io.github.jaeseongs95.portal.app.artifact.StagedActionState;
+import io.github.jaeseongs95.portal.app.artifact.UnpinReason;
 import io.github.jaeseongs95.portal.domain.error.ArtifactErrorCode;
 import io.github.jaeseongs95.portal.domain.error.ErrorCode;
 import io.github.jaeseongs95.portal.domain.error.RequestErrorCode;
@@ -73,12 +75,10 @@ class JdbcArtifactRegistryTest {
 
     private final ArtifactFixtures fixtures = new ArtifactFixtures();
     private final ArtifactRegistry registry;
-    private final ArtifactInventory inventory;
     private final Savepoints savepoints;
 
-    JdbcArtifactRegistryTest(ArtifactRegistry registry, ArtifactInventory inventory, Savepoints savepoints) {
+    JdbcArtifactRegistryTest(ArtifactRegistry registry, Savepoints savepoints) {
         this.registry = registry;
-        this.inventory = inventory;
         this.savepoints = savepoints;
     }
 
@@ -93,12 +93,12 @@ class JdbcArtifactRegistryTest {
         assertThat(registry.budget().budgetBytes()).isEqualTo(536_870_912L);
         assertThat(registry.budget().chargedBytes()).isEqualTo(536_870_912L);
         assertThat(registry.budget().remainingBytes()).isZero();
-        assertThat(registry.reserve(fixtures.upload(MAX_FILE), fixtures.at())).isEqualTo(new ArtifactReservation.BudgetExceeded(MAX_FILE, 536_870_912L, 536_870_912L));
-        assertThat(inventory.holding()).hasSize(8);
+        assertThat(registry.reserve(fixtures.upload(MAX_FILE), fixtures.at())).isEqualTo(new ArtifactReservation.BudgetExceeded(MAX_FILE, new ReservedSplit(536_870_912L, 0), 536_870_912L));
+        assertThat(registry.holding()).hasSize(8);
 
         ids.forEach(id -> registry.release(id, ReleaseReason.REFUSED));
         assertThat(registry.budget().chargedBytes()).isZero();
-        assertThat(inventory.holding()).isEmpty();
+        assertThat(registry.holding()).isEmpty();
     }
 
     @Test
@@ -122,6 +122,42 @@ class JdbcArtifactRegistryTest {
     }
 
     @Test
+    @DisplayName("S3-AR-07: a submitted upload is pinned and not listed; once its operation settled, unpin gives it back to the expiry, and a second unpin changes nothing")
+    void anUnpinnedArtifactExpiresAgain() {
+        ArtifactId submitted = fixtures.readyArtifact(registry, fixtures.upload(4), fixtures.bytes(4, 1));
+        registry.submit(submitted, OPERATION_A);
+        assertThat(registry.expired(ArtifactFixtures.T0.plus(Duration.ofHours(2)))).as("pinned while the operation depends on it").isEmpty();
+
+        ArtifactRecord unpinned = registry.unpin(submitted, UnpinReason.OPERATION_SETTLED);
+
+        assertThat(unpinned.spec().retention()).isEqualTo(ArtifactRetention.RELEASABLE);
+        assertThat(unpinned.submission()).as("the link to the operation stays").isEqualTo(new ArtifactSubmission.SubmittedAs(OPERATION_A));
+        assertThat(registry.expired(ArtifactFixtures.T0.plus(Duration.ofHours(2)))).extracting(ArtifactRecord::id).containsExactly(submitted);
+        assertThat(registry.unpin(submitted, UnpinReason.OPERATION_SETTLED).version()).isEqualTo(unpinned.version());
+        assertRefused(() -> registry.unpin(new ArtifactId("9".repeat(48)), UnpinReason.OPERATION_SETTLED), ArtifactErrorCode.ARTIFACT_NOT_FOUND);
+    }
+
+    @Test
+    @DisplayName("RC-A-772 / D3-17: a download reserves the largest size, receives fewer bytes and completes with the real size, so the charge falls to what was received; an upload cannot complete this way")
+    void aCompletedDownloadChargesWhatItReceived() {
+        ArtifactId id = fixtures.reservedId(registry.reserve(fixtures.download(64), fixtures.at()));
+        assertThat(registry.budget().chargedBytes()).isEqualTo(64);
+        byte[] bytes = fixtures.bytes(4, 7);
+        registry.append(id, 0, fixtures.chunk(bytes));
+        assertRefused(() -> registry.markReady(id, fixtures.digest(bytes)), ArtifactErrorCode.ARTIFACT_INCOMPLETE);
+
+        ArtifactRecord ready = registry.completeDownload(id, fixtures.digest(bytes));
+
+        assertThat(ready.state()).isEqualTo(ArtifactState.READY);
+        assertThat(ready.spec().sizeBytes()).isEqualTo(4);
+        assertThat(ready.content()).isEqualTo(new ContentDigest.Sealed(fixtures.digest(bytes)));
+        assertThat(registry.budget().chargedBytes()).isEqualTo(4);
+        assertThat(registry.completeDownload(id, fixtures.digest(bytes))).isEqualTo(ready);
+        ArtifactId upload = fixtures.reservedId(registry.reserve(fixtures.upload(4), fixtures.at()));
+        assertRefused(() -> registry.completeDownload(upload, fixtures.digest(bytes)), ArtifactErrorCode.ARTIFACT_NOT_WRITABLE);
+    }
+
+    @Test
     @DisplayName("RC-A-161: chunks are acknowledged in order, the registry keeps the received count and every chunk digest, and a repeated or skipped chunk number is a conflict")
     void chunksAreAcknowledgedInOrder() {
         byte[] first = {1, 2};
@@ -138,7 +174,7 @@ class JdbcArtifactRegistryTest {
         ArtifactRecord afterSecond = registry.append(id, 1, fixtures.chunk(second));
         assertThat(afterSecond.receivedBytes()).isEqualTo(5);
         assertThat(afterSecond.version()).isGreaterThan(afterFirst.version());
-        assertThat(inventory.chunks(id)).containsExactly(fixtures.chunk(first), fixtures.chunk(second));
+        assertThat(registry.chunks(id)).containsExactly(fixtures.chunk(first), fixtures.chunk(second));
 
         ArtifactRecord ready = registry.markReady(id, fixtures.digest(new byte[] {1, 2, 3, 4, 5}));
         assertThat(ready.state()).isEqualTo(ArtifactState.READY);
@@ -193,7 +229,7 @@ class JdbcArtifactRegistryTest {
         registry.release(id, ReleaseReason.EXPIRED);
 
         assertThat(registry.budget().chargedBytes()).isZero();
-        assertThat(inventory.chunks(id)).isEmpty();
+        assertThat(registry.chunks(id)).isEmpty();
     }
 
     @Test
@@ -204,7 +240,7 @@ class JdbcArtifactRegistryTest {
             assertThat(registry.find(id).orElseThrow().state()).isEqualTo(ArtifactState.READY);
         }
 
-        assertThat(inventory.holding()).hasSize(101);
+        assertThat(registry.holding()).hasSize(101);
         assertThat(registry.budget().chargedBytes()).isEqualTo(101);
     }
 
@@ -275,7 +311,7 @@ class JdbcArtifactRegistryTest {
     }
 
     @Test
-    @DisplayName("RC-B-091: a staged file keeps its public UUID, owner and key, has no target and no path, and the same owner and key (or the same UUID) cannot be reserved twice")
+    @DisplayName("RC-B-091 / S3-AR-08: a staged file keeps its public UUID, owner and key, has no target and no path, the registry port finds it by owner and key (the retry of a begin gets the same UUID), and the same owner and key (or the same UUID) cannot be reserved twice")
     void aStagedFileIsBoundToItsOwnerAndKey() {
         ArtifactUuid uuid = fixtures.nextUuid();
         String key = "opaque-upload-key-0001";
@@ -287,7 +323,7 @@ class JdbcArtifactRegistryTest {
         assertThat(record.spec().destination()).isEqualTo(new ArtifactDestination.Unassigned());
         assertThat(record.spec().fileName().value()).isEqualTo("한글😀.bin");
         assertThat(registry.findStaged(uuid)).contains(record);
-        assertThat(inventory.findStagedByKey(new OwnerId("verified-owner"), key)).contains(record);
+        assertThat(registry.findStagedByKey(new OwnerId("verified-owner"), key)).contains(record);
 
         assertRefused(() -> registry.reserve(fixtures.staged("verified-owner", key, fixtures.nextUuid(), 4), fixtures.at()), RequestErrorCode.OPERATION_KEY_CONFLICT);
         assertRefused(() -> registry.reserve(fixtures.staged("verified-owner", "opaque-upload-key-0002", uuid, 4), fixtures.at()),
@@ -295,8 +331,8 @@ class JdbcArtifactRegistryTest {
         ArtifactUuid otherUuid = fixtures.nextUuid();
         ArtifactId other = fixtures.reservedId(registry.reserve(fixtures.staged("other-owner", key, otherUuid, 4), fixtures.at()));
         assertThat(other).isNotEqualTo(id);
-        assertThat(inventory.findStagedByKey(new OwnerId("other-owner"), key).orElseThrow().id()).isEqualTo(other);
-        assertThat(inventory.findStagedByKey(new OwnerId("verified-owner"), key).orElseThrow().id()).isEqualTo(id);
+        assertThat(registry.findStagedByKey(new OwnerId("other-owner"), key).orElseThrow().id()).isEqualTo(other);
+        assertThat(registry.findStagedByKey(new OwnerId("verified-owner"), key).orElseThrow().id()).isEqualTo(id);
 
         List<StagedAction> actions = registry.actions(id);
         assertThat(actions).isEmpty();
@@ -314,7 +350,7 @@ class JdbcArtifactRegistryTest {
             assertThatThrownBy(() -> new Digest("a".repeat(64) + suffix)).isInstanceOf(IllegalArgumentException.class);
             assertThatThrownBy(() -> ArtifactUuid.parse(uuid.text() + suffix)).isInstanceOf(IllegalArgumentException.class);
         }
-        assertThat(inventory.holding()).isEmpty();
+        assertThat(registry.holding()).isEmpty();
         assertThat(registry.budget().chargedBytes()).isZero();
 
         ArtifactId id = fixtures.reservedId(registry.reserve(fixtures.staged("verified-owner", "valid-operation-key", uuid, 4), fixtures.at()));
@@ -343,8 +379,10 @@ class JdbcArtifactRegistryTest {
         ArtifactId removed = fixtures.readyArtifact(registry, fixtures.stagedFile(4), bytes);
         assertThat(registry.budget().chargedBytes()).isEqualTo(8);
 
-        assertThat(registry.beginConsume(moved).state()).isEqualTo(ArtifactState.CONSUMING);
-        assertRefused(() -> registry.beginConsume(moved), ArtifactErrorCode.STAGED_FILE_CONSUMED);
+        ArtifactRecord consuming = registry.beginConsume(moved, ConsumeReason.MOVED);
+        assertThat(consuming.state()).isEqualTo(ArtifactState.CONSUMING);
+        assertThat(consuming.consumption()).as("S3-AR-09: the reason is recorded when the use starts").isEqualTo(new ConsumeState.Consuming(ConsumeReason.MOVED));
+        assertRefused(() -> registry.beginConsume(moved, ConsumeReason.MOVED), ArtifactErrorCode.STAGED_FILE_CONSUMED);
         assertRefused(() -> registry.beginDelete(moved), ArtifactErrorCode.ARTIFACT_BUSY);
         ArtifactRecord done = registry.completeConsume(moved, ConsumeReason.MOVED);
 
@@ -355,13 +393,13 @@ class JdbcArtifactRegistryTest {
         assertThat(done.content()).isEqualTo(new ContentDigest.Sealed(fixtures.digest(bytes)));
         assertThat(registry.completeConsume(moved, ConsumeReason.MOVED)).isEqualTo(done);
         assertRefused(() -> registry.completeConsume(moved, ConsumeReason.REMOVED), ArtifactErrorCode.STAGED_FILE_CONSUMED);
-        assertRefused(() -> registry.beginConsume(moved), ArtifactErrorCode.STAGED_FILE_CONSUMED);
+        assertRefused(() -> registry.beginConsume(moved, ConsumeReason.MOVED), ArtifactErrorCode.STAGED_FILE_CONSUMED);
         assertThat(registry.budget().chargedBytes()).isEqualTo(4 + 1);
 
-        registry.beginConsume(removed);
+        registry.beginConsume(removed, ConsumeReason.REMOVED);
         registry.completeConsume(removed, ConsumeReason.REMOVED);
         assertThat(registry.budget().chargedBytes()).isEqualTo(2);
-        assertThat(inventory.holding()).isEmpty();
+        assertThat(registry.holding()).isEmpty();
         assertThat(registry.expired(ArtifactFixtures.T0.plus(Duration.ofMinutes(11)))).extracting(ArtifactRecord::id).containsExactlyInAnyOrder(moved, removed);
         registry.release(moved, ReleaseReason.CONSUMED);
         registry.release(removed, ReleaseReason.CONSUMED);
@@ -375,8 +413,8 @@ class JdbcArtifactRegistryTest {
         ArtifactId ready = fixtures.readyArtifact(registry, fixtures.stagedFile(4), fixtures.bytes(4, 1));
         registry.beginDelete(ready);
 
-        assertRefused(() -> registry.beginConsume(staging), ArtifactErrorCode.ARTIFACT_NOT_READY);
-        assertRefused(() -> registry.beginConsume(ready), ArtifactErrorCode.ARTIFACT_NOT_READY);
+        assertRefused(() -> registry.beginConsume(staging, ConsumeReason.REMOVED), ArtifactErrorCode.ARTIFACT_NOT_READY);
+        assertRefused(() -> registry.beginConsume(ready, ConsumeReason.REMOVED), ArtifactErrorCode.ARTIFACT_NOT_READY);
         assertRefused(() -> registry.completeConsume(staging, ConsumeReason.MOVED), ArtifactErrorCode.ARTIFACT_CHANGED);
     }
 
@@ -400,7 +438,7 @@ class JdbcArtifactRegistryTest {
         long charged = registry.budget().chargedBytes();
         assertThatThrownBy(() -> new WindowsRemotePath("C:/file:stream")).isInstanceOf(IllegalArgumentException.class);
         assertThat(registry.budget().chargedBytes()).isEqualTo(charged);
-        assertThat(inventory.holding()).hasSize(2);
+        assertThat(registry.holding()).hasSize(2);
     }
 
     @Test
@@ -457,7 +495,7 @@ class JdbcArtifactRegistryTest {
 
         assertThat(registry.budget().chargedBytes()).isEqualTo(4);
         assertThat(registry.expired(ArtifactFixtures.T0.plus(Duration.ofHours(5)))).isEmpty();
-        assertThat(inventory.holding()).extracting(ArtifactRecord::state).containsExactly(ArtifactState.DELETING);
+        assertThat(registry.holding()).extracting(ArtifactRecord::state).containsExactly(ArtifactState.DELETING);
     }
 
     /**

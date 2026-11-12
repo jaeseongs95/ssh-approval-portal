@@ -2,6 +2,7 @@ package io.github.jaeseongs95.portal.ssh.testkit;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.security.GeneralSecurityException;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.NoSuchAlgorithmException;
@@ -26,6 +27,7 @@ import org.apache.sshd.common.file.virtualfs.VirtualFileSystemFactory;
 import org.apache.sshd.common.keyprovider.KeyPairProvider;
 import org.apache.sshd.common.session.ConnectionService;
 import org.apache.sshd.common.session.Session;
+import org.apache.sshd.common.session.SessionListener;
 import org.apache.sshd.common.session.helpers.AbstractSession;
 import org.apache.sshd.common.util.net.SshdSocketAddress;
 import org.apache.sshd.server.ServerBuilder;
@@ -71,7 +73,9 @@ public final class EmbeddedSshServer implements AutoCloseable {
     private final EventLog<String> destroyedCommands = new EventLog<>();
     private final EventLog<AuthAttempt> authAttempts = new EventLog<>();
     private final EventLog<SshdSocketAddress> forwardRequests = new EventLog<>();
+    private final EventLog<String> acceptedConnections = new EventLog<>();
     private volatile boolean swallowKeepAlives;
+    private volatile boolean refuseChannels;
 
     private EmbeddedSshServer(Builder builder) {
         this.hostKey = builder.hostKey != null ? builder.hostKey : newKeyPair();
@@ -103,7 +107,24 @@ public final class EmbeddedSshServer implements AutoCloseable {
             if (script instanceof ScriptedCommand.Refused) {
                 return null; // MINA answers SSH_MSG_CHANNEL_FAILURE to an exec request that wanted a reply
             }
+            if (script instanceof ScriptedCommand.DropsConnection) {
+                channel.getSession().close(true); // before MINA writes its reply: the client gets no answer
+                return null;
+            }
             return new ScriptedCommandSession(command, script, executor, startedCommands, receivedSignals, destroyedCommands);
+        });
+        server.addSessionListener(new SessionListener() {
+            @Override
+            public void sessionEstablished(Session session) {
+                acceptedConnections.add(String.valueOf(session.getRemoteAddress()));
+            }
+
+            @Override
+            public void sessionEvent(Session session, SessionListener.Event event) {
+                if (event == SessionListener.Event.Authenticated && refuseChannels) {
+                    allowChannels(session, false);
+                }
+            }
         });
         server.addChannelListener(new ChannelListener() {
             @Override
@@ -162,6 +183,15 @@ public final class EmbeddedSshServer implements AutoCloseable {
             return generator.generateKeyPair();
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("the JDK has no EC key generator", e);
+        }
+    }
+
+    /** A new Ed25519 key pair made by MINA (it needs the EdDSA provider of the module's runtime class path, see build.gradle.kts). */
+    public static KeyPair newEd25519KeyPair() {
+        try {
+            return KeyUtils.generateKeyPair(KeyPairProvider.SSH_ED25519, 256);
+        } catch (GeneralSecurityException e) {
+            throw new IllegalStateException("MINA cannot make an Ed25519 key: is there an EdDSA provider?", e);
         }
     }
 
@@ -230,6 +260,11 @@ public final class EmbeddedSshServer implements AutoCloseable {
         return forwardRequests;
     }
 
+    /** One entry (the client's address) for every TCP connection the server accepted, in order: the count is the number of connections a client made. */
+    public EventLog<String> acceptedConnections() {
+        return acceptedConnections;
+    }
+
     /** The number of SSH sessions that are open on the server right now (authenticated or not). */
     public int activeSessionCount() {
         return server.getActiveSessions().size();
@@ -243,6 +278,25 @@ public final class EmbeddedSshServer implements AutoCloseable {
     /** While true, the server does not answer a {@code keepalive@...} global request (it neither succeeds nor fails it): the peer's probe times out. */
     public void swallowKeepAlives(boolean swallow) {
         this.swallowKeepAlives = swallow;
+    }
+
+    /**
+     * While true, every new channel a client asks for is refused with {@code SSH_MSG_CHANNEL_OPEN_FAILURE} ("additional sessions disabled", reason connect-failed), on the
+     * sessions that exist now and on every session that logs in later; the channels that are open keep running. It is what a server at its {@code MaxSessions} does.
+     */
+    public void refuseNewChannels(boolean refuse) {
+        this.refuseChannels = refuse;
+        for (AbstractSession session : server.getActiveSessions()) {
+            allowChannels(session, !refuse);
+        }
+    }
+
+    private void allowChannels(Session session, boolean allow) {
+        try {
+            session.getService(ConnectionService.class).setAllowMoreSessions(allow);
+        } catch (RuntimeException e) {
+            // The session has not logged in yet (it has no connection service); the listener applies the switch when it does.
+        }
     }
 
     /** Arms an SFTP failure; it stays armed until it has fired {@link SftpFault#times()} times or {@link #clearSftpFaults()}. */

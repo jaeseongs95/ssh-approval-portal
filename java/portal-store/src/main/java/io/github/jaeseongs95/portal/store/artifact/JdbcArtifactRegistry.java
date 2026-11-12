@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import io.github.jaeseongs95.portal.app.artifact.ArtifactBudget;
+import io.github.jaeseongs95.portal.app.artifact.ArtifactDirection;
 import io.github.jaeseongs95.portal.app.artifact.ArtifactPayloadStore;
 import io.github.jaeseongs95.portal.app.artifact.ArtifactRecord;
 import io.github.jaeseongs95.portal.app.artifact.ArtifactRegistry;
@@ -26,8 +27,10 @@ import io.github.jaeseongs95.portal.app.artifact.ArtifactState;
 import io.github.jaeseongs95.portal.app.artifact.ChunkDigest;
 import io.github.jaeseongs95.portal.app.artifact.ConsumeReason;
 import io.github.jaeseongs95.portal.app.artifact.ReleaseReason;
+import io.github.jaeseongs95.portal.app.artifact.ReservedSplit;
 import io.github.jaeseongs95.portal.app.artifact.StagedAction;
 import io.github.jaeseongs95.portal.app.artifact.StagedActionState;
+import io.github.jaeseongs95.portal.app.artifact.UnpinReason;
 import io.github.jaeseongs95.portal.app.storage.DiskSpace;
 import io.github.jaeseongs95.portal.domain.error.ArtifactErrorCode;
 import io.github.jaeseongs95.portal.domain.error.ErrorCode;
@@ -52,7 +55,7 @@ import io.github.jaeseongs95.portal.domain.id.OwnerId;
  * Refusals the use case must tell apart are returned as {@link ArtifactReservation} variants; every other business failure is a {@link RequestRefusedException}.
  */
 @Repository
-public class JdbcArtifactRegistry implements ArtifactRegistry, ArtifactInventory {
+public class JdbcArtifactRegistry implements ArtifactRegistry {
 
     private static final Logger LOG = LoggerFactory.getLogger(JdbcArtifactRegistry.class);
 
@@ -85,27 +88,44 @@ public class JdbcArtifactRegistry implements ArtifactRegistry, ArtifactInventory
         this.transaction = new TransactionTemplate(transactionManager);
     }
 
+    /**
+     * The checks run in the order of design 5.2: the size of the file, the budget, the disk. The disk is read before the transaction opens (file I/O outside a
+     * transaction, Principles 4.4) but is only <em>judged</em> after the budget accepted the file, so the budget's verdict never depends on what the disk says, and a
+     * disk that cannot be read refuses nothing by itself: it throws {@code ARTIFACT_STORAGE_IO_ERROR} when the file got that far.
+     */
     @Override
     public ArtifactReservation reserve(ArtifactSpec spec, Instant at) {
         Objects.requireNonNull(spec, "spec");
         Objects.requireNonNull(at, "at");
         if (spec.sizeBytes() > limits.maxFileBytes()) {
-            return new ArtifactReservation.FileTooLarge(limits.maxFileBytes());
+            return new ArtifactReservation.FileTooLarge(spec.sizeBytes(), limits.maxFileBytes());
         }
-        // File-system read, outside the transaction (Principles 4.4).
-        DiskSpace disk = payloads.usable();
+        // File-system reads, outside the transaction (Principles 4.4).
+        DiskReading disk = readDisk();
         long quarantined = retained.retainedBytes();
         return Objects.requireNonNull(transaction.execute(status -> reserveRows(spec, at, disk, quarantined)), "reservation");
     }
 
-    /** The budget is the reserved bytes of the rows plus the bytes in quarantine: both are on the disk of the staging folder (design 13.6, RC-A-170). */
-    private ArtifactReservation reserveRows(ArtifactSpec spec, Instant at, DiskSpace disk, long quarantined) {
-        long charged = artifacts.chargedBytes() + quarantined;
-        if (charged + Math.max(1L, spec.sizeBytes()) > limits.budgetBytes()) {
-            return new ArtifactReservation.BudgetExceeded(spec.sizeBytes(), charged, limits.budgetBytes());
+    private DiskReading readDisk() {
+        try {
+            return new DiskReading.Usable(payloads.usable());
+        } catch (RuntimeException e) {
+            return new DiskReading.Unreadable(e);
         }
-        if (disk.usableBytes() - spec.sizeBytes() < limits.diskMarginBytes()) {
-            return new ArtifactReservation.DiskSpaceInsufficient(spec.sizeBytes(), disk.usableBytes());
+    }
+
+    /**
+     * The budget is the reserved bytes of the rows plus the bytes in quarantine: both are on the disk of the staging folder (design 13.6, RC-A-170). A refusal tells
+     * the two parts apart (defect D-0012), the rows as {@code liveBytes} and the quarantine as {@code holdingBytes}.
+     */
+    private ArtifactReservation reserveRows(ArtifactSpec spec, Instant at, DiskReading disk, long quarantined) {
+        ReservedSplit reserved = new ReservedSplit(artifacts.chargedBytes(), quarantined);
+        if (reserved.totalBytes() > limits.budgetBytes() - Math.max(1L, spec.sizeBytes())) {
+            return new ArtifactReservation.BudgetExceeded(spec.sizeBytes(), reserved, limits.budgetBytes());
+        }
+        long usable = disk.usableBytes();
+        if (usable - spec.sizeBytes() < limits.diskMarginBytes()) {
+            return new ArtifactReservation.DiskSpaceInsufficient(spec.sizeBytes(), usable, limits.diskMarginBytes());
         }
         ArtifactId id = ids.next();
         ArtifactRow row = mapper.toNewRow(id, spec, at);
@@ -165,6 +185,28 @@ public class JdbcArtifactRegistry implements ArtifactRegistry, ArtifactInventory
     }
 
     @Override
+    @Transactional
+    public ArtifactRecord completeDownload(ArtifactId id, Digest sha256) {
+        Objects.requireNonNull(sha256, "sha256");
+        ArtifactRow row = require(id);
+        if (row.direction() != ArtifactDirection.DOWNLOAD) {
+            throw new RequestRefusedException(ArtifactErrorCode.ARTIFACT_NOT_WRITABLE);
+        }
+        if (row.state() == ArtifactState.READY) {
+            if (Objects.equals(row.sha256(), sha256.hex())) {
+                return mapper.toRecord(row);
+            }
+            throw new RequestRefusedException(ArtifactErrorCode.ARTIFACT_HASH_MISMATCH);
+        }
+        if (row.state() != ArtifactState.STAGING) {
+            throw new RequestRefusedException(ArtifactErrorCode.ARTIFACT_NOT_WRITABLE);
+        }
+        ArtifactRow updated = row.downloaded(sha256.hex(), takeLock(row, ArtifactErrorCode.ARTIFACT_CHANGED));
+        aggregates.update(updated);
+        return mapper.toRecord(updated);
+    }
+
+    @Override
     @Transactional(readOnly = true)
     public Optional<ArtifactRecord> find(ArtifactId id) {
         return artifacts.findById(id.value()).map(mapper::toRecord);
@@ -214,9 +256,29 @@ public class JdbcArtifactRegistry implements ArtifactRegistry, ArtifactInventory
         return mapper.toRecord(updated);
     }
 
+    /**
+     * Gives the artifact back to the expiry calculation once the operation that pinned it is over (S3-AR-07). An artifact that is released already changes nothing,
+     * so a repeated call, or a call after a restart, is harmless.
+     */
     @Override
     @Transactional
-    public ArtifactRecord beginConsume(ArtifactId id) {
+    public ArtifactRecord unpin(ArtifactId id, UnpinReason reason) {
+        Objects.requireNonNull(reason, "reason");
+        ArtifactRow row = require(id);
+        if (row.retention() == ArtifactRetention.RELEASABLE) {
+            return mapper.toRecord(row);
+        }
+        ArtifactRow updated = row.unpinned(takeLock(row, ArtifactErrorCode.ARTIFACT_CHANGED));
+        aggregates.update(updated);
+        LOG.info("Artifact {} is no longer pinned: {}", id.value(), reason);
+        return mapper.toRecord(updated);
+    }
+
+    /** The reason is written with the state, in the one UPDATE that moves the row, so no moment exists in which the file is in use for an unknown reason (S3-AR-09). */
+    @Override
+    @Transactional
+    public ArtifactRecord beginConsume(ArtifactId id, ConsumeReason reason) {
+        Objects.requireNonNull(reason, "reason");
         ArtifactRow row = require(id);
         switch (row.state()) {
             case READY -> {
@@ -225,14 +287,14 @@ public class JdbcArtifactRegistry implements ArtifactRegistry, ArtifactInventory
             case CONSUMING, CONSUMED -> throw new RequestRefusedException(ArtifactErrorCode.STAGED_FILE_CONSUMED);
             case STAGING, DELETING -> throw new RequestRefusedException(ArtifactErrorCode.ARTIFACT_NOT_READY);
         }
-        ArtifactRow updated = row.withState(ArtifactState.CONSUMING, takeLock(row, ArtifactErrorCode.STAGED_FILE_CONSUMED));
+        ArtifactRow updated = row.consumingBecause(reason, takeLock(row, ArtifactErrorCode.STAGED_FILE_CONSUMED));
         aggregates.update(updated);
         return mapper.toRecord(updated);
     }
 
     /**
      * {@code CONSUMING} to {@code CONSUMED}. Asked twice for the same reason, or by two threads at once, it answers the same tombstone: the row charges one byte
-     * once (RC-B-095).
+     * once (RC-B-095). The reason must be the one that {@link #beginConsume} recorded; a use that began for another reason is never finished under this one.
      */
     @Override
     @Transactional
@@ -242,7 +304,7 @@ public class JdbcArtifactRegistry implements ArtifactRegistry, ArtifactInventory
         if (row.state() == ArtifactState.CONSUMED) {
             return answerConsumed(row, reason);
         }
-        if (row.state() != ArtifactState.CONSUMING) {
+        if (row.state() != ArtifactState.CONSUMING || row.consumeReason() != reason) {
             throw new RequestRefusedException(ArtifactErrorCode.ARTIFACT_CHANGED);
         }
         long next = row.version() + 1;
@@ -382,5 +444,30 @@ public class JdbcArtifactRegistry implements ArtifactRegistry, ArtifactInventory
             throw new RequestRefusedException(conflict);
         }
         return next;
+    }
+
+    /**
+     * What the read of the disk gave, kept until the budget has judged the file. {@link #usableBytes()} is the one place where a read that failed becomes the
+     * {@code ARTIFACT_STORAGE_IO_ERROR} of the reservation: it is asked only by a file that the size limit and the budget accepted.
+     */
+    private sealed interface DiskReading permits DiskReading.Usable, DiskReading.Unreadable {
+
+        long usableBytes();
+
+        record Usable(DiskSpace space) implements DiskReading {
+
+            @Override
+            public long usableBytes() {
+                return space.usableBytes();
+            }
+        }
+
+        record Unreadable(RuntimeException cause) implements DiskReading {
+
+            @Override
+            public long usableBytes() {
+                throw new RequestRefusedException(ArtifactErrorCode.ARTIFACT_STORAGE_IO_ERROR, cause);
+            }
+        }
     }
 }

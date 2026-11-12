@@ -12,4 +12,8 @@ dependencies {
     // ApplicationContextRunner (S2-AP-01, S2-AP-02) is Spring Boot's test class org.springframework.boot.test.context.runner.ApplicationContextRunner;
     // spring-boot-starter-test brings it with spring-boot-test (https://docs.spring.io/spring-boot/reference/testing/test-scope-dependencies.html).
     testImplementation("org.springframework.boot:spring-boot-starter-test")
+
+    // The use cases log through SLF4J like portal-store and portal-ssh (Principles 6); the version is the Boot BOM's. It is not an api dependency: no type of this module
+    // exposes a Logger.
+    implementation("org.slf4j:slf4j-api")
 }

@@ -25,6 +25,7 @@ import io.github.jaeseongs95.portal.app.output.OutputState;
 import io.github.jaeseongs95.portal.app.output.StreamInfo;
 import io.github.jaeseongs95.portal.app.storage.DiskSpace;
 import io.github.jaeseongs95.portal.domain.error.ExecutionErrorCode;
+import io.github.jaeseongs95.portal.domain.error.OperationErrorCode;
 import io.github.jaeseongs95.portal.domain.error.RequestRefusedException;
 import io.github.jaeseongs95.portal.domain.id.OperationIdGenerator;
 
@@ -35,8 +36,9 @@ import io.github.jaeseongs95.portal.domain.id.OperationIdGenerator;
  * file I/O (Principles 4.4); every other method is one short {@code @Transactional} method.
  *
  * <p>A change of a row is a compare-and-set on {@code version}: {@link CommandOutputRowRepository#bumpVersion} moves the version in the same transaction, and a
- * writer that lost the race is refused with {@link ExecutionErrorCode#OUTPUT_CAPTURE_FAILED}. A write to an output that is missing or in the wrong state is refused
- * with the same code (the capture of that output failed). The budget check of {@link #reserve} reads the sum of the charges and writes the new row in one
+ * writer that lost the race is refused with {@link OperationErrorCode#OUTPUT_VERSION_CONFLICT} (stage 3 design D3-13: another writer changed the record first). A write
+ * to an output that is missing or in the wrong state, which includes the loser that reads the row after the winner committed, is refused with
+ * {@link ExecutionErrorCode#OUTPUT_CAPTURE_FAILED} (the capture of that output failed). The budget check of {@link #reserve} reads the sum of the charges and writes the new row in one
  * transaction; the dispatcher is a single scheduler thread (design 13.2), so two reservations do not race, and an overrun by a concurrent second writer would be one
  * output.
  */
@@ -248,11 +250,11 @@ public class JdbcOutputManifestStore implements OutputManifestStore {
         return row;
     }
 
-    /** The compare-and-set: moves the version by one, or refuses because another writer changed the row first. */
+    /** The compare-and-set: moves the version by one, or refuses with {@code OUTPUT_VERSION_CONFLICT} because another writer changed the row first. */
     private CommandOutputRow claimVersion(CommandOutputRow row) {
         long next = row.version() + 1;
         if (outputs.bumpVersion(row.id(), row.version(), next) != 1) {
-            throw new RequestRefusedException(ExecutionErrorCode.OUTPUT_CAPTURE_FAILED);
+            throw new RequestRefusedException(OperationErrorCode.OUTPUT_VERSION_CONFLICT);
         }
         return row.withVersion(next);
     }

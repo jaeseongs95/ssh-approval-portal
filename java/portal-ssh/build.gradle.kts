@@ -5,7 +5,21 @@ dependencies {
     // (maven-metadata.xml of org.apache.sshd:sshd-core, 2026-11-12); the 3.0.0 line is milestones only (M7), which Principles 8.1 does not allow.
     implementation("org.apache.sshd:sshd-core:2.20.1")
     implementation("org.apache.sshd:sshd-sftp:2.20.1")
-    testRuntimeOnly("ch.qos.logback:logback-classic")
+    // ssh-ed25519 (the default host and user key type of current OpenSSH, and first in the 2.x host key list) needs an EdDSA provider that MINA finds by itself:
+    // sshd-core has no EdDSA signature of its own, so BuiltinSignatures.ed25519.isSupported() is false without one (pilot P3-3). MINA 2.20.1 registers either BouncyCastle
+    // (BouncyCastleSecurityProviderRegistrar, BouncyCastleEdDSASupport) or net.i2p.crypto:eddsa (unmaintained); BouncyCastle is the maintained one and is what the MINA 2.20.1
+    // build itself is tested with (bouncycastle.version 1.86 in its pom.xml; 1.87 is a day old on 2026-11-12). It is not in the Spring Boot BOM
+    // (spring-boot-dependencies-4.1.2.pom has no org.bouncycastle entry). Runtime only: MINA loads it by reflection, no product code names a BouncyCastle class.
+    // bcpkix is not added: it is needed only for encrypted PEM key files, which the profile design does not use.
+    runtimeOnly("org.bouncycastle:bcprov-jdk18on:1.86")
+    // ssh.profile.TomlProfileLoader reads the 2.x profile TOML with Jackson's TOML data format (no hand-written parser, Principles 2.2 category 13); the version is the one of the
+    // tools.jackson:jackson-bom that the Spring Boot BOM manages.
+    implementation("tools.jackson.dataformat:jackson-dataformat-toml")
+    // The profile schema is checked with Jakarta Validation (jakarta.validation.Validator, Principles 2.2 category 9); the starter brings the Hibernate Validator implementation
+    // at the Boot BOM's version.
+    implementation("org.springframework.boot:spring-boot-starter-validation")
+    // testImplementation, not testRuntimeOnly: LoggingHostKeyEventsTest attaches a logback ListAppender, so the logback classes are on the test compile class path.
+    testImplementation("ch.qos.logback:logback-classic")
 }
 
 // ---- realOpenSshTest: the tests that need a real OpenSSH server (stage 3 design 7.2 and 7.3, cases S3-RO-nn and S3-RW-nn) ----

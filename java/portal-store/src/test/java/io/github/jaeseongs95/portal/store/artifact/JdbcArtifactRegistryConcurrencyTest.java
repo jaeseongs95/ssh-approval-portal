@@ -56,15 +56,13 @@ class JdbcArtifactRegistryConcurrencyTest {
 
     private final ArtifactFixtures fixtures = new ArtifactFixtures();
     private final ArtifactRegistry registry;
-    private final ArtifactInventory inventory;
     private final StagedActionRowRepository actions;
     private final ArtifactChunkRowRepository chunks;
     private final ArtifactRowRepository artifacts;
 
-    JdbcArtifactRegistryConcurrencyTest(ArtifactRegistry registry, ArtifactInventory inventory, StagedActionRowRepository actions, ArtifactChunkRowRepository chunks,
+    JdbcArtifactRegistryConcurrencyTest(ArtifactRegistry registry, StagedActionRowRepository actions, ArtifactChunkRowRepository chunks,
                                         ArtifactRowRepository artifacts) {
         this.registry = registry;
-        this.inventory = inventory;
         this.actions = actions;
         this.chunks = chunks;
         this.artifacts = artifacts;
@@ -81,7 +79,7 @@ class JdbcArtifactRegistryConcurrencyTest {
     @DisplayName("RC-B-095: two callers that complete the same consumption at once both get the tombstone, and the row charges one byte once")
     void aDuplicateRemovalChargesOnce() throws Exception {
         ArtifactId id = fixtures.readyArtifact(registry, fixtures.stagedFile(4), fixtures.bytes(4, 5));
-        registry.beginConsume(id);
+        registry.beginConsume(id, ConsumeReason.REMOVED);
 
         List<Optional<ErrorCode>> outcomes = race(() -> registry.completeConsume(id, ConsumeReason.REMOVED), () -> registry.completeConsume(id, ConsumeReason.REMOVED));
 
@@ -105,7 +103,7 @@ class JdbcArtifactRegistryConcurrencyTest {
         ArtifactRecord record = registry.find(id).orElseThrow();
         assertThat(record.receivedBytes()).isEqualTo(4);
         assertThat(record.chunkCount()).isEqualTo(1);
-        assertThat(inventory.chunks(id)).hasSize(1);
+        assertThat(registry.chunks(id)).hasSize(1);
     }
 
     @Test

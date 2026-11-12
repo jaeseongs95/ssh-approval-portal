@@ -211,8 +211,8 @@ class DbmsPortabilityTest {
         String vendor = jdbc.execute((ConnectionCallback<String>) connection -> connection.getMetaData().getDatabaseProductName()).toLowerCase(Locale.ROOT);
 
         List<String> scripts = Arrays.stream(flyway.info().applied()).map(DbmsPortabilityTest::location).toList();
-        assertThat(scripts).hasSize(8);
-        assertThat(scripts).filteredOn(script -> script.contains("/db/migration/common/")).as("common scripts").hasSize(6);
+        assertThat(scripts).hasSize(9);
+        assertThat(scripts).filteredOn(script -> script.contains("/db/migration/common/")).as("common scripts (V7 is common: no vendor script was needed)").hasSize(7);
         assertThat(scripts).filteredOn(script -> script.contains("/db/migration/" + vendor + "/")).as("the scripts of the vendor " + vendor)
             .hasSize(2).allMatch(script -> script.contains("V1_1__long_text_columns.sql") || script.contains("V6_1__maintenance_baseline.sql"));
 

@@ -18,6 +18,10 @@ dependencies {
     testImplementation("org.springframework.boot:spring-boot-starter-test") {
         exclude(group = "org.mockito")
     }
+    // The use case tests (package server.usecase: dispatcher, intake, operations, read commands, recovery) run the real use cases of portal-app on the real storage adapters of
+    // portal-store over the embedded H2 database, not on a fake store; they live here because this is the module that sees both (rule A-DIR keeps portal-app from depending
+    // on portal-store, tests included). @DataJdbcTest is in the test module org.springframework.boot.data.jdbc.test.autoconfigure (as in portal-store); the version is the BOM's.
+    testImplementation("org.springframework.boot:spring-boot-data-jdbc-test")
 }
 
 tasks.named<org.springframework.boot.gradle.tasks.bundling.BootJar>("bootJar") {
