@@ -7,10 +7,7 @@ import java.util.Optional;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.jdbc.core.JdbcAggregateOperations;
 import org.springframework.stereotype.Repository;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionTemplate;
 
 import io.github.jaeseongs95.portal.app.journal.ClaimResult;
 import io.github.jaeseongs95.portal.app.journal.ClaimStore;
@@ -22,6 +19,7 @@ import io.github.jaeseongs95.portal.domain.id.TargetId;
 import io.github.jaeseongs95.portal.domain.operation.Operation;
 import io.github.jaeseongs95.portal.domain.operation.OperationState;
 import io.github.jaeseongs95.portal.domain.schedule.ConcurrencyLimits;
+import io.github.jaeseongs95.portal.store.Savepoints;
 import io.github.jaeseongs95.portal.domain.schedule.SaturationReason;
 
 /**
@@ -48,17 +46,16 @@ public class JdbcClaimStore implements ClaimStore {
     private final OperationStorage storage;
     private final JdbcAggregateOperations aggregates;
     private final Digester digester;
-    private final TransactionTemplate nested;
+    private final Savepoints savepoints;
 
     public JdbcClaimStore(OperationRowRepository operations, OperationSlotRowRepository slots, OperationStorage storage, JdbcAggregateOperations aggregates,
-                          Digester digester, PlatformTransactionManager transactions) {
+                          Digester digester, Savepoints savepoints) {
         this.operations = operations;
         this.slots = slots;
         this.storage = storage;
         this.aggregates = aggregates;
         this.digester = digester;
-        this.nested = new TransactionTemplate(transactions);
-        this.nested.setPropagationBehavior(TransactionDefinition.PROPAGATION_NESTED);
+        this.savepoints = savepoints;
     }
 
     @Override
@@ -85,7 +82,7 @@ public class JdbcClaimStore implements ClaimStore {
         Operation queued = storage.load(row);
         Operation claimed = queued.claim(at);
         try {
-            nested.executeWithoutResult(status -> {
+            savepoints.run(() -> {
                 aggregates.insert(new OperationSlotRow(GLOBAL_SCOPE, globalSlot, row.id()));
                 aggregates.insert(new OperationSlotRow(targetScope, targetSlot, row.id()));
                 if (row.conflictKey() != null) {

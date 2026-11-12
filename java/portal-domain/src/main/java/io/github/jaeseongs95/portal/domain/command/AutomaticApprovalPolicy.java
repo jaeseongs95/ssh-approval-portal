@@ -1,6 +1,7 @@
 package io.github.jaeseongs95.portal.domain.command;
 
 import io.github.jaeseongs95.portal.domain.operation.DecisionReason;
+import io.github.jaeseongs95.portal.domain.operation.ReviewReason;
 import java.util.List;
 
 /**

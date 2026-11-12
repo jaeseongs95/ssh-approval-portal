@@ -7,10 +7,7 @@ import java.util.Optional;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Repository;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionTemplate;
 
 import io.github.jaeseongs95.portal.app.journal.JournalInsert;
 import io.github.jaeseongs95.portal.app.journal.OperationJournal;
@@ -24,6 +21,7 @@ import io.github.jaeseongs95.portal.domain.operation.NewOperation;
 import io.github.jaeseongs95.portal.domain.operation.Operation;
 import io.github.jaeseongs95.portal.domain.operation.OperationEvent;
 import io.github.jaeseongs95.portal.domain.operation.OperationState;
+import io.github.jaeseongs95.portal.store.Savepoints;
 
 /**
  * {@link OperationJournal} over the journal tables (design 8.2 V1, 2.x {@code operation-store.mjs}). The id and the time of a new operation are made here from the
@@ -45,19 +43,19 @@ public class JdbcOperationJournal implements OperationJournal {
     private final OperationStorage storage;
     private final OperationIdGenerator ids;
     private final Clock clock;
-    private final TransactionTemplate nested;
+    private final Savepoints savepoints;
 
     private final long maxRows;
 
     @Autowired
     public JdbcOperationJournal(OperationRowRepository operations, OperationEventRowRepository events, OperationLegacyRowRepository legacy, OperationStorage storage,
-                                OperationIdGenerator ids, Clock clock, PlatformTransactionManager transactions) {
-        this(operations, events, legacy, storage, ids, clock, transactions, MAX_ROWS);
+                                OperationIdGenerator ids, Clock clock, Savepoints savepoints) {
+        this(operations, events, legacy, storage, ids, clock, savepoints, MAX_ROWS);
     }
 
     /** The row limit is a parameter so that a test can reach it with a few rows (test RC-B-207). */
     JdbcOperationJournal(OperationRowRepository operations, OperationEventRowRepository events, OperationLegacyRowRepository legacy, OperationStorage storage,
-                         OperationIdGenerator ids, Clock clock, PlatformTransactionManager transactions, long maxRows) {
+                         OperationIdGenerator ids, Clock clock, Savepoints savepoints, long maxRows) {
         this.maxRows = maxRows;
         this.operations = operations;
         this.events = events;
@@ -65,8 +63,7 @@ public class JdbcOperationJournal implements OperationJournal {
         this.storage = storage;
         this.ids = ids;
         this.clock = clock;
-        this.nested = new TransactionTemplate(transactions);
-        this.nested.setPropagationBehavior(TransactionDefinition.PROPAGATION_NESTED);
+        this.savepoints = savepoints;
     }
 
     @Override
@@ -81,7 +78,7 @@ public class JdbcOperationJournal implements OperationJournal {
         }
         Operation created = Operation.accept(spec, ids.next(), clock.instant());
         try {
-            nested.executeWithoutResult(status -> storage.insertNew(created));
+            savepoints.run(() -> storage.insertNew(created));
             return new JournalInsert.Inserted(created);
         } catch (DuplicateKeyException e) {
             OperationRow winner = operations.findByRequestKey(spec.requestKey().value())

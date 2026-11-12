@@ -26,6 +26,7 @@ import io.github.jaeseongs95.portal.domain.contract.CapacityErrorCode;
 import io.github.jaeseongs95.portal.domain.contract.RequestRefusedException;
 import io.github.jaeseongs95.portal.domain.id.TargetId;
 import io.github.jaeseongs95.portal.domain.target.CapacityOverride;
+import io.github.jaeseongs95.portal.store.Savepoints;
 import io.github.jaeseongs95.portal.store.StoreTest;
 
 /**
@@ -44,10 +45,17 @@ class JdbcRuntimeCapacityStoreTest {
 
     private final JdbcRuntimeCapacityStore store;
     private final JdbcTemplate jdbc;
+    private final Savepoints savepoints;
 
-    JdbcRuntimeCapacityStoreTest(JdbcRuntimeCapacityStore store, JdbcTemplate jdbc) {
+    JdbcRuntimeCapacityStoreTest(JdbcRuntimeCapacityStore store, JdbcTemplate jdbc, Savepoints savepoints) {
         this.store = store;
         this.jdbc = jdbc;
+        this.savepoints = savepoints;
+    }
+
+    /** A statement that the schema must refuse, run in its own savepoint: PostgreSQL rejects every later statement of a transaction after the first failed one (S2-DB-17). */
+    private void refused(String sql, Object... arguments) {
+        assertThatThrownBy(() -> savepoints.run(() -> jdbc.update(sql, arguments))).isInstanceOf(DataIntegrityViolationException.class);
     }
 
     @Test
@@ -147,15 +155,13 @@ class JdbcRuntimeCapacityStoreTest {
     void aValueThatBreaksTheSchemaCannotBeStored() {
         String insert = "INSERT INTO runtime_capacity (id, revision, queue_capacity, max_concurrency, version) VALUES (?, ?, ?, ?, 1)";
 
-        assertThatThrownBy(() -> jdbc.update(insert, 1, REVISION_A, 0, 1)).isInstanceOf(DataIntegrityViolationException.class);
-        assertThatThrownBy(() -> jdbc.update(insert, 1, REVISION_A, 1, 0)).isInstanceOf(DataIntegrityViolationException.class);
-        assertThatThrownBy(() -> jdbc.update(insert, 1, REVISION_A, null, 1)).isInstanceOf(DataIntegrityViolationException.class);
-        assertThatThrownBy(() -> jdbc.update(insert, 1, null, 1, 1)).isInstanceOf(DataIntegrityViolationException.class);
-        assertThatThrownBy(() -> jdbc.update(insert, 2, REVISION_A, 1, 1)).isInstanceOf(DataIntegrityViolationException.class);
-        assertThatThrownBy(() -> jdbc.update("INSERT INTO runtime_capacity_target (target_id, queue_capacity, max_concurrency) VALUES ('alpha', 0, NULL)"))
-            .isInstanceOf(DataIntegrityViolationException.class);
-        assertThatThrownBy(() -> jdbc.update("INSERT INTO runtime_capacity_target (target_id, queue_capacity, max_concurrency) VALUES (NULL, 1, NULL)"))
-            .isInstanceOf(DataIntegrityViolationException.class);
+        refused(insert, 1, REVISION_A, 0, 1);
+        refused(insert, 1, REVISION_A, 1, 0);
+        refused(insert, 1, REVISION_A, null, 1);
+        refused(insert, 1, null, 1, 1);
+        refused(insert, 2, REVISION_A, 1, 1);
+        refused("INSERT INTO runtime_capacity_target (target_id, queue_capacity, max_concurrency) VALUES ('alpha', 0, NULL)");
+        refused("INSERT INTO runtime_capacity_target (target_id, queue_capacity, max_concurrency) VALUES (NULL, 1, NULL)");
         assertThat(store.read()).isEmpty();
     }
 

@@ -11,7 +11,6 @@ import java.util.TimeZone;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.transaction.PlatformTransactionManager;
 
 import io.github.jaeseongs95.portal.app.journal.ClaimResult;
 import io.github.jaeseongs95.portal.app.journal.JournalInsert;
@@ -56,6 +55,7 @@ import io.github.jaeseongs95.portal.domain.target.ProfileAlias;
 import io.github.jaeseongs95.portal.domain.target.TargetRevision;
 import io.github.jaeseongs95.portal.domain.text.CommandText;
 import io.github.jaeseongs95.portal.domain.text.Utf8Text;
+import io.github.jaeseongs95.portal.store.Savepoints;
 
 @JournalTest
 class JdbcOperationJournalTest {
@@ -68,12 +68,12 @@ class JdbcOperationJournalTest {
     private final OperationStorage storage;
     private final OperationIdGenerator ids;
     private final Clock clock;
-    private final PlatformTransactionManager transactions;
+    private final Savepoints savepoints;
     private final Digester digester;
     private final JournalFixture fx = new JournalFixture();
 
     JdbcOperationJournalTest(JdbcOperationJournal journal, JdbcClaimStore claims, OperationRowRepository operations, OperationEventRowRepository events,
-                             OperationLegacyRowRepository legacy, OperationStorage storage, OperationIdGenerator ids, Clock clock, PlatformTransactionManager transactions,
+                             OperationLegacyRowRepository legacy, OperationStorage storage, OperationIdGenerator ids, Clock clock, Savepoints savepoints,
                              Digester digester) {
         this.journal = journal;
         this.claims = claims;
@@ -83,7 +83,7 @@ class JdbcOperationJournalTest {
         this.storage = storage;
         this.ids = ids;
         this.clock = clock;
-        this.transactions = transactions;
+        this.savepoints = savepoints;
         this.digester = digester;
     }
 
@@ -147,7 +147,7 @@ class JdbcOperationJournalTest {
     @Test
     @DisplayName("RC-B-207: a journal that holds its limit of rows refuses a new intake with OPERATION_CAPACITY and stores nothing of it")
     void theJournalRefusesAnIntakeBeyondItsLimit() {
-        JdbcOperationJournal small = new JdbcOperationJournal(operations, events, legacy, storage, ids, clock, transactions, 3);
+        JdbcOperationJournal small = new JdbcOperationJournal(operations, events, legacy, storage, ids, clock, savepoints, 3);
         small.accept(fx.command("one", "alpha", "echo 1", new ConflictKey.None()));
         small.accept(fx.command("two", "alpha", "echo 2", new ConflictKey.None()));
         small.accept(fx.command("three", "alpha", "echo 3", new ConflictKey.None()));

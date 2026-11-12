@@ -18,6 +18,7 @@ import io.github.jaeseongs95.portal.app.capacity.CapacityState;
 import io.github.jaeseongs95.portal.app.capacity.RuntimeCapacityStore;
 import io.github.jaeseongs95.portal.domain.contract.CapacityErrorCode;
 import io.github.jaeseongs95.portal.domain.contract.RequestRefusedException;
+import io.github.jaeseongs95.portal.store.Savepoints;
 
 /**
  * {@link RuntimeCapacityStore} over {@code runtime_capacity} (one row) and {@code runtime_capacity_target} (migration V6, 2.x {@code runtime-capacity-state.mjs}).
@@ -36,14 +37,16 @@ public class JdbcRuntimeCapacityStore implements RuntimeCapacityStore {
     private final JdbcAggregateOperations aggregates;
     private final CapacityMapper mapper;
     private final TransactionTemplate transactions;
+    private final Savepoints savepoints;
 
     public JdbcRuntimeCapacityStore(RuntimeCapacityRowRepository capacities, RuntimeCapacityTargetRowRepository targets, JdbcAggregateOperations aggregates,
-                                    CapacityMapper mapper, PlatformTransactionManager transactionManager) {
+                                    CapacityMapper mapper, PlatformTransactionManager transactionManager, Savepoints savepoints) {
         this.capacities = capacities;
         this.targets = targets;
         this.aggregates = aggregates;
         this.mapper = mapper;
         this.transactions = new TransactionTemplate(transactionManager);
+        this.savepoints = savepoints;
     }
 
     /** The global row and the override rows are read in one snapshot so that a write that commits in between cannot mix two states. */
@@ -55,8 +58,8 @@ public class JdbcRuntimeCapacityStore implements RuntimeCapacityStore {
 
     /**
      * Stores {@code initial} when no state exists and returns the stored state. Two first writers collide on the primary key; the loser reads the winner's state.
-     * The insert runs in its own transaction so that the failed insert is rolled back before the winner's state is read (PostgreSQL aborts a transaction after an
-     * error).
+     * The insert runs in its own transaction, or in a savepoint when the caller has one, so that the failed insert is rolled back before the winner's state is read
+     * (PostgreSQL aborts a transaction after an error; S2-DB-17).
      */
     @Override
     public CapacityState initialize(CapacityState initial) {
@@ -66,7 +69,7 @@ public class JdbcRuntimeCapacityStore implements RuntimeCapacityStore {
             return existing.orElseThrow();
         }
         try {
-            transactions.executeWithoutResult(status -> insertFirst(initial));
+            savepoints.run(() -> insertFirst(initial));
             return initial;
         } catch (DuplicateKeyException e) {
             LOG.info("Another writer initialized the runtime capacity first; the stored state is used", e);

@@ -1,5 +1,6 @@
 package io.github.jaeseongs95.portal.domain.command;
 
+import io.github.jaeseongs95.portal.domain.operation.ReviewReason;
 import io.github.jaeseongs95.portal.domain.safety.SafetyAssessment;
 
 /**

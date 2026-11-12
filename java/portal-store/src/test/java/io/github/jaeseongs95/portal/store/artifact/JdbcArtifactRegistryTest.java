@@ -8,7 +8,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
 
-import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -49,6 +48,7 @@ import io.github.jaeseongs95.portal.domain.operation.UploadProtocol;
 import io.github.jaeseongs95.portal.domain.path.PosixRemotePath;
 import io.github.jaeseongs95.portal.domain.path.WindowsRemotePath;
 import io.github.jaeseongs95.portal.domain.target.TargetRevision;
+import io.github.jaeseongs95.portal.store.Savepoints;
 import io.github.jaeseongs95.portal.store.StoreTest;
 
 /**
@@ -74,10 +74,12 @@ class JdbcArtifactRegistryTest {
     private final ArtifactFixtures fixtures = new ArtifactFixtures();
     private final ArtifactRegistry registry;
     private final ArtifactInventory inventory;
+    private final Savepoints savepoints;
 
-    JdbcArtifactRegistryTest(ArtifactRegistry registry, ArtifactInventory inventory) {
+    JdbcArtifactRegistryTest(ArtifactRegistry registry, ArtifactInventory inventory, Savepoints savepoints) {
         this.registry = registry;
         this.inventory = inventory;
+        this.savepoints = savepoints;
     }
 
     @Test
@@ -326,7 +328,8 @@ class JdbcArtifactRegistryTest {
 
         assertThat(registry.budget().chargedBytes()).isEqualTo(1);
         ArtifactRecord record = registry.find(empty).orElseThrow();
-        assertThat(registry.expired(record.expiresAt().minusNanos(1))).isEmpty();
+        // One microsecond before: the column is TIMESTAMP(6), and a PostgreSQL parameter of one nanosecond less is rounded to the same microsecond (S2-DB-13).
+        assertThat(registry.expired(record.expiresAt().minusNanos(1_000))).isEmpty();
         assertThat(registry.expired(record.expiresAt())).extracting(ArtifactRecord::id).containsExactly(empty);
         registry.release(empty, ReleaseReason.EXPIRED);
         assertThat(registry.budget().chargedBytes()).isZero();
@@ -457,7 +460,12 @@ class JdbcArtifactRegistryTest {
         assertThat(inventory.holding()).extracting(ArtifactRecord::state).containsExactly(ArtifactState.DELETING);
     }
 
-    private void assertRefused(ThrowingCallable call, ErrorCode code) {
-        assertThatThrownBy(call).isInstanceOfSatisfying(RequestRefusedException.class, e -> assertThat(e.code()).isEqualTo(code));
+    /**
+     * The refused call runs in its own savepoint: a refusal that comes from a violated constraint aborts the transaction on PostgreSQL (SQL state 25P02 for every later
+     * statement), and any refusal from a {@code @Transactional} method marks the joined transaction rollback-only. A caller that goes on after a refusal scopes the call in a
+     * nested transaction, whose rollback to the savepoint clears both (S2-DB-17).
+     */
+    private void assertRefused(Runnable call, ErrorCode code) {
+        assertThatThrownBy(() -> savepoints.run(call)).isInstanceOfSatisfying(RequestRefusedException.class, e -> assertThat(e.code()).isEqualTo(code));
     }
 }

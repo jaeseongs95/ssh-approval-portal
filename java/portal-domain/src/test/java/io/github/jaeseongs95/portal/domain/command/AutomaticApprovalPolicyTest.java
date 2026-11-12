@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import io.github.jaeseongs95.portal.domain.operation.DecisionKind;
 import io.github.jaeseongs95.portal.domain.operation.DecisionReason;
+import io.github.jaeseongs95.portal.domain.operation.ReviewReason;
 import io.github.jaeseongs95.portal.domain.safety.LabelProbabilities;
 import io.github.jaeseongs95.portal.domain.safety.Probability;
 import io.github.jaeseongs95.portal.domain.safety.SafetyAssessment;

@@ -12,6 +12,7 @@ import io.github.jaeseongs95.portal.app.maintenance.OwnerHash;
 import io.github.jaeseongs95.portal.app.maintenance.PreservationBaseline;
 import io.github.jaeseongs95.portal.domain.contract.RequestErrorCode;
 import io.github.jaeseongs95.portal.domain.contract.RequestRefusedException;
+import io.github.jaeseongs95.portal.store.Savepoints;
 import io.github.jaeseongs95.portal.store.StoreTest;
 
 @StoreTest
@@ -22,9 +23,21 @@ class JdbcMaintenanceStoreTest {
     private static final OwnerHash OWNER_B = new OwnerHash("b".repeat(64));
 
     private final JdbcMaintenanceStore store;
+    private final Savepoints savepoints;
 
-    JdbcMaintenanceStoreTest(JdbcMaintenanceStore store) {
+    JdbcMaintenanceStoreTest(JdbcMaintenanceStore store, Savepoints savepoints) {
         this.store = store;
+        this.savepoints = savepoints;
+    }
+
+    /**
+     * A reservation that the store refuses because the key of the one row is taken, in its own savepoint: PostgreSQL aborts the transaction at the failed insert (SQL state
+     * 25P02 for every later statement), and a refusal from a {@code @Transactional} method marks the joined transaction rollback-only; the rollback to the savepoint
+     * clears both, so the test can go on in the same transaction (S2-DB-17).
+     */
+    private void refusedReservation(OwnerHash owner) {
+        assertThatThrownBy(() -> savepoints.run(() -> store.reserve(owner))).isInstanceOfSatisfying(RequestRefusedException.class,
+            e -> assertThat(e.code()).isEqualTo(RequestErrorCode.MAINTENANCE_ACTIVE));
     }
 
     @Test
@@ -36,9 +49,21 @@ class JdbcMaintenanceStoreTest {
         assertThat(store.occupied()).isTrue();
         assertThat(store.status(OWNER_A)).isInstanceOf(MaintenanceStatus.Reserved.class);
         assertThat(store.status(OWNER_B)).isInstanceOf(MaintenanceStatus.Unknown.class);
-        assertThatThrownBy(() -> store.reserve(OWNER_B)).isInstanceOfSatisfying(RequestRefusedException.class,
-            e -> assertThat(e.code()).isEqualTo(RequestErrorCode.MAINTENANCE_ACTIVE));
-        assertThatThrownBy(() -> store.reserve(OWNER_A)).isInstanceOf(RequestRefusedException.class);
+        refusedReservation(OWNER_B);
+        refusedReservation(OWNER_A);
+    }
+
+    @Test
+    @DisplayName("S2-DB-17: a refused reservation (the key of the one row is taken) leaves the same transaction usable: it reads, releases and reserves again")
+    void aRefusedReservationLeavesTheTransactionUsable() {
+        store.reserve(OWNER_A);
+        refusedReservation(OWNER_B);
+        refusedReservation(OWNER_B);
+
+        assertThat(store.status(OWNER_A)).isInstanceOf(MaintenanceStatus.Reserved.class);
+        store.release(OWNER_A);
+        store.reserve(OWNER_B);
+        assertThat(store.status(OWNER_B)).isInstanceOf(MaintenanceStatus.Reserved.class);
     }
 
     @Test

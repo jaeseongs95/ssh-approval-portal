@@ -16,7 +16,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.jaeseongs95.portal.domain.approval.MaintenancePolicy;
-import io.github.jaeseongs95.portal.domain.command.ReviewReason;
 import io.github.jaeseongs95.portal.domain.contract.OperationErrorCode;
 import io.github.jaeseongs95.portal.domain.contract.RequestRefusedException;
 import io.github.jaeseongs95.portal.domain.failure.DispatchFailure;

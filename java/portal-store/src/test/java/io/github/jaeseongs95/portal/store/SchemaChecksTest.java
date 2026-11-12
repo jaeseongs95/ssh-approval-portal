@@ -41,9 +41,19 @@ class SchemaChecksTest {
     private static final String STAMP = "TIMESTAMP '2026-11-12 00:00:00'";
 
     private final JdbcTemplate jdbc;
+    private final Savepoints savepoints;
 
-    SchemaChecksTest(JdbcTemplate jdbc) {
+    SchemaChecksTest(JdbcTemplate jdbc, Savepoints savepoints) {
         this.jdbc = jdbc;
+        this.savepoints = savepoints;
+    }
+
+    /**
+     * A statement that the schema must refuse, in its own savepoint: PostgreSQL rejects every later statement of a transaction after the first failed one (SQL state
+     * 25P02), so each refusal is rolled back before the next statement runs (S2-DB-17). On H2 the savepoint changes nothing.
+     */
+    private void inSavepoint(String sql) {
+        savepoints.run(() -> jdbc.update(sql));
     }
 
     @BeforeEach
@@ -126,7 +136,7 @@ class SchemaChecksTest {
     @DisplayName("S2-DB-02: a value that is in no list is refused by the CHECK of every enum column, and the value of the fixture is accepted")
     void everyEnumColumnRefusesAnUnknownValue(Column column) {
         assertThat(jdbc.update("UPDATE " + column.table() + " SET " + column.column() + " = " + column.column())).isGreaterThanOrEqualTo(1);
-        assertThatThrownBy(() -> jdbc.update("UPDATE " + column.table() + " SET " + column.column() + " = 'X'")).as(column.toString())
+        assertThatThrownBy(() -> inSavepoint("UPDATE " + column.table() + " SET " + column.column() + " = 'X'")).as(column.toString())
             .isInstanceOf(DataIntegrityViolationException.class);
     }
 
@@ -164,30 +174,30 @@ class SchemaChecksTest {
     @Test
     @DisplayName("S2-DB-02: ranges and shapes are enforced: a version below 1, a slot number below 1, a size over 64 MiB, a policy id other than 1")
     void rangesAndShapesAreEnforced() {
-        assertThatThrownBy(() -> jdbc.update("UPDATE operation SET version = 0")).isInstanceOf(DataIntegrityViolationException.class);
-        assertThatThrownBy(() -> jdbc.update("UPDATE operation_slot SET slot_no = 0")).isInstanceOf(DataIntegrityViolationException.class);
-        assertThatThrownBy(() -> jdbc.update("UPDATE artifact SET size_bytes = 67108865")).isInstanceOf(DataIntegrityViolationException.class);
-        assertThatThrownBy(() -> jdbc.update("UPDATE artifact_chunk SET size_bytes = 262145")).isInstanceOf(DataIntegrityViolationException.class);
-        assertThatThrownBy(() -> jdbc.update("UPDATE command_policy SET id = 2")).isInstanceOf(DataIntegrityViolationException.class);
-        assertThatThrownBy(() -> jdbc.update("UPDATE command_policy_threshold SET min_low_risk = 0.5")).isInstanceOf(DataIntegrityViolationException.class);
-        assertThatThrownBy(() -> jdbc.update("UPDATE operation_result SET exit_kind = 'SIGNALED'")).as("a signal exit needs a signal name").isInstanceOf(DataIntegrityViolationException.class);
-        assertThatThrownBy(() -> jdbc.update("UPDATE operation SET input_digest = '" + HEX + "'")).as("only an agent CLI operation has an input digest")
+        assertThatThrownBy(() -> inSavepoint("UPDATE operation SET version = 0")).isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> inSavepoint("UPDATE operation_slot SET slot_no = 0")).isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> inSavepoint("UPDATE artifact SET size_bytes = 67108865")).isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> inSavepoint("UPDATE artifact_chunk SET size_bytes = 262145")).isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> inSavepoint("UPDATE command_policy SET id = 2")).isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> inSavepoint("UPDATE command_policy_threshold SET min_low_risk = 0.5")).isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> inSavepoint("UPDATE operation_result SET exit_kind = 'SIGNALED'")).as("a signal exit needs a signal name").isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> inSavepoint("UPDATE operation SET input_digest = '" + HEX + "'")).as("only an agent CLI operation has an input digest")
             .isInstanceOf(DataIntegrityViolationException.class);
     }
 
     @Test
     @DisplayName("S2-DB-02: keys are enforced: a second operation with the same request key, a second row for one slot, a child without its parent")
     void keysAreEnforced() {
-        assertThatThrownBy(() -> jdbc.update("INSERT INTO operation (id, request_key, owner_id, target_id, target_revision, kind, state, version, approval_mode, profile,"
+        assertThatThrownBy(() -> inSavepoint("INSERT INTO operation (id, request_key, owner_id, target_id, target_revision, kind, state, version, approval_mode, profile,"
             + " contract_digest, created_at, updated_at, recovery_reason, audit_failure) VALUES ('" + "d".repeat(48) + "', 'request-key-000001', 'o', 'alpha', '" + HEX
             + "', 'COMMAND', 'ACCEPTED', 1, 'NOT_DECIDED', 'default', '" + HEX + "', " + STAMP + ", " + STAMP + ", 'NONE', 'NONE')")).isInstanceOf(DataIntegrityViolationException.class);
-        assertThatThrownBy(() -> jdbc.update("INSERT INTO operation_slot (scope, slot_no, operation_id) VALUES ('GLOBAL', 1, '" + OP + "')"))
+        assertThatThrownBy(() -> inSavepoint("INSERT INTO operation_slot (scope, slot_no, operation_id) VALUES ('GLOBAL', 1, '" + OP + "')"))
             .isInstanceOf(DataIntegrityViolationException.class);
-        assertThatThrownBy(() -> jdbc.update("INSERT INTO operation_command (operation_id, command_text, caller_context, display_context) VALUES ('" + "e".repeat(48)
+        assertThatThrownBy(() -> inSavepoint("INSERT INTO operation_command (operation_id, command_text, caller_context, display_context) VALUES ('" + "e".repeat(48)
             + "', 'x', '', '')")).isInstanceOf(DataIntegrityViolationException.class);
-        assertThatThrownBy(() -> jdbc.update("INSERT INTO operation_fence (target_id, target_revision, conflict_digest, operation_id) VALUES ('alpha', '" + HEX + "', '" + HEX
+        assertThatThrownBy(() -> inSavepoint("INSERT INTO operation_fence (target_id, target_revision, conflict_digest, operation_id) VALUES ('alpha', '" + HEX + "', '" + HEX
             + "', '" + OP + "')")).as("a conflict key is held by one operation").isInstanceOf(DataIntegrityViolationException.class);
-        assertThatThrownBy(() -> jdbc.update("DELETE FROM operation")).as("an operation with rows below it cannot be deleted").isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> inSavepoint("DELETE FROM operation")).as("an operation with rows below it cannot be deleted").isInstanceOf(DataIntegrityViolationException.class);
     }
 
     private void acceptAll(String table, String column, List<String> values) {

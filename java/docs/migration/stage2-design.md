@@ -1583,6 +1583,13 @@ A-228, A-249, A-460(브라우저·UI 입력, 4단계 portal-web), B-466(MCP subm
   - Linux에서 실행(이 PC에서 skip 7건): `FileArtifactPayloadStoreTest`의 RC-A-179·RC-A-166·RC-A-171, `ArtifactStartupCheckTest`의 RC-A-166, `PosixPrivateStorageTest` 3건(RC-A-178·179·171). 이 PC는 심볼릭 링크 생성 권한과 링크 수 조회가 없고 POSIX 권한도 없다.
   - Windows에서 실행(Linux CI에서 skip 예정): `AclPrivateStorageTest` 7건(사례 S2-DB-10).
   - 2026-11-12 메인 전체 빌드(`build --rerun-tasks`, exit 0): tests 1176, failures 0, errors 0, skipped 7(위 Linux 목록과 일치), javac 경고 0.
+- **`ReviewReason`은 `operation` 패키지로 옮겼다**(위 판정 이행). `operation`→`command` import는 0이다.
+- **외부 DBMS 시험(`portal-store` `externalDbmsTest`, 13.3a 이행).** 명시 호출 전용 `Test` 작업이고 `check`·`build`에 붙지 않는다. 접속 값은 Gradle 속성 `portal.test.dbms.postgresql.{url,user,password-file}`로 받고, 없으면 실패한다(H2로 대체하지 않음). 빌드 스크립트는 비밀번호 경로만 넘기고, 시험 쪽 `EnvironmentPostProcessor`가 실행 시 파일을 읽는다. 시험은 DB 안의 전용 스키마 `portal_store_it`만 쓰며 시작 때 만들고 끝날 때 지운다. 풀은 4개, 컨텍스트 캐시는 1개다. 8단계 CI는 같은 작업을 서비스 컨테이너로 돌린다.
+  - 첫 실행(PostgreSQL 18.6)은 265건 중 실패 7건이었다. 6건은 PostgreSQL이 위반 뒤 트랜잭션을 중단(SQL state 25P02)하는데 시험이 같은 트랜잭션에서 계속 실행해서 생겼다. 위반 문장을 savepoint 안에서 실행하도록 시험을 고쳤고 단정은 그대로다. 1건(RC-B-094)은 `TIMESTAMP(6)` 해상도 때문으로, 경계를 1ns에서 1µs로 맞췄다. 제품 결함은 `JdbcRuntimeCapacityStore.initialize` 1곳(바깥 트랜잭션 안의 첫 INSERT 위반)이다.
+  - 위반을 번역해 곧바로 던지는 저장소 메서드에는 savepoint를 넣지 않는다. 넣어 보니 `@Transactional` 메서드의 예외가 합류한 바깥 트랜잭션을 rollback-only로 만들어, 이후 savepoint 생성이 실패했다(H2 9건). 한 트랜잭션에서 거절 뒤 계속하는 호출자가 자기 savepoint로 감싼다.
+  - savepoint는 `store.Savepoints`(`@Component`, `PROPAGATION_NESTED`) 하나로 모았다. `JdbcClaimStore`·`JdbcOperationJournal`의 중복 `TransactionTemplate`을 이것으로 바꿨다. 새 사례는 S2-DB-11(따옴표 없는 이름), S2-DB-12(savepoint 슬롯 충돌), S2-DB-13(마이크로초), S2-DB-14(CHAR 공백 채움), S2-DB-15(vendor 폴더·스키마), S2-DB-16(접속 값 공급·비밀번호 비노출), S2-DB-17(거절 뒤 트랜잭션 계속)이다.
+  - 2026-11-12 메인 실행: H2 전체 빌드는 tests 1191, failures 0, skipped 7, 경고 0이다. `externalDbmsTest`는 tests 267, failures 0, skipped 7(위 Linux 목록과 같음)이다. 실행 뒤 `portal_%` 스키마는 0개다. MariaDB·MySQL은 이 PC에 없어 8단계 CI에서 확인한다(미검증).
+- **domain 패키지 순환(다음 작업).** `contract`↔`operation`(`OperationData`→`OperationState`, `Operation`→`OperationErrorCode`·`RequestRefusedException`)과 `contract`↔`failure`(예외→`DispatchFailure`·`ExecutionFailure`, `ExecutionFailure`·`ExecutionStage`→`ExecutionErrorCode`)가 있다. 오류 코드 enum·`PortalException` 계열과 `failure` 패키지를 새 `error` 패키지로 모으고, `contract`에는 wire record만 남겨 의존을 한 방향(`contract`→`operation`·`error`, `operation`→`error`)으로 만든다. ArchUnit에 portal-domain 패키지 순환 0 규칙을 더한다.
 - **run-209 수용 기준 문구의 `--max-workers=1 -Pportal.test.forks=1`** 은 사용자 지시(전용 GRADLE_USER_HOME, 병렬 2·힙 1g)로 대체한다(13.3절과 같음).
 
 ---

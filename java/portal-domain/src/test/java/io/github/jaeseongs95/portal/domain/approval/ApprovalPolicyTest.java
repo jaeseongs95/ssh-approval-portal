@@ -11,7 +11,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.jaeseongs95.portal.domain.capacity.Capacity;
-import io.github.jaeseongs95.portal.domain.command.ReviewReason;
 import io.github.jaeseongs95.portal.domain.contract.CapacityErrorCode;
 import io.github.jaeseongs95.portal.domain.contract.OperationErrorCode;
 import io.github.jaeseongs95.portal.domain.contract.RequestErrorCode;
@@ -35,6 +34,7 @@ import io.github.jaeseongs95.portal.domain.operation.NewOperation;
 import io.github.jaeseongs95.portal.domain.operation.Operation;
 import io.github.jaeseongs95.portal.domain.operation.OperationState;
 import io.github.jaeseongs95.portal.domain.operation.OverwriteMode;
+import io.github.jaeseongs95.portal.domain.operation.ReviewReason;
 import io.github.jaeseongs95.portal.domain.operation.StartAuthority;
 import io.github.jaeseongs95.portal.domain.operation.StateCounts;
 import io.github.jaeseongs95.portal.domain.operation.UploadInput;

@@ -1,4 +1,4 @@
-package io.github.jaeseongs95.portal.domain.command;
+package io.github.jaeseongs95.portal.domain.operation;
 
 import com.fasterxml.jackson.annotation.JsonValue;
 
