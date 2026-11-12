@@ -8,6 +8,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -31,11 +32,8 @@ class McpContractSpikeTest {
 
     private static final String PROTOCOL_VERSION = "2025-06-18";
 
-    @LocalServerPort
-    int port;
-
-    @Autowired
-    JsonMapper json;
+    private final int port;
+    private final JsonMapper json;
 
     private RestClient http;
     private String sessionId;
@@ -43,6 +41,13 @@ class McpContractSpikeTest {
     private int nextId = 1;
 
     record Reply(int status, HttpHeaders headers, String body) {
+    }
+
+    /** Constructor injection (anti-patterns SP1): Spring's TestContext resolves the parameters of an @Autowired test constructor, @LocalServerPort included. */
+    @Autowired
+    McpContractSpikeTest(JsonMapper json, @LocalServerPort int port) {
+        this.json = json;
+        this.port = port;
     }
 
     @BeforeEach
@@ -170,7 +175,7 @@ class McpContractSpikeTest {
 
     private static JsonNode tool(JsonNode tools, String name) {
         for (JsonNode tool : tools) {
-            if (name.equals(tool.path("name").asString())) {
+            if (Objects.equals(name, tool.path("name").asString())) {
                 return tool;
             }
         }

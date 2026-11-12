@@ -16,12 +16,15 @@ import java.util.regex.Pattern;
 import java.util.List;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInstance;
+import org.junit.jupiter.api.TestInstance.Lifecycle;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
  * Each rule must be able to fail: it is run over classes (and files) that break it on purpose and has to name every one of them, and must not name the clean ones.
  * Without this a rule that matches nothing (a wrong owner name, a changed API) would pass the real product vacuously. Cases A-* of docs/migration/foundation-cases.md.
  */
+@TestInstance(Lifecycle.PER_CLASS)
 class RuleFixturesTest {
 
     private static final String FIXTURES = "io.github.jaeseongs95.portal.archchecks.fixtures";
@@ -30,10 +33,11 @@ class RuleFixturesTest {
     private static final ModuleTable PRODUCT_TABLE = ModuleTable.product();
     private static final Set<String> NEVER_FLAGGED = Set.of("Clean", "GoodApp", "PureDomain", "Counter", "GoodAdvice", "GoodController", "Answer", "Order");
 
-    private static JavaClasses fixtures;
+    // One import for the whole class (PER_CLASS lifecycle): an instance field, not static state.
+    private JavaClasses fixtures;
 
     @BeforeAll
-    static void importFixtures() {
+    void importFixtures() {
         fixtures = new ClassFileImporter().importPackages(FIXTURES);
     }
 
@@ -146,6 +150,27 @@ class RuleFixturesTest {
     }
 
     @Test
+    void a_optionalSlot() {
+        assertFlagsAndSparesCleanClasses(PortalRules.optionalSlot(), "OptionalField", "OptionalParameter", "OptionalComponent");
+    }
+
+    @Test
+    void a_optionalGet() {
+        assertFlagsAndSparesCleanClasses(PortalRules.optionalGet(), "GetsOptional");
+    }
+
+    @Test
+    void a_charset() {
+        assertFlagsAndSparesCleanClasses(PortalRules.charset(), "GetsBytesWithDefaultCharset", "NewsStringFromBytes", "NewsStringFromByteRange",
+            "NewsInputStreamReader", "NewsOutputStreamWriter");
+    }
+
+    @Test
+    void a_sleep() {
+        assertFlagsAndSparesCleanClasses(PortalRules.sleep(), "SleepsMillis", "SleepsDuration");
+    }
+
+    @Test
     void cleanClassesAreNeverFlaggedByAnyRule() {
         List<ArchRule> all = new java.util.ArrayList<>();
         all.addAll(PortalRules.out());
@@ -168,6 +193,10 @@ class RuleFixturesTest {
         all.addAll(PortalRules.domain(FIXTURE_TABLE));
         all.addAll(PortalRules.lombok());
         all.addAll(PortalRules.reflect());
+        all.addAll(PortalRules.optionalSlot());
+        all.addAll(PortalRules.optionalGet());
+        all.addAll(PortalRules.charset());
+        all.addAll(PortalRules.sleep());
         assertThat(flagged(all)).doesNotContainAnyElementsOf(NEVER_FLAGGED);
     }
 
@@ -196,11 +225,16 @@ class RuleFixturesTest {
         assertThat(sources.scanSources(directory.resolve("portal-x"))).extracting(SourceRules.Violation::rule).containsExactlyInAnyOrder("A-OS", "A-LOMBOK");
     }
 
-    private static void assertFlags(List<ArchRule> rules, String... expected) {
+    private void assertFlags(List<ArchRule> rules, String... expected) {
         assertThat(flagged(rules)).contains(expected);
     }
 
-    private static Set<String> flagged(List<ArchRule> rules) {
+    /** The violating fixtures are named in the failure report; the clean ones (Clean holds the allowed form of every rule) are not. */
+    private void assertFlagsAndSparesCleanClasses(List<ArchRule> rules, String... expected) {
+        assertThat(flagged(rules)).contains(expected).doesNotContainAnyElementsOf(NEVER_FLAGGED);
+    }
+
+    private Set<String> flagged(List<ArchRule> rules) {
         Set<String> names = new TreeSet<>();
         for (ArchRule rule : rules) {
             for (String detail : rule.evaluate(fixtures).getFailureReport().getDetails()) {
@@ -213,7 +247,7 @@ class RuleFixturesTest {
         return names;
     }
 
-    private static Set<String> flagged(ArchRule rule) {
+    private Set<String> flagged(ArchRule rule) {
         return flagged(List.of(rule));
     }
 }

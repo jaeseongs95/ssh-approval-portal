@@ -20,6 +20,8 @@ import java.util.Calendar;
 import java.util.Date;
 import java.util.GregorianCalendar;
 import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Predicate;
 
@@ -44,6 +46,9 @@ final class PortalRules {
     private static final Set<String> THREAD_FACTORIES = Set.of("ofVirtual", "ofPlatform", "startVirtualThread");
     private static final Set<String> POOL_TYPES = Set.of("java.util.concurrent.ThreadPoolExecutor", "java.util.concurrent.ScheduledThreadPoolExecutor",
         "java.util.concurrent.ForkJoinPool", "java.util.Timer");
+    /** A parameter of one of these types states the character set (a name or an object), so the constructor or method does not fall back to the default. */
+    private static final Set<String> CHARSET_PARAMETER_TYPES = Set.of("java.lang.String", "java.nio.charset.Charset", "java.nio.charset.CharsetDecoder",
+        "java.nio.charset.CharsetEncoder");
 
     private PortalRules() {
     }
@@ -156,7 +161,7 @@ final class PortalRules {
         List<ArchRule> rules = new ArrayList<>();
         for (String module : table.mayUse().keySet()) {
             for (String other : table.mayUse().keySet()) {
-                if (!other.equals(module) && !table.mayUse().get(module).contains(other)) {
+                if (!Objects.equals(other, module) && !table.mayUse().get(module).contains(other)) {
                     rules.add(ArchRuleDefinition.noClasses().that().resideInAPackage(table.packageOf(module) + "..")
                         .should().dependOnClassesThat().resideInAPackage(table.packageOf(other) + "..")
                         .as("A-DIR: " + module + " does not depend on " + other + " (Principles 3.2)"));
@@ -304,6 +309,65 @@ final class PortalRules {
             .should().callCodeUnitWhere(call("makes a member accessible",
                 c -> Set.of("setAccessible", "trySetAccessible").contains(c.getTarget().getName()) && c.getTargetOwner().isAssignableTo(AccessibleObject.class)))
             .as("A-REFLECT: no class calls setAccessible (Principles 8.2)"));
+    }
+
+    /**
+     * A-OPTIONAL-SLOT, Principles 3.3 and check 35 (anti-patterns O1): Optional is a return type for "no result" and nothing else. A field, a method or constructor
+     * parameter and a record component are all excluded; ArchUnit has no record-component model, but the compiler makes every component a private field and a
+     * canonical constructor parameter, so the field and parameter rules cover it. Collection elements ({@code List<Optional<T>>}) are not covered.
+     */
+    static List<ArchRule> optionalSlot() {
+        ArchCondition<JavaCodeUnit> optionalParameter = new ArchCondition<>("not have a parameter of type Optional") {
+            @Override
+            public void check(JavaCodeUnit unit, ConditionEvents events) {
+                for (JavaParameter parameter : unit.getParameters()) {
+                    if (parameter.getRawType().isEquivalentTo(Optional.class)) {
+                        events.add(SimpleConditionEvent.violated(unit, unit.getFullName() + " has a parameter of type Optional"));
+                    }
+                }
+            }
+        };
+        return List.of(
+            ArchRuleDefinition.noFields().should().haveRawType(Optional.class)
+                .as("A-OPTIONAL-SLOT: no field or record component has type Optional (Principles 3.3, check 35; anti-patterns O1)"),
+            ArchRuleDefinition.codeUnits().should(optionalParameter)
+                .as("A-OPTIONAL-SLOT: no method or constructor parameter has type Optional (Principles 3.3, check 35; anti-patterns O1)"));
+    }
+
+    /**
+     * A-OPTIONAL-GET, Principles 3.3 (anti-patterns O2): JDK API Note of Optional.get(): "The preferred alternative to this method is orElseThrow()." The pairs the
+     * bytecode cannot tell apart from legitimate code (isPresent() followed by get(), orElse(null)) are a review item, not a rule.
+     */
+    static List<ArchRule> optionalGet() {
+        return List.of(ArchRuleDefinition.noClasses()
+            .should().callCodeUnitWhere(call("calls Optional.get()", c -> "java.util.Optional".equals(c.getTargetOwner().getName())
+                && "get".equals(c.getTarget().getName()) && c.getTarget().getRawParameterTypes().isEmpty()))
+            .as("A-OPTIONAL-GET: no class calls Optional.get(); use orElseThrow() (Principles 3.3, check 35; JDK Optional.get() API Note; anti-patterns O2)"));
+    }
+
+    /**
+     * A-CHARSET, anti-patterns Z2 (checklist 15): the default character set depends on the host. Flagged: {@code String.getBytes()} without an argument,
+     * {@code new String(byte[]...)} without a charset, and {@code InputStreamReader} / {@code OutputStreamWriter} constructors without a charset. The ones that
+     * name a charset (String name, Charset, CharsetDecoder, CharsetEncoder) pass.
+     */
+    static List<ArchRule> charset() {
+        return List.of(ArchRuleDefinition.noClasses()
+            .should().callCodeUnitWhere(call("uses the default character set", c -> {
+                String owner = c.getTargetOwner().getName(), name = c.getTarget().getName();
+                List<JavaClass> parameters = c.getTarget().getRawParameterTypes();
+                boolean namesCharset = parameters.stream().anyMatch(type -> CHARSET_PARAMETER_TYPES.contains(type.getName()));
+                return "java.lang.String".equals(owner) && "getBytes".equals(name) && parameters.isEmpty()
+                    || "java.lang.String".equals(owner) && "<init>".equals(name) && !parameters.isEmpty() && parameters.get(0).isEquivalentTo(byte[].class) && !namesCharset
+                    || Set.of("java.io.InputStreamReader", "java.io.OutputStreamWriter").contains(owner) && "<init>".equals(name) && !namesCharset;
+            }))
+            .as("A-CHARSET: no String.getBytes(), new String(byte[]...), new InputStreamReader or new OutputStreamWriter without a Charset (anti-patterns Z2)"));
+    }
+
+    /** A-SLEEP, anti-patterns D3 (checklist 14): wait for the event (onExit, waitFor(timeout), CountDownLatch, Future.get(timeout)), do not poll with Thread.sleep. */
+    static List<ArchRule> sleep() {
+        return List.of(ArchRuleDefinition.noClasses()
+            .should().callCodeUnitWhere(call("calls Thread.sleep", c -> "java.lang.Thread".equals(c.getTargetOwner().getName()) && "sleep".equals(c.getTarget().getName())))
+            .as("A-SLEEP: no class calls Thread.sleep (anti-patterns D3)"));
     }
 
     private static DescribedPredicate<JavaCall<?>> call(String description, Predicate<JavaCall<?>> predicate) {

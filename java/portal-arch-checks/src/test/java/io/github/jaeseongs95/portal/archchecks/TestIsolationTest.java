@@ -18,16 +18,19 @@ class TestIsolationTest {
 
     @Test
     void noHostSessionVariableReachesTheTest() {
+        // System.getenv is allowed here: a JUnit test outside Spring checks the environment of the test JVM; A-ENV binds the product code.
         assertThat(System.getenv().keySet()).noneMatch(name -> HOST_SESSION_VARIABLE.matcher(name).matches());
     }
 
     @Test
     void homeAndTemporaryFoldersLieInsideTheModuleBuildFolder() throws IOException {
+        // System.getProperty and System.getenv are allowed in this class: a JUnit test outside Spring checks what Gradle's test JVM setup hands over; A-ENV binds the product code.
         Path isolated = Path.of(System.getProperty("user.dir")).resolve("build/isolated").toRealPath();
         for (String variable : List.of("HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "TMPDIR")) {
             assertThat(System.getenv(variable)).as(variable).isNotNull();
             assertThat(Path.of(System.getenv(variable)).toRealPath()).as(variable).startsWith(isolated);
         }
+        // System.getProperty is allowed here (see the first line of this method).
         assertThat(Path.of(System.getProperty("user.home")).toRealPath()).startsWith(isolated);
         assertThat(Path.of(System.getProperty("java.io.tmpdir")).toRealPath()).startsWith(isolated);
     }

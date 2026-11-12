@@ -1,7 +1,12 @@
 package io.github.jaeseongs95.portal.archchecks.fixtures;
 
 import java.io.File;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.io.OutputStreamWriter;
 import java.lang.reflect.Field;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -9,6 +14,7 @@ import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.util.Calendar;
 import java.util.Date;
+import java.util.Optional;
 import java.util.Timer;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -186,6 +192,69 @@ final class StartsProcess {
 final class ExecsRuntime {
     Object run() throws java.io.IOException {
         return Runtime.getRuntime().exec(new String[] {"x"});
+    }
+}
+
+final class OptionalField {
+    Optional<String> value;
+}
+
+final class OptionalParameter {
+    String run(Optional<String> value) {
+        return value.orElseThrow();
+    }
+}
+
+// A record component is a private field and a canonical constructor parameter of type Optional.
+record OptionalComponent(Optional<String> name) {
+}
+
+final class GetsOptional {
+    String run() {
+        Optional<String> found = Optional.of("x");
+        return found.get();
+    }
+}
+
+final class GetsBytesWithDefaultCharset {
+    byte[] run(String text) {
+        return text.getBytes();
+    }
+}
+
+final class NewsStringFromBytes {
+    String run(byte[] bytes) {
+        return new String(bytes);
+    }
+}
+
+final class NewsStringFromByteRange {
+    String run(byte[] bytes) {
+        return new String(bytes, 0, 1);
+    }
+}
+
+final class NewsInputStreamReader {
+    Object run(InputStream in) {
+        return new InputStreamReader(in);
+    }
+}
+
+final class NewsOutputStreamWriter {
+    Object run(OutputStream out) {
+        return new OutputStreamWriter(out);
+    }
+}
+
+final class SleepsMillis {
+    void run() throws InterruptedException {
+        Thread.sleep(1L);
+    }
+}
+
+final class SleepsDuration {
+    void run() throws InterruptedException {
+        Thread.sleep(Duration.ofMillis(1));
     }
 }
 

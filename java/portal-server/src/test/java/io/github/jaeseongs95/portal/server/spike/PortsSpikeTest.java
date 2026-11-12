@@ -9,6 +9,8 @@ import javax.sql.DataSource;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInstance;
+import org.junit.jupiter.api.TestInstance.Lifecycle;
 import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.builder.SpringApplicationBuilder;
@@ -29,6 +31,7 @@ import org.springframework.web.client.RestClient;
  * web server on its own port (0 = a free port here; 39124 and 39125 in the product). The parent holds what both share: auto-configured infrastructure
  * (the DataSource of portal-store) and a bean. Each child holds only its own web layer.
  */
+@TestInstance(Lifecycle.PER_CLASS)
 class PortsSpikeTest {
 
     /** Shared state of the parent: both web layers must see this one instance. A component of ours, found by the parent's registration, not made by a factory. */
@@ -99,14 +102,15 @@ class PortsSpikeTest {
     record Reply(int status, String body) {
     }
 
-    private static ConfigurableApplicationContext parent;
-    private static ConfigurableApplicationContext mcp;
-    private static ConfigurableApplicationContext admin;
-    private static RestClient mcpHttp;
-    private static RestClient adminHttp;
+    // One start for the whole class (PER_CLASS lifecycle): instance fields, not static state.
+    private ConfigurableApplicationContext parent;
+    private ConfigurableApplicationContext mcp;
+    private ConfigurableApplicationContext admin;
+    private RestClient mcpHttp;
+    private RestClient adminHttp;
 
     @BeforeAll
-    static void start() {
+    void start() {
         // The parent is not a web application and has the MCP server off; the children set their own server.port and decide for themselves whether they are MCP.
         parent = new SpringApplicationBuilder(ParentConfiguration.class).web(WebApplicationType.NONE)
             .properties("spring.ai.mcp.server.enabled=false", "spring.main.banner-mode=off").run();
@@ -122,7 +126,7 @@ class PortsSpikeTest {
     }
 
     @AfterAll
-    static void stop() {
+    void stop() {
         // Closing the parent closes the children first (a child is closed with its parent).
         parent.close();
     }

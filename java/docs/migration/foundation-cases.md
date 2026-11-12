@@ -39,6 +39,12 @@
 | A-DOMAIN | `portal-domain`은 JDK·jackson-annotation·자기 패키지에만 의존 (3.2) | Spring을 쓰는 fixture | 순수 fixture | 위반 0 |
 | A-LOMBOK | `lombok..` 의존 0, 소스 `import lombok`·빌드 파일 `lombok` 0 (8.2) | `lombok.Getter`(시험용 같은 이름 어노테이션) 붙인 클래스, 임시 빌드 파일 | 없음 | 위반 0 |
 | A-REFLECT | `setAccessible`·`trySetAccessible` 호출 0, 빌드 파일에 `add-opens`·`enable-preview` 0 (8.1, 8.2) | `Field.setAccessible(true)`, 임시 빌드 파일 | 없음 | 위반 0 |
+| A-OPTIONAL-SLOT | `Optional` 타입의 필드·record 구성요소·메서드/생성자 매개변수 0. 반환 타입은 허용 (개발원칙 3.3, 체크 35; 안티패턴 O1, 16절 1번). ArchUnit 1.5.1에는 record 구성요소 모델이 없어 구성요소는 컴파일러가 만드는 private 필드와 정규 생성자 매개변수로 잡는다 | `Optional` 필드(`OptionalField`), `Optional` 매개변수(`OptionalParameter`), `Optional` 구성요소 record(`OptionalComponent`) | `Optional`을 반환하는 `Clean.find` | 위반 0 |
+| A-OPTIONAL-GET | `Optional.get()` 호출 0 (개발원칙 3.3, 체크 35; 안티패턴 O2, 16절 2번). 근거: JDK `Optional.get()` API Note 「The preferred alternative to this method is `orElseThrow()`.」 | `Optional.of("x").get()`(`GetsOptional`) | `orElseThrow()`를 쓰는 `Clean.require` | 위반 0 |
+| A-CHARSET | 인자 없는 `String.getBytes()`, 문자셋 없는 `new String(byte[]…)`, 문자셋 없는 `InputStreamReader`·`OutputStreamWriter` 생성자 0 (안티패턴 Z2, 16절 15번). 문자셋 이름·`Charset`·`CharsetDecoder`·`CharsetEncoder` 인자가 있으면 통과 | `getBytes()`, `new String(bytes)`, `new String(bytes, 0, 1)`, `new InputStreamReader(in)`, `new OutputStreamWriter(out)` | `getBytes(UTF_8)`, `new String(bytes, UTF_8)`, `new String(bytes, 0, n, UTF_8)`, 문자셋을 준 Reader·Writer | 위반 0 |
+| A-SLEEP | `Thread.sleep` 호출 0(모든 오버로드) — 완료를 알리는 API를 쓴다 (안티패턴 D3, 16절 14번) | `Thread.sleep(1L)`, `Thread.sleep(Duration)` | `CountDownLatch.await(1, SECONDS)`(`Clean.finished`) | 위반 0 |
+
+시험 코드의 보정(2a06896 뒤, 개발원칙 9절·안티패턴 16절 기준): (1) Spring 시험의 필드 `@Autowired`·`@LocalServerPort`를 `@Autowired` 생성자 매개변수로 바꿨다(안티패턴 SP1; `McpContractSpikeTest`, `NullInclusionSpikeTest`). (2) 가변 static 상태를 `@TestInstance(PER_CLASS)`와 인스턴스 필드로 바꿨다(안티패턴 S2; `ArchitectureRulesTest`, `RuleFixturesTest`, `PortsSpikeTest`). (3) 값이 둘 다 변수인 비교를 `Objects.equals`로 바꿨다(개발원칙 3.3; `McpContractSpikeTest`, `ArchitectureRulesTest`, `PortalRules`). (4) 판정: 시험 하니스(`ArchitectureRulesTest`, `TestIsolationTest`)의 `System.getProperty`·`System.getenv`는 Spring이 아닌 JUnit 시험이 Gradle `systemProperty`·시험 JVM 환경을 읽는 자리라 허용한다. 제품 코드에는 A-ENV가 그대로 적용된다.
 
 ### 2.1 기계로 잡을 수 없는 항목: 검토 판정
 
@@ -56,6 +62,9 @@
 | 34 (DIP·OCP·LSP·ISP, Spring 대응표) | 구현을 `new`로 만들지 않고 생성자 주입; 확장 지점은 interface 구현 빈 + `List<인터페이스>` 주입; 프로파일·시험에서 같은 interface의 다른 빈으로 바꿔도 의미 동일; 주입 타입은 소비자가 쓰는 interface만큼 좁게 | 「구현을 new로 만든다」는 값 객체·외부 라이브러리 객체와 구분할 수 없다(`getBean`만 A-DIP이 잡는다) |
 | 34 (solid-design) | interface는 소비자 역할 단위로 좁게, 변화 축(SSH 전송·저장·시각·호스트 hook·인증·외부 I/O) 경계에만, 내부 클래스마다 interface 금지, 상속보다 조합 | 「어느 경계인가」는 의미 판단. UnsupportedOperationException만 A-LSP가 잡는다 |
 | 32 일부 | 불변 record의 불변식을 compact constructor에서 검사 | 어떤 record가 불변식을 가져야 하는지는 의미 판단(시범 `ContractEnvelope`·`Limits`가 그렇게 했다) |
+| 35 일부 | `isPresent()` 뒤 `get()`, `orElse(null)`, `Optional.empty()`로 없음·미지원·미확인·실패를 뭉치기 | 기계 검사 불가, 검토 항목: 두 호출이 짝인지·`orElse`의 인자가 null인지·`empty`의 뜻은 바이트코드로 가를 수 없다(A-OPTIONAL-SLOT·A-OPTIONAL-GET은 슬롯과 `get()`만 잡는다) |
+| 35 일부 | 컬렉션 요소가 `Optional`인 경우(`List<Optional<T>>`) | 기계 검사 불가, 검토 항목: A-OPTIONAL-SLOT은 필드·매개변수의 원시 타입만 본다(제네릭 인자는 보지 않는다) |
+| 안티패턴 Z2·D3 | A-CHARSET·A-SLEEP이 포함하지 않는 API: `FileReader`·`FileWriter`·`PrintWriter`·`Scanner(InputStream)`·`ByteArrayOutputStream.toString()`의 기본 문자셋, `toLowerCase()`·`String.format`의 기본 로캘, `LockSupport.parkNanos`·`TimeUnit.sleep`·빈 본문 바쁜 대기 | 기계 검사 불가, 검토 항목: 이번 규칙의 범위 밖이다(필요하면 규칙을 더하되 fixture로 증명한다) |
 
 ## 3. 시범 (a) — MCP 서버가 Contract 2.0 모양을 낼 수 있는가 (`portal-web`, `McpContractSpikeTest`)
 
@@ -91,7 +100,7 @@
 | Q-04 | 부모 빈 공유 | 부모의 `SharedCounter` | 두 자식 모두 같은 인스턴스(동일성), MCP 포트의 요청이 올린 값을 관리자 포트의 요청이 읽음 | 동일성 + 실제 HTTP | Spring Framework: 자식 컨텍스트는 부모 빈을 본다(`ApplicationContext` 계층) — 공식 근거 미확인(문서 원문은 열지 않음), 실행으로 확인 |
 | Q-05 | 종료 | 부모 close | 두 포트 모두 연결 거절 | 단언 | 공식 근거 미확인, 실행으로 확인 |
 | Q-06 | 대안 검토(문서) | — | Boot의 다른 표준 방식: (1) 한 컨텍스트에 추가 Tomcat 커넥터(`addAdditionalConnectors`), (2) `management.server.port`. 둘이 더 단순한지 판단 | 문서 근거로 판단, (1)은 Q-07로 실측 | Boot how-to: 「You can add an Connector to the TomcatServletWebServerFactory, which can allow multiple connectors」(예: 포트 8081 커넥터)이나 같은 DispatcherServlet·같은 경로 집합을 두 포트가 공유하고 포트별 경로 제한 방법은 문서에 없다. Actuator: 「You can set the management.server.port property to change the HTTP port」는 actuator 엔드포인트용(임의 컨트롤러를 올릴 수 있다는 문장 없음). official-docs-spring.md Q1(b)(c). https://docs.spring.io/spring-boot/how-to/webserver.html , https://docs.spring.io/spring-boot/reference/actuator/monitoring.html |
-| Q-07 | 대안 실측: 한 컨텍스트 + 추가 커넥터 + 포트별 경로 제한 필터(`ConnectorsSpikeTest`) | MCP 포트·관리자 포트로 `/mcp`, `/api/x` | MCP 포트: `/mcp` 200, `/api/x` 404. 관리자 포트: `/api/x` 200, `/mcp`(POST·GET) 404. 판정 기준은 Q-02·Q-03과 같다 | 실제 HTTP | 같음. 경로 제한 필터(`request.getLocalPort()`)는 공식 근거 미확인(서블릿 API) |
+| Q-07 | 대안 실측: 한 컨텍스트 + 추가 커넥터 + 포트별 경로 제한 필터. `ConnectorsSpikeTest`(추가 커넥터 방식 시범)는 채택하지 않아 메인 판정으로 삭제했다(근거: 커밋 8321134 이력). 아래 판정 기록은 삭제 전 실행 결과로 남긴다 | MCP 포트·관리자 포트로 `/mcp`, `/api/x` | MCP 포트: `/mcp` 200, `/api/x` 404. 관리자 포트: `/api/x` 200, `/mcp`(POST·GET) 404. 판정 기준은 Q-02·Q-03과 같다 | 실제 HTTP | 같음. 경로 제한 필터(`request.getLocalPort()`)는 공식 근거 미확인(서블릿 API) |
 
 ## 5. 시범 (c) — MINA SSHD 클라이언트로 exec·SFTP·TOFU (`portal-ssh`, `SshSpikeTest`)
 
@@ -112,7 +121,8 @@
 ## 6. 실행 결과
 
 명령: `./gradlew --no-daemon --console=plain --max-workers=1 -Pportal.test.forks=1 build` → `BUILD SUCCESSFUL`, 종료 코드 0. 로그 `D:/codex/build/tools/runs/ssh-portal-v300-found.log`.
-시험 72건, skipped 0, failures 0, errors 0(`*/build/test-results/test/*.xml`: ArchitectureRulesTest 21, RuleFixturesTest 23, TestIsolationTest 3, McpContractSpikeTest 9, NullInclusionSpikeTest 1, PortsSpikeTest 5, ConnectorsSpikeTest 1, SshSpikeTest 9). javac 경고: `compileJava`·`compileTestJava` 20개 작업을 `--rerun-tasks`로 다시 돌려 `warning:` 0줄(`…-recompile.log`).
+시험 72건(8321134·2a06896), skipped 0, failures 0, errors 0(`*/build/test-results/test/*.xml`: ArchitectureRulesTest 21, RuleFixturesTest 23, TestIsolationTest 3, McpContractSpikeTest 9, NullInclusionSpikeTest 1, PortsSpikeTest 5, ConnectorsSpikeTest 1, SshSpikeTest 9).
+보정 뒤(생성자 주입·PER_CLASS·`Objects.equals`·`ConnectorsSpikeTest` 삭제·A-OPTIONAL-SLOT/GET·A-CHARSET·A-SLEEP 추가): `BUILD SUCCESSFUL in 41s`, 종료 코드 0, 시험 79건, skipped 0, failures 0, errors 0, 출력의 warning·deprecat 0줄(메인 실행). 클래스별 `@Test` 수: ArchitectureRulesTest 25(+4), RuleFixturesTest 27(+4), TestIsolationTest 3, McpContractSpikeTest 9, NullInclusionSpikeTest 1, PortsSpikeTest 5, SshSpikeTest 9, ConnectorsSpikeTest 삭제(−1). 72 − 1 + 8 = 79. javac 경고: `compileJava`·`compileTestJava` 20개 작업을 `--rerun-tasks`로 다시 돌려 `warning:` 0줄(`…-recompile.log`).
 
 관찰 값과 발견:
 
@@ -125,7 +135,7 @@
 | P-08 결과 | `structuredContent`와 `content[0].text`가 같은 JSON. **첫 실행은 실패했다**: 계약 봉투의 `error:null`·`defaultTarget:null`이 `structuredContent`에서 빠졌다(P-10). 계약 record에 `@JsonInclude(ALWAYS)`를 달아 고쳤다. 달지 않으면 호스트가 `structuredContent`로 읽을 때 Contract 2.0의 명시적 null 키가 사라진다 |
 | P-09 서버 쪽 검증 | 스키마에 없는 필드와 짧은 `operationKey`(pattern 위반)를 서버가 거절한다(`isError` 또는 JSON-RPC 오류). 즉 입력 스키마가 광고만이 아니라 호출 전에 검증으로도 쓰인다 |
 | Q-01..05 | 부모(비웹) + 자식 웹 컨텍스트 둘이 서로 다른 포트에서 기동. MCP 포트: `/mcp` 200, `/api/x` 404. 관리자 포트: `/api/x` 200, `/mcp` 404(POST·GET). 부모 빈(`SharedCounter`, auto-configured `DataSource`)을 두 자식이 같은 인스턴스로 공유하고 자식이 자기 `dataSource`를 만들지 않는다. 부모를 닫으면 두 포트 모두 닫힌다. 조건: 부모에 `spring.ai.mcp.server.enabled=false`, 관리자 자식에 `false`, MCP 자식에만 `true`(MCP 자동 설정이 관리자 자식에서 꺼져 있어야 관리자 포트에 `/mcp`가 없다) |
-| Q-07 | 한 컨텍스트 + 추가 Tomcat 커넥터 + 포트별 경로 제한 필터(`getLocalPort()`)로도 같은 판정 기준을 만족한다 |
+| Q-07 | 한 컨텍스트 + 추가 Tomcat 커넥터 + 포트별 경로 제한 필터(`getLocalPort()`)로도 같은 판정 기준을 만족했다(8321134의 `ConnectorsSpikeTest` 실행 결과). 이 시범은 채택하지 않아 메인 판정으로 삭제했다(근거: 커밋 8321134 이력). 판정 기록은 남긴다 |
 | Q 비교 | 자식 컨텍스트 방식은 필터·포트 번호 비교 없이 경로 집합이 컨텍스트로 갈라지고(경로 제한이 구조), 인프라 빈은 부모에서 공유된다. 커넥터 방식은 코드가 더 적지만 경로 제한을 포트 번호 비교 필터로 직접 짜야 하고 두 포트가 같은 DispatcherServlet·같은 보안 설정을 공유한다(인증 방식을 포트별로 다르게 둘 때 불리). 공식 문서는 어느 쪽도 권장하지 않는다(official-docs-spring.md Q1). 계획은 자식 컨텍스트 방식 유지가 타당하다고 본다. 이 판단은 메인 몫 |
 | S-01..05 | exec stdout·stderr·종료 코드(0, 3), 시간 한도 초과 시 `waitFor`가 `TIMEOUT`을 돌려주고 `close(false)` 뒤 서버 명령의 `destroy()`가 호출됨, SFTP 1 MiB 업로드·300 KB 다운로드가 바이트 동일 |
 | S-06 | MINA 2.20.1 SFTP 서버가 `posix-rename@openssh.com`을 광고한다(문서 docs/sftp.md는 「only client side」로 적었으나 서버 광고는 시험으로 관찰). `rename(…, CopyMode.Overwrite)`로 기존 파일 교체 성공, 임시 파일 사라짐. Windows OpenSSH 서버(sftp-server)가 광고하는지는 이 시험으로 알 수 없다(미검증) |

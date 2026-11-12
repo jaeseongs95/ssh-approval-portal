@@ -45,11 +45,15 @@ class NullInclusionSpikeTest {
         }
     }
 
-    @LocalServerPort
-    int port;
+    private final int port;
+    private final JsonMapper json;
 
+    /** Constructor injection (anti-patterns SP1): Spring's TestContext resolves the parameters of an @Autowired test constructor, @LocalServerPort included. */
     @Autowired
-    JsonMapper json;
+    NullInclusionSpikeTest(JsonMapper json, @LocalServerPort int port) {
+        this.json = json;
+        this.port = port;
+    }
 
     @Test
     void p10_structuredContentLeavesNullsOutWhileBootsMapperWritesThem() {

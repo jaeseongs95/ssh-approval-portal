@@ -10,23 +10,30 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInstance;
+import org.junit.jupiter.api.TestInstance.Lifecycle;
 
 /**
  * The design rules over the product: every class of every product module (portal-domain ... portal-migrate), their Java sources and their build files.
  * Cases A-* of docs/migration/foundation-cases.md; RuleFixturesTest proves that each rule can fail.
  */
+@TestInstance(Lifecycle.PER_CLASS)
 class ArchitectureRulesTest {
 
     private static final ModuleTable TABLE = ModuleTable.product();
     private static final SourceRules SOURCES = new SourceRules(TABLE);
-    private static JavaClasses product;
-    private static Path root;
-    private static List<String> modules;
+
+    // One import for the whole class (PER_CLASS lifecycle): instance fields, not static state.
+    private JavaClasses product;
+    private Path root;
+    private List<String> modules;
 
     @BeforeAll
-    static void importProduct() {
+    void importProduct() {
+        // System.getProperty is allowed here: a JUnit test outside Spring reads the value Gradle's systemProperty sets; A-ENV and Principles 3.5 bind the product code.
         root = Path.of(System.getProperty("portal.arch.root"));
         modules = List.of(System.getProperty("portal.arch.modules").split(","));
         Path[] classDirectories = Arrays.stream(System.getProperty("portal.arch.classes").split(",")).map(Path::of).filter(Files::isDirectory).toArray(Path[]::new);
@@ -148,20 +155,40 @@ class ArchitectureRulesTest {
         assertThat(buildFileViolations("A-REFLECT")).isEmpty();
     }
 
-    private static void check(List<ArchRule> rules) {
+    @Test
+    void a_optionalSlot_optionalIsOnlyAReturnType() {
+        check(PortalRules.optionalSlot());
+    }
+
+    @Test
+    void a_optionalGet_noOptionalGet() {
+        check(PortalRules.optionalGet());
+    }
+
+    @Test
+    void a_charset_noDefaultCharset() {
+        check(PortalRules.charset());
+    }
+
+    @Test
+    void a_sleep_noThreadSleep() {
+        check(PortalRules.sleep());
+    }
+
+    private void check(List<ArchRule> rules) {
         // A module whose package holds only package-info has no class yet; that is not a failure of the rule.
         rules.forEach(rule -> rule.allowEmptyShould(true).check(product));
     }
 
-    private static List<SourceRules.Violation> sourceViolations(String rule) {
+    private List<SourceRules.Violation> sourceViolations(String rule) {
         List<SourceRules.Violation> all = new ArrayList<>();
         modules.forEach(module -> all.addAll(SOURCES.scanSources(root.resolve(module))));
-        return all.stream().filter(v -> rule.equals(v.rule())).toList();
+        return all.stream().filter(v -> Objects.equals(rule, v.rule())).toList();
     }
 
-    private static List<SourceRules.Violation> buildFileViolations(String rule) {
+    private List<SourceRules.Violation> buildFileViolations(String rule) {
         List<SourceRules.Violation> all = new ArrayList<>(SOURCES.scanBuildFile(root.resolve("build.gradle.kts"), null));
         modules.forEach(module -> all.addAll(SOURCES.scanBuildFile(root.resolve(module).resolve("build.gradle.kts"), module.substring("portal-".length()))));
-        return all.stream().filter(v -> rule.equals(v.rule())).toList();
+        return all.stream().filter(v -> Objects.equals(rule, v.rule())).toList();
     }
 }
