@@ -260,4 +260,10 @@ The server archive is named `ssh-approval-portal-2.4.2.tar.gz`.
 
 Packaging produces server and client `.tar.gz`/`.zip` assets and checksums. Node.js, cloudflared, credentials and user sessions are not bundled. Source, fixture, live-host, client UI and deployment checks establish different things; an available command is not evidence that a test has passed. Keep published assets immutable and compare the release checksums before use.
 
-[MIT license](LICENSE).
+## License
+
+Starting with version 3.0.0, SSH Approval Portal is licensed under the [GNU Affero General Public License, version 3 only](LICENSE) (SPDX identifier `AGPL-3.0-only`). Releases up to and including 2.4.2 remain available under the MIT License with which they were published.
+
+Files that carry their own license notice keep that license: `native/freerdp-input/` (Apache-2.0, a patch to FreeRDP) and the Gradle wrapper (`java/gradlew`, `java/gradlew.bat`, `java/gradle/wrapper/`, Apache-2.0).
+
+If you modify the program and let users interact with it over a network, section 13 of the license requires you to offer those users the corresponding source code of your version.
