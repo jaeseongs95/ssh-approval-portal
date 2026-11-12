@@ -9,5 +9,9 @@ dependencies {
     api("org.springframework.ai:spring-ai-starter-mcp-server-webmvc")
     api("org.springframework.boot:spring-boot-starter-webmvc")
     api("org.springframework.boot:spring-boot-starter-validation")
-    testImplementation("org.springframework.boot:spring-boot-starter-test")
+    // No mock is used (Principles 7.1: real paths only). Mockito on the classpath makes Boot's test listeners self-attach its inline agent, which prints
+    // "Mockito is currently self-attaching" and the JVM's "Sharing is only supported for boot loader classes" warning; without the library there is no attach.
+    testImplementation("org.springframework.boot:spring-boot-starter-test") {
+        exclude(group = "org.mockito")
+    }
 }

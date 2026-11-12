@@ -14,7 +14,10 @@ dependencies {
     implementation(project(":portal-desktop"))
     implementation(project(":portal-web"))
     implementation(platform("org.springframework.ai:spring-ai-bom:$springAiVersion"))
-    testImplementation("org.springframework.boot:spring-boot-starter-test")
+    // No mock is used (Principles 7.1); see portal-web/build.gradle.kts for the Mockito self-attach warning this avoids.
+    testImplementation("org.springframework.boot:spring-boot-starter-test") {
+        exclude(group = "org.mockito")
+    }
 }
 
 tasks.named<org.springframework.boot.gradle.tasks.bundling.BootJar>("bootJar") {
