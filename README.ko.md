@@ -262,7 +262,9 @@ npm run package:release -- --output /absolute/new/portal-2.4.2-release
 
 ## 라이선스
 
-SSH Approval Portal은 3.0.0부터 [GNU Affero General Public License 3판 또는 (선택에 따라) 그 이후 판](LICENSE)(SPDX 식별자 `AGPL-3.0-or-later`)으로 배포합니다. 2.4.2 이하 릴리스는 공개 당시의 MIT 라이선스를 그대로 따릅니다.
+SSH Approval Portal은 [GNU Affero General Public License 3판 또는 (선택에 따라) 그 이후 판](LICENSE)(SPDX 식별자 `AGPL-3.0-or-later`)으로 배포합니다. 이 라이선스는 3.0.0과 그 뒤에 공개하는 모든 릴리스에 적용됩니다. 이전 판 계열의 후속 유지보수 릴리스도 포함합니다.
+
+2.4.2 이하 릴리스는 MIT 라이선스로 공개되었습니다. MIT 조건은 이미 공개된 그 릴리스의 사본에만 계속 적용됩니다.
 
 자체 라이선스 고지가 있는 파일은 그 라이선스를 유지합니다. 해당 파일은 `native/freerdp-input/`(Apache-2.0, FreeRDP 패치)과 Gradle wrapper(`java/gradlew`, `java/gradlew.bat`, `java/gradle/wrapper/`, Apache-2.0)입니다.
 
