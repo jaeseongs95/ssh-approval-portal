@@ -7,12 +7,14 @@ import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.lang.ArchRule;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -135,8 +137,72 @@ class ArchitectureRulesTest {
     }
 
     @Test
+    @DisplayName("S3-AB-05: A-NO-UOE is the rule A-LSP: no class of any module, portal-ssh and portal-app included, throws UnsupportedOperationException")
     void a_lsp_noUnsupportedOperation() {
         check(PortalRules.unsupported());
+    }
+
+    @Test
+    @DisplayName("S3-AB-02: A-MINA: only the classes of portal-ssh use org.apache.sshd")
+    void a_mina_onlyPortalSshUsesMina() {
+        check(PortalRules.mina(TABLE));
+    }
+
+    @Test
+    @DisplayName("S3-AB-03: A-NO-LOCAL-PROCESS: no class of portal-ssh starts a local process")
+    void a_noLocalProcess_portalSshStartsNoProcess() {
+        check(PortalRules.noLocalProcess(TABLE));
+    }
+
+    @Test
+    @DisplayName("S3-AB-04: A-NO-RETRY-EXEC: ssh.exec and the RemoteExecutor implementations use no @Retryable, RetryTemplate or @ConcurrencyLimit")
+    void a_noRetryExec_execIsNeverSentAgain() {
+        check(PortalRules.noRetryExec(TABLE));
+    }
+
+    @Test
+    @DisplayName("S3-AB-09: A-SSH-NO-PLATFORM-BRANCH: portal-ssh does not branch on TargetOs outside a TargetPlatform")
+    void a_sshNoPlatformBranch_theOsIsChosenByThePlatformList() {
+        check(PortalRules.noPlatformBranch(TABLE));
+    }
+
+    @Test
+    @DisplayName("S3-AB-06: A-REMOTE-RESULT: the ports of app.remote answer with sealed results or records, not Optional or boolean")
+    void a_remoteResult_portsAnswerWithSealedResults() {
+        check(PortalRules.remoteResult(TABLE));
+    }
+
+    @Test
+    @DisplayName("S3-AB-10: A-AUDIT-BOUNDARY: a public method of app.execution or app.file does not declare AuditFailedException")
+    void a_auditBoundary_auditFailureIsConvertedAtTheUseCase() {
+        check(PortalRules.auditBoundary(TABLE));
+    }
+
+    /**
+     * S3-AB-08: the stage 3 rules are not vacuous over portal-ssh. {@link #check} lets a rule pass over no class at all, which is right while the module has only
+     * {@code package-info}; so this test says the other half: as soon as portal-ssh has a Java source besides package-info, its compiled classes are among the
+     * imported ones, and the rules that name the ssh package are run over exactly those classes.
+     */
+    @Test
+    @DisplayName("S3-AB-08: when portal-ssh has Java sources, its compiled classes are in the scope of A-MINA, A-NO-LOCAL-PROCESS, A-NO-RETRY-EXEC and A-SSH-NO-PLATFORM-BRANCH")
+    void s3_ab_08_portalSshClassesAreInScope() throws IOException {
+        Path sources = root.resolve("portal-ssh").resolve("src").resolve("main").resolve("java");
+        long sourceFiles = 0;
+        if (Files.isDirectory(sources)) {
+            try (Stream<Path> walk = Files.walk(sources)) {
+                sourceFiles = walk.filter(p -> p.toString().endsWith(".java") && !"package-info.java".equals(p.getFileName().toString())).count();
+            }
+        }
+        String ssh = TABLE.packageOf("ssh");
+        JavaClasses sshClasses = product.that(DescribedPredicate.describe("in portal-ssh", (JavaClass c) -> c.getPackageName().equals(ssh) || c.getPackageName().startsWith(ssh + ".")));
+        assertThat(sourceFiles == 0 || sshClasses.stream().findAny().isPresent())
+            .as("portal-ssh has %d Java sources besides package-info, so its compiled classes must have been imported (a rule over nothing proves nothing)", sourceFiles).isTrue();
+        List<ArchRule> rules = new ArrayList<>();
+        rules.addAll(PortalRules.noLocalProcess(TABLE));
+        rules.addAll(PortalRules.noRetryExec(TABLE));
+        rules.addAll(PortalRules.noPlatformBranch(TABLE));
+        rules.forEach(rule -> rule.allowEmptyShould(true).check(sshClasses));
+        PortalRules.mina(TABLE).forEach(rule -> rule.allowEmptyShould(true).check(product));
     }
 
     @Test
@@ -200,6 +266,7 @@ class ArchitectureRulesTest {
     }
 
     @Test
+    @DisplayName("S3-AB-07: A-NO-CHARSET-DEFAULT is the rule A-CHARSET: no class of any module, portal-ssh included, converts bytes and text without a Charset")
     void a_charset_noDefaultCharset() {
         check(PortalRules.charset());
     }

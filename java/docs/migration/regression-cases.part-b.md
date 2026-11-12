@@ -10,7 +10,7 @@
 - 사례 ID는 `RC-B-001`부터이며 묶음별 번호 대역을 쓴다(G01 001~090, G02 091~180, G03 181~270, G04 271~360, G05 361~450, G06 451~540, G07 541~630, G08 631~720, G09 721~810, G10 811~900, G11 901~990). 대역 안에서는 연속 번호이고, 대역 끝의 빈 번호는 결번이다.
 - 사용 규칙: (a) 사례 하나를 JUnit 시험 하나 이상으로 옮긴다. 「판정 방법」이 assert 대상이다. (b) 「(추정)」 표시는 원 시험 assert에서 직접 확인하지 못한 값이므로 구현 담당이 원 시험을 다시 읽고 확정한다. (c) 「3.0 모듈」은 portal-domain·portal-app·portal-store·portal-ssh·portal-desktop·portal-web·portal-server·portal-client·portal-migrate·packaging 중 하나다. (d) 「삭제」는 3.0에서 없어지는 구성요소의 고유 구현 세부만이며, 행동이 3.0에도 필요하면 삭제하지 않고 사례로 옮겼다. (e) 대응표 셀에 사례 ID가 여러 개이면 그 원 시험 행이 여러 사례에 걸친다는 뜻이다(해당 원 시험의 assert가 둘 이상 행동을 확인). 구현 담당은 나열된 모든 사례에서 이 원 시험을 고정해야 한다.
 - 메인 판정(담당 보고에서 모은 미결 사항에 대한 결정. 이 판정을 사례 표·삭제 표·대응표에 반영했다):
-  1. 대상 호스트 agent CLI 설치기(`manage-agent-cli.py`, `check-agent-cli-login.py`, Windows `manage-agent-cli-windows.ps1`)는 유지한다. 제품 기능이며 원격 명령 실행은 제품의 일이다. RC-B-631~682와 Windows CLI 사례(RC-B-541~549·618 등)도 유지한다.
+  1. 대상 호스트 agent CLI 설치기(`manage-agent-cli.py`, `check-agent-cli-login.py`, Windows `manage-agent-cli-windows.ps1`)는 유지한다. 제품 기능이며 원격 명령 실행은 제품의 일이다. RC-B-631~682와 Windows CLI 사례(RC-B-541~549·618 등)도 유지한다. [3단계 정정] 이 판정은 3단계 Q3(원격 PowerShell·Python helper 폐지, 설치기는 MINA SFTP·고정 명령으로 구현)로 일부 바뀌었다. 결정 D3-16(3단계 설계 11.1절)으로 helper 내부 사례 38건(RC-B-541~549, 553~557, 644~648, 657, 661, 672~682, 902, 904, 905, 914, 916, 917)을 삭제 표로 옮겼고 RC-B-646~648·661은 시범 P3-6 결과가 나올 때까지 「보류」다. 대체 행동은 새 사례 S3-AG-01~10·S3-RW-05가 고정한다.
   2. 관리자 인증 token·Access JWT·OIDC는 유지한다. compose 배포도 유지한다(Caddy·oauth2-proxy 동반 구성 포함). env-editor는 행동을 유지하되 3.0에서는 Java가 처리한다(root broker·Python 없음). 이 유지 여부에 붙였던 「(추정)」 표시는 지웠고, 기대값에 대한 「(추정)」은 그대로 둔다. `connect access`(관리자 Access JWT 설정)는 유지한다. PC 클라이언트가 cloudflared·Access로 인증하는 사례(`portal-client-cloudflared.test.mjs:56`·`:120`, `portal-client-discovery.test.mjs`의 doctor·소유자 세션 9건(:178·:198·:216·:247·:262·:337·:353·:374·:391)과 이미 삭제한 helper 탐색 6건, `portal-client.test.mjs:261`, 사례 RC-B-250·252·258·259·260·262~267·299)는 삭제 표로 옮겼다. 사유는 「사용자 결정 5: 기기 등록 토큰으로 대체, cloudflared 제거」다.
   3. RC-B-022는 그대로 둔다. outputSchema `$schema`도 draft-07로 확정했다(이 시험이 근거다).
   4. web-session 등 브라우저 JS 모듈 시험(RC-B-528~537)은 Playwright for Java로 실제 브라우저 페이지에서 모듈을 불러 실행한다. 「3.0 모듈」 열은 `portal-web(브라우저·Playwright Java)`로 적었다.
@@ -553,23 +553,9 @@
 
 | 사례 ID | 대상 기능 | 입력·조건 | 기대 결과 | 판정 방법 | 3.0 모듈 | 원 시험 | 연결 결함 |
 |---|---|---|---|---|---|---|---|
-| RC-B-541 | Windows 대상 CLI 관리 helper: 상태 파일 원자 쓰기·개인 ACL·정규 digest | 개인 임시 루트에서 상태 JSON을 `{value:1}` 뒤 `{value:2}`로 두 번 원자 기록. 정규 digest 입력 `{a:1,b:2}` | 읽은 값 `value==2`. 상태 파일 소유자==선택 계정 SID. ACL은 상속 차단(AreAccessRulesProtected). `Digest({a:1,b:2})`==SHA-256(`{"a":1,"b":2}\n`) (키 순서 고정·LF 종료) | 상태 파일 재읽기·소유자·ACL 보호 플래그·digest 바이트 일치 assert (원 시험은 fixture assert 실패 시 throw, 성공 시 stdout `ok`) | portal-ssh (대상측 고정 계획. 대상에서 실행되는 PowerShell 스크립트이므로 Java 대체 불가, 3.0도 고정 스크립트로 유지) | test/windows-agent-cli-helper.test.mjs:6 | - |
-| RC-B-542 | CLI 하위 프로세스 경계: 환경 정리·출력 상한·시간 상한·자식 종료 | node로 `OPENAI_API_KEY`/`ANTHROPIC_API_KEY`(값 `must-not-leak`)가 설정된 부모 환경에서 자식 실행(출력 상한 1024). 출력 100000자 쓰기+상한 128. `setTimeout 60000`+제한 150ms. 자식이 detached 손자를 만든 뒤 timeout/output 초과 | 자식이 보는 두 환경 변수는 없음(출력 `{}`, 종료 0). 출력 초과는 예외(`OUTPUT_LIMIT`), 시간 초과는 예외(`PROCESS_TIMEOUT`). 손자 프로세스(detached)도 5초 안에 종료(job 상속) | 종료 코드·stdout 문자열·예외 메시지 정규식·손자 PID 종료 대기 assert | portal-ssh | test/windows-agent-cli-helper.test.mjs:6 | - |
-| RC-B-543 | CLI 로그인 진단 환경: 실제 home 보존·임시 디렉터리 분리 | 로그인 모드로 자식 실행(환경 값 출력) | `USERPROFILE`==실제 home. `TEMP==TMP==<root>/tmp`(개인 임시). `CODEX_HOME` 미설정이고 `<home>/.codex`는 임시 디렉터리 하위가 아님 | 자식이 출력한 JSON의 home/temp/tmp/codex 값 비교 assert | portal-ssh | test/windows-agent-cli-helper.test.mjs:6 | - |
-| RC-B-544 | CLI install 영수증·응답 유실 복구·같은 의도 비재실행 | codex 1.2.3 install(expected=초기 revision, 만료 1900000000000, 작업 ID `a`*48)을 한 번 실행 뒤 응답 폐기하고 status만 호출. 같은 의도로 재호출. 같은 작업 ID에 version 1.2.9로 재호출 | 초기 installationRevision이 교차 언어 고정값과 일치, package 무결성(sha512)·intentDigest도 고정값 일치. 첫 install state `completed`, 실행 횟수 1. status는 `completed`+version 1.2.3+operationId 반환하며 재설치하지 않음(횟수 불변). 같은 의도 재호출도 `completed`지만 횟수 불변. 다른 의도는 예외 `REQUEST_CONFLICT`, 횟수·영수증 intentDigest 불변 | 실행 횟수 로그(npm 호출 수)·영수증 필드·예외 메시지 assert | portal-ssh | test/windows-agent-cli-helper.test.mjs:6 | - |
-| RC-B-545 | CLI update 이전 버전 보존·독점 잠금·오래된 revision 거절 | 1.2.4 update 성공 뒤: 활성 이전 버전 디렉터리 확인. `.lock`을 독점(ReadWrite,None)으로 연 채 update. 오래된 expected revision으로 update | update 영수증 `completed`, 활성 version 1.2.4, 이전 버전 디렉터리 유지. 잠금 중에는 예외 `BUSY`, npm 실행 횟수 불변, 새 operations 디렉터리 미생성, 활성 revision 불변. stale revision은 예외 | 영수증·inspect·디렉터리 존재·예외 assert | portal-ssh | test/windows-agent-cli-helper.test.mjs:6 | - |
-| RC-B-546 | CLI 무결성 불일치: 활성화 전 거절·자기 작업만 정리·타 작업 보존 | update 1.2.5를 sha512 0바이트 값(불일치)으로 호출. 정리 대상 옆에 다른 operation(`e`*48, state preparing)과 자격증명 fixture(`.codex/auth-fixture.txt`) 존재 | 설치 예외, 활성 version은 1.2.4 유지. status는 `failed`(operationId 일치), 재설치 없음. 성공 영수증(`b`*48)·다른 operation 영수증과 payload·자격증명 파일·활성/이전 버전 바이트·current.json·`.lock` 모두 불변. 해당 operation 디렉터리에는 `receipt.json`만 남음 | SHA-256 해시 전후 비교·파일 존재·디렉터리 목록 assert | portal-ssh | test/windows-agent-cli-helper.test.mjs:6 | - |
-| RC-B-547 | CLI 정리 소유자·경계 규칙 | 개인 작업 디렉터리에 기본 토큰 소유자 payload, 이어서 모든 사용자(S-1-1-0) Read 허용 ACL을 붙인 payload. 경계 밖 파일을 대상으로 RemovePrivateEntry. 소유자가 계정이 아닌 루트 | 기본 토큰 소유자 payload는 정리됨(반환 0), receipt.json은 보존. 공유 ACL payload는 정리 거절(반환>0, 파일 남음). 경계 밖은 예외 `UNSAFE_CLEANUP`, 파일 불변. 계정 소유가 아닌 루트는 정리 거절 | 반환 값·파일 존재·예외 메시지·해시 assert | portal-ssh | test/windows-agent-cli-helper.test.mjs:6 | - |
-| RC-B-548 | CLI 설치 실패 유형별 정리·롤백·복구 필요 표시 | npm 실패(exit 1), npm timeout(만료 5초), 잠긴 payload(package.tgz 삭제 불가), 활성화 직후 Cleanup 실패, current.json 롤백 쓰기까지 실패 | npm 실패·timeout: 예외 `INSTALL_FAILED`, 실제 npm이 1회 실행됨, 상태 `failed`, 작업 디렉터리에는 `receipt.json`만 남음. 잠긴 payload: 설치 거절, status `cleanupFailures>0`, package.tgz 잔존 관측. 활성화 후 실패: `INSTALL_FAILED`, 새 버전 디렉터리(`versions/1.2.6-<hash16>`) 회수, current.json 해시 원복. 롤백 실패: 예외 `RECOVERY_REQUIRED`, 활성 포인터는 새 버전, 새 버전 디렉터리·`.installed.json` 보존, status `cleanupFailures>0` | 예외 메시지 정규식·영수증 state·디렉터리 목록·해시·cleanupFailures 값 assert | portal-ssh | test/windows-agent-cli-helper.test.mjs:6 | - |
-| RC-B-549 | CLI 외부 설치 재사용·중단된 설치·claude 설치/갱신 | `%USERPROFILE%/AppData/Roaming/npm`에 codex 1.2.5 외부 설치 후 install. `installing` 상태 영수증만 있는 operation status. claude 2.1.1 install 뒤 2.1.2 update(fixture 네이티브 exe) | 외부 설치: inspect `installed`·`managed==false`·version 1.2.5, install state `reused`, current.json 미생성. 중단 영수증: status `unknown`. claude: install `completed`+provider claude, npm 1회 실행, inspect `managed`·version 2.1.1, package.json `bin.claude=='bin/claude.exe'`, 선택 실행 파일이 그 경로. update: version 2.1.2, 활성 디렉터리 변경, status `completed`, 총 실행 횟수 +2 | 영수증·inspect 필드·경로 문자열·실행 횟수 assert | portal-ssh | test/windows-agent-cli-helper.test.mjs:6 | - |
 | RC-B-550 | CI 한정 Windows 고정 CLI 패키지 설치 시험의 전제(격리 계정·Node 선택) | `AGS_WINDOWS_CLI_PACKAGE_SMOKE=1`, GITHUB_ACTIONS=true, fixture의 임시 계정(`agsci`+hex12, 비관리자, SID `S-1-5-21-…`), 절대경로 node.exe. 사용자 PATH 앞에 node 디렉터리 추가 | 프로필 user==임시 계정, host 127.0.0.1, tty false, readOnly false. 기존 로그인 자료(`.codex/auth.json`·`.claude/.credentials.json`·`.claude.json`) 없음, 두 provider inspect `installed==false`. 운영 NodeRuntime 선택(첫 후보)이 후보 우선순위와 일치하고 준비한 node가 후보에 포함, 버전 `v22+`. 종료 시 사용자 PATH 원복 | SSH 실행 결과 JSON 필드·정규식·PATH 복원 assert (CI 전용 조건 시험으로 이식, 일반 시험은 skip 표시) | portal-ssh | test/windows-agent-cli-smoke.test.mjs:63 | - |
 | RC-B-551 | CI 한정 고정 npm 패키지(codex 0.166.0, claude 2.1.316) 설치·버전·로그인 진단 | provider별 고정 tarball URL·integrity로 install(계획 expected=inspect의 revision, 만료 +900초, 임의 operationId). 설치 전 PowerShell과 JS가 계산한 정규 인수 JSON·intentDigest 비교. 응답 유실 시 status만 허용 | 정규 JSON(`{action,expected,expires,integrity,provider,version}`)과 intentDigest가 PowerShell·Java 두 쪽에서 일치. install `completed`·version==고정 버전. inspect `managed==true`·같은 버전. login-status 상태 `signed_out`. 예외 시 재설치 없이 status만 호출 | 정규 JSON 문자열·digest·state·version assert (CI 전용) | portal-ssh | test/windows-agent-cli-smoke.test.mjs:63 | - |
 | RC-B-552 | CLI 의도 해시 정규화 | install 계획(codex 1.2.3, expected `b`*64, expires 1900000000000) | `intentDigest`==SHA-256(`{"action":"install","expected":"<64b>","expires":1900000000000,"integrity":"<integrity>","provider":"codex","version":"1.2.3"}\n`) (expected가 expires 앞, 끝 LF) | 문자열 직접 구성해 SHA-256 비교 assert | portal-domain | test/windows-agent-cli.test.mjs:11 | - |
-| RC-B-553 | Windows 고정 CLI install 계획 구조·변조 거부 | install 계획 생성 후 `stdin+'\n'`, `command+' '`, manifest.profile 변경, agentCli.platform=linux로 각각 검증 | contract `agent-cli-powershell-v1`, cwd `C:/`, command 접두 `powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden `. 원 계획 검증 시 planDigest 동일. 4개 변조 모두 예외 | contract·cwd·정규식·planDigest·assert.throws | portal-ssh | test/windows-agent-cli.test.mjs:16 | - |
-| RC-B-554 | Windows 로그인 진단 계획 | provider claude, action login-status | `manifest.argvJson`==`["login-status","claude","","","","",""]`(7개 인수) , planDigest 검증 통과 | deepEqual·planDigest | portal-ssh | test/windows-agent-cli.test.mjs:24 | - |
-| RC-B-555 | Windows CLI 모든 계획의 해시·시작 명령 상한 결속 | provider {codex,claude} × action {inspect,login-status,install,update,status}(install/update는 version `999999.999999.999999`, expiresAt MAX_SAFE_INTEGER) | `command.length<=8000`. 수신기(base64 UTF-16LE 복원) SHA-256==`manifest.receiverSha256`, stdin SHA-256==`sourceSha256`, stdin 바이트==`sourceBytes`. 검증 통과, receiverSha256를 0으로 바꾸면 예외 | 해시·길이 비교·assert.throws | portal-ssh | test/windows-agent-cli.test.mjs:29 | - |
-| RC-B-556 | 응답 유실 뒤 읽기 전용 status 계획 | 기존 install 영수증(operation 필드)에서 status 계획 생성. sourceContract를 `python-source-v1`로 바꾼 입력 | action `status`, intentDigest가 원 install 계획과 동일, planDigest 검증 통과. 다른 contract는 예외 | 필드 비교·assert.throws | portal-ssh | test/windows-agent-cli.test.mjs:44 | - |
-| RC-B-557 | Windows 외부 실행 파일 경로 투영·비밀 출력 거부 | inspect 결과 stdout JSON의 `active`를 `C:/Users/test/AppData/Roaming/npm/node_modules/@openai/codex/bin/codex.js`(정상)와 `//server/share/codex.exe`·`codex.exe`·`C:/bad\n/codex.exe`·`C:/path/run.cmd`(비정상)로 투영. 정상 JSON에 stderr `token` | 정상 경로는 `data.agentCli.active`에 그대로 투영. 비정상 4건은 예외. stderr가 비어 있지 않으면 예외 | 투영 값 비교·assert.throws | portal-ssh | test/windows-agent-cli.test.mjs:53 | - |
 | RC-B-558 | Windows 명령 실행 래퍼: 모든 catch 경로가 원 ErrorRecord와 위치를 보고 | `throw 'deliberate-test-error-7f3a'`를 직접 래퍼·준비된 부트스트랩·gzip 수신기 세 경로로 생성 | 세 스크립트 모두 `[Console]::Error.WriteLine($_.ToString())`와 `InvocationInfo.PositionMessage`를 포함하고 일반 문구 `Windows command failed` WriteLine이 없음. 준비 결과 stdin==원문, 직접 래퍼에는 원문 포함. 직접·수신기에 `$ProgressPreference='SilentlyContinue'` 포함 | 스크립트 문자열 포함/미포함 assert (3.0에서도 대상에 전달되는 PowerShell 래퍼의 관측 가능한 계약) | portal-ssh | test/windows-command-execution.test.mjs:8 | D-0009 |
 | RC-B-559 | CLIXML 진행 기록 제거: 표시에서만 제거하고 stderr 원문은 호출자 소유 | stderr `#< CLIXML\r\n<Objs …><Obj S="progress" …>…</Objs>`, 진행+`<S S="Error">deliberate-test-error-7f3a</S>` 혼합, 일반 `plain stderr\n` | 진행만 있으면 표시 결과 `''`(원문 raw에는 `progress` 남음). 혼합이면 오류 문구는 포함하고 `S="progress"`는 제외. 일반 stderr는 그대로 | presentStderr 반환 문자열 비교 assert | portal-app (표시 가공) | test/windows-command-execution.test.mjs:22 | D-0011 |
 | RC-B-560 | WIN-STDIN 최대 32KiB 원문의 stdin 전송·수신기 결속 | 한글·이모지·셸 특수문자 접두를 가진 정확히 32768바이트 원문. 32769바이트 | stdin==원문(32768B), 시작 명령 길이<8000, 수신기에 원문 미포함·원문 SHA-256 포함. 수신기는 정확히 32768 바이트 읽기·32769 버퍼·UTF-8 엄격 디코딩(BOM 없음, 잘못된 바이트 거부)·`exit $LASTEXITCODE` 보존·`Exception.Message` 미노출. Windows 분류는 POSIX 분류 호출 없이 `safe`. 32769B는 예외 `Invalid Windows command` | 바이트 길이·해시 포함·정규식·assert.throws | portal-ssh | test/windows-command-line.test.mjs:22 | - |
@@ -630,7 +616,7 @@
 | RC-B-615 | 실제 SSH: 빈 파일·명시 덮어쓰기는 성공, 묵시적 덮어쓰기는 `DESTINATION_EXISTS`로 보존 | 0바이트 업로드·다운로드, 같은 경로에 `거부` 바이트 overwrite=false, 같은 경로에 `승인된 교체` overwrite=true | 빈 파일 왕복 성공(download size 0, 저장 바이트 빈). overwrite=false는 `failed==true`·`data.errorCode=='DESTINATION_EXISTS'`이고 원격은 빈 파일 유지. overwrite=true는 성공하고 원격==`승인된 교체` | errorCode·원격 바이트 | portal-ssh | test/windows-ssh-integration.test.mjs:26 | D-0034(후보) |
 | RC-B-616 | 실제 SSH: 파일 권한 상승은 비관리자에서 전송 전 거부, 관리자 토큰에서 왕복 | 비관리자 계정에서 elevate=true upload. 관리자 SSH 계정에서 같은 elevate=true upload·download(바이트 `0,255,128,32,13,10`) | 비관리자: `failed==true`·`errorCode=='PERMISSION_DENIED'`, 원격 파일 없음, 스테이징 빈 목록. 관리자: upload `failed==false`·원격 바이트 동일, download `failed==false`·sha256 일치·저장 바이트 동일 | errorCode·바이트·스테이징 목록 | portal-ssh | test/windows-ssh-integration.test.mjs:26 | D-0034(후보) |
 | RC-B-617 | 실제 SSH: 고정 CLI 관리자는 inspect와 로그인 상태 반환 | codex inspect·login-status | 둘 다 `failed==false`, inspect `agentCli.action=='inspect'`·`installed`는 boolean, login `state`는 `signed_in/signed_out/not_installed/unavailable` 중 하나 | 결과 필드 | portal-ssh | test/windows-ssh-integration.test.mjs:26 | - |
-| RC-B-618 | 실제 SSH: 고정 가짜 공급망으로 CLI 설치·갱신·보존·상태·실패 제한 전체 검증 | 가짜 npm fixture 스크립트(`cli-supply-fixture.ps1`)를 `-File`로 실행(120초) | 종료 0, stdout `ok`, stderr 빈 문자열. 검증하는 하위 행동은 RC-B-541~549와 같다(같은 fixture를 실제 SSH 계정 권한에서 실행) | 종료 코드·stdout/stderr | portal-ssh | test/windows-ssh-integration.test.mjs:26 | - |
+| RC-B-618 | 실제 SSH: 고정 가짜 공급망으로 CLI 설치·갱신·보존·상태·실패 제한 전체 검증 | 가짜 npm fixture 스크립트(`cli-supply-fixture.ps1`)를 `-File`로 실행(120초) | 종료 0, stdout `ok`, stderr 빈 문자열. 검증하는 하위 행동은 RC-B-541~549(결정 D3-16으로 삭제 표로 이동, 대체 S3-AG-01~10)와 같다(같은 fixture를 실제 SSH 계정 권한에서 실행) | 종료 코드·stdout/stderr | portal-ssh | test/windows-ssh-integration.test.mjs:26 | - |
 | RC-B-619 | 실제 SSH: WRITER-ACL IO-only 대 상속된 유효 쓰기 권한 구분, OS 거부 진단, ACL 불변 | fixture 디렉터리 2종(creator-owner IO-only ACE(flags&8), 사용자 상속 쓰기 ACE). 루트 정책 우회(`pathPolicy bypassRoot`)로 두 디렉터리에 이진 upload·download, 관리자 전용 디렉터리에 upload | IO-only/상속 ACL fixture 구조 확인(IO-only는 InheritOnly, 상속은 유효 생성+쓰기 mask&6==6). 두 디렉터리 upload 성공·바이트 동일, snapshot sha256 일치. 관리자 전용 디렉터리는 `failed==true`, `data=={errorCode:'PERMISSION_DENIED',diagnostic:{origin:'os',nativeStep:'open',nativeError:5}}`, 파일 미생성. 전송 전후 ACL SDDL SHA-256이 fixture 값과 동일, 스테이징 빈 목록 | 결과 data deepEqual·ACL 해시·바이트 비교. 3.0 MINA SFTP에서는 PERMISSION_DENIED(OS 거부)와 정책 거절을 구분해 보고하고 ACL을 변경하지 않음 | portal-ssh | test/windows-ssh-integration.test.mjs:26 | D-0034(후보), D-0003(후보) |
 | RC-B-620 | 실제 SSH: 테스트 모드의 허용 루트 우회는 SSH 계정 권한을 유지 | helper `policy`(bypassRoot true): protocol `file-path-policy-v1`, allowedRoot=fileRoot, rootPolicyApplied `test-server-bypass`. 루트 밖 경로에 허용 루트 지정 publish→우회 publish→snapshot→관리자 전용 경로 publish(우회) | 일반 모드 루트 밖은 exit 1·`PATH_OUTSIDE_ALLOWED_ROOT`(allowedRoot 포함)·파일 없음. 우회 publish `published==true`·rootPolicyApplied `test-server-bypass`·바이트 동일, snapshot 성공. 관리자 전용 경로는 exit 1·`errorCode=='PERMISSION_DENIED'`·`nativeStep=='open'`·`nativeError==5`·`origin=='os'`·`policyReason` 없음·미게시. 정리 후 스테이징 빈 목록 | helper 응답 필드. 3.0에서는 같은 정책 사유(루트 정책 vs OS 권한)를 SFTP 호출 결과의 오류 코드로 이식 | portal-ssh | test/windows-ssh-integration.test.mjs:26 | D-0002 |
 | RC-B-621 | 실제 SSH: 대상측 방어 경계는 위험 경로·상태 변경·크기 초과 거부 | snapshot 경로: `x:stream`, `//localhost/C$/outside.bin`, `//?/C:/Windows/win.ini`, `CON`, `NUL.txt`, `COM1.log`, `LPT9`, `../outside.bin`, 끝 `.`·공백, junction 경유, symlink. publish sha256 0 불일치. snapshot maxBytes 4 | 위험 경로 12종 모두 exit 1·`UNSAFE_PATH`. 해시 불일치 `FILE_CHANGED`·파일 미생성. 크기 초과 `FILE_TOO_LARGE`. 영역 밖 원본 파일 불변, 스테이징 빈 목록 | errorCode·파일 내용 assert. 3.0 SFTP 경로 정책이 같은 코드로 거부 | portal-ssh | test/windows-ssh-integration.test.mjs:26 | D-0003(후보) |
@@ -661,11 +647,6 @@
 | RC-B-641 | 계획 만료·낡은 스냅샷·요청 충돌 | (a) 만료 시각=현재 시각 (b) 설치 후 이전 revision으로 새 operation (c) 같은 operation에 다른 version(`1.2.4`) | (a) `PLAN_EXPIRED` (b) `STALE_INSTALLATION` (c) `REQUEST_CONFLICT`. 설치기 호출 수 1 유지 | 오류 코드 3종, 호출 수 | portal-ssh·portal-app | test/test_agent_cli.py:149 | - |
 | RC-B-642 | integrity·식별자 형식 검증 | integrity `sha1-aaaa`, `sha512-YQ==`, 끝에 공백, 끝 3자를 `B==`로 변조 / operation `../unsafe` / version `1.2.3;id` | integrity 4종 모두 `INVALID_INTEGRITY`, operation·version 위반은 `INVALID_PLAN`. 거절 후 관리 루트 디렉터리가 만들어지지 않음 | 코드, 루트 부재 | portal-ssh·portal-app | test/test_agent_cli.py:154 | - |
 | RC-B-643 | 심볼릭 링크 부모·current의 관리 트리 이탈 차단 | (a) home의 `.local`이 외부 디렉터리 심볼릭 링크 → inspect·install (b) 정상 초기화 후 `current`가 `/etc`를 가리킴 → inspect | (a) 둘 다 `UNSAFE_DIRECTORY`, 외부 디렉터리에 아무것도 생성되지 않음 (b) `UNSAFE_CURRENT` | 코드, 외부 디렉터리 비어 있음 | portal-ssh·portal-app | test/test_agent_cli.py:160 | - |
-| RC-B-644 | 하드링크된 잠금 파일 거절 | `.lock` 파일이 다른 경로에 하드링크된 상태로 install | `UNSAFE_LOCK`, 설치기 호출 0회 | 코드, 호출 수 | portal-ssh·portal-app | test/test_agent_cli.py:166 | - |
-| RC-B-645 | 영수증 추가 필드·심볼릭 링크는 반환하지 않음 | 설치 후 receipt.json에 `private` 필드 추가 → status / receipt를 외부 파일 심볼릭 링크로 교체 → status | 추가 필드는 `INVALID_STATE`(내용 미노출), 심볼릭 링크는 예외(내용 반환 없음) | 코드, 예외 발생 | portal-ssh·portal-app | test/test_agent_cli.py:169 | - |
-| RC-B-646 | 자식 프로세스 환경에 자격증명 비상속 | 호스트 환경에 `JEV_API_KEY`·`OPENAI_API_KEY`·`NPM_TOKEN`·`NODE_OPTIONS`가 있을 때 자식 환경 생성 후 설치 | 자식 환경 키 집합이 정확히 `{LANG,LC_ALL,PATH,HOME,CODEX_HOME,CLAUDE_CONFIG_DIR,DISABLE_UPDATES}`, 합성 비밀 문자열이 환경에 없음, 설치 성공 | 키 집합 동치, 비밀 부재 | portal-ssh·portal-app | test/test_agent_cli.py:175 | - |
-| RC-B-647 | 버전 조회 프로세스: 번들 런타임 PATH·비밀 제외 | `OPENAI_API_KEY` 설정 상태에서 `<home>/codex` 버전 조회(출력 `codex-cli 1.2.3`) | 버전 `1.2.3`, 자식 PATH 항목에 `/opt/ssh-approval/node/bin` 포함, 자식 환경에 합성 비밀 없음 (3.0에서 번들 런타임 경로가 달라지면 경로만 대응 값으로 바꾼다) | 반환 버전, 캡처한 env | portal-ssh·portal-app | test/test_agent_cli.py:180 | - |
-| RC-B-648 | npm 설치 호출의 개별 빈 사설 설정 파일 | work 디렉터리에서 패키지 설치 실행 | 인자에 `--userconfig`·`--globalconfig` 경로가 서로 다르고 둘 다 work 디렉터리 직속, 내용 빈 바이트, mode 0o600, 심볼릭 링크 아님. 자식 env에 `NPM_TOKEN`·`NODE_OPTIONS` 없음. 호출 1회. (npm으로 설치하는 방식을 3.0에서 유지할 때에 한정; 방식이 바뀌면 사용자·전역 설정 격리 요건으로 대체) | 캡처한 인자·env, 파일 바이트·mode | portal-ssh·portal-app | test/test_agent_cli.py:189 | - |
 | RC-B-649 | 외부(foreign) 설치 재사용·비덮어쓰기 | `~/.local/bin/codex`가 `codex-cli 1.2.3`을 출력(관리 설치 아님)하는 상태에서 같은 버전 install | inspect: `installed=true`·`managed=false`. 결과 `state=reused`, 설치기 호출 0, 외부 바이너리 바이트 불변, `current` 링크 생성 안 됨 | inspect 필드, 바이트 동치, current 부재 | portal-ssh·portal-app | test/test_agent_cli.py:200 | SSH_PORTAL-D-0041(후보) |
 | RC-B-650 | 외부 설치와 다른 버전의 관리 설치 병존(두 provider) | codex·claude 각각 외부 1.2.2 설치+인증 파일이 있을 때 1.2.4 install | 결과 `completed`, 관리 설치 `managed=true`·버전 `1.2.4`, 외부 바이너리 바이트·mode 불변, 인증 파일 `SYNTHETIC_AUTH_PRESERVE` 불변, 설치기 호출 1회 | provider별 상태·바이트·mode | portal-ssh·portal-app | test/test_agent_cli.py:206 | SSH_PORTAL-D-0041(후보) |
 | RC-B-651 | 외부 설치 위 관리 설치 실패 시 원본·인증 보존 | 외부 codex 1.2.2 존재, 1.2.4 install을 (1) 설치기 실패 (2) 버전 불명 | (1) `NPM_FAILED` (2) `VERSION_UNAVAILABLE`. 외부 바이너리·인증 파일 불변, `current` 링크 없음, installationRevision 불변 | 코드, 바이트, revision | portal-ssh·portal-app | test/test_agent_cli.py:214 | - |
@@ -674,11 +655,9 @@
 | RC-B-654 | 첫 관리 설치 영수증 실패 시 외부 설치 복구 | 외부 설치 존재 상태에서 첫 관리 설치의 `completed` 영수증 쓰기 실패 | `INSTALL_FAILED`, `current` 링크·경로 모두 없음, installationRevision 원복, 외부 바이너리·인증 바이트 불변, status `failed` | 코드, 부재, revision, 바이트 | portal-ssh·portal-app | test/test_agent_cli.py:234 | - |
 | RC-B-655 | 롤백이 외부에서 교체된 current 링크를 보존 | 완료 영수증 쓰기 실패 순간 다른 주체가 `current`를 `versions/foreign-link-not-owned`로 교체 | `RECOVERY_REQUIRED`, `current`는 교체된 대상 그대로, 이전 버전 바이너리 파일 존재 | 코드, readlink, 파일 존재 | portal-ssh·portal-app | test/test_agent_cli.py:241 | - |
 | RC-B-656 | 외부 설치의 update는 별도 install 요구 | 외부 설치만 있을 때 action=`update` | `MANAGED_UPDATE_REQUIRED`, 외부 바이너리 불변, 설치기 호출 0 | 코드, 바이트, 호출 수 | portal-ssh·portal-app | test/test_agent_cli.py:249 | - |
-| RC-B-657 | 실제 프로세스 간 claim의 단일 승자 | 첫 프로세스가 설치기에서 대기하는 동안 status=`installing`, 두 번째 프로세스(다른 operation)가 install | 두 번째는 즉시(5초 내) `BUSY`로 종료, 게이트 해제 후 첫 프로세스 `completed`, 최종 버전 `1.2.3` | 상태, 두 결과, 종료 | portal-ssh·portal-app | test/test_agent_cli.py:253 | - |
 | RC-B-658 | 강제 종료된 작업은 unknown, 재실행 금지 | 설치기 실행 중 작업 프로세스를 terminate | status `unknown`, 같은 요청 재실행 `RESULT_UNKNOWN`, 설치기 호출 0 | status, 코드, 호출 수 | portal-ssh·portal-app | test/test_agent_cli.py:268 | - |
 | RC-B-659 | 설치 마감 시한: 느린 다운로드 중단 | 만료까지 250ms, 다운로드가 1.5초 걸리는 install | `INSTALL_TIMEOUT`이 1.0초 미만에 발생, 설치기 호출 0, `installed=false`, status `failed`, 프로세스 전역 타이머·핸들러 원복(3.0에서는 시한 취소 자원 해제) | 코드, 경과 시간, 호출 수, status | portal-ssh·portal-app | test/test_agent_cli.py:280 | - |
 | RC-B-660 | 마감 시한 초과 시 직전 버전·인증 보존 | 1.2.3 설치·인증 파일 존재, 1.2.4 update에서 설치기가 1.5초 지연되고 만료 250ms | `INSTALL_TIMEOUT`, inspect 전후 동치, 이전 바이너리·인증 파일 바이트 불변 | 코드, inspect 동치, 바이트 | portal-ssh·portal-app | test/test_agent_cli.py:289 | - |
-| RC-B-661 | npm 대기 중단 시 소유 프로세스 그룹만 종료·회수 | npm 대기가 `synthetic-wait-interruption` 예외로 중단 | 예외가 그대로 전파, 자식 1개가 종료(poll이 None 아님), 종료 신호는 해당 자식 그룹에 SIGKILL 단 1회 | 예외 메시지, 신호 기록, 자식 종료 | portal-ssh·portal-app | test/test_agent_cli.py:308 | - |
 | RC-B-662 | 외부 설치 탐색의 비신뢰 경로 실행 금지 | `~/.local/bin/codex`가 실행 시 marker 파일을 만드는 스크립트이고 (a) 상위 디렉터리 0777 (b) 파일 0775 (c) 심볼릭 링크 대상이 0777 디렉터리 | 세 경우 모두 inspect가 `UNSAFE_EXECUTABLE`, marker 파일 미생성(버전 조회 프로세스 미실행) | 코드, marker 부재 | portal-ssh·portal-app | test/test_agent_cli.py:351, test/test_agent_cli.py:352, test/test_agent_cli.py:353 | SSH_PORTAL-D-0041(후보) |
 | RC-B-663 | 소유자 신뢰 네이티브 심볼릭 링크·인증 보존 | `~/.local/bin/codex`가 0700 소유 `~/native/codex`로의 심볼릭 링크 | inspect: `installed=true`·`managed=false`·version `1.2.2`, 대상 바이트·인증 파일 불변, 링크 유지 | 필드, 바이트, 링크 유지 | portal-ssh·portal-app | test/test_agent_cli.py:354 | SSH_PORTAL-D-0041(후보) |
 | RC-B-664 | 완료 영수증의 디렉터리 ACK 실패와 실패 영수증 사전 실패(관리 설치 update) | codex·claude 각각 1.2.3 관리 설치 후 1.2.4 update에서 completed 영수증 교체 뒤 디렉터리 fsync 실패, 이어 failed 영수증 교체 직전 실패 | `RESULT_UNKNOWN`. 사건 순서 `[completed-after-replace, failed-before-replace]`, 영수증 `completed`, active 버전 `1.2.4`(롤백된 current와 completed 불일치 없음), 이전 바이너리·사용자 파일 불변, 설치기 1회, status `completed`, 새 객체로 같은 요청 재실행 시 `completed`이고 다운로드·설치기 호출 0 | 사건 목록, 영수증·status, 재실행 무호출 | portal-ssh·portal-app | test/test_agent_cli.py:444 | SSH_PORTAL-D-0035(후보) |
@@ -689,17 +668,6 @@
 | RC-B-669 | failed 영수증 교체 뒤 작업 종료 시 실제 효과 보존 | failed 영수증 교체 후 디렉터리 ACK 대기 중 작업 terminate | 영수증 `failed`, active `1.2.4`, 이전 바이너리·사용자 파일 보존, status `failed`, 재실행 `RESULT_UNKNOWN`·설치기 0, 작업 프로세스 회수 | 영수증, active, status | portal-ssh·portal-app | test/test_agent_cli.py:485 | SSH_PORTAL-D-0035(후보) |
 | RC-B-670 | 과거 completed·reused 기록은 이후 정상 update 뒤에도 유지 | 관리 설치 1.2.3(op a), update 1.2.4(op b), 같은 버전 update(op c, 결과 `reused`), 1.2.5 update(op d) | 최종 active `1.2.5`, status: a `completed`·b `completed`·c `reused`, b·c를 다른 객체로 재실행하면 각각 `completed`·`reused`이고 호출 0, 밀려난 1.2.3 바이너리는 제거(`SUPERSEDED_VERSION_NOT_PRUNED` 방지), 사용자 파일 불변 | status 3종, 재실행 무호출, 파일 부재 | portal-ssh·portal-app | test/test_agent_cli.py:486 | - |
 | RC-B-671 | 외부 재사용 기록은 이후 관리 설치 뒤에도 유지 | 외부 1.2.3 존재, op e `reused`, 이어 1.2.4 관리 install | 버전 `1.2.4`, op e status `reused`, 같은 요청 재실행 `reused`·호출 0, 관리 설치기 1회·외부 바이너리·사용자 파일 보존 | status, 재실행 무호출 | portal-ssh·portal-app | test/test_agent_cli.py:502 | - |
-| RC-B-672 | 로그인 확인: 안전하지 않은 부모 권한 설명(프로세스 미시작) | codex 바이너리가 있고 home·`.local`·bin 디렉터리를 각각 0775로 변경 / 관리 claude의 `.local/share`를 0775 | 모두 `{"provider":"codex","state":"unavailable","reason":"unsafe_path"}`(claude도 `reason=unsafe_path`), 벤더 프로세스 시작 0회, 출력에 `SYNTHETIC_PRIVATE`·홈 경로 미노출 | 출력 JSON 동치, 프로세스 미생성 | portal-ssh·portal-app | test/test_agent_cli_login.py:44 | SSH_PORTAL-D-0041(후보) |
-| RC-B-673 | 로그인 확인 실패 사유의 한정과 벤더 출력 비노출 | claude 바이너리가 (a) 30초 대기(제한 시간 0.2초) (b) 합성 비밀 9000바이트 이상 출력 (c) 비밀 한 줄 출력 / 관리 codex 바이너리가 `exit 1` 스크립트로 교체 | (a) `timeout` (b) `output_limit` (c) `unexpected_response` — 형식 `{"provider":"claude","state":"unavailable","reason":...}`. 교체된 관리 바이너리는 `reason=invalid_installation`이며 프로세스 미시작. 출력에 비밀 없음 | 이유 코드별 JSON | portal-ssh·portal-app | test/test_agent_cli_login.py:58 | - |
-| RC-B-674 | 로그인 확인 고정 인자·실제 home·비밀 없는 환경 | codex(`login status`)·claude(`auth status`) 바이너리가 인자 일치, `HOME`=실제 home, `PATH`가 `/opt/ssh-approval/node/bin:`로 시작, `OPENAI_API_KEY`·`CODEX_HOME` 부재를 스스로 검증. 호스트 환경에는 두 변수가 있음. codex는 stderr `Logged in using ChatGPT`, claude는 `{"loggedIn":true,...}` | 두 provider 모두 `signed_in`(바이너리 내부 assert 통과) | 상태값, 자식 환경 | portal-ssh·portal-app | test/test_agent_cli_login.py:73 | - |
-| RC-B-675 | signed_out과 벤더 오류의 구분 | codex stderr `Not logged in`+exit 1 / codex stderr 다른 오류+exit 1 / claude `{"loggedIn":false}`+exit 1 / claude `{"loggedIn":false}`+exit 0 | `signed_out` / `unavailable` / `signed_out` / `unavailable` | 네 입력의 상태값 | portal-ssh·portal-app | test/test_agent_cli_login.py:84 | - |
-| RC-B-676 | 미설치·안전하지 않은 실행 파일 | (a) 실행 파일 없음 (b) codex 바이너리 mode 0777 | (a) `not_installed` (b) 검증 오류(원문은 ValueError, main에서는 사유 코드로 보고) | 상태값, 오류 | portal-ssh·portal-app | test/test_agent_cli_login.py:94 | - |
-| RC-B-677 | 관리 설치 메타데이터·해시 검증 | `~/.local/share/ssh-approval-cli/codex` 아래 versions/`1.2.3-<sha256(integrity)[:16]>`, `.installed.json`(provider·version·integrity·executableSha256), current 링크가 정상 | `signed_in`. 바이너리 내용을 바꾸면 해시 불일치로 검증 오류 | 상태값, 변조 후 오류 | portal-ssh·portal-app | test/test_agent_cli_login.py:102 | - |
-| RC-B-678 | 대용량 관리 claude는 인증 조회 전에 검증 | 관리 claude 바이너리 291974512 바이트(희소 파일), 해시 일치 / 마지막 바이트를 `X`로 변조 | 정상은 `signed_in`이고 인증 조회가 정확히 1회(해당 바이너리·`claude`·home 인자). 변조 시 검증 오류이며 인증 조회 0회 | 상태, 조회 호출 수·인자 | portal-ssh·portal-app | test/test_agent_cli_login.py:148 | - |
-| RC-B-679 | 관리 실행 파일 크기 상한(포함 경계) | 상한 `512*1024*1024`. 크기 정확히 상한인 파일 / 상한+1 | 상한 값이 512MiB로 유한, 정확히 상한이면 실행 파일 경로 반환, +1이면 검증 오류 | 상수, 경계 두 입력 | portal-ssh·portal-app | test/test_agent_cli_login.py:161 | - |
-| RC-B-680 | stat 이후 증가하는 스트림 거절 | 메타데이터 해시가 증가한 바이트와 일치하더라도 상한을 stat 크기로 두고 열린 스트림이 상한을 넘겨 읽힘 | 검증 오류(상한을 넘는 읽기는 일치하는 메타데이터로도 허용하지 않음) | 오류 발생 | portal-ssh·portal-app | test/test_agent_cli_login.py:170 | - |
-| RC-B-681 | 로그인 확인 출력 상한·제한 시간·프로세스 회수 | codex가 `x`*9000 출력(상한 8192) / 30초 대기(제한 0.2초) | 둘 다 검증 오류, 자식 프로세스 회수 | 오류, 프로세스 종료 | portal-ssh·portal-app | test/test_agent_cli_login.py:185 | - |
-| RC-B-682 | main 출력은 벤더 오류·계정 필드를 내보내지 않음 | claude 확인 중 내부 예외 `RuntimeError('SYNTHETIC_PRIVATE')` | 출력이 정확히 `{"provider":"claude","state":"unavailable","reason":"check_failed"}`, 합성 비밀 문자열 미포함 | JSON 동치, 비밀 부재 | portal-ssh·portal-app | test/test_agent_cli_login.py:193 | - |
 
 
 ### G09 (원자료 1942~2047: test_cloudflare_discovery ~ test_environment_helper, py 106행)
@@ -834,22 +802,16 @@
 | 사례 ID | 대상 기능 | 입력·조건 | 기대 결과 | 판정 방법 | 3.0 모듈 | 원 시험 | 연결 결함 |
 |---|---|---|---|---|---|---|---|
 | RC-B-901 | Windows 대상 파일 작업의 오류 응답 위생·분류 코드(helper의 JSON 오류 응답 → 3.0 SFTP 오류 매핑) | publish·snapshot 요청을 각각 오류로 유도하는 입력 표(DESTINATION_EXISTS: 이미 있는 대상에 overwrite=false publish, FILE_TOO_LARGE: maxBytes=1 snapshot, FILE_NOT_FOUND: 없는 파일 snapshot, PARENT_NOT_FOUND: 없는 부모 디렉터리 publish, FILE_CHANGED, PERMISSION_DENIED, UNSAFE_PATH, PATH_OUTSIDE_ALLOWED_ROOT, INVALID_REQUEST). 본문 첫 줄이 `sensitive-marker`로 시작하는 파일을 다룸 | 각 입력이 대응 코드를 대소문자 정확히 일치(`-ceq`)로 반환하고 종료 상태 1(3.0은 실패 결과). 응답·stderr에 예외 상세·파일 내용(`sensitive-marker`)·경로 원문이 없다. 오류 코드 집합은 `PARENT_NOT_FOUND, FILE_NOT_FOUND, PERMISSION_DENIED, DESTINATION_EXISTS, UNSAFE_PATH, PATH_OUTSIDE_ALLOWED_ROOT, STAGING_UNAVAILABLE, FILE_CHANGED, FILE_TOO_LARGE, INVALID_REQUEST, OPERATION_FAILED` 중 하나로 분류(미분류는 `unclassified`). 요청 검증은 INVALID_REQUEST(id가 `../sensitive-marker`, overwrite/elevate/bypassRoot가 문자열 'true', maxBytes=1.5, action='authorize'는 elevate 없이 거부)(다중 줄 Refused 호출 반영) | 코드 문자열 정확 일치, 응답 원문에 `sensitive-marker` 부재, 응답에 stderr·예외 문구 부재 | portal-ssh | test/windows-file-helper.tests.ps1:61, test/windows-file-helper.tests.ps1:105, test/windows-file-helper.tests.ps1:106 | D-0034(후보) |
-| RC-B-902 | publish로 새로 만든 대상 파일의 비공개 DACL(상속 차단·허용 주체 3종) | publish 성공 후 대상 파일의 보안 설명자(SDDL) 조회. 부모에 Users 생성 권한이 있는 디렉터리 포함 | DiscretionaryAclProtected 플래그가 설정(부모 상속 차단). AccessAllowed ACE의 SID는 서비스 계정 SID·`S-1-5-18`(SYSTEM)·`S-1-5-32-544`(Administrators)뿐이며 그 밖의 허용 ACE 0건. (3.0은 SFTP만으로 DACL을 지정할 수 없으므로 업로드 후 보조 단계 또는 새 방식으로 동일 결과를 확정해야 한다) | protected 플래그, 허용 ACE SID 집합 비교 | portal-ssh | test/windows-file-helper.tests.ps1:111, test/windows-file-helper.tests.ps1:116 | - |
 | RC-B-903 | FO-SNAPSHOT-01 TEST 서버 우회(bypassRoot=true) snapshot은 외부 소유자 부모 디렉터리의 일반 파일을 읽는다 | 부모 디렉터리 소유자를 `S-1-5-32-545`(Users, 토큰 구성원이나 서비스 계정·SYSTEM·Administrators가 아님)로 설정(소유자 확인: 298). 그 안의 source.bin(UTF-8 `sensitive-marker`+CRLF+한글 바이트)에 snapshot(bypassRoot=true) | exit 0, sha256 == 독립 계산 digest, size == 바이트 길이, rootPolicyApplied == `test-server-bypass`(원문 오류 시 `PERMISSION_DENIED/policy/UNTRUSTED_OWNER`가 red). stage의 `<id>.part` 바이트가 원본과 base64 일치. 원본 부모·파일의 owner·SDDL 불변. cleanup 요청 exit 0. 전체 FO-SNAPSHOT 사례 뒤에도 부모·원본 SDDL이 처음과 동일(다중 줄 assert 288·307 반영) | exit·sha256·size·rootPolicyApplied, part 바이트, SDDL 문자열 비교, cleanup | portal-ssh | test/windows-file-helper.tests.ps1:298, test/windows-file-helper.tests.ps1:310, test/windows-file-helper.tests.ps1:311, test/windows-file-helper.tests.ps1:313, test/windows-file-helper.tests.ps1:467 | D-0001(확정) |
-| RC-B-904 | FO-SNAPSHOT-02 우회가 아닌 snapshot과 bypassRoot publish는 외부 소유자 정책 거절을 유지하고 아무것도 만들지 않음 | 외부 소유자 부모의 source.bin에 snapshot: bypassRoot 생략, bypassRoot=false 두 경우. 같은 부모에 bypassRoot=true publish(must-not-publish.bin, 사전 stage 지정) | 세 경우 모두 exit 1, errorCode `PERMISSION_DENIED`, origin `policy`, policyReason `UNTRUSTED_OWNER`, nativeStep 속성 없음(다중 줄 assert 279·317·322 반영). snapshot은 stage에 `.part`를 만들지 않음. publish는 대상 파일 미생성이고 부모 SDDL 불변, 그 stage는 cleanup exit 0 | 오류 필드 4종, `.part` 부재, 대상 부재, SDDL 비교 | portal-ssh | test/windows-file-helper.tests.ps1:318, test/windows-file-helper.tests.ps1:323, test/windows-file-helper.tests.ps1:324 | D-0001(후보) |
-| RC-B-905 | FO-SNAPSHOT-03 stage·설치(보호) 루트의 소유자가 외부 소유자면 거절하고 소유자를 정확히 복원 | 보호 루트 두 곳(stage 루트, 설치 루트) 각각의 소유자를 `S-1-5-32-545`로 바꾼 뒤 bypassRoot=true snapshot, 종료 시 원래 소유자로 복원. (3.0 stage는 서버 로컬 디렉터리이므로 구현 담당이 소유자·권한 검사 대상을 확정, 추정) | 각 경우 `PERMISSION_DENIED/policy/UNTRUSTED_OWNER`(nativeStep 없음), stage에 `.part` 미생성. 복원 뒤 보호 루트 SDDL이 시험 전과 완전 동일 | 오류 필드, `.part` 부재, 복원 SDDL 비교 | portal-ssh | test/windows-file-helper.tests.ps1:332, test/windows-file-helper.tests.ps1:334 | D-0001(후보) |
 | RC-B-906 | FO-SNAPSHOT-04 TEST snapshot은 소스에 READ_CONTROL 권한이 없어도 데이터 읽기만으로 성공 | 부모·파일의 소유자를 `S-1-5-32-545`로 하고 서비스 계정과 `S-1-3-4`(Owner Rights)에 ReadPermissions Deny ACE 추가. 사전 OS 탐침: 소스 접근(부모 0xA0, 파일 0x100081)은 오류 0, READ_CONTROL(0x20000) 열기는 오류 5. 그 뒤 bypassRoot=true snapshot | 탐침 4개 결과가 (0,5,0,5)인 고정 조건(다중 줄 assert 372). snapshot exit 0, sha256 == digest, stage `.part` 바이트 일치, cleanup exit 0. 종료 시 ACL 복원 | exit·sha256, part 바이트, cleanup | portal-ssh | test/windows-file-helper.tests.ps1:376, test/windows-file-helper.tests.ps1:377, test/windows-file-helper.tests.ps1:378 | D-0001(후보) |
 | RC-B-907 | FO-SNAPSHOT-06 및 일반 경로 안전성: 위험 경로는 UNSAFE_PATH로 거절하고 stage `.part`를 만들지 않음 | bypassRoot=true와 false 각각으로 snapshot. 외부 소유자 부모 안의 대표 입력: junction 하위 `source.bin`, 심볼릭 링크 파일, 하드링크 파일, 대체 스트림(`source.bin:stream`). 일반 입력: `relative.txt`, `\\server\share\file`, `\\?\C:\file`, `C:relative`, `C:\file:stream`, `<root>\..\escape`, `<root>\.\file`, `<root>\a\\b`, `<root>\NUL.txt`, `<root>\COM1`, `<root>\name.`, `<root>\name `(끝 공백), `<root>\folder\`(다중 줄 Refused 반영). root 안 junction/hardlink/symlink가 가리키는 외부 secret.bin | 모두 exit 1, errorCode `UNSAFE_PATH`, 응답에 파일 내용 없음, stage `.part` 미생성. 원본과 대체(decoy) 파일 바이트는 시험 전과 같다(다중 줄 assert 420) | 코드 일치, `.part` 부재, 바이트 비교 | portal-ssh | test/windows-file-helper.tests.ps1:418 | D-0003(후보) |
 | RC-B-908 | FO-SNAPSHOT-08 snapshot 중 부모·leaf 이름 변경과 부모 reparse 치환 경합 | 64 MiB(67108864바이트, 끝 바이트 123) 소스(외부 소유자 부모)에 bypassRoot=true snapshot을 실행하는 동안 .part 생성이 관찰되면 부모 디렉터리 이름 변경, leaf 이름 변경, 부모를 decoy로의 reparse(junction)로 치환을 시도 | 경합 장치가 실패 없이 동작하고 `.part`를 관찰해 시도 3회 완료(아니면 시험 준비 부족이며 제품 red 아님). 성공 시 sha256 == 원본 raceHash, size == 67108864, rootPolicyApplied `test-server-bypass`, `.part` 바이트가 원본과 일치(고정한 원본만 보고, 다중 줄 assert 449 반영). 실패 시 exit 1이고 errorCode ∈ {UNSAFE_PATH, FILE_CHANGED, PERMISSION_DENIED, FILE_NOT_FOUND, PARENT_NOT_FOUND}이며 `.part` 미생성. 어느 쪽이든 stage cleanup exit 0. (3.0: SFTP는 서버가 핸들을 관리하므로 경합 시 읽은 바이트가 열린 원본 한 개와 일치하거나 안전 거절이어야 함) | 성공 분기 해시·size·바이트, 실패 분기 코드 집합과 `.part` 부재, cleanup | portal-ssh | test/windows-file-helper.tests.ps1:446, test/windows-file-helper.tests.ps1:447, test/windows-file-helper.tests.ps1:451, test/windows-file-helper.tests.ps1:454, test/windows-file-helper.tests.ps1:463 | D-0003(확정) |
 | RC-B-909 | WRITER-ACL-01 inherit-only Creator Owner ACE만 있는 부모에서도 publish·snapshot 성공, 디렉터리 ACL을 고치지 않음 | 디렉터리에 `S-1-3-0`(Creator Owner) FullControl ACE를 ContainerInherit+ObjectInherit+InheritOnly로만 추가(조건 확인: Creator ACE 존재, 전부 InheritOnly(flags & 8), 쓰기 마스크 0x500D0156 포함, 다중 줄 assert 486). bypassRoot=true로 binary.bin publish 후 같은 경로 snapshot | publish exit 0, published true, rootPolicyApplied `test-server-bypass`, 대상 바이트가 입력과 일치. snapshot exit 0, sha256 == digest, `.part` 바이트 일치. 디렉터리 SDDL이 시험 전과 동일(helper는 ACL을 수리하지 않음). 두 stage 모두 cleanup exit 0 | exit·published·rootPolicy, 바이트, SDDL 불변, cleanup | portal-ssh | test/windows-file-helper.tests.ps1:496, test/windows-file-helper.tests.ps1:497, test/windows-file-helper.tests.ps1:499, test/windows-file-helper.tests.ps1:500, test/windows-file-helper.tests.ps1:501, test/windows-file-helper.tests.ps1:506 | D-0034(후보) |
-| RC-B-910 | WRITER-ACL-02 Users에게 생성 권한만 있는 공유 드롭 디렉터리에서 publish·snapshot 성공, 비공개 파일 | 디렉터리에 Users(`S-1-5-32-545`) CreateFiles+CreateDirectories 허용 ACE(유효)와 ObjectInherit·InheritOnly FullControl ACE 추가(조건: Users의 비-InheritOnly ACE 마스크 & 6 == 6, 다중 줄 assert 771). bypassRoot=true로 private.bin publish → 같은 파일 snapshot | publish exit 0, published true. 대상 바이트 일치. 새 파일은 RC-B-902의 비공개 DACL 조건 충족. snapshot exit 0, sha256 == digest. 디렉터리 SDDL 불변. 두 stage cleanup exit 0 | exit·published, 바이트, 파일 DACL, 디렉터리 SDDL, cleanup | portal-ssh | test/windows-file-helper.tests.ps1:779, test/windows-file-helper.tests.ps1:780, test/windows-file-helper.tests.ps1:785, test/windows-file-helper.tests.ps1:786, test/windows-file-helper.tests.ps1:790 | D-0034(후보) |
-| RC-B-911 | WRITER-ACL-03 부모에서 상속된 Users 생성 ACE가 있는 자식 디렉터리에서 비공개 publish 성공 | 부모에 Users CreateFiles+CreateDirectories ACE(ContainerInherit·InheritOnly) 추가 후 자식 디렉터리 생성. 자식 SDDL에서 Users ACE가 상속(flags & 16)·유효(flags & 8 == 0)·마스크 & 6 == 6(다중 줄 assert 805). bypassRoot=true publish | exit 0, published true(원 시험 라벨은 동적 문자열). 새 파일 DACL이 RC-B-902 조건 충족. 자식 디렉터리 SDDL 불변. stage cleanup exit 0 | exit·published, 파일 DACL, SDDL 불변, cleanup | portal-ssh | test/windows-file-helper.tests.ps1:813, test/windows-file-helper.tests.ps1:815, test/windows-file-helper.tests.ps1:818 | D-0034(후보) |
+| RC-B-910 | WRITER-ACL-02 Users에게 생성 권한만 있는 공유 드롭 디렉터리에서 publish·snapshot 성공, 비공개 파일 | 디렉터리에 Users(`S-1-5-32-545`) CreateFiles+CreateDirectories 허용 ACE(유효)와 ObjectInherit·InheritOnly FullControl ACE 추가(조건: Users의 비-InheritOnly ACE 마스크 & 6 == 6, 다중 줄 assert 771). bypassRoot=true로 private.bin publish → 같은 파일 snapshot | publish exit 0, published true. 대상 바이트 일치. 새 파일의 비공개 DACL 조건(RC-B-902)은 결정 D3-16으로 삭제 표로 이동해 이식하지 않는다(대체 S3-RW-05). snapshot exit 0, sha256 == digest. 디렉터리 SDDL 불변. 두 stage cleanup exit 0 | exit·published, 바이트, 파일 DACL, 디렉터리 SDDL, cleanup | portal-ssh | test/windows-file-helper.tests.ps1:779, test/windows-file-helper.tests.ps1:780, test/windows-file-helper.tests.ps1:785, test/windows-file-helper.tests.ps1:786, test/windows-file-helper.tests.ps1:790 | D-0034(후보) |
+| RC-B-911 | WRITER-ACL-03 부모에서 상속된 Users 생성 ACE가 있는 자식 디렉터리에서 비공개 publish 성공 | 부모에 Users CreateFiles+CreateDirectories ACE(ContainerInherit·InheritOnly) 추가 후 자식 디렉터리 생성. 자식 SDDL에서 Users ACE가 상속(flags & 16)·유효(flags & 8 == 0)·마스크 & 6 == 6(다중 줄 assert 805). bypassRoot=true publish | exit 0, published true(원 시험 라벨은 동적 문자열). 새 파일의 비공개 DACL 조건(RC-B-902)은 결정 D3-16으로 삭제 표로 이동해 이식하지 않는다(대체 S3-RW-05). 자식 디렉터리 SDDL 불변. stage cleanup exit 0 | exit·published, 파일 DACL, SDDL 불변, cleanup | portal-ssh | test/windows-file-helper.tests.ps1:813, test/windows-file-helper.tests.ps1:815, test/windows-file-helper.tests.ps1:818 | D-0034(후보) |
 | RC-B-912 | WRITER-ACL-04 및 FO-SNAPSHOT-05 실제 OS 접근 거부는 정책 거절과 구분하고 ACL을 고치지 않음 | (a) 대상 디렉터리에 서비스 계정 CreateFiles Deny ACE → bypassRoot=true publish(must-not-exist.bin). (b) 소스 파일에 서비스 계정 ReadData Deny ACE → bypassRoot=true snapshot | (a) exit 1, errorCode `PERMISSION_DENIED`, origin `os`, nativeStep `open`, nativeError 5(ERROR_ACCESS_DENIED, 3.0 SFTP는 SSH_FX_PERMISSION_DENIED로 대응, 추정), policyReason 속성 없음, published 거짓, 대상 파일 미생성, 디렉터리 SDDL 불변, 그 stage cleanup exit 0. (b) 동일 필드(origin `os`, nativeStep `open`, nativeError 5, policyReason 없음), `.part` 미생성, 소스 SDDL 불변(다중 줄 assert 400·403·833 반영) | 오류 필드 5종, 파일 부재, SDDL 불변, cleanup | portal-ssh | test/windows-file-helper.tests.ps1:835, test/windows-file-helper.tests.ps1:836, test/windows-file-helper.tests.ps1:837, test/windows-file-helper.tests.ps1:840 | D-0034(확정) |
 | RC-B-913 | publish 기본 동작: 메타데이터·기본 정책·이진 바이트 | 사전 stage된 `<id>.part`(UTF-8 `sensitive-marker\r\nUnicode: 한글\n`) 의 sha256·size를 지정해 root 안 `result.bin`에 publish(overwrite=false, 우회 옵션 없음). 이어서 같은 요청을 다시 publish | 1회차 exit 0, published true, sha256 == digest, size == 바이트 길이, rootPolicyApplied `configured-root`, 대상 바이트 base64가 입력과 일치. 2회차는 exit 1·`DESTINATION_EXISTS` | exit·published·sha256·size, rootPolicyApplied, 바이트, 재실행 코드 | portal-ssh | test/windows-file-helper.tests.ps1:644, test/windows-file-helper.tests.ps1:645, test/windows-file-helper.tests.ps1:646 | D-0002(후보) |
-| RC-B-914 | overwrite=true publish는 대상 DACL·소유자·시각을 보존하며 원자적으로 교체 | 이미 있는 대상의 생성 시각 2020-01-02 03:04:05Z, 접근 시각 2021-02-03 04:05:06Z, 쓰기 시각 2022-03-04 05:06:07Z로 설정 후 SDDL·소유자 기록. overwrite=true, elevate=true publish | exit 0, published true, 대상 SDDL·소유자 불변, 세 시각이 설정값과 동일(핸들 닫은 뒤 재조회, 다중 줄 assert 660). (3.0: SFTP setstat 또는 posix-rename 동작에 맞춰 구현 담당이 보존 방식을 정함) | exit·published, SDDL·소유자·세 시각 비교 | portal-ssh | test/windows-file-helper.tests.ps1:657, test/windows-file-helper.tests.ps1:658, test/windows-file-helper.tests.ps1:659 | - |
 | RC-B-915 | overwrite 중 열린 읽기 핸들: share-delete 읽기는 유지, 삭제 공유 없는 읽기는 PERMISSION_DENIED로 원본 보존 | (a) 대상을 FileShare.Read+Delete로 연 reader를 유지한 채 overwrite publish. (b) 대상을 FileShare.Read(삭제 공유 없음)로 연 reader를 유지한 채 overwrite publish | (a) exit 0, published true(원 시험 라벨 동적 문자열), 유지한 핸들에서 첫 바이트가 `script.bytes[0]`로 읽힘. (b) exit 1, `PERMISSION_DENIED`, 대상 바이트가 입력 바이트와 동일하게 보존 | (a) exit·ReadByte, (b) 코드·바이트 보존 | portal-ssh | test/windows-file-helper.tests.ps1:666, test/windows-file-helper.tests.ps1:667, test/windows-file-helper.tests.ps1:671 | - |
-| RC-B-916 | overwrite가 대상의 서로 다른 안전 DACL을 그대로 유지: 명시 DACL(상속 허용)과 보호된 DACL | 대상에 Users ReadAttributes 허용 ACE 추가한 SDDL 기록 → overwrite publish. 이어서 대상 DACL을 보호(상속 차단, 기존 규칙 복사)한 SDDL 기록 → overwrite publish | 두 경우 모두 exit 0, overwrite 뒤 SDDL이 기록한 SDDL과 정확 일치 | exit, SDDL 문자열 일치 | portal-ssh | test/windows-file-helper.tests.ps1:678, test/windows-file-helper.tests.ps1:684 | - |
-| RC-B-917 | overwrite가 필수 무결성 레이블(low integrity)을 기본 레이블로 바꾸지 않음 | `icacls <대상> /setintegritylevel L` 종료 0(686·688: 픽스처 확인 2건), 레이블 포함 icacls 출력 기록 → overwrite publish | exit 0, published true, 이후 icacls 출력이 이전 출력과 완전 동일(종료 0). (3.0은 대상 계정으로 레이블 보존 방식을 구현 담당이 정의, 추정) | icacls 출력 문자열 일치 | portal-ssh | test/windows-file-helper.tests.ps1:686, test/windows-file-helper.tests.ps1:688, test/windows-file-helper.tests.ps1:690, test/windows-file-helper.tests.ps1:692 | - |
 | RC-B-918 | snapshot 기본 동작: 메타데이터와 바이트 | root 안 기존 파일에 elevate=true snapshot. 이어서 같은 id snapshot, id를 새로 하고 maxBytes=1인 snapshot | 1회차 exit 0, sha256 == digest, size == 바이트 길이, `.part` 바이트 일치. 같은 id 재요청은 `DESTINATION_EXISTS`, maxBytes=1은 `FILE_TOO_LARGE`(Refused 호출 반영) | exit·sha256·size, 바이트, 두 거절 코드 | portal-ssh | test/windows-file-helper.tests.ps1:702, test/windows-file-helper.tests.ps1:703 | - |
 | RC-B-919 | publish의 해시·크기 불일치는 FILE_CHANGED로 거절하고 대상·임시 파일을 남기지 않음 | stage에는 정상 바이트, 요청 sha256을 `0`×64로 하여 publish. 이어서 요청 size를 +1하여 publish | 두 경우 모두 exit 1·`FILE_CHANGED`. 대상 파일 미생성. root에 `.ssh-approval-*.part` 임시 파일 0개 | 코드, 대상 부재, 임시 파일 수 0 | portal-ssh | test/windows-file-helper.tests.ps1:713, test/windows-file-helper.tests.ps1:714 | - |
 | RC-B-920 | 일반 모드는 허용 루트 밖 경로를 PATH_OUTSIDE_ALLOWED_ROOT로 구분하고 허용 루트는 설정에서만 가져옴 | root 밖 형제 경로 `files-other/file.bin`에 snapshot(bypassRoot 없음). 요청에 `allowedRoot=<작업 루트>` 값을 넣어 보냄 | exit 1, errorCode `PATH_OUTSIDE_ALLOWED_ROOT`(UNSAFE_PATH와 구분). 응답 allowedRoot는 helper 설정의 root이고 요청이 보낸 값이 아님 | 코드 일치, allowedRoot 값 비교 | portal-ssh | test/windows-file-helper.tests.ps1:722, test/windows-file-helper.tests.ps1:723 | D-0002(후보) |
@@ -954,14 +916,39 @@
 
 | 원 시험(파일:줄) | 사유 |
 |---|---|
-| 없음 | 이 묶음의 원자료 행 56건은 모두 행동이 3.0에도 필요하여 사례로 옮겼다. 일부 행에서 이식하지 않는 세부(RC-B-586의 helper 스크립트 경로 삽입 거부, RC-B-598·RC-B-603의 Python helper 65536바이트 상한)는 해당 사례의 본문에 사유를 적었다 |
+| test/windows-agent-cli-helper.test.mjs:6 | 결정 D3-16으로 RC-B-541~549를 사례 표에서 옮겼다(3단계 설계 8.4절). Windows 에이전트 CLI helper 내부(PowerShell 스크립트의 상태 파일 원자 쓰기·환경 정리·영수증·잠금·정리 규칙): Q3로 원격 PowerShell helper를 폐지한다(feature-map `manage-agent-cli-windows.ps1` 삭제). RC-B-541의 「3.0도 고정 스크립트로 유지」는 Q3 판정 이전 문장이다. 대체 행동: S3-AG-01~10 |
+| test/windows-agent-cli.test.mjs:16 | 결정 D3-16으로 RC-B-553을 옮겼다. 고정 PowerShell 설치 계획의 구조·변조 거부: 계획(스크립트 원문 생성) 자체가 3.0에 없고, 의도 digest·만료·revision 결속은 S2 `AgentCliIntent`가 닫았다. 대체 행동: S3-AG-01, S3-AG-10 |
+| test/windows-agent-cli.test.mjs:24 | 결정 D3-16으로 RC-B-554를 옮겼다. 로그인 진단 PowerShell 계획: 3.0은 CLI를 실행하지 않고 자격 파일 `stat`만 본다(Q3). 대체 행동: S3-AG-07(8.4절의 S3-AG-01, S3-AG-10에 더해 이 줄에 맞는 사례) |
+| test/windows-agent-cli.test.mjs:29 | 결정 D3-16으로 RC-B-555를 옮겼다. 모든 계획의 수신기 해시·시작 명령 8000자 상한 결속: 수신기 PowerShell 원문과 계획 digest가 3.0에 없다. 대체 행동: S3-AG-01, S3-AG-10 |
+| test/windows-agent-cli.test.mjs:44 | 결정 D3-16으로 RC-B-556을 옮겼다. 응답 유실 뒤 읽기 전용 status 계획: 계획이 없어진다. 응답 유실 뒤 재설치 없이 상태만 묻는 행동은 대체 사례가 고정한다. 대체 행동: S3-AG-06(8.4절의 S3-AG-01, S3-AG-10에 더해 이 줄에 맞는 사례) |
+| test/windows-agent-cli.test.mjs:53 | 결정 D3-16으로 RC-B-557을 옮겼다. 고정 PowerShell 계획이 낸 stdout JSON의 외부 실행 파일 경로 투영·stderr 비밀 거부: 그 JSON 계약이 3.0에 없다. 대체 행동: S3-AG-01, S3-AG-10 |
+
+- 이 묶음의 나머지 원자료 행 50건은 행동이 3.0에도 필요하여 사례로 옮겼다. 일부 행에서 이식하지 않는 세부(RC-B-586의 helper 스크립트 경로 삽입 거부, RC-B-598·RC-B-603의 Python helper 65536바이트 상한)는 해당 사례의 본문에 사유를 적었다.
 
 ### G08 삭제
 
 | 원 시험(파일:줄) | 사유 |
 |---|---|
+| test/test_agent_cli.py:166 | 결정 D3-16으로 RC-B-644를 옮겼다(3단계 설계 8.4절). Python 에이전트 CLI helper 내부: 하드링크된 잠금 파일 거절. 잠금 파일이 3.0에 없다(S2 저널이 대체). 대체 행동: S3-AG-02, S3-AG-09 |
+| test/test_agent_cli.py:169 | 결정 D3-16으로 RC-B-645를 옮겼다. Python 에이전트 CLI helper 내부: 영수증 파일의 추가 필드·심볼릭 링크 거부. 영수증 파일이 3.0에 없다(S2 저널이 대체). 대체 행동: S3-AG-02, S3-AG-09 |
+| test/test_agent_cli.py:175 | 보류(P3-6): RC-B-646(자식 프로세스 환경에 자격증명 비상속)을 옮기기로 했으나, npm 필요 여부는 시범 P3-6(CLI tarball)의 결과에 달렸다. npm을 쓰게 되면 사례 표로 되돌려 닫는다. 원문은 이 절 끝의 「보류 사례 원문」. 대체 행동: S3-AG-02, S3-AG-09 |
+| test/test_agent_cli.py:180 | 보류(P3-6): RC-B-647(버전 조회 프로세스의 번들 런타임 PATH·비밀 제외). 같은 사유로 P3-6 결과가 나올 때까지 보류한다. 원문은 「보류 사례 원문」. 대체 행동: S3-AG-02, S3-AG-09 |
+| test/test_agent_cli.py:189 | 보류(P3-6): RC-B-648(npm 설치 호출의 개별 빈 사설 설정 파일). npm 설치 방식이 유지될 때에 한정된 사례였으므로 P3-6 결과가 나올 때까지 보류한다. 원문은 「보류 사례 원문」. 대체 행동: S3-AG-02, S3-AG-09 |
+| test/test_agent_cli.py:253 | 결정 D3-16으로 RC-B-657을 옮겼다. Python 에이전트 CLI helper 내부: 실제 프로세스 간 claim의 단일 승자. 프로세스 간 claim이 3.0에 없다(S2 저널이 대체). 대체 행동: S3-AG-02, S3-AG-09 |
 | test/test_agent_cli.py:298 | Python helper 언어 고유 구현 세부: 설치 성공 뒤 `signal.setitimer(ITIMER_REAL)`·SIGALRM 핸들러가 원복되는지 확인. Java는 시그널 타이머를 쓰지 않으므로 대상 아님(마감 시한 행동 자체는 RC-B-659·660으로 이식) |
 | test/test_agent_cli.py:301 | Python helper 언어 고유 구현 세부: 프로세스에 이미 걸린 ITIMER_REAL을 빼앗지 않고 `RUNTIME_TIMER_BUSY`로 거절. Java 구현에는 같은 프로세스 전역 타이머 충돌이 없음 |
+| test/test_agent_cli.py:308 | 보류(P3-6): RC-B-661(npm 대기 중단 시 소유 프로세스 그룹만 종료·회수). npm 프로세스를 쓰는 경우에 한정된 사례이므로 P3-6 결과가 나올 때까지 보류한다. 원문은 「보류 사례 원문」. 대체 행동: S3-AG-02, S3-AG-09 |
+| test/test_agent_cli_login.py:44 | 결정 D3-16으로 RC-B-672를 옮겼다(3단계 설계 8.4절). 로그인 확인 helper 내부(안전하지 않은 부모 권한 설명): 3.0은 CLI를 실행하지 않고 자격 파일 `stat`만 본다(Q3). 대체 행동: S3-AG-07 |
+| test/test_agent_cli_login.py:58 | 결정 D3-16으로 RC-B-673을 옮겼다. 로그인 확인 helper 내부(실패 사유 한정·벤더 출력 비노출): CLI를 실행하지 않으므로 벤더 출력이 없다(Q3). 대체 행동: S3-AG-07 |
+| test/test_agent_cli_login.py:73 | 결정 D3-16으로 RC-B-674를 옮겼다. 로그인 확인 helper 내부(고정 인자·환경): CLI를 실행하지 않는다(Q3). 대체 행동: S3-AG-07 |
+| test/test_agent_cli_login.py:84 | 결정 D3-16으로 RC-B-675를 옮겼다. 로그인 확인 helper 내부(signed_out과 벤더 오류 구분): 자격 파일 있음·없음·미설치로 `signed_in`·`signed_out`·`not_installed`를 낸다(Q3). 대체 행동: S3-AG-07 |
+| test/test_agent_cli_login.py:94 | 결정 D3-16으로 RC-B-676을 옮겼다. 로그인 확인 helper 내부(미설치·안전하지 않은 실행 파일): 실행 파일을 열지 않는다(Q3). 대체 행동: S3-AG-07 |
+| test/test_agent_cli_login.py:102 | 결정 D3-16으로 RC-B-677을 옮겼다. 로그인 확인 helper 내부(관리 설치 메타데이터·해시 검증): 실행 파일 해시를 보지 않는다(Q3). 대체 행동: S3-AG-07 |
+| test/test_agent_cli_login.py:148 | 결정 D3-16으로 RC-B-678을 옮겼다. 로그인 확인 helper 내부(대용량 관리 claude 검증): 실행 파일을 열지 않는다(Q3). 대체 행동: S3-AG-07 |
+| test/test_agent_cli_login.py:161 | 결정 D3-16으로 RC-B-679를 옮겼다. 로그인 확인 helper 내부(관리 실행 파일 크기 상한): 실행 파일을 열지 않는다(Q3). 대체 행동: S3-AG-07 |
+| test/test_agent_cli_login.py:170 | 결정 D3-16으로 RC-B-680을 옮겼다. 로그인 확인 helper 내부(stat 이후 증가하는 스트림 거절): 실행 파일을 열지 않는다(Q3). 대체 행동: S3-AG-07 |
+| test/test_agent_cli_login.py:185 | 결정 D3-16으로 RC-B-681을 옮겼다. 로그인 확인 helper 내부(출력 상한·제한 시간·프로세스 회수): 실행하는 프로세스가 없다(Q3). 대체 행동: S3-AG-07 |
+| test/test_agent_cli_login.py:193 | 결정 D3-16으로 RC-B-682를 옮겼다. 로그인 확인 helper 내부(main 출력은 벤더 오류·계정 필드를 내보내지 않음): 자격 파일 `stat` 결과만 돌려주며 벤더 오류가 없다(Q3). 대체 행동: S3-AG-07 |
 | test/test_cloudflare_api_lifecycle.py:55 | Cloudflare API 프로비저닝: Cloudflare 목록 응답의 페이지 메타데이터 오류가 부재 증명이 되지 않는지 확인. 3.0은 Cloudflare API를 호출하지 않음(기기 등록 토큰 인증) |
 | test/test_cloudflare_api_lifecycle.py:79 | Cloudflare API 프로비저닝: 두 번째 페이지 오류에서 삭제 의도를 불확정으로 보존. Cloudflare 리소스 정리 자체가 3.0에 없음 |
 | test/test_cloudflare_api_lifecycle.py:114 | Cloudflare API 프로비저닝: 2페이지의 외부 Access 앱이 초기 정리 삭제를 막는지 확인. Cloudflare Access 앱 정리가 3.0에 없음 |
@@ -1108,6 +1095,13 @@
 
 | 원 시험(파일:줄) | 사유 |
 |---|---|
+| test/windows-file-helper.tests.ps1:111 | 결정 D3-16으로 RC-B-902를 옮겼다(3단계 설계 8.4절). 새로 만든 대상 파일의 비공개 DACL(상속 차단·허용 주체 3종): SFTP로 DACL을 설정·검사할 수 없다(3단계 설계 4.4절 20·23·24번, 결정 D3-02 (a)). 대체 행동: S3-RW-05(문서화된 차이 시험), 릴리스 노트 「동작 변경」 |
+| test/windows-file-helper.tests.ps1:116 | 결정 D3-16으로 RC-B-902를 옮겼다(위 :111과 같은 사례의 둘째 줄). 대체 행동: S3-RW-05, 릴리스 노트 |
+| test/windows-file-helper.tests.ps1:318 | 결정 D3-16으로 RC-B-904를 옮겼다. 우회가 아닌 snapshot과 bypassRoot publish의 외부 소유자 정책 거절(`UNTRUSTED_OWNER`): 소유자·DACL 신뢰 검사를 3.0에서 내지 않는다(결정 D3-02 (a): 검사 대상이던 SYSTEM 설치 루트가 3.0에 없고, SFTP는 로그인 계정 권한으로 동작한다). 대체 행동: S3-RW-05, 릴리스 노트. D3-02에서 (b)를 고르면 닫는 쪽으로 되돌린다 |
+| test/windows-file-helper.tests.ps1:323 | 결정 D3-16으로 RC-B-904를 옮겼다(:318과 같은 사례). 대체 행동: S3-RW-05, 릴리스 노트 |
+| test/windows-file-helper.tests.ps1:324 | 결정 D3-16으로 RC-B-904를 옮겼다(:318과 같은 사례). 대체 행동: S3-RW-05, 릴리스 노트 |
+| test/windows-file-helper.tests.ps1:332 | 결정 D3-16으로 RC-B-905를 옮겼다. stage·설치(보호) 루트의 외부 소유자 거절과 소유자 복원: 보호 루트(SYSTEM 설치 루트)가 3.0에 없다(결정 D3-02 (a)). 대체 행동: S3-RW-05, 릴리스 노트. D3-02에서 (b)를 고르면 닫는 쪽으로 되돌린다 |
+| test/windows-file-helper.tests.ps1:334 | 결정 D3-16으로 RC-B-905를 옮겼다(:332와 같은 사례). 대체 행동: S3-RW-05, 릴리스 노트 |
 | test/windows-file-helper.tests.ps1:339 | Windows 대상 helper: install-windows-helper.ps1이 외부 소유자 부모에서 설치를 거절하는지 확인. MINA SSHD SFTP로 대체되어 대상에 helper를 설치하지 않으므로 3.0에 없음(소유자 거절 행동은 RC-B-904·905로 이식) |
 | test/windows-file-helper.tests.ps1:341 | Windows 대상 helper: 거절된 helper 설치가 보호 루트(new-files·new-helper·new-stage)를 만들지 않는지 확인. 대상에 helper를 설치하지 않으므로 3.0에 없음 |
 | test/windows-file-helper.tests.ps1:424 | Windows 대상 helper: 메타데이터만 여는 부모 핸들 pin이 실제 이름 변경을 허용하는지 NtCreateFile·MoveFileEx P/Invoke로 OS 동작을 탐침. 핸들 pin 설계는 helper 구현 세부이며 SFTP에서는 핸들 공유 모드를 클라이언트가 지정할 수 없어 3.0에 없음(경합 안전 행동은 RC-B-908로 이식) |
@@ -1126,6 +1120,15 @@
 | test/windows-file-helper.tests.ps1:609 | Windows 대상 helper: 거절된 설치가 속성 쓰기 가능 빈 부모를 변경하지 않는지 확인. helper 설치가 3.0에 없음 |
 | test/windows-file-helper.tests.ps1:630 | Windows 대상 helper: helper 프로세스의 stdin 요청 JSON이 EOF 전에는 publish를 시작하지 않는지 확인. stdin JSON 요청 프로토콜은 SFTP로 대체되어 3.0에 없음 |
 | test/windows-file-helper.tests.ps1:634 | Windows 대상 helper: stdin EOF 뒤에만 publish가 완료되는지 확인. stdin JSON 프로토콜이 3.0에 없음 |
+| test/windows-file-helper.tests.ps1:657 | 결정 D3-16으로 RC-B-914를 옮겼다. overwrite 때 대상의 DACL·소유자·시각 보존: SFTP로 DACL·소유자를 지정할 수 없어 덮어쓴 파일은 임시 파일의 속성을 가진다(4.4절 20·23·24번). 대체 행동: S3-RW-05(보존되지 않음을 시험이 명시적으로 단정), 릴리스 노트 |
+| test/windows-file-helper.tests.ps1:658 | 결정 D3-16으로 RC-B-914를 옮겼다(:657과 같은 사례). 대체 행동: S3-RW-05, 릴리스 노트 |
+| test/windows-file-helper.tests.ps1:659 | 결정 D3-16으로 RC-B-914를 옮겼다(:657과 같은 사례). 대체 행동: S3-RW-05, 릴리스 노트 |
+| test/windows-file-helper.tests.ps1:678 | 결정 D3-16으로 RC-B-916을 옮겼다. overwrite가 대상의 명시·보호 DACL을 그대로 유지: SFTP로 DACL을 유지·지정할 수 없다. 대체 행동: S3-RW-05, 릴리스 노트 |
+| test/windows-file-helper.tests.ps1:684 | 결정 D3-16으로 RC-B-916을 옮겼다(:678과 같은 사례). 대체 행동: S3-RW-05, 릴리스 노트 |
+| test/windows-file-helper.tests.ps1:686 | 결정 D3-16으로 RC-B-917을 옮겼다. overwrite가 필수 무결성 레이블(low integrity)을 바꾸지 않음: SFTP로 레이블을 보존할 수 없다. 대체 행동: S3-RW-05, 릴리스 노트 |
+| test/windows-file-helper.tests.ps1:688 | 결정 D3-16으로 RC-B-917을 옮겼다(:686과 같은 사례). 대체 행동: S3-RW-05, 릴리스 노트 |
+| test/windows-file-helper.tests.ps1:690 | 결정 D3-16으로 RC-B-917을 옮겼다(:686과 같은 사례). 대체 행동: S3-RW-05, 릴리스 노트 |
+| test/windows-file-helper.tests.ps1:692 | 결정 D3-16으로 RC-B-917을 옮겼다(:686과 같은 사례). 대체 행동: S3-RW-05, 릴리스 노트 |
 | test/windows-file-helper.tests.ps1:887 | Windows 대상 helper: helper stdin 요청이 16385바이트이면 INVALID_REQUEST인 입력 한도 확인. stdin JSON 프로토콜 전용이라 3.0에 없음(요청 필드 검증은 RC-B-901로 이식) |
 | test/windows-file-helper.tests.ps1:892 | Windows 대상 helper: 한도 경계 픽스처가 정확히 16384바이트인지 확인. stdin JSON 프로토콜 전용이라 3.0에 없음 |
 | test/windows-file-helper.tests.ps1:893 | Windows 대상 helper: 정확히 16384바이트 요청이 EOF 뒤 수락되는지 확인. stdin JSON 프로토콜 전용이라 3.0에 없음 |
@@ -1144,6 +1147,17 @@
 | test/portal-container-test.sh:65 | Node 런타임 고유: ARM(aarch64) 픽스처에서 node --test --test-concurrency=1 실행기 선택 안내. 3.0 시험은 Gradle·JUnit이 실행하므로 없음 |
 | test/non-cloudflare-container-test.sh:3 | 기존 셸 시험: 격리된 root Docker 픽스처에서만 실행되도록 막는 환경 가드(`id -u`==0, container==docker). 셸·Docker 고유 구성이며 3.0은 CI 잡 격리로 대체 |
 | test/ssh-recovery-red.sh:23 | 기존 셸 시험 + Node 런타임 고유: 수정 전 커밋(2ccec18a)의 Node 소스에 node --test를 실행해 3개 회귀 시험(ssh-connection-lifecycle·command-output-accounting·execution-failure)이 AssertionError로 실패함을 확인하는 red 검증 하네스. 3.0에는 수정 전 Node 소스가 없고 세 시험의 행동은 해당 파일 행(다른 묶음)에서 이식 |
+
+### 보류 사례 원문 (결정 D3-16, 시범 P3-6)
+
+RC-B-646·RC-B-647·RC-B-648·RC-B-661은 시범 P3-6(CLI tarball: npm을 쓰는지)의 결과가 나올 때까지 보류한다. 위 G08 삭제 표의 해당 줄(test_agent_cli.py:175·:180·:189·:308)이 이 사례들이다. P3-6 결과 npm 프로세스를 쓰게 되면 아래 행을 G08 사례 표로 되돌려 닫는 쪽으로 바꾸고 대응표·수량표를 다시 맞춘다. 되돌릴 때 원문을 잃지 않도록 옮기기 전 행을 그대로 둔다(사례 ID 칸 앞의 「보류」는 사례 표 행 수 집계에서 빼려는 표시이며, 되돌릴 때 지운다).
+
+| 사례 ID | 대상 기능 | 입력·조건 | 기대 결과 | 판정 방법 | 3.0 모듈 | 원 시험 | 연결 결함 |
+|---|---|---|---|---|---|---|---|
+| 보류 RC-B-646 | 자식 프로세스 환경에 자격증명 비상속 | 호스트 환경에 `JEV_API_KEY`·`OPENAI_API_KEY`·`NPM_TOKEN`·`NODE_OPTIONS`가 있을 때 자식 환경 생성 후 설치 | 자식 환경 키 집합이 정확히 `{LANG,LC_ALL,PATH,HOME,CODEX_HOME,CLAUDE_CONFIG_DIR,DISABLE_UPDATES}`, 합성 비밀 문자열이 환경에 없음, 설치 성공 | 키 집합 동치, 비밀 부재 | portal-ssh·portal-app | test/test_agent_cli.py:175 | - |
+| 보류 RC-B-647 | 버전 조회 프로세스: 번들 런타임 PATH·비밀 제외 | `OPENAI_API_KEY` 설정 상태에서 `<home>/codex` 버전 조회(출력 `codex-cli 1.2.3`) | 버전 `1.2.3`, 자식 PATH 항목에 `/opt/ssh-approval/node/bin` 포함, 자식 환경에 합성 비밀 없음 (3.0에서 번들 런타임 경로가 달라지면 경로만 대응 값으로 바꾼다) | 반환 버전, 캡처한 env | portal-ssh·portal-app | test/test_agent_cli.py:180 | - |
+| 보류 RC-B-648 | npm 설치 호출의 개별 빈 사설 설정 파일 | work 디렉터리에서 패키지 설치 실행 | 인자에 `--userconfig`·`--globalconfig` 경로가 서로 다르고 둘 다 work 디렉터리 직속, 내용 빈 바이트, mode 0o600, 심볼릭 링크 아님. 자식 env에 `NPM_TOKEN`·`NODE_OPTIONS` 없음. 호출 1회. (npm으로 설치하는 방식을 3.0에서 유지할 때에 한정; 방식이 바뀌면 사용자·전역 설정 격리 요건으로 대체) | 캡처한 인자·env, 파일 바이트·mode | portal-ssh·portal-app | test/test_agent_cli.py:189 | - |
+| 보류 RC-B-661 | npm 대기 중단 시 소유 프로세스 그룹만 종료·회수 | npm 대기가 `synthetic-wait-interruption` 예외로 중단 | 예외가 그대로 전파, 자식 1개가 종료(poll이 None 아님), 종료 신호는 해당 자식 그룹에 SIGKILL 단 1회 | 예외 메시지, 신호 기록, 자식 종료 | portal-ssh·portal-app | test/test_agent_cli.py:308 | - |
 
 ## 4. 대응표
 
@@ -1738,14 +1752,14 @@ B범위 원자료 모든 행(파일:줄)을 사례 ID 또는 「삭제」(또는
 
 | 원 시험(파일:줄) | 사례 ID·삭제 |
 |---|---|
-| test/windows-agent-cli-helper.test.mjs:6 | RC-B-541, RC-B-542, RC-B-543, RC-B-544, RC-B-545, RC-B-546, RC-B-547, RC-B-548, RC-B-549 |
+| test/windows-agent-cli-helper.test.mjs:6 | 삭제 |
 | test/windows-agent-cli-smoke.test.mjs:63 | RC-B-550, RC-B-551 |
 | test/windows-agent-cli.test.mjs:11 | RC-B-552 |
-| test/windows-agent-cli.test.mjs:16 | RC-B-553 |
-| test/windows-agent-cli.test.mjs:24 | RC-B-554 |
-| test/windows-agent-cli.test.mjs:29 | RC-B-555 |
-| test/windows-agent-cli.test.mjs:44 | RC-B-556 |
-| test/windows-agent-cli.test.mjs:53 | RC-B-557 |
+| test/windows-agent-cli.test.mjs:16 | 삭제 |
+| test/windows-agent-cli.test.mjs:24 | 삭제 |
+| test/windows-agent-cli.test.mjs:29 | 삭제 |
+| test/windows-agent-cli.test.mjs:44 | 삭제 |
+| test/windows-agent-cli.test.mjs:53 | 삭제 |
 | test/windows-command-execution.test.mjs:8 | RC-B-558 |
 | test/windows-command-execution.test.mjs:22 | RC-B-559 |
 | test/windows-command-line.test.mjs:22 | RC-B-560 |
@@ -1812,11 +1826,11 @@ B범위 원자료 모든 행(파일:줄)을 사례 ID 또는 「삭제」(또는
 | test/test_agent_cli.py:149 | RC-B-641 |
 | test/test_agent_cli.py:154 | RC-B-642 |
 | test/test_agent_cli.py:160 | RC-B-643 |
-| test/test_agent_cli.py:166 | RC-B-644 |
-| test/test_agent_cli.py:169 | RC-B-645 |
-| test/test_agent_cli.py:175 | RC-B-646 |
-| test/test_agent_cli.py:180 | RC-B-647 |
-| test/test_agent_cli.py:189 | RC-B-648 |
+| test/test_agent_cli.py:166 | 삭제 |
+| test/test_agent_cli.py:169 | 삭제 |
+| test/test_agent_cli.py:175 | 삭제 |
+| test/test_agent_cli.py:180 | 삭제 |
+| test/test_agent_cli.py:189 | 삭제 |
 | test/test_agent_cli.py:200 | RC-B-649 |
 | test/test_agent_cli.py:206 | RC-B-650 |
 | test/test_agent_cli.py:214 | RC-B-651 |
@@ -1825,13 +1839,13 @@ B범위 원자료 모든 행(파일:줄)을 사례 ID 또는 「삭제」(또는
 | test/test_agent_cli.py:234 | RC-B-654 |
 | test/test_agent_cli.py:241 | RC-B-655 |
 | test/test_agent_cli.py:249 | RC-B-656 |
-| test/test_agent_cli.py:253 | RC-B-657 |
+| test/test_agent_cli.py:253 | 삭제 |
 | test/test_agent_cli.py:268 | RC-B-658 |
 | test/test_agent_cli.py:280 | RC-B-659 |
 | test/test_agent_cli.py:289 | RC-B-660 |
 | test/test_agent_cli.py:298 | 삭제 |
 | test/test_agent_cli.py:301 | 삭제 |
-| test/test_agent_cli.py:308 | RC-B-661 |
+| test/test_agent_cli.py:308 | 삭제 |
 | test/test_agent_cli.py:351 | RC-B-662 |
 | test/test_agent_cli.py:352 | RC-B-662 |
 | test/test_agent_cli.py:353 | RC-B-662 |
@@ -1844,17 +1858,17 @@ B범위 원자료 모든 행(파일:줄)을 사례 ID 또는 「삭제」(또는
 | test/test_agent_cli.py:485 | RC-B-669 |
 | test/test_agent_cli.py:486 | RC-B-670 |
 | test/test_agent_cli.py:502 | RC-B-671 |
-| test/test_agent_cli_login.py:44 | RC-B-672 |
-| test/test_agent_cli_login.py:58 | RC-B-673 |
-| test/test_agent_cli_login.py:73 | RC-B-674 |
-| test/test_agent_cli_login.py:84 | RC-B-675 |
-| test/test_agent_cli_login.py:94 | RC-B-676 |
-| test/test_agent_cli_login.py:102 | RC-B-677 |
-| test/test_agent_cli_login.py:148 | RC-B-678 |
-| test/test_agent_cli_login.py:161 | RC-B-679 |
-| test/test_agent_cli_login.py:170 | RC-B-680 |
-| test/test_agent_cli_login.py:185 | RC-B-681 |
-| test/test_agent_cli_login.py:193 | RC-B-682 |
+| test/test_agent_cli_login.py:44 | 삭제 |
+| test/test_agent_cli_login.py:58 | 삭제 |
+| test/test_agent_cli_login.py:73 | 삭제 |
+| test/test_agent_cli_login.py:84 | 삭제 |
+| test/test_agent_cli_login.py:94 | 삭제 |
+| test/test_agent_cli_login.py:102 | 삭제 |
+| test/test_agent_cli_login.py:148 | 삭제 |
+| test/test_agent_cli_login.py:161 | 삭제 |
+| test/test_agent_cli_login.py:170 | 삭제 |
+| test/test_agent_cli_login.py:185 | 삭제 |
+| test/test_agent_cli_login.py:193 | 삭제 |
 | test/test_cloudflare_api_lifecycle.py:55 | 삭제 |
 | test/test_cloudflare_api_lifecycle.py:79 | 삭제 |
 | test/test_cloudflare_api_lifecycle.py:114 | 삭제 |
@@ -2152,17 +2166,17 @@ B범위 원자료 모든 행(파일:줄)을 사례 ID 또는 「삭제」(또는
 | test/windows-file-helper.tests.ps1:61 | RC-B-901 |
 | test/windows-file-helper.tests.ps1:105 | RC-B-901 |
 | test/windows-file-helper.tests.ps1:106 | RC-B-901 |
-| test/windows-file-helper.tests.ps1:111 | RC-B-902 |
-| test/windows-file-helper.tests.ps1:116 | RC-B-902 |
+| test/windows-file-helper.tests.ps1:111 | 삭제 |
+| test/windows-file-helper.tests.ps1:116 | 삭제 |
 | test/windows-file-helper.tests.ps1:298 | RC-B-903 |
 | test/windows-file-helper.tests.ps1:310 | RC-B-903 |
 | test/windows-file-helper.tests.ps1:311 | RC-B-903 |
 | test/windows-file-helper.tests.ps1:313 | RC-B-903 |
-| test/windows-file-helper.tests.ps1:318 | RC-B-904 |
-| test/windows-file-helper.tests.ps1:323 | RC-B-904 |
-| test/windows-file-helper.tests.ps1:324 | RC-B-904 |
-| test/windows-file-helper.tests.ps1:332 | RC-B-905 |
-| test/windows-file-helper.tests.ps1:334 | RC-B-905 |
+| test/windows-file-helper.tests.ps1:318 | 삭제 |
+| test/windows-file-helper.tests.ps1:323 | 삭제 |
+| test/windows-file-helper.tests.ps1:324 | 삭제 |
+| test/windows-file-helper.tests.ps1:332 | 삭제 |
+| test/windows-file-helper.tests.ps1:334 | 삭제 |
 | test/windows-file-helper.tests.ps1:339 | 삭제 |
 | test/windows-file-helper.tests.ps1:341 | 삭제 |
 | test/windows-file-helper.tests.ps1:376 | RC-B-906 |
@@ -2200,18 +2214,18 @@ B범위 원자료 모든 행(파일:줄)을 사례 ID 또는 「삭제」(또는
 | test/windows-file-helper.tests.ps1:644 | RC-B-913 |
 | test/windows-file-helper.tests.ps1:645 | RC-B-913 |
 | test/windows-file-helper.tests.ps1:646 | RC-B-913 |
-| test/windows-file-helper.tests.ps1:657 | RC-B-914 |
-| test/windows-file-helper.tests.ps1:658 | RC-B-914 |
-| test/windows-file-helper.tests.ps1:659 | RC-B-914 |
+| test/windows-file-helper.tests.ps1:657 | 삭제 |
+| test/windows-file-helper.tests.ps1:658 | 삭제 |
+| test/windows-file-helper.tests.ps1:659 | 삭제 |
 | test/windows-file-helper.tests.ps1:666 | RC-B-915 |
 | test/windows-file-helper.tests.ps1:667 | RC-B-915 |
 | test/windows-file-helper.tests.ps1:671 | RC-B-915 |
-| test/windows-file-helper.tests.ps1:678 | RC-B-916 |
-| test/windows-file-helper.tests.ps1:684 | RC-B-916 |
-| test/windows-file-helper.tests.ps1:686 | RC-B-917 |
-| test/windows-file-helper.tests.ps1:688 | RC-B-917 |
-| test/windows-file-helper.tests.ps1:690 | RC-B-917 |
-| test/windows-file-helper.tests.ps1:692 | RC-B-917 |
+| test/windows-file-helper.tests.ps1:678 | 삭제 |
+| test/windows-file-helper.tests.ps1:684 | 삭제 |
+| test/windows-file-helper.tests.ps1:686 | 삭제 |
+| test/windows-file-helper.tests.ps1:688 | 삭제 |
+| test/windows-file-helper.tests.ps1:690 | 삭제 |
+| test/windows-file-helper.tests.ps1:692 | 삭제 |
 | test/windows-file-helper.tests.ps1:695 | RC-B-922 |
 | test/windows-file-helper.tests.ps1:696 | RC-B-922 |
 | test/windows-file-helper.tests.ps1:697 | RC-B-922 |
@@ -2302,17 +2316,18 @@ B범위 원자료 모든 행(파일:줄)을 사례 ID 또는 「삭제」(또는
 | G04 | 102 | 98 | 4 | 0 | 88 (RC-B-271~359, 삭제로 빠진 299 제외) |
 | G05 | 95 | 89 | 6 | 0 | 82 (RC-B-361~446, 삭제로 빠진 420·421·423·439 제외) |
 | G06 | 112 | 110 | 2 | 0 | 89 (RC-B-451~537, 메인 판정 6으로 되살린 538·539 포함) |
-| G07 | 56 | 56 | 0 | 0 | 89 (RC-B-541~629) |
-| G08 | 102 | 54 | 48 | 0 | 52 (RC-B-631~682) |
+| G07 | 56 | 50 | 6 | 0 | 75 (RC-B-541~629, 결정 D3-16으로 삭제 표로 옮긴 541~549·553~557 제외) |
+| G08 | 102 | 36 | 66 | 0 | 34 (RC-B-631~682, 결정 D3-16으로 삭제 표로 옮긴 644~648·657·661·672~682 제외) |
 | G09 | 106 | 33 | 73 | 0 | 35 (RC-B-721~755) |
 | G10 | 127 | 115 | 12 | 0 | 82 (RC-B-811~892) |
-| G11 | 142 | 106 | 36 | 0 | 47 (RC-B-901~947) |
-| **합계** | **1,088** | **886** | **202** | **0** | **801** |
+| G11 | 142 | 90 | 52 | 0 | 41 (RC-B-901~947, 결정 D3-16으로 삭제 표로 옮긴 902·904·905·914·916·917 제외) |
+| **합계** | **1,088** | **846** | **242** | **0** | **763** |
 
-- 원자료 행 수(B범위) 1,088 = mjs 611 + py 335 + ps1·sh 142. 대응표 행 수 1,088(파일 Grep으로 확인: 대응표 행 `| test/...:줄 | RC-B-…·삭제·미확인`이 1,088개, 그중 `삭제` 197개, `미확인` 0개).
-- 사례로 간 행 886 + 삭제 202 + 미확인 0 = 1,088. 삭제 표의 행 수도 202이다(두 칸 표 행 1,290 = 대응표 1,088 + 삭제 표 202).
-- 사례 수 801(`| RC-B-nnn |` 행 801개). 한 원자료 행이 여러 사례에 걸치는 경우가 있어(대응표 셀에 사례 ID를 쉼표로 나열) 「사례 수」와 「사례로 간 행」은 같지 않다.
-- 결번: 대역의 빈 번호(RC-B-089·090, 164~180, 268~270, 360, 447~450, 540, 630, 683~720, 756~810, 893~900, 948~990)와 메인 판정 2·5로 삭제 표로 옮긴 사례 번호(RC-B-250·252·258~260·262~267·299)와 메인 판정 D-18로 옮긴 사례 번호(RC-B-420·421·423·439).
+- 3단계 결정 D3-16(3단계 설계 8.4절, 11.1절)으로 사례 38건(RC-B-541~549, 553~557, 644~648, 657, 661, 672~682, 902, 904, 905, 914, 916, 917)을 사례 표에서 삭제 표로 옮겼다. 이 38건이 걸치던 원 시험 행 40개(G07 6, G08 18, G11 16)가 「사례로 간 행」에서 「삭제 행」으로 바뀌었다(886 - 40 = 846, 202 + 40 = 242). RC-B-646~648·661(원 시험 4행)은 시범 P3-6 결과가 나올 때까지 「보류」이며 원문을 3절 끝 「보류 사례 원문」에 남겼다(`| 보류 RC-B-…` 형식이라 사례 표 행 수에 세지 않는다).
+- 원자료 행 수(B범위) 1,088 = mjs 611 + py 335 + ps1·sh 142. 대응표 행 수 1,088(파일 Grep으로 확인: 대응표 행 `| test/...:줄 | RC-B-…·삭제·미확인`이 1,088개, 그중 `삭제` 242개, `미확인` 0개).
+- 사례로 간 행 846 + 삭제 242 + 미확인 0 = 1,088. 삭제 표의 행 수도 242이다(`| test/파일:줄 |` 행. 두 칸 표 행 1,330 = 대응표 1,088 + 삭제 표 242).
+- 사례 수 763(`| RC-B-nnn |` 행 763개). 한 원자료 행이 여러 사례에 걸치는 경우가 있어(대응표 셀에 사례 ID를 쉼표로 나열) 「사례 수」와 「사례로 간 행」은 같지 않다.
+- 결번: 대역의 빈 번호(RC-B-089·090, 164~180, 268~270, 360, 447~450, 540, 630, 683~720, 756~810, 893~900, 948~990)와 메인 판정 2·5로 삭제 표로 옮긴 사례 번호(RC-B-250·252·258~260·262~267·299)와 메인 판정 D-18로 옮긴 사례 번호(RC-B-420·421·423·439)와 결정 D3-16으로 옮긴 사례 번호 38개(위 괄호의 번호. 보류 4개 포함). 결번은 이번에도 다시 매기지 않는다.
 
 ### 교차 검증 결과 (메인 판정 7)
 
@@ -2321,10 +2336,10 @@ B범위 원자료 모든 행(파일:줄)을 사례 ID 또는 「삭제」(또는
 | 비교 | 결과 |
 |---|---|
 | 사례 표의 원 시험(파일:줄) 집합 − 대응표 사례 행 집합 | 0건 (사례 표에만 있는 줄 없음) |
-| 대응표 사례 행 집합(886) − 사례 표의 원 시험 집합 | 0건 (사례 표에 없는 사례 행 없음) |
-| 대응표 `삭제` 행 집합(202) − 삭제 표 행 집합(202) | 0건 |
+| 대응표 사례 행 집합(846) − 사례 표의 원 시험 집합 | 0건 (사례 표에 없는 사례 행 없음) |
+| 대응표 `삭제` 행 집합(242) − 삭제 표 행 집합(242) | 0건 |
 | 삭제 표 행 집합 − 대응표 `삭제` 행 집합 | 0건 |
-| 개수 | 대응표 1,088 = 원자료 1,088, 삭제 202 = 202, 사례 행 801 |
+| 개수 | 대응표 1,088 = 원자료 1,088, 삭제 242 = 242, 사례 행 763 |
 
 - 같은 대조에서 한 가지 해석이 필요했다. G11의 `windows-file-helper.tests.ps1`은 사례 표의 원 시험 열이 아닌 설명 열에도 줄 번호(여러 줄 assert 15개 등)를 인용한다. 이 인용 줄은 원자료 행이 아니므로 대응표 행에서 제외했고, 사례 표의 원 시험 열에 있는 줄과 대응표 사례 행이 정확히 일치함을 확인했다.
 - 한 줄이 여러 사례에 속하는 경우(예: `test/mcp-contracts.test.mjs:83` → RC-B-013·RC-B-032, `test/solid-regressions.test.mjs:14` → RC-B-441~446)는 사례 표에서 해당 줄이 해당 사례 행마다 나오고 대응표 셀에 ID가 모두 적혀 있어 일치한다.
@@ -2340,7 +2355,7 @@ B범위 원자료 모든 행(파일:줄)을 사례 ID 또는 「삭제」(또는
 
 | 결함 | 확정 사례 | 후보 사례 |
 |---|---|---|
-| SSH_PORTAL-D-0001 | RC-B-903 | RC-B-519, 904, 905, 906 |
+| SSH_PORTAL-D-0001 | RC-B-903 | RC-B-519, 906 (RC-B-904·905는 결정 D3-16으로 삭제 표로 이동) |
 | SSH_PORTAL-D-0002 | RC-B-497, 504, 620, 921 | RC-B-496, 500, 501, 503, 505, 506, 508, 509, 538, 539, 913, 920 |
 | SSH_PORTAL-D-0003 | RC-B-908 | RC-B-619, 621, 812, 907, 923 |
 | SSH_PORTAL-D-0004 | RC-B-065 | RC-B-383, 465 |
@@ -2378,7 +2393,7 @@ B범위 원자료 모든 행(파일:줄)을 사례 ID 또는 「삭제」(또는
 | SSH_PORTAL-D-0038 | - | RC-B-474~477 |
 | SSH_PORTAL-D-0039 | RC-B-156 | RC-B-140, 149, 150, 152, 157 |
 | SSH_PORTAL-D-0040 | RC-B-489 | - |
-| SSH_PORTAL-D-0041 | - | RC-B-649, 650, 662, 663, 672 |
+| SSH_PORTAL-D-0041 | - | RC-B-649, 650, 662, 663 (RC-B-672는 결정 D3-16으로 삭제 표로 이동) |
 | SSH_PORTAL-D-0042 | RC-B-362, 856 | RC-B-751~753, 926 |
 | SSH_PORTAL-D-0046 | - | RC-B-319, 323, 325 |
 | SSH_PORTAL-D-0047 | RC-B-019 | RC-B-003, 008, 354, 931, 939~946 |
@@ -2494,7 +2509,7 @@ B범위 시험에서 연결하지 않은 결함: D-0026·D-0027(클라이언트 
 | 결함 | 사례 ID | 근거(시험 줄, 장부 제목) | 구분(확정·후보) |
 |---|---|---|---|
 | SSH_PORTAL-D-0035 | RC-B-664, RC-B-665, RC-B-666, RC-B-667, RC-B-668, RC-B-669 | test/test_agent_cli.py:444~485: post-replace 영수증·ACK 실패와 롤백 뒤 completed 기록이 실제 active와 어긋나지 않는지(`STALE_COMPLETED_WITH_ROLLED_BACK_CURRENT`, `STALE_COMPLETED_AT_ROLLBACK_KILL`) assert. 장부 제목은 구형 v16 helper의 post-replace 실패·rollback 뒤 completed 잔류로, agent CLI 설치기와 같은 증상이나 대상 helper가 같은지는 확인하지 못함 | 후보 |
-| SSH_PORTAL-D-0041 | RC-B-649, RC-B-650, RC-B-662, RC-B-663, RC-B-672 | test/test_agent_cli.py:69~: 시험 setUp이 `os.umask(0o077)`로 고정하고 정상 외부(foreign) 경로가 unsafe로 판정되지 않음을 assert. 장부 제목은 CLI helper 시험 fixture가 SSH umask0002를 상속해 정상 foreign 경로를 unsafe로 만듦 | 후보 |
+| SSH_PORTAL-D-0041 | RC-B-649, RC-B-650, RC-B-662, RC-B-663 (RC-B-672는 결정 D3-16으로 삭제 표로 이동) | test/test_agent_cli.py:69~: 시험 setUp이 `os.umask(0o077)`로 고정하고 정상 외부(foreign) 경로가 unsafe로 판정되지 않음을 assert. 장부 제목은 CLI helper 시험 fixture가 SSH umask0002를 상속해 정상 foreign 경로를 unsafe로 만듦 | 후보 |
 
 ### G09 결함
 
@@ -2524,8 +2539,8 @@ B범위 시험에서 연결하지 않은 결함: D-0026·D-0027(클라이언트 
 | 결함 | 사례 ID | 근거(시험 줄, 장부 제목) | 구분(확정·후보) |
 |---|---|---|---|
 | SSH_PORTAL-D-0001 | RC-B-903 | windows-file-helper.tests.ps1:298~311(주석 302: baseline은 policy/UNTRUSTED_OWNER로 실패해야 함). 외부 소유자(`S-1-5-32-545`) 부모의 TEST snapshot(bypassRoot)이 성공해야 함. 장부: Windows TEST가 SSH로 읽을 수 있는 GUI 생성 파일 다운로드를 UNTRUSTED_OWNER로 거절 | 확정 |
-| SSH_PORTAL-D-0001 | RC-B-904 | windows-file-helper.tests.ps1:318·323·324. 같은 외부 소유자 시나리오에서 일반 모드·publish는 정책 거절 유지(TEST 우회만 허용). D-0001 수정의 범위 경계 | 후보 |
-| SSH_PORTAL-D-0001 | RC-B-905 | windows-file-helper.tests.ps1:332·334. 보호 루트 외부 소유자 거절 유지(FO-SNAPSHOT-03). D-0001 수정의 범위 경계 | 후보 |
+| SSH_PORTAL-D-0001 | RC-B-904(삭제 표로 이동, 결정 D3-16) | windows-file-helper.tests.ps1:318·323·324. 같은 외부 소유자 시나리오에서 일반 모드·publish는 정책 거절 유지(TEST 우회만 허용). D-0001 수정의 범위 경계. 3.0은 소유자 신뢰 검사를 내지 않는다(결정 D3-02 (a)) | 후보 |
+| SSH_PORTAL-D-0001 | RC-B-905(삭제 표로 이동, 결정 D3-16) | windows-file-helper.tests.ps1:332·334. 보호 루트 외부 소유자 거절 유지(FO-SNAPSHOT-03). D-0001 수정의 범위 경계. 3.0은 소유자 신뢰 검사를 내지 않는다(결정 D3-02 (a)) | 후보 |
 | SSH_PORTAL-D-0001 | RC-B-906 | windows-file-helper.tests.ps1:376~378. 소스에 READ_CONTROL이 없어도 TEST snapshot 성공(FO-SNAPSHOT-04). UNTRUSTED_OWNER 판정을 소유자 조회 없이 하도록 한 수정의 변형 | 후보 |
 | SSH_PORTAL-D-0002 | RC-B-921 | windows-file-helper.tests.ps1:742·743·747. bypassRoot(TEST)에서 설정 루트가 사용 불가여도 외부 publish·snapshot 성공, rootPolicyApplied `test-server-bypass`. 장부: Windows 파일 전송에서 TEST 모드인데도 허용 루트 정책이 적용됨 | 확정 |
 | SSH_PORTAL-D-0002 | RC-B-913 | windows-file-helper.tests.ps1:645. 기본 요청은 rootPolicyApplied `configured-root`로 정책 적용(TEST 우회와 대비) | 후보 |
