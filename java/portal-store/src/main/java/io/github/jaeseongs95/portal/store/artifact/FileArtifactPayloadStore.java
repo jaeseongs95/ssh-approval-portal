@@ -12,6 +12,7 @@ import java.nio.file.OpenOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -45,7 +46,7 @@ import io.github.jaeseongs95.portal.store.storage.UnsafeStorageException;
  * the start-up check refuses to start with.
  */
 @Component
-public class FileArtifactPayloadStore implements ArtifactPayloadStore {
+public class FileArtifactPayloadStore implements ArtifactPayloadStore, RetainedPayloads {
 
     private static final String SUFFIX = ".part";
     private static final Pattern STORED_NAME = Pattern.compile("[a-f0-9]{48}\\.part");
@@ -201,6 +202,27 @@ public class FileArtifactPayloadStore implements ArtifactPayloadStore {
             throw ioFailure(e);
         }
         return Set.copyOf(found);
+    }
+
+    /** The sizes of the regular files in {@code orphans/}; a link is not followed and not counted, a missing folder is zero. */
+    @Override
+    public long retainedBytes() {
+        Path quarantine = root.resolve(QUARANTINE_FOLDER);
+        if (!Files.isDirectory(quarantine, LinkOption.NOFOLLOW_LINKS)) {
+            return 0L;
+        }
+        long total = 0L;
+        try (DirectoryStream<Path> entries = Files.newDirectoryStream(quarantine, "*" + SUFFIX)) {
+            for (Path entry : entries) {
+                BasicFileAttributes attributes = Files.readAttributes(entry, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+                if (attributes.isRegularFile()) {
+                    total += attributes.size();
+                }
+            }
+        } catch (IOException e) {
+            throw ioFailure(e);
+        }
+        return total;
     }
 
     @Override

@@ -1589,6 +1589,16 @@ A-228, A-249, A-460(브라우저·UI 입력, 4단계 portal-web), B-466(MCP subm
   - 위반을 번역해 곧바로 던지는 저장소 메서드에는 savepoint를 넣지 않는다. 넣어 보니 `@Transactional` 메서드의 예외가 합류한 바깥 트랜잭션을 rollback-only로 만들어, 이후 savepoint 생성이 실패했다(H2 9건). 한 트랜잭션에서 거절 뒤 계속하는 호출자가 자기 savepoint로 감싼다.
   - savepoint는 `store.Savepoints`(`@Component`, `PROPAGATION_NESTED`) 하나로 모았다. `JdbcClaimStore`·`JdbcOperationJournal`의 중복 `TransactionTemplate`을 이것으로 바꿨다. 새 사례는 S2-DB-11(따옴표 없는 이름), S2-DB-12(savepoint 슬롯 충돌), S2-DB-13(마이크로초), S2-DB-14(CHAR 공백 채움), S2-DB-15(vendor 폴더·스키마), S2-DB-16(접속 값 공급·비밀번호 비노출), S2-DB-17(거절 뒤 트랜잭션 계속)이다.
   - 2026-11-12 메인 실행: H2 전체 빌드는 tests 1191, failures 0, skipped 7, 경고 0이다. `externalDbmsTest`는 tests 267, failures 0, skipped 7(위 Linux 목록과 같음)이다. 실행 뒤 `portal_%` 스키마는 0개다. MariaDB·MySQL은 이 PC에 없어 8단계 CI에서 확인한다(미검증).
+- **사례 표기 대조(메인 2026-11-12).** 9.2절의 A-·B- ID와 9.5절의 S2- ID를 `portal-*/src/test`의 `.java`·`.tsv`와 대조했다. 이유 없이 빠졌던 A-047·A-170·A-485·A-486·S2-AR-01은 시험을 보강해 표기했다.
+  - A-170은 제품 결함이었다. 격리 바이트가 예산에 들어가지 않았는데, 이제 `RetainedPayloads`로 `orphans/` 일반 파일 크기를 예산에 더한다. 위의 「RC-A-169·170 채택」을 이행한 것이다. `BudgetExceeded`가 보유분과 라이브 예약분을 나눠 싣는 일은 3단계로 넘긴다(portal-app 포트 변경).
+  - A-486은 T19 철회에 따라 QUEUED를 보존한다. A-485는 2.x의 UPDATE 거부 트리거(H2 전용) 대신, 모든 행을 전후로 비교하는 방식으로 DBMS 중립하게 확인한다.
+  - A-047의 `cleanupFailures`는 3.0에서 0을 「없음」(null 저장)으로 받는다. 음수·문자열은 타입이 막는다. 2.x의 「0은 예외」와 다르므로 3단계 원격 결과 매핑 때 확인한다.
+  - **미룬 사례(9.3 추가)**:
+    - A-173(유지보수 중 reap 정책): reaper 유스케이스가 필요하다 → 3단계.
+    - A-182·A-183(스트림 가져오기 예약·해시·정리): SFTP 다운로드 유스케이스와 함께 → 3단계.
+    - B-004(보호 장치 실패 시 출력 reap 금지·시작 거절): 조립 로직 → 3단계.
+    - A-048(DB 파일의 심볼릭 링크·넓은 권한 거절): H2 파일 경로는 서버 조립이 안다 → 4단계(DBMS 중립 유지, store는 URL을 해석하지 않는다).
+  - 9.2 본문이 이미 9.3으로 보낸 A-748·A-751·B-075~B-077은 2단계 대상이 아니다. 대조 결과, 2단계 대상 중 표기가 빠진 것은 위의 미룬 5건뿐이다.
 - **domain 패키지 순환(이행 완료).** 아래 판정대로 `error` 패키지(오류 코드 enum 8개·`ErrorCode`·`PortalException` 계열·옛 `failure` 6개·`ExecutionAttempt`)를 만들었다. `ExecutionAttempt`는 `ErrorCode`·`RequestRefusedException`이 직접 참조해 함께 옮겼다. 결과 의존은 `contract`→`error`·`operation`, `operation`→`error` 등 한 방향이고 `error`는 domain 안 의존이 없다. ArchUnit `A-CYCLE`(foundation-cases.md)을 9개 모듈 루트에 건다. 하위 패키지가 없는 모듈은 지금 검사 대상이 비어 있고, 패키지가 생기면 자동 적용된다. 판정 원문: `contract`↔`operation`(`OperationData`→`OperationState`, `Operation`→`OperationErrorCode`·`RequestRefusedException`)과 `contract`↔`failure`(예외→`DispatchFailure`·`ExecutionFailure`, `ExecutionFailure`·`ExecutionStage`→`ExecutionErrorCode`)가 있다. 오류 코드 enum·`PortalException` 계열과 `failure` 패키지를 새 `error` 패키지로 모으고, `contract`에는 wire record만 남겨 의존을 한 방향(`contract`→`operation`·`error`, `operation`→`error`)으로 만든다. ArchUnit에 portal-domain 패키지 순환 0 규칙을 더한다.
 - **run-209 수용 기준 문구의 `--max-workers=1 -Pportal.test.forks=1`** 은 사용자 지시(전용 GRADLE_USER_HOME, 병렬 2·힙 1g)로 대체한다(13.3절과 같음).
 

@@ -8,6 +8,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -17,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import io.github.jaeseongs95.portal.app.cli.AgentCliBinding;
@@ -40,6 +42,7 @@ import io.github.jaeseongs95.portal.domain.id.TargetId;
 import io.github.jaeseongs95.portal.domain.operation.Operation;
 import io.github.jaeseongs95.portal.domain.target.ProfileAlias;
 import io.github.jaeseongs95.portal.domain.target.TargetRevision;
+import io.github.jaeseongs95.portal.store.Savepoints;
 import io.github.jaeseongs95.portal.store.StoreTest;
 
 /**
@@ -60,11 +63,13 @@ class JdbcAgentCliRequestStoreTest {
     private final JdbcAgentCliRequestStore store;
     private final AgentCliHistoryReader reader;
     private final JdbcTemplate jdbc;
+    private final Savepoints savepoints;
 
-    JdbcAgentCliRequestStoreTest(JdbcAgentCliRequestStore store, AgentCliHistoryReader reader, JdbcTemplate jdbc) {
+    JdbcAgentCliRequestStoreTest(JdbcAgentCliRequestStore store, AgentCliHistoryReader reader, JdbcTemplate jdbc, Savepoints savepoints) {
         this.store = store;
         this.reader = reader;
         this.jdbc = jdbc;
+        this.savepoints = savepoints;
     }
 
     /** A stand-in for the journal's read port: it knows no operation, which is all the wiring test needs. */
@@ -206,7 +211,7 @@ class JdbcAgentCliRequestStoreTest {
     }
 
     @Test
-    @DisplayName("RC-A-027: the remote status is replaced as a whole; an unknown operation is refused and a second insert for the same operation is refused")
+    @DisplayName("RC-A-027, RC-A-047: the remote status is replaced as a whole; an unknown operation is refused and a second insert for the same operation is refused")
     void theRemoteStatusIsRecorded() {
         OperationId id = operationId(1);
         insertOperation(id, T1000, "alpha", REVISION_A, "alpha-write");
@@ -224,6 +229,43 @@ class JdbcAgentCliRequestStoreTest {
         assertThatThrownBy(() -> store.recordRemote(operationId(98), completed)).isInstanceOfSatisfying(RequestRefusedException.class,
             e -> assertThat(e.code()).isEqualTo(RequestErrorCode.OPERATION_NOT_FOUND));
         assertThatThrownBy(() -> store.insert(record)).isInstanceOf(RequestRefusedException.class);
+    }
+
+    /**
+     * RC-A-047 (the remote status half) in 3.0: 2.x refused a cleanup count of 0, -1 and the string '1' passed to {@code recordRemote}, and kept private fields of the
+     * reported object out of the stored row. In 3.0 the count is an {@code int} of a typed record, so the string cannot be passed and a negative number is refused when
+     * the record is built; a count of 0 is the absence of a failure (the record says so) and is stored as null, because the table accepts only a positive count or
+     * null. A private field cannot be passed either: {@link RemoteStatus} has no place for one, and the table has a column for nothing but the install request. The
+     * pending and running normalisation of the 2.x journal is the one recovery of the operation journal ({@code JdbcRestartRecoveryTest}).
+     */
+    @Test
+    @DisplayName("RC-A-047: a failed install is stored as the error INSTALL_FAILED with its cleanup failures; a count of 0 is stored as none and a count below 1 is refused by the type and by the table; the row has no column for anything else")
+    void aFailedRemoteStatusIsStoredWithItsErrorAndCount() {
+        OperationId id = operationId(1);
+        insertOperation(id, T1000, "alpha", REVISION_A, "alpha-write");
+        store.insert(install(id, AgentCliProviderId.CODEX, new RemoteStatus.NotReported()));
+        RemoteStatus failed = new RemoteStatus.Failed(new CliVersion("2.0.0"), 3);
+
+        assertThat(store.recordRemote(id, failed)).isEqualTo(failed);
+
+        assertThat(jdbc.queryForObject("SELECT remote_state FROM agent_cli_request WHERE operation_id = ?", String.class, id.value())).isEqualTo("FAILED");
+        assertThat(jdbc.queryForObject("SELECT remote_error FROM agent_cli_request WHERE operation_id = ?", String.class, id.value())).isEqualTo(RemoteError.INSTALL_FAILED.name());
+        assertThat(jdbc.queryForObject("SELECT remote_cleanup_failures FROM agent_cli_request WHERE operation_id = ?", Integer.class, id.value())).isEqualTo(3);
+        assertThat(store.findByOperation(id)).contains(install(id, AgentCliProviderId.CODEX, failed));
+        Map<String, Object> row = jdbc.queryForList("SELECT * FROM agent_cli_request WHERE operation_id = ?", id.value()).get(0);
+        assertThat(row.keySet().stream().map(name -> name.toLowerCase(Locale.ROOT)).toList()).containsExactlyInAnyOrder("operation_id", "provider", "action", "package_name",
+            "release_version", "release_tarball", "release_integrity", "release_digest", "expected_installation_revision", "intent_digest", "plan_expires_at", "remote_state",
+            "remote_version", "remote_error", "remote_cleanup_failures");
+
+        RemoteStatus noneFailedToClean = new RemoteStatus.Failed(new CliVersion("2.0.0"), 0);
+        assertThat(store.recordRemote(id, noneFailedToClean)).isEqualTo(noneFailedToClean);
+        assertThat(jdbc.queryForObject("SELECT remote_cleanup_failures FROM agent_cli_request WHERE operation_id = ?", Integer.class, id.value())).isNull();
+        assertThatThrownBy(() -> new RemoteStatus.Failed(new CliVersion("2.0.0"), -1)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new RemoteStatus.Known(RemoteState.COMPLETED, new CliVersion("2.0.0"), -1)).isInstanceOf(IllegalArgumentException.class);
+        for (int count : new int[] {0, -1}) {
+            assertThatThrownBy(() -> savepoints.run(() -> jdbc.update("UPDATE agent_cli_request SET remote_cleanup_failures = ? WHERE operation_id = ?", count, id.value())))
+                .as("the table refuses a stored count of %d", count).isInstanceOf(DataIntegrityViolationException.class);
+        }
     }
 
     private List<OperationId> ids(AgentCliHistoryReader.Slice slice) {

@@ -5,11 +5,13 @@ import java.time.Instant;
 
 import io.github.jaeseongs95.portal.app.journal.JournalInsert;
 import io.github.jaeseongs95.portal.app.journal.OperationJournal;
+import io.github.jaeseongs95.portal.domain.id.Digest;
 import io.github.jaeseongs95.portal.domain.id.Digester;
 import io.github.jaeseongs95.portal.domain.id.OwnerId;
 import io.github.jaeseongs95.portal.domain.id.RequestKey;
 import io.github.jaeseongs95.portal.domain.id.Sha256Digester;
 import io.github.jaeseongs95.portal.domain.id.TargetId;
+import io.github.jaeseongs95.portal.domain.operation.AgentCliInput;
 import io.github.jaeseongs95.portal.domain.operation.CommandInput;
 import io.github.jaeseongs95.portal.domain.operation.ConflictKey;
 import io.github.jaeseongs95.portal.domain.operation.Deadline;
@@ -37,6 +39,12 @@ final class JournalFixture {
     NewOperation command(String key, String target, String text, String owner, String revision, ConflictKey conflictKey, Deadline expiry) {
         return NewOperation.of(digester, requestKey(key), new OwnerId(owner), new TargetId(target), TargetRevision.of(revision), new ProfileAlias("default"),
             new CommandInput(new CommandText(text), new Utf8Text("caller"), new Utf8Text("display")), conflictKey, expiry);
+    }
+
+    /** The operation of an agent CLI installation: it holds only the digest of the intent, the install request itself is the CLI store's. */
+    NewOperation agentCli(String key, String target, ConflictKey conflictKey) {
+        return NewOperation.of(digester, requestKey(key), new OwnerId("owner"), new TargetId(target), TargetRevision.of(REVISION), new ProfileAlias("default"),
+            new AgentCliInput(new Digest("e".repeat(64))), conflictKey, new Deadline.None());
     }
 
     RequestKey requestKey(String key) {

@@ -65,19 +65,21 @@ public class JdbcArtifactRegistry implements ArtifactRegistry, ArtifactInventory
     private final JdbcAggregateOperations aggregates;
     private final ArtifactMapper mapper;
     private final ArtifactPayloadStore payloads;
+    private final RetainedPayloads retained;
     private final ArtifactIdGenerator ids;
     private final ArtifactLimits limits;
     private final TransactionTemplate transaction;
 
     public JdbcArtifactRegistry(ArtifactRowRepository artifacts, ArtifactChunkRowRepository chunks, StagedActionRowRepository actions,
-                                JdbcAggregateOperations aggregates, ArtifactMapper mapper, ArtifactPayloadStore payloads, ArtifactIdGenerator ids,
-                                ArtifactLimits limits, PlatformTransactionManager transactionManager) {
+                                JdbcAggregateOperations aggregates, ArtifactMapper mapper, ArtifactPayloadStore payloads, RetainedPayloads retained,
+                                ArtifactIdGenerator ids, ArtifactLimits limits, PlatformTransactionManager transactionManager) {
         this.artifacts = artifacts;
         this.chunks = chunks;
         this.actions = actions;
         this.aggregates = aggregates;
         this.mapper = mapper;
         this.payloads = payloads;
+        this.retained = retained;
         this.ids = ids;
         this.limits = limits;
         this.transaction = new TransactionTemplate(transactionManager);
@@ -92,11 +94,13 @@ public class JdbcArtifactRegistry implements ArtifactRegistry, ArtifactInventory
         }
         // File-system read, outside the transaction (Principles 4.4).
         DiskSpace disk = payloads.usable();
-        return Objects.requireNonNull(transaction.execute(status -> reserveRows(spec, at, disk)), "reservation");
+        long quarantined = retained.retainedBytes();
+        return Objects.requireNonNull(transaction.execute(status -> reserveRows(spec, at, disk, quarantined)), "reservation");
     }
 
-    private ArtifactReservation reserveRows(ArtifactSpec spec, Instant at, DiskSpace disk) {
-        long charged = artifacts.chargedBytes();
+    /** The budget is the reserved bytes of the rows plus the bytes in quarantine: both are on the disk of the staging folder (design 13.6, RC-A-170). */
+    private ArtifactReservation reserveRows(ArtifactSpec spec, Instant at, DiskSpace disk, long quarantined) {
+        long charged = artifacts.chargedBytes() + quarantined;
         if (charged + Math.max(1L, spec.sizeBytes()) > limits.budgetBytes()) {
             return new ArtifactReservation.BudgetExceeded(spec.sizeBytes(), charged, limits.budgetBytes());
         }
@@ -172,10 +176,11 @@ public class JdbcArtifactRegistry implements ArtifactRegistry, ArtifactInventory
         return artifacts.findByPublicUuid(publicUuid.text()).map(mapper::toRecord);
     }
 
+    /** Not {@code @Transactional}: the bytes in quarantine are read from the disk first (Principles 4.4), then the rows are summed. */
     @Override
-    @Transactional(readOnly = true)
     public ArtifactBudget budget() {
-        return new ArtifactBudget(limits.budgetBytes(), artifacts.chargedBytes());
+        long quarantined = retained.retainedBytes();
+        return new ArtifactBudget(limits.budgetBytes(), artifacts.chargedBytes() + quarantined);
     }
 
     @Override
