@@ -1,0 +1,21 @@
+{
+  "description": "SSH completion inbox; bounded Claude native asyncRewake, metadata only, explicit handling ACK.",
+  "hooks": {
+    "SessionStart": [{ "hooks": [
+      { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/portal-files.mjs", "--host", "claude-code"], "timeout": 10 },
+      { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/portal-files.mjs", "--host", "claude-code", "--wait"], "async": true, "asyncRewake": true, "rewakeMessage": "[SSH Approval Portal completion notice]", "rewakeSummary": "SSH completion notification", "timeout": 86400 }
+    ] }],
+    "UserPromptSubmit": [{ "hooks": [
+      { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/portal-files.mjs", "--host", "claude-code"], "timeout": 10 }
+    ] }],
+    "PostToolUse": [{ "hooks": [
+      { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/portal-files.mjs", "--host", "claude-code"], "timeout": 10 }
+    ] }],
+    "Stop": [{ "hooks": [
+      { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/portal-files.mjs", "--host", "claude-code", "--wait"], "async": true, "asyncRewake": true, "rewakeMessage": "[SSH Approval Portal completion notice]", "rewakeSummary": "SSH completion notification", "timeout": 86400 }
+    ] }],
+    "SessionEnd": [{ "hooks": [
+      { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/portal-files.mjs", "--host", "claude-code"], "timeout": 10 }
+    ] }]
+  }
+}

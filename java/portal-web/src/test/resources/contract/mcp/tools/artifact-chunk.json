@@ -1,0 +1,51 @@
+{
+  "name": "artifact-chunk",
+  "description": "Append 1..262144 authorized bytes as canonical base64 to a transfer id; sequence starts at 0. Identical acknowledged chunks are idempotent while writable. On uncertainty read artifact-status for that id. Avoid model transcription of large PC files; use portal-files upload.",
+  "inputSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+      "id": { "type": "string", "pattern": "^[a-f0-9]{48}$" },
+      "sequence": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+      "data": { "type": "string", "minLength": 1, "maxLength": 349528 }
+    },
+    "required": ["id", "sequence", "data"],
+    "additionalProperties": false
+  },
+  "portalRules": {
+    "outputSchema": "public-contract.mjs:74-75 responseSchema(): .refine(value => value.ok ? value.data !== null && value.error === null : value.data === null && value.error !== null, 'Expected data or error'). Not expressed in the outputSchema (a Zod .refine is absent from the SDK-published JSON Schema); recorded here only.",
+    "inputSchema.properties.data": "public-contract.mjs:91 max = Math.ceil(CHUNK_BYTES / 3) * 4 = 349528 (CHUNK_BYTES = 256 * 1024, ports.mjs:3). public-contract.mjs:111-116 decodeArtifactChunk(data), run in the handler (public-contract.mjs:229): data must match /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/, decode to 1..262144 bytes and re-encode to exactly the same canonical base64 string; otherwise error code ARTIFACT_INVALID_CHUNK (executionAttempted=false)."
+  },
+  "outputSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["contractVersion", "ok", "data", "error"],
+    "properties": {
+      "contractVersion": { "const": "2.0" },
+      "ok": { "type": "boolean" },
+      "data": { "anyOf": [{ "$ref": "#/$defs/chunkData" }, { "type": "null" }] },
+      "error": { "anyOf": [{ "$ref": "#/$defs/errorData" }, { "type": "null" }] }
+    },
+    "$defs": {
+      "nint": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+      "errorData": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "retryable", "executionAttempted"],
+        "properties": {
+          "code": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{1,95}$" },
+          "retryable": { "type": "boolean" },
+          "executionAttempted": { "anyOf": [{ "type": "boolean" }, { "const": "unknown" }] }
+        }
+      },
+      "chunkData": {
+        "type": "object", "additionalProperties": false,
+        "required": ["sequence", "received"],
+        "properties": { "sequence": { "$ref": "#/$defs/nint" }, "received": { "$ref": "#/$defs/nint" } }
+      }
+    }
+  },
+  "annotations": { "readOnlyHint": false, "destructiveHint": true, "idempotentHint": false },
+  "visibility": "public"
+}

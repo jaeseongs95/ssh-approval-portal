@@ -1,0 +1,26 @@
+{
+  "name": "show-ui-probe",
+  "description": "Show an optional owner UI probe. Text reports availability, not proof that the host rendered a card.",
+  "inputSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+  },
+  "outputSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+      "probe": { "const": "SSH_UI_PUBLIC_PROBE" },
+      "uiEnabled": { "type": "boolean" }
+    },
+    "required": ["probe", "uiEnabled"]
+  },
+  "annotations": { "readOnlyHint": true, "destructiveHint": false },
+  "_meta": { "ui": { "resourceUri": "ui://ssh-approval/card-{sha256 hex of the card HTML}.html", "visibility": ["model", "app"] } },
+  "portalRules": {
+    "outputSchema": "results.mjs:52 outputSchemas.probe = z.object({ probe: z.literal('SSH_UI_PUBLIC_PROBE'), uiEnabled: z.boolean() }) (non-strict Zod object: additionalProperties not constrained here). This tool does NOT use the Contract 2.0 envelope: result is { content: [{type:'text', text: JSON.stringify(value)}], structuredContent: value, _meta: { sshApproval: {...} } } (server.mjs:43, results.mjs:96-99).",
+    "_meta": "_meta.ui.resourceUri is computed at runtime: `ui://ssh-approval/card-${hash(uiHtml)}.html`, hash = SHA-256 hex (server.mjs:15, validation.mjs:5). The literal above is a template, not a fixed value. Result-level _meta.sshApproval keys: bridgeDisplayName, targetDisplayName, privateMarker ('SSH_UI_PRIVATE_PROBE_NOT_FOR_MODEL'), uiEnabled (false), namespace, webUrl (server.mjs:43)."
+  },
+  "visibility": "public"
+}

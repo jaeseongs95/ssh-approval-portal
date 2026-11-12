@@ -1,0 +1,98 @@
+{
+  "name": "desktop-input",
+  "description": "Send key/pointer/text actions using the same sessionId/epoch and latest frameId/geometryRevision. Use nextInputSequence and a stable requestKey. Identical latest input recovers its receipt without replay. After uncertainty read desktop-status; do not send a new key.",
+  "inputSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+      "sessionId": { "type": "string", "format": "uuid", "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$" },
+      "epoch": { "type": "integer", "exclusiveMinimum": 0, "maximum": 9007199254740991 },
+      "frameId": { "type": "string", "minLength": 1, "maxLength": 96 },
+      "geometryRevision": { "type": "integer", "exclusiveMinimum": 0, "maximum": 9007199254740991 },
+      "sequence": { "type": "integer", "exclusiveMinimum": 0, "maximum": 9007199254740991 },
+      "requestKey": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}(?![\\s\\S])" },
+      "actions": {
+        "type": "array", "minItems": 1, "maxItems": 128,
+        "items": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "type": { "const": "key", "type": "string" },
+                "keysym": { "type": "integer", "minimum": 1, "maximum": 536870911 },
+                "down": { "type": "boolean" }
+              },
+              "required": ["type", "keysym", "down"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": { "const": "pointer", "type": "string" },
+                "x": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+                "y": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+                "buttons": { "type": "integer", "minimum": 0, "maximum": 255 }
+              },
+              "required": ["type", "x", "y", "buttons"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "type": { "const": "text", "type": "string" },
+                "text": { "type": "string", "minLength": 1, "maxLength": 2048 }
+              },
+              "required": ["type", "text"],
+              "additionalProperties": false
+            }
+          ]
+        }
+      }
+    },
+    "required": ["sessionId", "epoch", "frameId", "geometryRevision", "sequence", "requestKey", "actions"],
+    "additionalProperties": false
+  },
+  "portalRules": {
+    "outputSchema": "public-contract.mjs:74-75 responseSchema(): .refine(value => value.ok ? value.data !== null && value.error === null : value.data === null && value.error !== null, 'Expected data or error'). Not expressed in the outputSchema (a Zod .refine is absent from the SDK-published JSON Schema); recorded here only.",
+    "inputSchema.properties.actions.items[text].text": "public-contract.mjs:264 .refine(value => value.isWellFormed(), 'Well-formed text required'): text must be well-formed UTF-16 (no lone surrogates). Not expressible in JSON Schema.",
+    "inputSchema": "server.mjs:19 McpServer option maxToolInputElements = 7 + 128 * 5 = 647 (seven desktop-input members plus 128 pointer actions, one array slot + four members each). Server-level request limit, not part of the JSON Schema."
+  },
+  "outputSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["contractVersion", "ok", "data", "error"],
+    "properties": {
+      "contractVersion": { "const": "2.0" },
+      "ok": { "type": "boolean" },
+      "data": { "anyOf": [{ "$ref": "#/$defs/inputReceipt" }, { "type": "null" }] },
+      "error": { "anyOf": [{ "$ref": "#/$defs/errorData" }, { "type": "null" }] }
+    },
+    "$defs": {
+      "pint": { "type": "integer", "exclusiveMinimum": 0, "maximum": 9007199254740991 },
+      "sessionId": { "type": "string", "format": "uuid", "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$" },
+      "errorData": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "retryable", "executionAttempted"],
+        "properties": {
+          "code": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{1,95}$" },
+          "retryable": { "type": "boolean" },
+          "executionAttempted": { "anyOf": [{ "type": "boolean" }, { "const": "unknown" }] }
+        }
+      },
+      "inputReceipt": {
+        "type": "object", "additionalProperties": false,
+        "required": ["sessionId", "sequence", "requestKey", "state"],
+        "properties": {
+          "sessionId": { "$ref": "#/$defs/sessionId" },
+          "sequence": { "$ref": "#/$defs/pint" },
+          "requestKey": { "type": "string" },
+          "state": { "const": "sent" }
+        }
+      }
+    }
+  },
+  "annotations": { "readOnlyHint": false, "destructiveHint": true, "idempotentHint": false },
+  "visibility": "public"
+}

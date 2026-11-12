@@ -1,0 +1,32 @@
+{
+  "name": "ui-upload-chunk",
+  "description": "Owner UI only: append the next upload chunk using its ticket and sequence.",
+  "inputSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+      "id": { "type": "string", "pattern": "^[a-f0-9]{48}$" },
+      "ticket": { "type": "string", "minLength": 1, "maxLength": 8192 },
+      "sequence": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+      "data": { "type": "string", "maxLength": 349528 }
+    },
+    "required": ["id", "ticket", "sequence", "data"],
+    "additionalProperties": false
+  },
+  "portalRules": {
+    "outputSchema": "results.mjs:45 outputSchemas.chunk (non-strict). Not the Contract 2.0 envelope. Handler: capabilities.guard(); capabilities.verifyUpload(id, ticket); files.appendUpload({id, sequence, bytes}) (server.mjs:71-74).",
+    "inputSchema.properties.data": "server.mjs:71 max = Math.ceil(CHUNK_BYTES / 3) * 4 = 349528 (CHUNK_BYTES = 256 * 1024). No minLength here (unlike artifact-chunk). Handler decodes with decodeArtifactChunk (public-contract.mjs:111-116): canonical base64, 1..262144 bytes, else error code ARTIFACT_INVALID_CHUNK thrown => generic refused() text."
+  },
+  "outputSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+      "sequence": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+      "received": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
+    },
+    "required": ["sequence", "received"]
+  },
+  "annotations": { "readOnlyHint": false, "destructiveHint": true },
+  "_meta": { "ui": { "visibility": ["app"] } },
+  "visibility": "appOnly"
+}

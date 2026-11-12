@@ -1,0 +1,185 @@
+{
+  "name": "artifact-status",
+  "description": "Read progress or the submitted request for the same transfer id, not a staged UUID. Missing/expired state or uncertain finish does not permit a replacement transfer.",
+  "inputSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+      "id": { "type": "string", "pattern": "^[a-f0-9]{48}$" }
+    },
+    "required": ["id"],
+    "additionalProperties": false
+  },
+  "outputSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["contractVersion", "ok", "data", "error"],
+    "properties": {
+      "contractVersion": { "const": "2.0" },
+      "ok": { "type": "boolean" },
+      "data": { "anyOf": [{ "$ref": "#/$defs/transferStatus" }, { "type": "null" }] },
+      "error": { "anyOf": [{ "$ref": "#/$defs/errorData" }, { "type": "null" }] }
+    },
+    "$defs": {
+      "identifier": { "type": "string", "pattern": "^[a-f0-9]{48}$" },
+      "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+      "target": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}$" },
+      "key": { "type": "string", "pattern": "^[A-Za-z0-9_.:-]{16,128}(?![\\s\\S])" },
+      "nint": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+      "errorData": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "retryable", "executionAttempted"],
+        "properties": {
+          "code": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{1,95}$" },
+          "retryable": { "type": "boolean" },
+          "executionAttempted": { "anyOf": [{ "type": "boolean" }, { "const": "unknown" }] }
+        }
+      },
+      "transfer": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "received", "sequence", "size", "sha256", "expiresAt", "targetId", "targetRevision"],
+        "properties": {
+          "id": { "$ref": "#/$defs/identifier" },
+          "received": { "$ref": "#/$defs/nint" },
+          "sequence": { "$ref": "#/$defs/nint" },
+          "size": { "type": "integer", "minimum": 0, "maximum": 67108864 },
+          "sha256": { "$ref": "#/$defs/digest" },
+          "expiresAt": { "$ref": "#/$defs/nint" },
+          "targetId": { "$ref": "#/$defs/target" },
+          "targetRevision": { "$ref": "#/$defs/digest" }
+        }
+      },
+      "streamMetadata": {
+        "type": "object", "additionalProperties": false,
+        "required": ["receivedBytes", "retainedBytes", "cursor", "truncated"],
+        "properties": { "receivedBytes": { "$ref": "#/$defs/nint" }, "retainedBytes": { "$ref": "#/$defs/nint" }, "cursor": { "$ref": "#/$defs/nint" }, "truncated": { "type": "boolean" } }
+      },
+      "executionData": {
+        "type": "object", "additionalProperties": false,
+        "required": ["phase", "reason", "remoteState", "exitCode", "signal", "automaticReplay", "signalDelivery", "timeoutMs", "cleanupComplete", "requiresReconciliation", "outputState", "captureFailed", "stdout", "stderr"],
+        "properties": {
+          "phase": { "enum": ["settled", null] },
+          "reason": { "enum": ["exit", "deadline", "cancel", "transport_lost", "channel_open_failed", "input_failed", null] },
+          "remoteState": { "enum": ["not_dispatched", "exited", "unknown", null] },
+          "exitCode": { "type": ["integer", "null"], "minimum": -9007199254740991, "maximum": 9007199254740991 },
+          "signal": { "type": ["string", "null"], "pattern": "^[A-Z0-9_-]{1,32}$" },
+          "automaticReplay": { "enum": [false, null] },
+          "signalDelivery": { "enum": ["requested", "unsupported", null] },
+          "timeoutMs": { "type": ["integer", "null"], "exclusiveMinimum": 0, "maximum": 9007199254740991 },
+          "cleanupComplete": { "type": ["boolean", "null"] },
+          "requiresReconciliation": { "type": ["boolean", "null"] },
+          "outputState": { "enum": ["partial", "complete", null] },
+          "captureFailed": { "type": ["boolean", "null"] },
+          "stdout": { "anyOf": [{ "$ref": "#/$defs/streamMetadata" }, { "type": "null" }] },
+          "stderr": { "anyOf": [{ "$ref": "#/$defs/streamMetadata" }, { "type": "null" }] }
+        }
+      },
+      "operationData": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "operationKey", "kind", "state", "targetId", "targetRevision", "approvalMode", "createdAt", "expiresAt", "finishedAt", "failed", "auditFailure", "failureCode", "remoteOutcome", "allowedRoot", "diagnostic", "remoteCleanup", "execution", "output", "artifact", "outputPage", "streamPage", "waitTimedOut"],
+        "properties": {
+          "id": { "$ref": "#/$defs/identifier" },
+          "operationKey": { "anyOf": [{ "$ref": "#/$defs/key" }, { "type": "null" }] },
+          "kind": { "enum": ["command", "source", "upload", "download"] },
+          "state": { "enum": ["accepted", "pending", "evaluating", "queued", "starting", "running", "terminating", "completed", "failed", "cancelled", "denied", "expired", "unknown"] },
+          "targetId": { "anyOf": [{ "$ref": "#/$defs/target" }, { "type": "null" }] },
+          "targetRevision": { "anyOf": [{ "$ref": "#/$defs/digest" }, { "type": "null" }] },
+          "approvalMode": { "enum": ["owner", "automatic", null] },
+          "createdAt": { "$ref": "#/$defs/nint" },
+          "expiresAt": { "type": ["integer", "null"], "minimum": 0, "maximum": 9007199254740991 },
+          "finishedAt": { "type": ["integer", "null"], "minimum": 0, "maximum": 9007199254740991 },
+          "failed": { "type": ["boolean", "null"] },
+          "auditFailure": { "type": "boolean" },
+          "failureCode": { "type": ["string", "null"] },
+          "remoteOutcome": { "enum": ["not_started", "completed", "unknown", null] },
+          "allowedRoot": { "type": ["string", "null"] },
+          "diagnostic": {
+            "anyOf": [
+              {
+                "type": "object", "additionalProperties": false,
+                "required": ["origin", "policyReason", "nativeStep", "nativeError"],
+                "properties": {
+                  "origin": { "enum": ["policy", "os"] },
+                  "policyReason": { "type": ["string", "null"] },
+                  "nativeStep": { "type": ["string", "null"] },
+                  "nativeError": { "type": ["integer", "null"], "minimum": 0, "maximum": 9007199254740991 }
+                }
+              },
+              { "type": "null" }
+            ]
+          },
+          "remoteCleanup": { "enum": ["confirmed", "unconfirmed", null] },
+          "execution": { "anyOf": [{ "$ref": "#/$defs/executionData" }, { "type": "null" }] },
+          "output": {
+            "anyOf": [
+              {
+                "type": "object", "additionalProperties": false,
+                "required": ["version", "captureSource", "sshCompleteness", "id", "state", "bytes", "snapshotBytes", "sha256", "expiresAt"],
+                "properties": {
+                  "version": { "const": 1 },
+                  "captureSource": { "const": "redacted-adapter-outcome" },
+                  "sshCompleteness": { "const": "unknown" },
+                  "id": { "anyOf": [{ "$ref": "#/$defs/identifier" }, { "type": "null" }] },
+                  "state": { "enum": ["pending", "ready", "unavailable", "expired"] },
+                  "bytes": { "type": ["integer", "null"], "minimum": 0, "maximum": 9007199254740991 },
+                  "snapshotBytes": { "type": ["integer", "null"], "minimum": 0, "maximum": 9007199254740991 },
+                  "sha256": { "anyOf": [{ "$ref": "#/$defs/digest" }, { "type": "null" }] },
+                  "expiresAt": { "type": ["integer", "null"], "minimum": 0, "maximum": 9007199254740991 }
+                }
+              },
+              { "type": "null" }
+            ]
+          },
+          "artifact": {
+            "anyOf": [
+              {
+                "type": "object", "additionalProperties": false,
+                "required": ["fileName", "size", "sha256"],
+                "properties": { "fileName": { "type": "string" }, "size": { "$ref": "#/$defs/nint" }, "sha256": { "$ref": "#/$defs/digest" } }
+              },
+              { "type": "null" }
+            ]
+          },
+          "outputPage": {
+            "anyOf": [
+              {
+                "type": "object", "additionalProperties": false,
+                "required": ["text", "cursor", "nextCursor", "bytes", "totalBytes", "sha256", "eof", "expiresAt"],
+                "properties": {
+                  "text": { "type": "string" },
+                  "cursor": { "$ref": "#/$defs/nint" },
+                  "nextCursor": { "$ref": "#/$defs/nint" },
+                  "bytes": { "$ref": "#/$defs/nint" },
+                  "totalBytes": { "$ref": "#/$defs/nint" },
+                  "sha256": { "$ref": "#/$defs/digest" },
+                  "eof": { "type": "boolean" },
+                  "expiresAt": { "$ref": "#/$defs/nint" }
+                }
+              },
+              { "type": "null" }
+            ]
+          },
+          "streamPage": { "type": "null" },
+          "waitTimedOut": { "type": "boolean" }
+        }
+      },
+      "transferStatus": {
+        "type": "object", "additionalProperties": false,
+        "required": ["state", "transfer", "request"],
+        "properties": {
+          "state": { "enum": ["staging", "ready", "expired", "submitted"] },
+          "transfer": { "anyOf": [{ "$ref": "#/$defs/transfer" }, { "type": "null" }] },
+          "request": { "anyOf": [{ "$ref": "#/$defs/operationData" }, { "type": "null" }] }
+        }
+      }
+    }
+  },
+  "annotations": { "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true },
+  "portalRules": {
+    "outputSchema": "public-contract.mjs:74-75 responseSchema(): .refine(value => value.ok ? value.data !== null && value.error === null : value.data === null && value.error !== null, 'Expected data or error'). Not expressed in the outputSchema (a Zod .refine is absent from the SDK-published JSON Schema); recorded here only.",
+    "outputSchema.$defs.executionData": "public-contract.mjs:34-40 presentExecution(): each field is parsed with its own schema and replaced by null when it fails; the whole execution object is null when the source value is not a plain object."
+  },
+  "visibility": "public"
+}
