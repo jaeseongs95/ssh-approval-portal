@@ -56,6 +56,7 @@ import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Clock;
 import java.util.Base64;
+import java.util.List;
 import java.util.zip.GZIPOutputStream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -101,7 +102,7 @@ class RealAgentCliTest {
             ElevationProbe probe = new ElevationProbe(server.executor(), id -> new TargetLookup.NotRegistered(id));
             MinaRemoteFileTransfer transfer = new MinaRemoteFileTransfer(server.sessions(), channels, checker, new SftpUploader(checker, replacer, classifier, channels, new SpaceProbe()),
                 new SftpDownloader(checker, classifier), classifier, new SudoSftpChannels(channels), probe, scheduler,
-                Clock.systemUTC());
+                Clock.systemUTC(), List.of(new io.github.jaeseongs95.portal.ssh.platform.WindowsReparseProbe(new WindowsCommandWrapper(scripts), server.executor())));
             AgentCliInstaller installer = new AgentCliInstaller(server.executor(), transfer, server.sessions(), channels, JsonMapper.builder().build(), Clock.systemUTC());
             assertThat(plan.commands()).as("the only command of the installation on the target is the unpack").hasSize(1);
             RemoteTarget target = new RemoteTarget(new TargetId("realserver"), TargetRevision.of("b".repeat(64)), new ProfileAlias("writer"), AccessMode.READ_WRITE);

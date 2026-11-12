@@ -74,7 +74,8 @@ class RealSftpTest {
         SftpChannels channels = new SftpChannels();
         ElevationProbe probe = new ElevationProbe(server.executor(), id -> new TargetLookup.NotRegistered(id));
         transfer = new MinaRemoteFileTransfer(server.sessions(), channels, checker, new SftpUploader(checker, replacer, classifier, channels, new SpaceProbe()),
-            new SftpDownloader(checker, classifier), classifier, new SudoSftpChannels(channels), probe, scheduler, Clock.systemUTC());
+            new SftpDownloader(checker, classifier), classifier, new SudoSftpChannels(channels), probe, scheduler, Clock.systemUTC(),
+            List.of(new io.github.jaeseongs95.portal.ssh.platform.WindowsReparseProbe(new WindowsCommandWrapper(new RemoteScripts()), server.executor())));
         target = new RemoteTarget(new TargetId("realserver"), TargetRevision.of("b".repeat(64)), new ProfileAlias("writer"), AccessMode.READ_WRITE);
         directoryName = "ssh-approval-portal-test-" + HexFormat.of().formatHex(new SecureRandom().generateSeed(6));
         server.exec(server.isWindows() ? "cmd /c mkdir \"%USERPROFILE%\\" + directoryName + "\"" : "mkdir -p \"$HOME/" + directoryName + "\"");
@@ -234,9 +235,18 @@ class RealSftpTest {
             }
         }
         byte[] content = "through the link".getBytes(StandardCharsets.UTF_8);
+        // A file that really is behind the directory link, so that a download through it would succeed if the adapter let it pass.
+        RemotePath inner = path("realdir/inner.bin");
+        UploadResult innerPlaced = transfer.upload(upload(inner, original, OverwriteMode.FAIL_IF_EXISTS), source(original), control());
+        assertThat(innerPlaced).as("the file behind the link is placed by its real path: %s", innerPlaced).isInstanceOf(UploadResult.Published.class);
 
         UploadResult asFile = transfer.upload(upload(path("link.bin"), content, OverwriteMode.REPLACE), source(content), control());
         UploadResult asDirectory = transfer.upload(upload(path("linkdir/x.bin"), content, OverwriteMode.FAIL_IF_EXISTS), source(content), control());
+        java.io.ByteArrayOutputStream leaked = new java.io.ByteArrayOutputStream();
+        DownloadResult downloadedThroughDirectory = fetch(path("linkdir/inner.bin"), leaked);
+        assertThat(downloadedThroughDirectory).as("a download through a link as a directory of the path: %s", downloadedThroughDirectory).isInstanceOf(DownloadResult.Refused.class);
+        assertThat(((DownloadResult.Refused) downloadedThroughDirectory).code()).isEqualTo(TransferErrorCode.UNSAFE_PATH);
+        assertThat(leaked.toByteArray()).as("nothing was delivered through the link").isEmpty();
 
         // A server that reports a link as a link lets the adapter refuse it; one that does not is a defect of the product (the test is not weakened for it).
         assertThat(asFile).as("a link as the file: %s", asFile).isInstanceOf(UploadResult.Refused.class);

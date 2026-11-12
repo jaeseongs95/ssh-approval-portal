@@ -23,9 +23,11 @@ import io.github.jaeseongs95.portal.app.remote.UploadRequest;
 import io.github.jaeseongs95.portal.app.remote.UploadResult;
 import io.github.jaeseongs95.portal.domain.error.TransferErrorCode;
 import io.github.jaeseongs95.portal.domain.operation.CleanupState;
+import io.github.jaeseongs95.portal.domain.path.RemotePath;
 import java.io.Closeable;
 import java.io.IOException;
 import java.time.Clock;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Function;
@@ -82,6 +84,7 @@ public class MinaRemoteFileTransfer implements RemoteFileTransfer {
     private final ElevationProbe elevationProbe;
     private final TaskScheduler scheduler;
     private final Clock clock;
+    private final List<HiddenLinkProbe> linkProbes;
 
     /**
      * @param sessions where the leased sessions come from (the session pool)
@@ -94,9 +97,12 @@ public class MinaRemoteFileTransfer implements RemoteFileTransfer {
      * @param elevationProbe asks a target whether elevated file work is allowed
      * @param scheduler runs the deadline of a transfer
      * @param clock the one source of time
+     * @param linkProbes the checks for the links that the SFTP server of some targets does not show (a Windows junction); a path is checked by the first that applies
      */
     public MinaRemoteFileTransfer(SessionSource sessions, SftpChannels channels, RemotePathChecker checker, SftpUploader uploader, SftpDownloader downloader,
-                                  SftpFailureClassifier classifier, SudoSftpChannels sudoChannels, ElevationProbe elevationProbe, TaskScheduler scheduler, Clock clock) {
+                                  SftpFailureClassifier classifier, SudoSftpChannels sudoChannels, ElevationProbe elevationProbe, TaskScheduler scheduler, Clock clock,
+                                  List<HiddenLinkProbe> linkProbes) {
+        this.linkProbes = List.copyOf(linkProbes);
         this.sessions = Objects.requireNonNull(sessions, "sessions");
         this.channels = Objects.requireNonNull(channels, "channels");
         this.checker = Objects.requireNonNull(checker, "checker");
@@ -120,6 +126,16 @@ public class MinaRemoteFileTransfer implements RemoteFileTransfer {
         if (checker.judgePolicy(request.target().id(), request.path(), request.pathPolicy()) instanceof PolicyVerdict.Refused refused) {
             return new UploadResult.Refused(refused.code(), refused.diagnostic(), CleanupState.COMPLETE);
         }
+        HiddenLinkProbe.Verdict hidden = hiddenLinks(request.target(), request.path(), request.limits(), control);
+        if (hidden instanceof HiddenLinkProbe.Linked) {
+            return new UploadResult.Refused(TransferErrorCode.UNSAFE_PATH, new FileDiagnostic.None(), CleanupState.COMPLETE);
+        }
+        if (hidden instanceof HiddenLinkProbe.Unverified) {
+            return new UploadResult.Refused(TransferErrorCode.INVALID_REQUEST, new FileDiagnostic.None(), CleanupState.COMPLETE);
+        }
+        if (hidden instanceof HiddenLinkProbe.NotRun notRun) {
+            return new UploadResult.NotDispatched(notRun.cause());
+        }
         return switch (request.access()) {
             case FileAccess.Direct direct -> uploadDirect(request, source, control);
             case FileAccess.Elevated elevated -> switch (elevated.plan()) {
@@ -142,6 +158,16 @@ public class MinaRemoteFileTransfer implements RemoteFileTransfer {
         Objects.requireNonNull(control, "control");
         if (checker.judgePolicy(request.target().id(), request.path(), request.pathPolicy()) instanceof PolicyVerdict.Refused refused) {
             return new DownloadResult.Refused(refused.code(), refused.diagnostic());
+        }
+        HiddenLinkProbe.Verdict hidden = hiddenLinks(request.target(), request.path(), request.limits(), control);
+        if (hidden instanceof HiddenLinkProbe.Linked) {
+            return new DownloadResult.Refused(TransferErrorCode.UNSAFE_PATH, new FileDiagnostic.None());
+        }
+        if (hidden instanceof HiddenLinkProbe.Unverified) {
+            return new DownloadResult.Refused(TransferErrorCode.INVALID_REQUEST, new FileDiagnostic.None());
+        }
+        if (hidden instanceof HiddenLinkProbe.NotRun notRun) {
+            return new DownloadResult.Failed(notRun.cause());
         }
         return switch (request.access()) {
             case FileAccess.Direct direct -> downloadDirect(request, sink, control);
@@ -168,6 +194,16 @@ public class MinaRemoteFileTransfer implements RemoteFileTransfer {
         if (checker.judgePolicy(request.target().id(), request.path(), request.pathPolicy()) instanceof PolicyVerdict.Refused refused) {
             return new PermissionResult.Refused(refused.code(), refused.diagnostic());
         }
+        HiddenLinkProbe.Verdict hidden = hiddenLinks(request.target(), request.path(), request.limits(), control);
+        if (hidden instanceof HiddenLinkProbe.Linked) {
+            return new PermissionResult.Refused(TransferErrorCode.UNSAFE_PATH, new FileDiagnostic.None());
+        }
+        if (hidden instanceof HiddenLinkProbe.Unverified) {
+            return new PermissionResult.Refused(TransferErrorCode.INVALID_REQUEST, new FileDiagnostic.None());
+        }
+        if (hidden instanceof HiddenLinkProbe.NotRun notRun) {
+            return new PermissionResult.NotDispatched(notRun.cause());
+        }
         return switch (request.access()) {
             case FileAccess.Direct direct -> permissionsDirect(request, control);
             case FileAccess.Elevated elevated -> switch (elevated.plan()) {
@@ -181,6 +217,16 @@ public class MinaRemoteFileTransfer implements RemoteFileTransfer {
     @Override
     public ElevationResult checkElevation(ElevationRequest request, ExecutionControl control) {
         return elevationProbe.check(request, control);
+    }
+
+    /** The links the SFTP server does not show, for a path of a syntax that has a probe; a path that no probe wants is clear (the SFTP inspection decides). */
+    private HiddenLinkProbe.Verdict hiddenLinks(RemoteTarget target, RemotePath path, TransferLimits limits, ExecutionControl control) {
+        for (HiddenLinkProbe probe : linkProbes) {
+            if (probe.applies(path)) {
+                return probe.check(target, path, limits, control);
+            }
+        }
+        return new HiddenLinkProbe.Clear();
     }
 
     // ---- the direct paths ----

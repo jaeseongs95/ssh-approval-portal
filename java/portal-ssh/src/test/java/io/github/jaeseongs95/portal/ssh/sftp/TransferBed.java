@@ -73,7 +73,8 @@ final class TransferBed implements AutoCloseable {
         WORKS
     }
 
-    private TransferBed(Path root, boolean posixRename, SftpChannels channels, RemoteExecutor executor, FilePathPolicy policy, Sudo sudo) throws IOException {
+    private TransferBed(Path root, boolean posixRename, SftpChannels channels, RemoteExecutor executor, FilePathPolicy policy, Sudo sudo, List<HiddenLinkProbe> linkProbes)
+        throws IOException {
         this.root = root;
         if (sudo != Sudo.NO_SERVER) {
             Files.createDirectories(root.resolve("usr/lib/openssh"));
@@ -101,7 +102,8 @@ final class TransferBed implements AutoCloseable {
         TargetSource noTargets = id -> new TargetLookup.NotRegistered(id);
         ElevationProbe probe = new ElevationProbe(executor, noTargets);
         SudoSftpChannels sudoChannels = new SudoSftpChannels(channels, List.of(SUDO_SERVER));
-        this.transfer = new MinaRemoteFileTransfer(sessions, channels, checker, uploader, downloader, classifier, sudoChannels, probe, scheduler, Clock.systemUTC());
+        this.transfer = new MinaRemoteFileTransfer(sessions, channels, checker, uploader, downloader, classifier, sudoChannels, probe, scheduler, Clock.systemUTC(),
+            linkProbes);
     }
 
     /** A bed with the MINA SFTP channel, a policy that does not apply and an executor that runs nothing. */
@@ -110,12 +112,18 @@ final class TransferBed implements AutoCloseable {
     }
 
     static TransferBed start(Path root, boolean posixRename, SftpChannels channels, RemoteExecutor executor, FilePathPolicy policy) throws IOException {
-        return new TransferBed(root, posixRename, channels, executor, policy, Sudo.NO_SERVER);
+        return new TransferBed(root, posixRename, channels, executor, policy, Sudo.NO_SERVER, List.of());
+    }
+
+    /** A bed with link probes: the checks for the links that the SFTP server of a target does not show. */
+    static TransferBed start(Path root, List<HiddenLinkProbe> linkProbes) throws IOException {
+        return new TransferBed(root, true, new SftpChannels(), ScriptedExecutor.everythingSucceeds(), (target, path) -> new PathPolicyDecision.NotApplicable(), Sudo.NO_SERVER,
+            linkProbes);
     }
 
     /** A bed whose target offers (or does not offer) elevated file work through an SFTP server under {@code sudo -n}; the executor is the one of the probes. */
     static TransferBed start(Path root, Sudo sudo, RemoteExecutor executor) throws IOException {
-        return new TransferBed(root, true, new SftpChannels(), executor, (target, path) -> new PathPolicyDecision.NotApplicable(), sudo);
+        return new TransferBed(root, true, new SftpChannels(), executor, (target, path) -> new PathPolicyDecision.NotApplicable(), sudo, List.of());
     }
 
     Path root() {

@@ -57,7 +57,9 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: real-openssh-linux-test-results
-          path: java/portal-ssh/build/test-results/realOpenSshTest/*.xml
+          path: |
+            java/portal-ssh/build/test-results/realOpenSshTest/*.xml
+            java/portal-ssh/build/reports/tests/realOpenSshTest
           if-no-files-found: warn
           retention-days: 14
 
@@ -98,6 +100,8 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: real-openssh-windows-test-results
-          path: java/portal-ssh/build/test-results/realOpenSshTest/*.xml
+          path: |
+            java/portal-ssh/build/test-results/realOpenSshTest/*.xml
+            java/portal-ssh/build/reports/tests/realOpenSshTest
           if-no-files-found: warn
           retention-days: 14
