@@ -1,5 +1,8 @@
 package io.github.jaeseongs95.portal.domain.contract;
 
+import io.github.jaeseongs95.portal.domain.error.ErrorCode;
+import io.github.jaeseongs95.portal.domain.error.ExecutionAttempt;
+import io.github.jaeseongs95.portal.domain.error.RequestRefusedException;
 import java.util.Objects;
 import java.util.regex.Pattern;
 

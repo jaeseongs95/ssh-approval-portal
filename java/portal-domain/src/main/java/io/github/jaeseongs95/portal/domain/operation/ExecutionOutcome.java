@@ -1,6 +1,6 @@
 package io.github.jaeseongs95.portal.domain.operation;
 
-import io.github.jaeseongs95.portal.domain.failure.ExecutionFailure;
+import io.github.jaeseongs95.portal.domain.error.ExecutionFailure;
 import java.util.List;
 import java.util.Objects;
 

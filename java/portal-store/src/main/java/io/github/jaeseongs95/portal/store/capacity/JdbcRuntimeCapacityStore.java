@@ -16,8 +16,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import io.github.jaeseongs95.portal.app.capacity.CapacityState;
 import io.github.jaeseongs95.portal.app.capacity.RuntimeCapacityStore;
-import io.github.jaeseongs95.portal.domain.contract.CapacityErrorCode;
-import io.github.jaeseongs95.portal.domain.contract.RequestRefusedException;
+import io.github.jaeseongs95.portal.domain.error.CapacityErrorCode;
+import io.github.jaeseongs95.portal.domain.error.RequestRefusedException;
 import io.github.jaeseongs95.portal.store.Savepoints;
 
 /**

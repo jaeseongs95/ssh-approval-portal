@@ -11,9 +11,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import io.github.jaeseongs95.portal.app.journal.JournalInsert;
 import io.github.jaeseongs95.portal.app.journal.OperationJournal;
-import io.github.jaeseongs95.portal.domain.contract.OperationErrorCode;
-import io.github.jaeseongs95.portal.domain.contract.RequestErrorCode;
-import io.github.jaeseongs95.portal.domain.contract.RequestRefusedException;
+import io.github.jaeseongs95.portal.domain.error.OperationErrorCode;
+import io.github.jaeseongs95.portal.domain.error.RequestErrorCode;
+import io.github.jaeseongs95.portal.domain.error.RequestRefusedException;
 import io.github.jaeseongs95.portal.domain.id.OperationId;
 import io.github.jaeseongs95.portal.domain.id.OperationIdGenerator;
 import io.github.jaeseongs95.portal.domain.id.RequestKey;

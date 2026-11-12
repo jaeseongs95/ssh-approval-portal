@@ -1,4 +1,4 @@
-package io.github.jaeseongs95.portal.domain.contract;
+package io.github.jaeseongs95.portal.domain.error;
 
 /** Failures of the file-transfer and agent CLI install adapters (stage 3 throws them; the values are fixed here). */
 public enum TransferErrorCode implements ErrorCode {

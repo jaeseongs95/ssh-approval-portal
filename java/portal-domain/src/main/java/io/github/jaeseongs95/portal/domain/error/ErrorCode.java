@@ -1,4 +1,4 @@
-package io.github.jaeseongs95.portal.domain.contract;
+package io.github.jaeseongs95.portal.domain.error;
 
 import java.io.Serializable;
 

@@ -16,9 +16,9 @@ import io.github.jaeseongs95.portal.app.cli.AgentCliRequestStore;
 import io.github.jaeseongs95.portal.app.cli.RemoteStatus;
 import io.github.jaeseongs95.portal.app.journal.HistoryCursor;
 import io.github.jaeseongs95.portal.app.journal.HistoryQuery;
-import io.github.jaeseongs95.portal.domain.contract.HistoryErrorCode;
-import io.github.jaeseongs95.portal.domain.contract.RequestErrorCode;
-import io.github.jaeseongs95.portal.domain.contract.RequestRefusedException;
+import io.github.jaeseongs95.portal.domain.error.HistoryErrorCode;
+import io.github.jaeseongs95.portal.domain.error.RequestErrorCode;
+import io.github.jaeseongs95.portal.domain.error.RequestRefusedException;
 import io.github.jaeseongs95.portal.domain.id.OperationId;
 
 /**

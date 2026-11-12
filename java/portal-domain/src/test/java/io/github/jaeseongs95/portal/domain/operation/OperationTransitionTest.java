@@ -16,12 +16,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.jaeseongs95.portal.domain.approval.MaintenancePolicy;
-import io.github.jaeseongs95.portal.domain.contract.OperationErrorCode;
-import io.github.jaeseongs95.portal.domain.contract.RequestRefusedException;
-import io.github.jaeseongs95.portal.domain.failure.DispatchFailure;
-import io.github.jaeseongs95.portal.domain.failure.DispatchReason;
-import io.github.jaeseongs95.portal.domain.failure.DispatchStage;
-import io.github.jaeseongs95.portal.domain.failure.ExecutionFailure;
+import io.github.jaeseongs95.portal.domain.error.DispatchFailure;
+import io.github.jaeseongs95.portal.domain.error.DispatchReason;
+import io.github.jaeseongs95.portal.domain.error.DispatchStage;
+import io.github.jaeseongs95.portal.domain.error.ExecutionFailure;
+import io.github.jaeseongs95.portal.domain.error.OperationErrorCode;
+import io.github.jaeseongs95.portal.domain.error.RequestRefusedException;
 import io.github.jaeseongs95.portal.domain.id.Digest;
 import io.github.jaeseongs95.portal.domain.id.RequestKey;
 import io.github.jaeseongs95.portal.domain.text.CommandText;

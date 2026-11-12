@@ -22,8 +22,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import io.github.jaeseongs95.portal.app.capacity.CapacityState;
 import io.github.jaeseongs95.portal.domain.capacity.Capacity;
-import io.github.jaeseongs95.portal.domain.contract.CapacityErrorCode;
-import io.github.jaeseongs95.portal.domain.contract.RequestRefusedException;
+import io.github.jaeseongs95.portal.domain.error.CapacityErrorCode;
+import io.github.jaeseongs95.portal.domain.error.RequestRefusedException;
 import io.github.jaeseongs95.portal.domain.id.TargetId;
 import io.github.jaeseongs95.portal.domain.target.CapacityOverride;
 import io.github.jaeseongs95.portal.store.Savepoints;

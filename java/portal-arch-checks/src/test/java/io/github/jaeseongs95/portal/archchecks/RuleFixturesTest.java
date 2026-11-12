@@ -28,10 +28,12 @@ import org.junit.jupiter.api.io.TempDir;
 class RuleFixturesTest {
 
     private static final String FIXTURES = "io.github.jaeseongs95.portal.archchecks.fixtures";
-    private static final Pattern FIXTURE_CLASS = Pattern.compile("io\\.github\\.jaeseongs95\\.portal\\.archchecks\\.fixtures\\.(?:dir\\.\\w+\\.)?(\\w+)");
+    private static final Pattern FIXTURE_CLASS = Pattern.compile("io\\.github\\.jaeseongs95\\.portal\\.archchecks\\.fixtures\\.(?:(?:dir|cycle)\\.\\w+\\.)?(\\w+)");
     private static final ModuleTable FIXTURE_TABLE = new ModuleTable(FIXTURES + ".dir", Map.of("domain", Set.of(), "app", Set.of("domain")));
     private static final ModuleTable PRODUCT_TABLE = ModuleTable.product();
-    private static final Set<String> NEVER_FLAGGED = Set.of("Clean", "GoodApp", "PureDomain", "Counter", "GoodAdvice", "GoodController", "Answer", "Order");
+    private static final Set<String> NEVER_FLAGGED = Set.of("Clean", "GoodApp", "PureDomain", "Counter", "GoodAdvice", "GoodController", "Answer", "Order", "GammaUser");
+    /** The sub-packages {@code alpha} and {@code beta} of this package depend on each other on purpose; {@code gamma} only uses {@code alpha}. */
+    private static final String CYCLE_FIXTURES = FIXTURES + ".cycle";
 
     // One import for the whole class (PER_CLASS lifecycle): an instance field, not static state.
     private JavaClasses fixtures;
@@ -140,6 +142,12 @@ class RuleFixturesTest {
     }
 
     @Test
+    void a_cycle() {
+        // alpha uses beta and beta uses alpha: both classes are named; gamma uses alpha only, so it is on no cycle and is not named.
+        assertFlagsAndSparesCleanClasses(PortalRules.cycles(List.of(CYCLE_FIXTURES)), "AlphaPart", "BetaPart");
+    }
+
+    @Test
     void a_lombok() {
         assertFlags(PortalRules.lombok(), "UsesLombok");
     }
@@ -197,6 +205,7 @@ class RuleFixturesTest {
         all.addAll(PortalRules.optionalGet());
         all.addAll(PortalRules.charset());
         all.addAll(PortalRules.sleep());
+        all.addAll(PortalRules.cycles(List.of(CYCLE_FIXTURES)));
         assertThat(flagged(all)).doesNotContainAnyElementsOf(NEVER_FLAGGED);
     }
 

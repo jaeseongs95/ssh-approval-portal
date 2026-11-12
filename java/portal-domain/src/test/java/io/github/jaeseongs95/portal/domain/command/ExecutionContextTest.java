@@ -3,9 +3,9 @@ package io.github.jaeseongs95.portal.domain.command;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import io.github.jaeseongs95.portal.domain.contract.ErrorCode;
-import io.github.jaeseongs95.portal.domain.contract.RequestErrorCode;
-import io.github.jaeseongs95.portal.domain.contract.RequestRefusedException;
+import io.github.jaeseongs95.portal.domain.error.ErrorCode;
+import io.github.jaeseongs95.portal.domain.error.RequestErrorCode;
+import io.github.jaeseongs95.portal.domain.error.RequestRefusedException;
 import io.github.jaeseongs95.portal.domain.id.Digest;
 import io.github.jaeseongs95.portal.domain.text.SourceText;
 import java.util.List;

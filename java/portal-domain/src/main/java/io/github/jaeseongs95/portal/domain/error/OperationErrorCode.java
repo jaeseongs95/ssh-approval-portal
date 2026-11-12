@@ -1,4 +1,4 @@
-package io.github.jaeseongs95.portal.domain.contract;
+package io.github.jaeseongs95.portal.domain.error;
 
 /** Failures of the operation journal and the scheduler: capacity, version conflicts, impossible transitions, invalid records. */
 public enum OperationErrorCode implements ErrorCode {

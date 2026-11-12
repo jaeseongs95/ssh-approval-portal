@@ -1,7 +1,6 @@
-package io.github.jaeseongs95.portal.domain.failure;
+package io.github.jaeseongs95.portal.domain.error;
 
 import com.fasterxml.jackson.annotation.JsonValue;
-import io.github.jaeseongs95.portal.domain.contract.ExecutionErrorCode;
 import java.util.EnumSet;
 import java.util.Locale;
 import java.util.Set;

@@ -10,8 +10,8 @@ import java.util.stream.Collectors;
 import org.springframework.data.jdbc.core.JdbcAggregateOperations;
 import org.springframework.stereotype.Component;
 
-import io.github.jaeseongs95.portal.domain.contract.OperationErrorCode;
-import io.github.jaeseongs95.portal.domain.contract.RequestRefusedException;
+import io.github.jaeseongs95.portal.domain.error.OperationErrorCode;
+import io.github.jaeseongs95.portal.domain.error.RequestRefusedException;
 import io.github.jaeseongs95.portal.domain.operation.AgentCliInput;
 import io.github.jaeseongs95.portal.domain.operation.CommandInput;
 import io.github.jaeseongs95.portal.domain.operation.DecisionRecord;

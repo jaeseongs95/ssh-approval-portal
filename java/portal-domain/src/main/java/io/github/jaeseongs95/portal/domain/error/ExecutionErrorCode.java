@@ -1,4 +1,4 @@
-package io.github.jaeseongs95.portal.domain.contract;
+package io.github.jaeseongs95.portal.domain.error;
 
 /** The codes an execution failure diagnostic may carry (execution-failure.mjs:4). */
 public enum ExecutionErrorCode implements ErrorCode {

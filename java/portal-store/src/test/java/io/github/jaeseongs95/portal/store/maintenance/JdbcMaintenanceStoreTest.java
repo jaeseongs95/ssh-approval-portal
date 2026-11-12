@@ -10,8 +10,8 @@ import org.springframework.context.annotation.Import;
 import io.github.jaeseongs95.portal.app.maintenance.MaintenanceStatus;
 import io.github.jaeseongs95.portal.app.maintenance.OwnerHash;
 import io.github.jaeseongs95.portal.app.maintenance.PreservationBaseline;
-import io.github.jaeseongs95.portal.domain.contract.RequestErrorCode;
-import io.github.jaeseongs95.portal.domain.contract.RequestRefusedException;
+import io.github.jaeseongs95.portal.domain.error.RequestErrorCode;
+import io.github.jaeseongs95.portal.domain.error.RequestRefusedException;
 import io.github.jaeseongs95.portal.store.Savepoints;
 import io.github.jaeseongs95.portal.store.StoreTest;
 

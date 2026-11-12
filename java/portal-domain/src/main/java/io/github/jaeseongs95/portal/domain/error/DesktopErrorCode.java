@@ -1,4 +1,4 @@
-package io.github.jaeseongs95.portal.domain.contract;
+package io.github.jaeseongs95.portal.domain.error;
 
 /** Failures of the desktop (GUI) tools (stage 5 throws them; the values are fixed here). */
 public enum DesktopErrorCode implements ErrorCode {

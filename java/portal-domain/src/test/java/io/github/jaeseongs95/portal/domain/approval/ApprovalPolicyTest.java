@@ -11,12 +11,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.jaeseongs95.portal.domain.capacity.Capacity;
-import io.github.jaeseongs95.portal.domain.contract.CapacityErrorCode;
-import io.github.jaeseongs95.portal.domain.contract.OperationErrorCode;
-import io.github.jaeseongs95.portal.domain.contract.RequestErrorCode;
-import io.github.jaeseongs95.portal.domain.failure.DispatchFailure;
-import io.github.jaeseongs95.portal.domain.failure.DispatchReason;
-import io.github.jaeseongs95.portal.domain.failure.DispatchStage;
+import io.github.jaeseongs95.portal.domain.error.CapacityErrorCode;
+import io.github.jaeseongs95.portal.domain.error.DispatchFailure;
+import io.github.jaeseongs95.portal.domain.error.DispatchReason;
+import io.github.jaeseongs95.portal.domain.error.DispatchStage;
+import io.github.jaeseongs95.portal.domain.error.OperationErrorCode;
+import io.github.jaeseongs95.portal.domain.error.RequestErrorCode;
 import io.github.jaeseongs95.portal.domain.file.FileBinding;
 import io.github.jaeseongs95.portal.domain.file.FileName;
 import io.github.jaeseongs95.portal.domain.id.ArtifactId;

@@ -1,6 +1,6 @@
 package io.github.jaeseongs95.portal.domain.approval;
 
-import io.github.jaeseongs95.portal.domain.failure.DispatchFailure;
+import io.github.jaeseongs95.portal.domain.error.DispatchFailure;
 import java.util.Objects;
 
 /** Whether an operation may be started now, and if not the diagnosis a refusal leaves: reason and step, nothing else. */

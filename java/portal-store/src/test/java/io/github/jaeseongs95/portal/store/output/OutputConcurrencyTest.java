@@ -27,8 +27,8 @@ import io.github.jaeseongs95.portal.app.output.OutputId;
 import io.github.jaeseongs95.portal.app.output.OutputPayloadStore;
 import io.github.jaeseongs95.portal.app.output.OutputReservation;
 import io.github.jaeseongs95.portal.app.output.OutputState;
-import io.github.jaeseongs95.portal.domain.contract.ExecutionErrorCode;
-import io.github.jaeseongs95.portal.domain.contract.RequestRefusedException;
+import io.github.jaeseongs95.portal.domain.error.ExecutionErrorCode;
+import io.github.jaeseongs95.portal.domain.error.RequestRefusedException;
 import io.github.jaeseongs95.portal.store.StoreTest;
 
 /**

@@ -20,8 +20,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import io.github.jaeseongs95.portal.app.output.OutputId;
-import io.github.jaeseongs95.portal.domain.contract.ExecutionErrorCode;
-import io.github.jaeseongs95.portal.domain.contract.RequestRefusedException;
+import io.github.jaeseongs95.portal.domain.error.ExecutionErrorCode;
+import io.github.jaeseongs95.portal.domain.error.RequestRefusedException;
 import io.github.jaeseongs95.portal.store.StorageRoots;
 import io.github.jaeseongs95.portal.store.storage.PrivateStorages;
 import io.github.jaeseongs95.portal.store.storage.UnsafeStorageException;

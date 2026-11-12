@@ -6,9 +6,9 @@ import java.util.Objects;
 
 import org.springframework.stereotype.Component;
 
-import io.github.jaeseongs95.portal.domain.contract.ExecutionErrorCode;
-import io.github.jaeseongs95.portal.domain.failure.DispatchFailure;
-import io.github.jaeseongs95.portal.domain.failure.ExecutionFailure;
+import io.github.jaeseongs95.portal.domain.error.DispatchFailure;
+import io.github.jaeseongs95.portal.domain.error.ExecutionErrorCode;
+import io.github.jaeseongs95.portal.domain.error.ExecutionFailure;
 import io.github.jaeseongs95.portal.domain.file.FileBinding;
 import io.github.jaeseongs95.portal.domain.file.FileName;
 import io.github.jaeseongs95.portal.domain.file.FileTargetBinding;

@@ -5,11 +5,11 @@ import java.time.Instant;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.relational.core.mapping.Table;
 
-import io.github.jaeseongs95.portal.domain.failure.DispatchReason;
-import io.github.jaeseongs95.portal.domain.failure.DispatchStage;
-import io.github.jaeseongs95.portal.domain.failure.ExecutionStage;
-import io.github.jaeseongs95.portal.domain.failure.RemoteOutcome;
-import io.github.jaeseongs95.portal.domain.contract.ExecutionErrorCode;
+import io.github.jaeseongs95.portal.domain.error.DispatchReason;
+import io.github.jaeseongs95.portal.domain.error.DispatchStage;
+import io.github.jaeseongs95.portal.domain.error.ExecutionErrorCode;
+import io.github.jaeseongs95.portal.domain.error.ExecutionStage;
+import io.github.jaeseongs95.portal.domain.error.RemoteOutcome;
 import io.github.jaeseongs95.portal.domain.operation.CaptureState;
 import io.github.jaeseongs95.portal.domain.operation.CleanupState;
 import io.github.jaeseongs95.portal.domain.operation.ExecutionReason;

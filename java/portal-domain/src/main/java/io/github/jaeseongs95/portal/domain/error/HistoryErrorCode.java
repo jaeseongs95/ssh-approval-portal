@@ -1,4 +1,4 @@
-package io.github.jaeseongs95.portal.domain.contract;
+package io.github.jaeseongs95.portal.domain.error;
 
 /** Failures of the history query: range, fields, filter, cursor, size. */
 public enum HistoryErrorCode implements ErrorCode {

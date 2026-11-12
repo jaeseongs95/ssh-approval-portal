@@ -1,6 +1,5 @@
-package io.github.jaeseongs95.portal.domain.contract;
+package io.github.jaeseongs95.portal.domain.error;
 
-import io.github.jaeseongs95.portal.domain.failure.ExecutionFailure;
 import java.io.Serial;
 import java.util.Objects;
 

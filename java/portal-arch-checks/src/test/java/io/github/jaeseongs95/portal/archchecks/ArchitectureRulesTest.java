@@ -143,6 +143,11 @@ class ArchitectureRulesTest {
     }
 
     @Test
+    void a_cycle_noPackageCycleInAnyModule() {
+        check(PortalRules.cycles(TABLE.mayUse().keySet().stream().sorted().map(TABLE::packageOf).toList()));
+    }
+
+    @Test
     void a_lombok_noLombok() {
         check(PortalRules.lombok());
         assertThat(sourceViolations("A-LOMBOK")).isEmpty();

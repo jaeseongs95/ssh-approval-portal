@@ -1,6 +1,6 @@
 package io.github.jaeseongs95.portal.domain.operation;
 
-import io.github.jaeseongs95.portal.domain.failure.DispatchFailure;
+import io.github.jaeseongs95.portal.domain.error.DispatchFailure;
 import java.util.Objects;
 
 /** What the operation kept of how it ended: nothing (it never reached an executor), the executor's outcome, or the refusal that stopped it before dispatch. */

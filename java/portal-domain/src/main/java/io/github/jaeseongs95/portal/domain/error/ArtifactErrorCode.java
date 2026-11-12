@@ -1,4 +1,4 @@
-package io.github.jaeseongs95.portal.domain.contract;
+package io.github.jaeseongs95.portal.domain.error;
 
 /** Failures of staged files, uploads, downloads and the artifact store. */
 public enum ArtifactErrorCode implements ErrorCode {

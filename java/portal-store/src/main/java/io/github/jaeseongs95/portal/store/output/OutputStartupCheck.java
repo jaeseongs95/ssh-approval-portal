@@ -13,7 +13,7 @@ import io.github.jaeseongs95.portal.app.output.OutputManifest;
 import io.github.jaeseongs95.portal.app.output.OutputManifestStore;
 import io.github.jaeseongs95.portal.app.output.OutputPayloadStore;
 import io.github.jaeseongs95.portal.app.output.OutputState;
-import io.github.jaeseongs95.portal.domain.contract.RequestRefusedException;
+import io.github.jaeseongs95.portal.domain.error.RequestRefusedException;
 
 /**
  * The start-up reconciliation of the output manifests with the output files (2.x {@code CommandOutputs} constructor and {@code reap}, design 8.5). It is not in a

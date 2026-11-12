@@ -1,4 +1,4 @@
-package io.github.jaeseongs95.portal.domain.contract;
+package io.github.jaeseongs95.portal.domain.error;
 
 /**
  * Request admission and runtime capacity. {@link #REQUEST_CAPACITY_EXCEEDED} is the one code that 3.0 adds to the 2.x vocabulary (stage 2 design, decision D-07):

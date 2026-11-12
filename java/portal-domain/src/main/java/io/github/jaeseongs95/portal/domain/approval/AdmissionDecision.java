@@ -1,7 +1,7 @@
 package io.github.jaeseongs95.portal.domain.approval;
 
-import io.github.jaeseongs95.portal.domain.contract.ErrorCode;
-import io.github.jaeseongs95.portal.domain.contract.RequestErrorCode;
+import io.github.jaeseongs95.portal.domain.error.ErrorCode;
+import io.github.jaeseongs95.portal.domain.error.RequestErrorCode;
 import java.util.Objects;
 
 /**

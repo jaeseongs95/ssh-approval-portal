@@ -1,8 +1,8 @@
 package io.github.jaeseongs95.portal.domain.approval;
 
-import io.github.jaeseongs95.portal.domain.contract.CapacityErrorCode;
-import io.github.jaeseongs95.portal.domain.contract.ErrorCode;
-import io.github.jaeseongs95.portal.domain.contract.OperationErrorCode;
+import io.github.jaeseongs95.portal.domain.error.CapacityErrorCode;
+import io.github.jaeseongs95.portal.domain.error.ErrorCode;
+import io.github.jaeseongs95.portal.domain.error.OperationErrorCode;
 
 /**
  * Which limit refused a request. Each has its own error code, so a full request store, a full execution queue and an exhausted reconciliation budget are never one

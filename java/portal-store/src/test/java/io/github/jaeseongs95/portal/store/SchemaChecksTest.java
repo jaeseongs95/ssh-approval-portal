@@ -14,8 +14,8 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-import io.github.jaeseongs95.portal.domain.failure.DispatchReason;
-import io.github.jaeseongs95.portal.domain.failure.DispatchStage;
+import io.github.jaeseongs95.portal.domain.error.DispatchReason;
+import io.github.jaeseongs95.portal.domain.error.DispatchStage;
 import io.github.jaeseongs95.portal.domain.operation.ApprovalMode;
 import io.github.jaeseongs95.portal.domain.operation.DecisionKind;
 import io.github.jaeseongs95.portal.domain.operation.DecisionReason;

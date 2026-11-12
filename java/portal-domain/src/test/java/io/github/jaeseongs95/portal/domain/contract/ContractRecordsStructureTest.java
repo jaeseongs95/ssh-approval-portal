@@ -3,6 +3,8 @@ package io.github.jaeseongs95.portal.domain.contract;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import io.github.jaeseongs95.portal.domain.error.ExecutionAttempt;
+import io.github.jaeseongs95.portal.domain.error.RequestErrorCode;
 import io.github.jaeseongs95.portal.domain.operation.OperationState;
 import java.io.IOException;
 import java.io.InputStream;

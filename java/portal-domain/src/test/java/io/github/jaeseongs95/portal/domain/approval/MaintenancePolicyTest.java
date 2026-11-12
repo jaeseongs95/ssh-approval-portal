@@ -4,9 +4,9 @@ import static io.github.jaeseongs95.portal.domain.operation.OperationFixtures.T0
 import static io.github.jaeseongs95.portal.domain.operation.OperationFixtures.queued;
 import static org.assertj.core.api.Assertions.assertThat;
 
-import io.github.jaeseongs95.portal.domain.failure.DispatchFailure;
-import io.github.jaeseongs95.portal.domain.failure.DispatchReason;
-import io.github.jaeseongs95.portal.domain.failure.DispatchStage;
+import io.github.jaeseongs95.portal.domain.error.DispatchFailure;
+import io.github.jaeseongs95.portal.domain.error.DispatchReason;
+import io.github.jaeseongs95.portal.domain.error.DispatchStage;
 import io.github.jaeseongs95.portal.domain.operation.Operation;
 import io.github.jaeseongs95.portal.domain.operation.OperationState;
 import io.github.jaeseongs95.portal.domain.operation.StateCounts;

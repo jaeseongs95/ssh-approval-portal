@@ -15,8 +15,8 @@ import org.springframework.stereotype.Component;
 import io.github.jaeseongs95.portal.app.cli.AgentCliBinding;
 import io.github.jaeseongs95.portal.app.cli.AgentCliInstallRecord;
 import io.github.jaeseongs95.portal.app.journal.HistoryCursor;
-import io.github.jaeseongs95.portal.domain.contract.HistoryErrorCode;
-import io.github.jaeseongs95.portal.domain.contract.RequestRefusedException;
+import io.github.jaeseongs95.portal.domain.error.HistoryErrorCode;
+import io.github.jaeseongs95.portal.domain.error.RequestRefusedException;
 import io.github.jaeseongs95.portal.domain.id.OperationId;
 
 /**

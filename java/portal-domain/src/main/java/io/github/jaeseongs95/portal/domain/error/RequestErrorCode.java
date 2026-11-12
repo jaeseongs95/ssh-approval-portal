@@ -1,4 +1,4 @@
-package io.github.jaeseongs95.portal.domain.contract;
+package io.github.jaeseongs95.portal.domain.error;
 
 /** Request-level refusals: input the contract does not accept, a target or operation that is not there, a read command that cannot run, a maintenance window. */
 public enum RequestErrorCode implements ErrorCode {

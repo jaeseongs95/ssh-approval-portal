@@ -1,4 +1,4 @@
-package io.github.jaeseongs95.portal.domain.failure;
+package io.github.jaeseongs95.portal.domain.error;
 
 import com.fasterxml.jackson.annotation.JsonValue;
 import java.util.Locale;

@@ -35,7 +35,7 @@ import io.github.jaeseongs95.portal.domain.command.TargetRule;
 import io.github.jaeseongs95.portal.domain.command.ThresholdTerms;
 import io.github.jaeseongs95.portal.domain.command.Thresholds;
 import io.github.jaeseongs95.portal.domain.command.WindowsPolicyName;
-import io.github.jaeseongs95.portal.domain.contract.RequestRefusedException;
+import io.github.jaeseongs95.portal.domain.error.RequestRefusedException;
 import io.github.jaeseongs95.portal.domain.id.TargetId;
 import io.github.jaeseongs95.portal.domain.target.ProfileAlias;
 import io.github.jaeseongs95.portal.domain.target.TargetOs;

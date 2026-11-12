@@ -1,9 +1,9 @@
 package io.github.jaeseongs95.portal.domain.approval;
 
 import io.github.jaeseongs95.portal.domain.capacity.Capacity;
-import io.github.jaeseongs95.portal.domain.failure.DispatchFailure;
-import io.github.jaeseongs95.portal.domain.failure.DispatchReason;
-import io.github.jaeseongs95.portal.domain.failure.DispatchStage;
+import io.github.jaeseongs95.portal.domain.error.DispatchFailure;
+import io.github.jaeseongs95.portal.domain.error.DispatchReason;
+import io.github.jaeseongs95.portal.domain.error.DispatchStage;
 import io.github.jaeseongs95.portal.domain.operation.ApprovalMode;
 import io.github.jaeseongs95.portal.domain.operation.Operation;
 import io.github.jaeseongs95.portal.domain.operation.OperationKind;

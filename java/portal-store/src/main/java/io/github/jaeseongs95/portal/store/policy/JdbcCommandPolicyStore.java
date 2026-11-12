@@ -9,8 +9,8 @@ import org.springframework.transaction.annotation.Transactional;
 import io.github.jaeseongs95.portal.app.policy.CommandPolicyStore;
 import io.github.jaeseongs95.portal.domain.command.CommandPolicyDocument;
 import io.github.jaeseongs95.portal.domain.command.PolicySnapshot;
-import io.github.jaeseongs95.portal.domain.contract.RequestErrorCode;
-import io.github.jaeseongs95.portal.domain.contract.RequestRefusedException;
+import io.github.jaeseongs95.portal.domain.error.RequestErrorCode;
+import io.github.jaeseongs95.portal.domain.error.RequestRefusedException;
 
 /**
  * {@link CommandPolicyStore} over the tables of the migration V4 (design 8.2, 2.x {@code command-state.mjs}). The policy is a single revision row plus child rows

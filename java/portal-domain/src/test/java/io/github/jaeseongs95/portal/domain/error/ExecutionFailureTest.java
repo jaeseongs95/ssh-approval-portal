@@ -1,11 +1,10 @@
-package io.github.jaeseongs95.portal.domain.failure;
+package io.github.jaeseongs95.portal.domain.error;
 
 import static io.github.jaeseongs95.portal.domain.operation.OperationFixtures.T0;
 import static io.github.jaeseongs95.portal.domain.operation.OperationFixtures.running;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import io.github.jaeseongs95.portal.domain.contract.ExecutionErrorCode;
 import io.github.jaeseongs95.portal.domain.operation.CaptureState;
 import io.github.jaeseongs95.portal.domain.operation.CleanupState;
 import io.github.jaeseongs95.portal.domain.operation.CompletionEvidence;
