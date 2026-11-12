@@ -1,6 +1,8 @@
 package io.github.jaeseongs95.portal.domain.path;
 
 import io.github.jaeseongs95.portal.domain.text.Utf8Text;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -32,5 +34,48 @@ public record PosixRemotePath(String value) implements RemotePath {
             end--;
         }
         return value.substring(value.lastIndexOf('/', end - 1) + 1, end);
+    }
+
+    @Override
+    public boolean isWithin(RemotePath root) {
+        Objects.requireNonNull(root, "root");
+        if (!(root instanceof PosixRemotePath posixRoot)) {
+            return false;
+        }
+        List<String> own = parts(value);
+        List<String> prefix = parts(posixRoot.value);
+        return own.size() >= prefix.size() && own.subList(0, prefix.size()).equals(prefix);
+    }
+
+    @Override
+    public String directory() {
+        int end = value.length();
+        while (end > 0 && value.charAt(end - 1) == '/') {
+            end--;
+        }
+        int slash = value.lastIndexOf('/', end - 1);
+        int directoryEnd = slash;
+        while (directoryEnd > 0 && value.charAt(directoryEnd - 1) == '/') {
+            directoryEnd--;
+        }
+        return directoryEnd <= 0 ? "/" : value.substring(0, directoryEnd);
+    }
+
+    @Override
+    public RemotePath sibling(String name) {
+        Objects.requireNonNull(name, "name");
+        String directory = directory();
+        return new PosixRemotePath("/".equals(directory) ? "/" + name : directory + "/" + name);
+    }
+
+    /** The non-empty parts of a path; empty parts ({@code //}) name the same directory. */
+    private static List<String> parts(String path) {
+        List<String> parts = new ArrayList<>();
+        for (String part : path.split("/", -1)) {
+            if (!part.isEmpty()) {
+                parts.add(part);
+            }
+        }
+        return parts;
     }
 }

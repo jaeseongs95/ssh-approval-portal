@@ -6,11 +6,17 @@ import java.time.Clock;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import io.github.jaeseongs95.portal.domain.approval.MaintenancePolicy;
+import io.github.jaeseongs95.portal.domain.classify.CommandClassifier;
+import io.github.jaeseongs95.portal.domain.classify.VendorCommandClassifier;
 import io.github.jaeseongs95.portal.domain.id.ArtifactIdGenerator;
 import io.github.jaeseongs95.portal.domain.id.ArtifactUuidGenerator;
 import io.github.jaeseongs95.portal.domain.id.Digester;
 import io.github.jaeseongs95.portal.domain.id.OperationIdGenerator;
 import io.github.jaeseongs95.portal.domain.id.Sha256Digester;
+import io.github.jaeseongs95.portal.domain.redact.OutputRedactor;
+import io.github.jaeseongs95.portal.domain.redact.VendorOutputRedactor;
+import io.github.jaeseongs95.portal.domain.schedule.OperationScheduler;
 
 /**
  * The helper beans every other bean shares: one {@link Clock}, one {@link SecureRandom}, one {@link Digester} (Principles 3.7, 4.5).
@@ -54,6 +60,36 @@ public class DomainBeans {
     @Bean
     public ArtifactUuidGenerator artifactUuidGenerator(SecureRandom random) {
         return new ArtifactUuidGenerator(random);
+    }
+
+    /**
+     * The command classifier of the vendor rules (stage 3 design 1.3, S2 carry-over). {@code VendorCommandClassifier} is a plain class of portal-domain without a Spring
+     * annotation (rule A-DOMAIN), so it is made a bean here, under the interface the consumers depend on. It holds no state and is safe to share.
+     */
+    @Bean
+    public CommandClassifier commandClassifier() {
+        return new VendorCommandClassifier();
+    }
+
+    /**
+     * The output redactor with the vendor secret patterns and the entropy scan of 2.x (threshold 4.5). A plain class of portal-domain, so a bean here for the reason of
+     * {@link #commandClassifier()}. It holds no state and is safe to share.
+     */
+    @Bean
+    public OutputRedactor outputRedactor() {
+        return new VendorOutputRedactor();
+    }
+
+    /** The scheduler's judgements are pure functions of a view; one instance serves every use case. A plain class of portal-domain, so a bean here. */
+    @Bean
+    public OperationScheduler operationScheduler() {
+        return new OperationScheduler();
+    }
+
+    /** The maintenance rules, pure judgements. A plain class of portal-domain, so a bean here. */
+    @Bean
+    public MaintenancePolicy maintenancePolicy() {
+        return new MaintenancePolicy();
     }
 
     /** The JVM's processor count; the interface lets a test answer another one. */

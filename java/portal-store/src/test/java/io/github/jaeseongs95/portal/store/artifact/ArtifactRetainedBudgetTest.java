@@ -27,6 +27,7 @@ import io.github.jaeseongs95.portal.app.artifact.ArtifactRecord;
 import io.github.jaeseongs95.portal.app.artifact.ArtifactRegistry;
 import io.github.jaeseongs95.portal.app.artifact.ArtifactReservation;
 import io.github.jaeseongs95.portal.app.artifact.ReleaseReason;
+import io.github.jaeseongs95.portal.app.artifact.ReservedSplit;
 import io.github.jaeseongs95.portal.domain.id.ArtifactId;
 import io.github.jaeseongs95.portal.store.StorageRoots;
 import io.github.jaeseongs95.portal.store.StoreTest;
@@ -38,7 +39,7 @@ import io.github.jaeseongs95.portal.store.StoreTest;
  *
  * <p>What 2.x reported and 3.0 does not have: the recovery status object ({@code recoveryStatus.reservedBytes}, {@code liveReservedBytes}, {@code unsafeEntries}, a
  * {@code resumable} flag) and the {@code reservedBytes} the legacy metadata claimed (16 for a one byte file). The 3.0 store quarantines a payload that has no row and
- * counts the bytes it really holds; the live part is the rows' ({@link ArtifactInventory#holding()}), the held part is the files'. The inode and the change time of
+ * counts the bytes it really holds; the live part is the rows' ({@link ArtifactRegistry#holding()}), the held part is the files'. The inode and the change time of
  * the 2.x case are not compared: the Java file API gives neither on every file system, so the bytes and the modification time stand for "not rewritten".
  */
 @StoreTest
@@ -58,7 +59,6 @@ class ArtifactRetainedBudgetTest {
 
     private final ArtifactFixtures fixtures = new ArtifactFixtures();
     private final ArtifactRegistry registry;
-    private final ArtifactInventory inventory;
     private final ArtifactPayloadStore payloads;
     private final ArtifactStartupCheck startup;
     private final StorageRoots roots;
@@ -66,10 +66,9 @@ class ArtifactRetainedBudgetTest {
     private final ArtifactChunkRowRepository chunks;
     private final ArtifactRowRepository artifacts;
 
-    ArtifactRetainedBudgetTest(ArtifactRegistry registry, ArtifactInventory inventory, ArtifactPayloadStore payloads, ArtifactStartupCheck startup, StorageRoots roots,
+    ArtifactRetainedBudgetTest(ArtifactRegistry registry, ArtifactPayloadStore payloads, ArtifactStartupCheck startup, StorageRoots roots,
                                StagedActionRowRepository actions, ArtifactChunkRowRepository chunks, ArtifactRowRepository artifacts) {
         this.registry = registry;
-        this.inventory = inventory;
         this.payloads = payloads;
         this.startup = startup;
         this.roots = roots;
@@ -105,8 +104,8 @@ class ArtifactRetainedBudgetTest {
         assertThat(startup.reconcile().quarantined()).containsExactly(legacy);
 
         assertThat(registry.budget().chargedBytes()).as("reserved").isEqualTo(33);
-        assertThat(inventory.holding()).as("nothing live is reserved").isEmpty();
-        assertThat(registry.reserve(fixtures.upload(1), fixtures.at())).isEqualTo(new ArtifactReservation.BudgetExceeded(1, 33, 32));
+        assertThat(registry.holding()).as("nothing live is reserved").isEmpty();
+        assertThat(registry.reserve(fixtures.upload(1), fixtures.at())).isEqualTo(new ArtifactReservation.BudgetExceeded(1, new ReservedSplit(0, 33), 32));
         assertThat(registry.expired(ArtifactFixtures.T0.plus(Duration.ofHours(2)))).isEmpty();
         assertThat(Files.readAllBytes(orphans().resolve(legacy.value() + ".part"))).as("the reap does not touch the bytes").isEqualTo(bytes);
         assertThat(startup.reconcile().quarantined()).as("a second start finds nothing new").isEmpty();
@@ -130,11 +129,11 @@ class ArtifactRetainedBudgetTest {
         }
 
         assertThat(registry.budget().chargedBytes()).as("reserved").isEqualTo(8);
-        assertThat(inventory.holding()).as("live reserved 0").isEmpty();
+        assertThat(registry.holding()).as("live reserved 0").isEmpty();
         ArtifactId live = fixtures.reservedId(registry.reserve(fixtures.upload(16), fixtures.at()));
         assertThat(registry.budget().chargedBytes()).as("8 held and 16 live").isEqualTo(24);
         assertThat(registry.budget().remainingBytes()).isEqualTo(8);
-        assertThat(registry.reserve(fixtures.upload(9), fixtures.at())).isEqualTo(new ArtifactReservation.BudgetExceeded(9, 24, 32));
+        assertThat(registry.reserve(fixtures.upload(9), fixtures.at())).isEqualTo(new ArtifactReservation.BudgetExceeded(9, new ReservedSplit(16, 8), 32));
         assertThat(startup.reconcile().quarantined()).as("the second start").isEmpty();
         assertThat(registry.budget().chargedBytes()).isEqualTo(24);
         assertThat(registry.reserve(fixtures.upload(16), fixtures.at())).as("a begin that was refused is not accepted by asking again").isInstanceOf(ArtifactReservation.BudgetExceeded.class);

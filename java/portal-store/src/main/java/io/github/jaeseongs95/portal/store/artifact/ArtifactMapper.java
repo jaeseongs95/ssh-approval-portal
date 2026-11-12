@@ -116,9 +116,19 @@ public class ArtifactMapper {
         }
     }
 
+    /**
+     * The time-to-live is not stored: it is the distance between the two stored instants, which the columns hold to the microsecond. A row whose expiry is not after its
+     * creation has no positive time-to-live, which no reservation can make (a request is at least a microsecond long: below that the two instants round to the same
+     * value), so such a row is a damaged row and is reported like the other damaged rows of this mapper, as {@link IllegalStateException}, and not as the
+     * {@link IllegalArgumentException} of the value that refuses it.
+     */
     private ArtifactSpec toSpec(ArtifactRow row) {
+        Duration timeToLive = Duration.between(row.createdAt(), row.expiresAt());
+        if (timeToLive.isNegative() || timeToLive.isZero()) {
+            throw new IllegalStateException("Artifact row " + row.id() + " does not expire after it was created");
+        }
         return new ArtifactSpec(row.direction(), new FileName(row.fileName()), row.sizeBytes(), toOrigin(row), toDestination(row), row.overwriteMode(),
-            row.elevation(), row.uploadProtocol(), row.retention(), Duration.between(row.createdAt(), row.expiresAt()));
+            row.elevation(), row.uploadProtocol(), row.retention(), timeToLive);
     }
 
     private ArtifactOrigin toOrigin(ArtifactRow row) {
@@ -165,6 +175,9 @@ public class ArtifactMapper {
     }
 
     private ConsumeState toConsumption(ArtifactRow row) {
-        return row.consumeReason() == null ? new ConsumeState.NotConsumed() : new ConsumeState.ConsumedBecause(row.consumeReason());
+        if (row.consumeReason() == null) {
+            return new ConsumeState.NotConsumed();
+        }
+        return row.state() == ArtifactState.CONSUMING ? new ConsumeState.Consuming(row.consumeReason()) : new ConsumeState.ConsumedBecause(row.consumeReason());
     }
 }

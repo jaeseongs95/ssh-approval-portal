@@ -51,6 +51,12 @@ final class PortalRules {
     private static final Set<String> CHARSET_PARAMETER_TYPES = Set.of("java.lang.String", "java.nio.charset.Charset", "java.nio.charset.CharsetDecoder",
         "java.nio.charset.CharsetEncoder");
 
+    /** The Spring Framework 7 resilience and retry types A-NO-RETRY-EXEC keeps out of the exec code (the older spring-retry package is matched by prefix). */
+    private static final Set<String> RETRY_TYPES = Set.of("org.springframework.resilience.annotation.Retryable", "org.springframework.resilience.annotation.ConcurrencyLimit",
+        "org.springframework.resilience.annotation.EnableResilientMethods", "org.springframework.core.retry.RetryTemplate", "org.springframework.core.retry.RetryPolicy");
+    /** The enum methods through which bytecode compares, orders or enumerates a TargetOs value. */
+    private static final Set<String> OS_BRANCH_METHODS = Set.of("ordinal", "values", "valueOf", "equals", "compareTo");
+
     private PortalRules() {
     }
 
@@ -150,11 +156,129 @@ final class PortalRules {
     /** A-PROCESS, Principles 1.4 and 2.2 category 6: starting an OS process is allowed only in the listed classes. */
     static List<ArchRule> process(Set<String> allowedClasses) {
         return List.of(ArchRuleDefinition.noClasses().that(notIn(allowedClasses))
-            .should().callCodeUnitWhere(call("starts an operating system process", c -> {
-                String owner = c.getTargetOwner().getName();
-                return "java.lang.ProcessBuilder".equals(owner) || "java.lang.Runtime".equals(owner) && "exec".equals(c.getTarget().getName());
-            }))
+            .should().callCodeUnitWhere(call("starts an operating system process", PortalRules::startsProcess))
             .as("A-PROCESS: only the listed classes use ProcessBuilder or Runtime.exec (Principles 1.4, 2.2 category 6)"));
+    }
+
+    private static boolean startsProcess(JavaCall<?> call) {
+        String owner = call.getTargetOwner().getName();
+        return "java.lang.ProcessBuilder".equals(owner) || "java.lang.Runtime".equals(owner) && "exec".equals(call.getTarget().getName());
+    }
+
+    /**
+     * A-MINA (S3-AB-02), stage 3 design 2.1: the vendor boundary. Only the classes of portal-ssh (the {@code ssh} package of the table) may use {@code org.apache.sshd};
+     * app, domain, store and every other module see the ports, never the SSH library (Principles 3.2, vendor independence).
+     */
+    static List<ArchRule> mina(ModuleTable table) {
+        return List.of(ArchRuleDefinition.noClasses().that().resideOutsideOfPackage(table.packageOf("ssh") + "..")
+            .should().dependOnClassesThat().resideInAnyPackage("org.apache.sshd..")
+            .as("A-MINA: only portal-ssh uses org.apache.sshd (stage 3 design 2.1; Principles 3.2)"));
+    }
+
+    /**
+     * A-NO-LOCAL-PROCESS (S3-AB-03): a remote command is an SSH channel, never a local process. A-PROCESS has an allow list; this rule keeps every class of portal-ssh
+     * off that list for good, whatever the list holds (the portal-desktop classes that start xfreerdp3 and Xvnc are the only reason the list exists).
+     */
+    static List<ArchRule> noLocalProcess(ModuleTable table) {
+        return List.of(ArchRuleDefinition.noClasses().that().resideInAPackage(table.packageOf("ssh") + "..")
+            .should().callCodeUnitWhere(call("starts an operating system process", PortalRules::startsProcess))
+            .as("A-NO-LOCAL-PROCESS: no class of portal-ssh uses ProcessBuilder or Runtime.exec (stage 3 design 2.1)"));
+    }
+
+    /**
+     * A-NO-RETRY-EXEC (S3-AB-04): an exec or upload request is never sent again by the framework. The {@code ssh.exec} package and every implementation of
+     * {@code app.remote.RemoteExecutor} stay free of {@code @Retryable}, {@code RetryTemplate}, {@code @ConcurrencyLimit} and the older spring-retry types.
+     * A hand-written retry loop is not visible in bytecode; it is a review item and the S3-EX no-resend cases fix the behaviour.
+     */
+    static List<ArchRule> noRetryExec(ModuleTable table) {
+        DescribedPredicate<JavaClass> execClasses = JavaClass.Predicates.resideInAPackage(table.packageOf("ssh") + ".exec..")
+            .or(JavaClass.Predicates.assignableTo(table.packageOf("app") + ".remote.RemoteExecutor"));
+        DescribedPredicate<JavaClass> retryTypes = DescribedPredicate.describe("are retry or concurrency-limit types",
+            type -> RETRY_TYPES.contains(type.getName()) || type.getName().startsWith("org.springframework.retry."));
+        return List.of(ArchRuleDefinition.noClasses().that(execClasses).should().dependOnClassesThat(retryTypes)
+            .as("A-NO-RETRY-EXEC: ssh.exec and the RemoteExecutor implementations use no @Retryable, RetryTemplate or @ConcurrencyLimit (stage 3 design 2.1; Principles 3.6)"));
+    }
+
+    /**
+     * A-SSH-NO-PLATFORM-BRANCH (S3-AB-09), pattern 8.12: the target OS is chosen by the {@code List<TargetPlatform>} the registry collects, not by a branch in the shared
+     * code. In the classes of portal-ssh the bytecode of a branch on {@code TargetOs} shows as {@code ordinal()}, {@code values()}, {@code valueOf}, {@code equals},
+     * {@code compareTo}, a {@code $SwitchMap$...TargetOs} read (the old-style switch), or a read of one of its constants outside a {@code TargetPlatform}
+     * implementation (the {@code ==} comparison). A {@code TargetPlatform} may name its own constant ({@code return TargetOs.WINDOWS}), and so may a
+     * {@code CommandLineGrammar} ({@code platform()} answers the OS whose command line it quotes; the registry joins the grammars by that answer as it joins the
+     * platforms). The registry sits in portal-app.
+     * Not visible: a pattern switch (invokedynamic) and an {@code ==} inside a {@code TargetPlatform} or a {@code CommandLineGrammar}; those are review items.
+     */
+    static List<ArchRule> noPlatformBranch(ModuleTable table) {
+        String ssh = table.packageOf("ssh") + "..";
+        String targetOs = table.packageOf("domain") + ".target.TargetOs";
+        String targetPlatform = table.packageOf("app") + ".target.TargetPlatform";
+        String commandLineGrammar = table.packageOf("domain") + ".command.CommandLineGrammar";
+        String switchMap = "$SwitchMap$" + targetOs.replace('.', '$');
+        return List.of(
+            ArchRuleDefinition.noClasses().that().resideInAPackage(ssh)
+                .should().callCodeUnitWhere(call("branches on or enumerates the target OS",
+                    c -> targetOs.equals(c.getTargetOwner().getName()) && OS_BRANCH_METHODS.contains(c.getTarget().getName())))
+                .as("A-SSH-NO-PLATFORM-BRANCH: no class of portal-ssh calls ordinal, values, valueOf, equals or compareTo on TargetOs (pattern 8.12)"),
+            ArchRuleDefinition.noClasses().that().resideInAPackage(ssh)
+                .should().accessFieldWhere(DescribedPredicate.<JavaFieldAccess>describe("read the switch map of the target OS", a -> switchMap.equals(a.getTarget().getName())))
+                .as("A-SSH-NO-PLATFORM-BRANCH: no class of portal-ssh switches on TargetOs (pattern 8.12)"),
+            ArchRuleDefinition.noClasses().that().resideInAPackage(ssh).and().areNotAssignableTo(targetPlatform).and().areNotAssignableTo(commandLineGrammar)
+                .should().accessFieldWhere(DescribedPredicate.<JavaFieldAccess>describe("read a TargetOs constant",
+                    a -> targetOs.equals(a.getTarget().getOwner().getName())))
+                .as("A-SSH-NO-PLATFORM-BRANCH: only a TargetPlatform or CommandLineGrammar implementation of portal-ssh reads a TargetOs constant (pattern 8.12)"));
+    }
+
+    /**
+     * A-REMOTE-RESULT (S3-AB-06), Principles 35: the methods of the ports (the interfaces of {@code app.remote}) do not answer with {@code Optional}, {@code boolean} or
+     * {@code Boolean}, which fold "none", "unsupported" and "unknown" into one value, and an own result type that is an interface must be {@code sealed}. The result
+     * types of the design are sealed interfaces or records ({@code ExecutionReport}). The one flag query is {@code CancelToken.requested()}: it reports a request
+     * that was made, not an outcome of the remote side.
+     */
+    static List<ArchRule> remoteResult(ModuleTable table) {
+        String remote = table.packageOf("app") + ".remote";
+        String flagQuery = remote + ".CancelToken";
+        ArchCondition<JavaMethod> sealedResult = new ArchCondition<>("answer with a sealed result, a record or void, not Optional or boolean") {
+            @Override
+            public void check(JavaMethod method, ConditionEvents events) {
+                if (flagQuery.equals(method.getOwner().getName())) {
+                    return;
+                }
+                JavaClass type = method.getRawReturnType();
+                boolean folded = type.isEquivalentTo(Optional.class) || type.isEquivalentTo(boolean.class) || type.isEquivalentTo(Boolean.class);
+                boolean ownLooseInterface = type.isInterface() && !type.isSealed()
+                    && (type.getPackageName().equals(remote) || type.getPackageName().startsWith(remote + "."));
+                if (folded || ownLooseInterface) {
+                    events.add(SimpleConditionEvent.violated(method, method.getFullName() + " answers with " + type.getName()
+                        + (folded ? ", which folds none, unsupported and unknown into one value" : ", an interface that is not sealed")));
+                }
+            }
+        };
+        return List.of(ArchRuleDefinition.methods().that().areDeclaredInClassesThat().resideInAPackage(remote + "..")
+            .and().areDeclaredInClassesThat().areInterfaces()
+            .should(sealedResult)
+            .as("A-REMOTE-RESULT: a port of app.remote answers with a sealed result or a record, not Optional or boolean (stage 3 design 2.1; Principles 35)"));
+    }
+
+    /**
+     * A-AUDIT-BOUNDARY (S3-AB-10), decision D3-14 (b): {@code AuditFailedException} is an infrastructure exception; the use case turns it into
+     * {@code DispatchRefusedException(AUDIT_FAILED)} at its boundary. A public method of {@code app.execution} or {@code app.file} therefore does not declare it in
+     * {@code throws}. The exception is unchecked, so an undeclared leak is not visible in bytecode; the S3-UC cases fix the conversion at run time.
+     */
+    static List<ArchRule> auditBoundary(ModuleTable table) {
+        String app = table.packageOf("app");
+        String auditFailed = app + ".audit.AuditFailedException";
+        ArchCondition<JavaMethod> noAuditThrows = new ArchCondition<>("not declare AuditFailedException") {
+            @Override
+            public void check(JavaMethod method, ConditionEvents events) {
+                if (method.getThrowsClause().containsType(auditFailed)) {
+                    events.add(SimpleConditionEvent.violated(method, method.getFullName() + " declares AuditFailedException in its throws clause"));
+                }
+            }
+        };
+        return List.of(ArchRuleDefinition.methods().that().arePublic()
+            .and().areDeclaredInClassesThat().resideInAnyPackage(app + ".execution..", app + ".file..")
+            .should(noAuditThrows)
+            .as("A-AUDIT-BOUNDARY: a public method of app.execution or app.file does not let AuditFailedException out (decision D3-14)"));
     }
 
     /** A-DIR, Principles 3.2: a module's classes depend only on the modules the table allows. */

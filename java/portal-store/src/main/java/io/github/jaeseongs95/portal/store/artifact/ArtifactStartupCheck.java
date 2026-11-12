@@ -40,13 +40,11 @@ public class ArtifactStartupCheck {
     private static final Logger LOG = LoggerFactory.getLogger(ArtifactStartupCheck.class);
 
     private final ArtifactRegistry registry;
-    private final ArtifactInventory inventory;
     private final ArtifactPayloadStore payloads;
     private final Digester digester;
 
-    public ArtifactStartupCheck(ArtifactRegistry registry, ArtifactInventory inventory, ArtifactPayloadStore payloads, Digester digester) {
+    public ArtifactStartupCheck(ArtifactRegistry registry, ArtifactPayloadStore payloads, Digester digester) {
         this.registry = registry;
-        this.inventory = inventory;
         this.payloads = payloads;
         this.digester = digester;
     }
@@ -54,7 +52,7 @@ public class ArtifactStartupCheck {
     public ArtifactReconciliation reconcile() {
         Set<ArtifactId> stored = payloads.stored();
         Map<ArtifactId, ArtifactRecord> rows = new HashMap<>();
-        for (ArtifactRecord record : inventory.holding()) {
+        for (ArtifactRecord record : registry.holding()) {
             rows.put(record.id(), record);
         }
         List<ArtifactId> quarantined = new ArrayList<>();
@@ -108,7 +106,7 @@ public class ArtifactStartupCheck {
     }
 
     private void verifyChunks(ArtifactRecord record) {
-        List<ChunkDigest> chunks = inventory.chunks(record.id());
+        List<ChunkDigest> chunks = registry.chunks(record.id());
         try (PayloadRead read = payloads.open(record.id())) {
             for (ChunkDigest chunk : chunks) {
                 byte[] bytes = new byte[chunk.sizeBytes()];

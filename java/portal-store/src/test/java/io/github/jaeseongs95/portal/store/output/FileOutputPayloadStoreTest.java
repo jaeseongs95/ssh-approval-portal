@@ -208,4 +208,45 @@ class FileOutputPayloadStoreTest {
         assertThat(Files.exists(quarantine.resolve(orphan.value() + ".part.1"))).isTrue();
         store.delete(orphan);
     }
+
+    @Test
+    @DisplayName("S3-AR-06 / RC-A-182 / RC-A-183: openStream delivers the spool as it is stored and streamDigest is the SHA-256 of those bytes; a spool changed on the disk gives another digest")
+    void theSpoolIsOpenedAndHashedAsItIsStored(@TempDir Path folder) throws IOException {
+        FileOutputPayloadStore store = store(folder, 1024);
+        OutputId id = id("3");
+        store.append(id, new StreamFrame(StreamKind.STDOUT, utf8("hello ")));
+        store.append(id, new StreamFrame(StreamKind.STDERR, utf8("oops")));
+
+        byte[] streamed = readAll(store.openStream(id));
+        Digest digest = store.streamDigest(id);
+
+        assertThat(streamed).isEqualTo(Files.readAllBytes(folder.resolve(id.value() + ".stream")));
+        assertThat(streamed).hasSize(5 + 6 + 5 + 4);
+        assertThat(digest).isEqualTo(new Sha256Digester().digest(streamed));
+        assertThat(store.streamDigest(id)).as("the same input, the same digest").isEqualTo(digest);
+
+        byte[] changed = streamed.clone();
+        changed[changed.length - 1] ^= 0x01;
+        Files.write(folder.resolve(id.value() + ".stream"), changed);
+
+        assertThat(store.streamDigest(id)).as("a tampered spool does not match").isNotEqualTo(digest);
+        assertThat(store.streamDigest(id)).isEqualTo(new Sha256Digester().digest(changed));
+    }
+
+    @Test
+    @DisplayName("S3-AR-06: an output without a spool (never written, or finished and its spool removed) is refused as OUTPUT_CAPTURE_FAILED, by openStream and by streamDigest")
+    void anOutputWithoutASpoolHasNoStream(@TempDir Path folder) {
+        FileOutputPayloadStore store = store(folder, 1024);
+        OutputId never = id("4");
+        OutputId finished = id("5");
+        store.append(finished, new StreamFrame(StreamKind.STDOUT, utf8("x")));
+        store.finish(finished, utf8("{}"), utf8("x"));
+
+        for (OutputId id : List.of(never, finished)) {
+            assertThatThrownBy(() -> store.openStream(id)).isInstanceOfSatisfying(RequestRefusedException.class,
+                e -> assertThat(e.code()).isEqualTo(ExecutionErrorCode.OUTPUT_CAPTURE_FAILED));
+            assertThatThrownBy(() -> store.streamDigest(id)).isInstanceOfSatisfying(RequestRefusedException.class,
+                e -> assertThat(e.code()).isEqualTo(ExecutionErrorCode.OUTPUT_CAPTURE_FAILED));
+        }
+    }
 }

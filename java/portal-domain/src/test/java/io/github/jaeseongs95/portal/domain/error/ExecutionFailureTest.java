@@ -58,6 +58,19 @@ class ExecutionFailureTest {
     }
 
     @Test
+    @DisplayName("S3-AR-03 D3-03 a disk that cannot take a reservation is ARTIFACT_STORAGE_FULL at the reservation or the operation stage, and at no other stage")
+    void storageFullBelongsToTheReservationAndOperationStages() {
+        for (ExecutionStage stage : ExecutionStage.values()) {
+            boolean allowed = stage == ExecutionStage.OUTPUT_RESERVATION || stage == ExecutionStage.OPERATION;
+            assertThat(stage.accepts(ExecutionErrorCode.ARTIFACT_STORAGE_FULL)).as(stage.name()).isEqualTo(allowed);
+        }
+        ExecutionFailure failure = new ExecutionFailure.Classified(ExecutionStage.OPERATION, ExecutionErrorCode.ARTIFACT_STORAGE_FULL, RemoteOutcome.NOT_STARTED);
+        assertThat(failure.code()).isEqualTo(ExecutionErrorCode.ARTIFACT_STORAGE_FULL);
+        assertThatThrownBy(() -> new ExecutionFailure.Classified(ExecutionStage.SSH_CONNECT, ExecutionErrorCode.ARTIFACT_STORAGE_FULL, RemoteOutcome.NOT_STARTED))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     @DisplayName("RC-A-760 RC-A-761 S2-FA-01 a diagnosis cannot be forged: a code that does not belong to the stage is refused, and the type has the three fields and no text")
     void onlyAllowedFieldsAndPairs() {
         for (ExecutionStage stage : ExecutionStage.values()) {

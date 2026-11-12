@@ -15,6 +15,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.List;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.TestInstance.Lifecycle;
@@ -28,10 +29,15 @@ import org.junit.jupiter.api.io.TempDir;
 class RuleFixturesTest {
 
     private static final String FIXTURES = "io.github.jaeseongs95.portal.archchecks.fixtures";
-    private static final Pattern FIXTURE_CLASS = Pattern.compile("io\\.github\\.jaeseongs95\\.portal\\.archchecks\\.fixtures\\.(?:(?:dir|cycle)\\.\\w+\\.)?(\\w+)");
+    /** A fixture class name in a failure detail: the lower-case package segments below {@code fixtures} (dir, cycle.alpha, s3.ssh.exec ...), then the class name. */
+    private static final Pattern FIXTURE_CLASS = Pattern.compile("io\\.github\\.jaeseongs95\\.portal\\.archchecks\\.fixtures\\.(?:[a-z]\\w*\\.)*([A-Z]\\w*)");
     private static final ModuleTable FIXTURE_TABLE = new ModuleTable(FIXTURES + ".dir", Map.of("domain", Set.of(), "app", Set.of("domain")));
+    /** The stage 3 fixtures mirror the product layout (s3.domain.target.TargetOs, s3.app.remote.RemoteExecutor, s3.ssh.exec ...), so the rules read them through a table. */
+    private static final ModuleTable S3_TABLE = new ModuleTable(FIXTURES + ".s3",
+        Map.of("domain", Set.of(), "app", Set.of("domain"), "store", Set.of("app", "domain"), "ssh", Set.of("app", "domain")));
     private static final ModuleTable PRODUCT_TABLE = ModuleTable.product();
-    private static final Set<String> NEVER_FLAGGED = Set.of("Clean", "GoodApp", "PureDomain", "Counter", "GoodAdvice", "GoodController", "Answer", "Order", "GammaUser");
+    private static final Set<String> NEVER_FLAGGED = Set.of("Clean", "GoodApp", "PureDomain", "Counter", "GoodAdvice", "GoodController", "Answer", "Order", "GammaUser",
+        "MinaAdapter", "PlainExec", "PosixPlatform", "GoodPort", "CancelToken", "ConvertsAuditFailure");
     /** The sub-packages {@code alpha} and {@code beta} of this package depend on each other on purpose; {@code gamma} only uses {@code alpha}. */
     private static final String CYCLE_FIXTURES = FIXTURES + ".cycle";
 
@@ -179,6 +185,61 @@ class RuleFixturesTest {
     }
 
     @Test
+    @DisplayName("S3-AB-01: A-DIR names a portal-ssh class that uses portal-store")
+    void a_dir_sshDoesNotUseStore() {
+        assertFlagsAndSparesCleanClasses(PortalRules.direction(S3_TABLE), "UsesStore");
+    }
+
+    @Test
+    @DisplayName("S3-AB-02: A-MINA names the app and store classes that use org.apache.sshd and spares the portal-ssh class that does")
+    void a_mina() {
+        assertFlagsAndSparesCleanClasses(PortalRules.mina(S3_TABLE), "AppUsesMina", "StoreUsesMina");
+        assertThat(flagged(PortalRules.mina(S3_TABLE))).doesNotContain("MinaAdapter");
+    }
+
+    @Test
+    @DisplayName("S3-AB-03: A-NO-LOCAL-PROCESS names the portal-ssh classes that start a local process")
+    void a_noLocalProcess() {
+        assertFlagsAndSparesCleanClasses(PortalRules.noLocalProcess(S3_TABLE), "StartsLocalProcess", "ExecsLocalRuntime");
+    }
+
+    @Test
+    @DisplayName("S3-AB-04: A-NO-RETRY-EXEC names the exec classes with @Retryable, RetryTemplate or @ConcurrencyLimit and a RemoteExecutor implementation outside ssh.exec")
+    void a_noRetryExec() {
+        assertFlagsAndSparesCleanClasses(PortalRules.noRetryExec(S3_TABLE), "RetriesExec", "RetryTemplateExec", "LimitsExec", "RetryingRemoteExecutor");
+    }
+
+    @Test
+    @DisplayName("S3-AB-05: A-NO-UOE is the rule A-LSP, which covers every module including portal-ssh and portal-app; it names a new UnsupportedOperationException")
+    void a_noUoe_isTheRuleALsp() {
+        assertFlagsAndSparesCleanClasses(PortalRules.unsupported(), "ReadOnlyStore");
+    }
+
+    @Test
+    @DisplayName("S3-AB-06: A-REMOTE-RESULT names the ports that answer with Optional, boolean or an interface that is not sealed")
+    void a_remoteResult() {
+        assertFlagsAndSparesCleanClasses(PortalRules.remoteResult(S3_TABLE), "OptionalLookupPort", "BooleanPort", "LooseResultPort");
+    }
+
+    @Test
+    @DisplayName("S3-AB-07: A-NO-CHARSET-DEFAULT is the rule A-CHARSET, which covers every module including portal-ssh; it names a conversion without a Charset")
+    void a_noCharsetDefault_isTheRuleACharset() {
+        assertFlagsAndSparesCleanClasses(PortalRules.charset(), "GetsBytesWithDefaultCharset", "NewsStringFromBytes", "NewsInputStreamReader");
+    }
+
+    @Test
+    @DisplayName("S3-AB-09: A-SSH-NO-PLATFORM-BRANCH names the portal-ssh classes that switch on, compare or enumerate TargetOs and spares a TargetPlatform that names its own OS")
+    void a_sshNoPlatformBranch() {
+        assertFlagsAndSparesCleanClasses(PortalRules.noPlatformBranch(S3_TABLE), "SwitchesOnOs", "ComparesOs", "EnumeratesOs");
+    }
+
+    @Test
+    @DisplayName("S3-AB-10: A-AUDIT-BOUNDARY names the public methods of app.execution and app.file that declare AuditFailedException")
+    void a_auditBoundary() {
+        assertFlagsAndSparesCleanClasses(PortalRules.auditBoundary(S3_TABLE), "LeaksAuditFailure", "LeaksFileAuditFailure");
+    }
+
+    @Test
     void cleanClassesAreNeverFlaggedByAnyRule() {
         List<ArchRule> all = new java.util.ArrayList<>();
         all.addAll(PortalRules.out());
@@ -206,6 +267,13 @@ class RuleFixturesTest {
         all.addAll(PortalRules.charset());
         all.addAll(PortalRules.sleep());
         all.addAll(PortalRules.cycles(List.of(CYCLE_FIXTURES)));
+        all.addAll(PortalRules.direction(S3_TABLE));
+        all.addAll(PortalRules.mina(S3_TABLE));
+        all.addAll(PortalRules.noLocalProcess(S3_TABLE));
+        all.addAll(PortalRules.noRetryExec(S3_TABLE));
+        all.addAll(PortalRules.noPlatformBranch(S3_TABLE));
+        all.addAll(PortalRules.remoteResult(S3_TABLE));
+        all.addAll(PortalRules.auditBoundary(S3_TABLE));
         assertThat(flagged(all)).doesNotContainAnyElementsOf(NEVER_FLAGGED);
     }
 

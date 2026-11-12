@@ -329,6 +329,14 @@
         ["DESKTOP_AUTH_BROKER_UNAVAILABLE", "src/domain/desktop-state.mjs:5"]
       ]
     },
+    "stage3Additions": {
+      "description": "Three codes of stored-state refusals that 2.x raised as message-only errors or did not raise at all (decision D3-13 of docs/migration/stage3-design.md, section 11.1): the java enums RequestErrorCode, OperationErrorCode own them. Each entry is [code, where 2.x raised the matching message-only error, or 'java only: ...' when 2.x had no counterpart]. ARTIFACT_STORAGE_FULL (decision D3-03) is not here: it is in the confirmedPublicContract list of 2.x and moves from ArtifactErrorCode to ExecutionErrorCode without a change of its wire value.",
+      "entries": [
+        ["POLICY_REVISION_CONFLICT", "src/adapters/storage/command-state.mjs:49 (message 'Policy revision conflict')"],
+        ["MAINTENANCE_OWNER_USED", "src/adapters/storage/maintenance-state.mjs:25 (message 'Maintenance owner already used')"],
+        ["OUTPUT_VERSION_CONFLICT", "java only: the optimistic-lock failure of a command output record (JdbcOutputManifestStore); 2.x had no counterpart"]
+      ]
+    },
     "excludedStrings": {
       "description": "UPPER_SNAKE literals found by the same grep but judged not to be error codes of the server envelope.",
       "entries": [

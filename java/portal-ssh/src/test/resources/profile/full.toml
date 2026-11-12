@@ -1,0 +1,61 @@
+# A profile file that uses every key of the schema (stage 3, vendor PF-10, PF-11, PF-12). The names are made up for the test.
+[defaults]
+defaultProfile = "build"
+sessionMaxPerConnection = 7
+sessionIdleTimeoutMs = 120000
+sessionBackgroundMaxMs = 7200000
+commandTimeoutMs = 45000
+commandMaxChars = 0
+commandMaxOutputBytes = 2048
+connectionIdleReapMs = 5000
+commandQuotaPerDay = 10
+approvalGrantTtlMs = 60000
+approvalMode = "ask-all"
+transferRoot = "/srv/transfer"
+transferMaxBytes = 1024
+transferTimeoutMs = 90000
+
+[[profiles]]
+name = "build"
+host = "build.example.test"
+port = 2222
+user = "deploy"
+auth = "key"
+keyRef = "keys/deploy"
+group = "ci"
+workdir = "/srv/build"
+trustedHostKey = "  SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA  "
+tty = true
+role = "builder"
+readOnly = true
+cert = true
+announceAgent = false
+timeout = 1000
+maxChars = 80
+maxOutputBytes = 512
+approvalPolicy = "deny"
+sessionMaxPerConnection = 2
+sessionIdleTimeoutMs = 1000
+sessionBackgroundMaxMs = 2000
+commandQuotaPerDay = 0
+transferMaxBytes = 4096
+transferTimeoutMs = 5000
+
+[[profiles]]
+name = "jump"
+host = "jump.example.test"
+user = "ops"
+
+[[profiles]]
+name = "db"
+host = "db.internal.example.test"
+user = "ops"
+auth = "keychain"
+keychainEntry = "ssh-mcp/db"
+via = "jump"
+
+[policy]
+denylist = ["rm -rf /"]
+
+[policy.roleBindings.operator]
+prod = ["read-only", "safe"]

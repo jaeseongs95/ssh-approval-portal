@@ -1,0 +1,1 @@
+@@IMPORT_MANAGEMENT@@$workdir=[Text.UTF8Encoding]::new($false,$true).GetString([Convert]::FromBase64String('@@WORKDIR_BASE64@@'));Microsoft.PowerShell.Management\Set-Location -LiteralPath $workdir -ErrorAction Stop;[IO.Directory]::SetCurrentDirectory($workdir);

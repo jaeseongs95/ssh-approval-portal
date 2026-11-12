@@ -28,6 +28,7 @@ import io.github.jaeseongs95.portal.app.artifact.ArtifactRegistry;
 import io.github.jaeseongs95.portal.app.artifact.ArtifactSpec;
 import io.github.jaeseongs95.portal.app.artifact.ArtifactState;
 import io.github.jaeseongs95.portal.app.artifact.ConsumeReason;
+import io.github.jaeseongs95.portal.app.artifact.ConsumeState;
 import io.github.jaeseongs95.portal.domain.error.ArtifactErrorCode;
 import io.github.jaeseongs95.portal.domain.error.RequestRefusedException;
 import io.github.jaeseongs95.portal.domain.id.ArtifactId;
@@ -226,17 +227,19 @@ class ArtifactStartupCheckTest {
     }
 
     @Test
-    @DisplayName("RC-B-095: a consumption that was begun and not completed is reported and left as it is, with its bytes; one without a file is not an error")
+    @DisplayName("RC-B-095 / S3-AR-09: a consumption that was begun and not completed is reported and left as it is, with its bytes and the reason it began for; one without a file is not an error")
     void anOpenConsumptionIsReported() {
         ArtifactId withFile = readyWithFile(fixtures.stagedFile(4), new byte[] {4, 4, 4, 4});
-        registry.beginConsume(withFile);
+        registry.beginConsume(withFile, ConsumeReason.MOVED);
         ArtifactId withoutFile = fixtures.readyArtifact(registry, fixtures.stagedFile(0), new byte[0]);
-        registry.beginConsume(withoutFile);
+        registry.beginConsume(withoutFile, ConsumeReason.REMOVED);
 
         ArtifactReconciliation report = startup.reconcile();
 
         assertThat(report.unfinishedConsumptions()).containsExactlyInAnyOrder(withFile, withoutFile);
         assertThat(registry.find(withFile).orElseThrow().state()).isEqualTo(ArtifactState.CONSUMING);
+        assertThat(registry.find(withFile).orElseThrow().consumption()).as("the recovery sees the reason the use began for").isEqualTo(new ConsumeState.Consuming(ConsumeReason.MOVED));
+        assertThat(registry.find(withoutFile).orElseThrow().consumption()).isEqualTo(new ConsumeState.Consuming(ConsumeReason.REMOVED));
         assertThat(payloads.length(withFile)).isEqualTo(4);
         assertThat(report.quarantined()).isEmpty();
     }
@@ -245,7 +248,7 @@ class ArtifactStartupCheckTest {
     @DisplayName("RC-B-095: bytes left behind by a consumed row are quarantined, not deleted and not re-adopted")
     void bytesOfAConsumedRowAreQuarantined() {
         ArtifactId id = readyWithFile(fixtures.stagedFile(4), new byte[] {4, 4, 4, 4});
-        registry.beginConsume(id);
+        registry.beginConsume(id, ConsumeReason.MOVED);
         registry.completeConsume(id, ConsumeReason.MOVED);
 
         ArtifactReconciliation report = startup.reconcile();

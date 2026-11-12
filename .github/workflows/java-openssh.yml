@@ -1,0 +1,107 @@
+name: Java real OpenSSH
+
+# The SSH adapter of the Java 3.0 line against a real OpenSSH server (stage 3 design 7.2, 7.3 and decision D3-11).
+# The tests (:portal-ssh:realOpenSshTest) are Java; only the preparation of the server (an OS account, a sudoers rule, sshd) is a script, because the JDK has no API for it:
+#   Linux   java/ci/openssh-linux.sh     a second sshd on the runner, an account that may run sftp-server through sudo -n
+#   Windows java/ci/openssh-windows.cmd  the OpenSSH Server capability, a non-administrator account, sshd as SYSTEM in a scheduled task
+# The task fails when a property is missing and when it ran no test, so a job can neither skip nor pass without a real server.
+
+on:
+  push:
+    branches: [develop, 'feature/v300-**']
+    paths:
+      - 'java/**'
+      - '.github/workflows/java-openssh.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: java-openssh-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  openssh-linux:
+    name: Real OpenSSH on Linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # Same pins as linux-regression.yml and windows-ssh.yml (the official actions/checkout and actions/upload-artifact repositories).
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      # Official action, major tag.
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Prepare the OpenSSH server (account, sudoers rule, sshd)
+        run: sh java/ci/openssh-linux.sh
+      - name: realOpenSshTest on Linux
+        working-directory: java
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --no-daemon --console=plain :portal-ssh:realOpenSshTest \
+            -Pportal.test.openssh.host=127.0.0.1 \
+            -Pportal.test.openssh.port="$PORTAL_OPENSSH_PORT" \
+            -Pportal.test.openssh.user="$PORTAL_OPENSSH_USER" \
+            -Pportal.test.openssh.key-file="$PORTAL_OPENSSH_KEY_FILE" \
+            -Pportal.test.openssh.known-hosts="$PORTAL_OPENSSH_KNOWN_HOSTS" \
+            -Pportal.test.openssh.platform=linux
+      - name: Stop the OpenSSH server and remove the account
+        if: always()
+        run: sh java/ci/openssh-linux.sh stop
+      - name: Upload the test results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: real-openssh-linux-test-results
+          path: |
+            java/portal-ssh/build/test-results/realOpenSshTest/*.xml
+            java/portal-ssh/build/reports/tests/realOpenSshTest
+          if-no-files-found: warn
+          retention-days: 14
+
+  openssh-windows:
+    name: Real OpenSSH on Windows
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Prepare the OpenSSH server (capability, account, sshd as SYSTEM)
+        shell: cmd
+        run: call java\ci\openssh-windows.cmd
+      # Git Bash is on every Windows runner; the Gradle wrapper script of the repository is the POSIX one.
+      - name: realOpenSshTest on Windows
+        shell: bash
+        working-directory: java
+        run: |
+          ./gradlew --no-daemon --console=plain :portal-ssh:realOpenSshTest \
+            -Pportal.test.openssh.host=127.0.0.1 \
+            -Pportal.test.openssh.port="$PORTAL_OPENSSH_PORT" \
+            -Pportal.test.openssh.user="$PORTAL_OPENSSH_USER" \
+            -Pportal.test.openssh.key-file="$PORTAL_OPENSSH_KEY_FILE" \
+            -Pportal.test.openssh.known-hosts="$PORTAL_OPENSSH_KNOWN_HOSTS" \
+            -Pportal.test.openssh.platform=windows \
+            -Pportal.test.openssh.windows-python="$PORTAL_OPENSSH_WINDOWS_PYTHON"
+      - name: Stop the OpenSSH server and remove the account
+        if: always()
+        shell: cmd
+        run: call java\ci\openssh-windows.cmd stop
+      - name: Upload the test results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: real-openssh-windows-test-results
+          path: |
+            java/portal-ssh/build/test-results/realOpenSshTest/*.xml
+            java/portal-ssh/build/reports/tests/realOpenSshTest
+          if-no-files-found: warn
+          retention-days: 14

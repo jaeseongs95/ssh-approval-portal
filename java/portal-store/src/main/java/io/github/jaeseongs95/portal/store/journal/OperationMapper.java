@@ -163,7 +163,7 @@ class OperationMapper {
             o.signalDelivery(), timeoutMs, o.cleanup(), o.reconciliation(), o.outputState(), o.capture(), out.received(), out.retained(), out.cursor(), out.truncation(),
             err.received(), err.retained(), err.cursor(), err.truncation(), failureKind, classified ? o.failure().stage() : null, classified ? o.failure().code() : null,
             classified ? o.failure().remoteOutcome() : null, null, null, null, evidence.kind(), evidence.exitCode(), evidence.confirmedAt(), evidence.sha256(), evidence.read(),
-            mapper.writeValueAsString(o.texts()));
+            mapper.writeValueAsString(o.texts()), null, null, null);
     }
 
     OperationResultRow resultRow(OperationId id, RecordedResult.Refused refused) {
@@ -176,7 +176,7 @@ class OperationMapper {
         return new OperationResultRow(id.value(), OperationResultRow.ResultKind.REFUSED, io.github.jaeseongs95.portal.domain.operation.ResultFlag.FAILED, null, null,
             OperationResultRow.ExitKind.NO_EXIT, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
             OperationResultRow.FailureKind.NONE, null, null, null, kind, f.reason(), f.stage(), OperationResultRow.EvidenceKind.NO_EVIDENCE, null, null, null, null,
-            mapper.writeValueAsString(List.<String>of()));
+            mapper.writeValueAsString(List.<String>of()), null, null, null);
     }
 
     // ----- rows -> snapshot -----

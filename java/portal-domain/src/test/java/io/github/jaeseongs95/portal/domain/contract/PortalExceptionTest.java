@@ -43,7 +43,7 @@ class PortalExceptionTest {
     }
 
     @Test
-    @DisplayName("S2-FA-02 a refusal before admission was not attempted; desktop, transfer, execution and store failures are unknown")
+    @DisplayName("S2-FA-02 S3-AR-03 a refusal before admission was not attempted; desktop, transfer, execution and store failures are unknown, except the two byte-reservation refusals")
     void attemptDefaultsFollowTheCategory() {
         for (ErrorCode code : allCodes()) {
             ExecutionAttempt expected = switch (code) {
@@ -55,10 +55,11 @@ class PortalExceptionTest {
                 case OperationErrorCode operation -> Set.of(OperationErrorCode.OPERATION_STORE_FAILED, OperationErrorCode.OPERATION_OUTCOME_PERSISTENCE_FAILED,
                     OperationErrorCode.OPERATION_DISPATCH_PERSISTENCE_FAILED, OperationErrorCode.OPERATION_NOTIFICATION_FAILED, OperationErrorCode.OPERATION_OBSERVER_ABORTED,
                     OperationErrorCode.OPERATION_CONTRACT_IMMUTABLE, OperationErrorCode.OPERATION_VERSION_CONFLICT, OperationErrorCode.INVALID_OPERATION_TRANSITION,
-                    OperationErrorCode.INVALID_OPERATION_RECORD).contains(operation) ? ExecutionAttempt.UNKNOWN : ExecutionAttempt.NOT_ATTEMPTED;
+                    OperationErrorCode.INVALID_OPERATION_RECORD, OperationErrorCode.OUTPUT_VERSION_CONFLICT).contains(operation) ? ExecutionAttempt.UNKNOWN : ExecutionAttempt.NOT_ATTEMPTED;
                 case DesktopErrorCode desktop -> ExecutionAttempt.UNKNOWN;
                 case TransferErrorCode transfer -> ExecutionAttempt.UNKNOWN;
-                case ExecutionErrorCode execution -> ExecutionAttempt.UNKNOWN;
+                case ExecutionErrorCode execution -> Set.of(ExecutionErrorCode.ARTIFACT_QUOTA, ExecutionErrorCode.ARTIFACT_STORAGE_FULL).contains(execution)
+                    ? ExecutionAttempt.NOT_ATTEMPTED : ExecutionAttempt.UNKNOWN;
             };
             assertThat(new RequestRefusedException(code).attempt()).as(code.name()).isEqualTo(expected);
         }

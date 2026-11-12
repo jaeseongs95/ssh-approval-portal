@@ -1,0 +1,1 @@
+try{$z=[IO.Compression.GZipStream]::new([IO.MemoryStream]::new([Convert]::FromBase64String('@@PACKED@@')),[IO.Compression.CompressionMode]::Decompress);$r=[IO.StreamReader]::new($z,[Text.UTF8Encoding]::new($false,$true));try{$s=$r.ReadToEnd()}finally{$r.Dispose()};& ([ScriptBlock]::Create($s))}catch{@@ERROR_REPORT@@exit 125}

@@ -15,6 +15,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
@@ -65,17 +66,34 @@ class ErrorCodeBaselineTest {
     }
 
     @Test
-    @DisplayName("S2-CO-01 the categories hold the counted number of codes: 30, 23, 46, 9, 13, 72, 18 and 7")
+    @DisplayName("S2-CO-01 S3-UC-07 the categories hold the counted number of codes: 32, 24, 45, 9, 13, 72, 18 and 8 (stage 3 moved one code and added three)")
     void categoriesHoldTheCountedCodes() {
-        assertThat(RequestErrorCode.values()).hasSize(30);
-        assertThat(OperationErrorCode.values()).hasSize(23);
-        assertThat(ArtifactErrorCode.values()).hasSize(46);
+        assertThat(RequestErrorCode.values()).hasSize(32);
+        assertThat(OperationErrorCode.values()).hasSize(24);
+        assertThat(ArtifactErrorCode.values()).hasSize(45);
         assertThat(HistoryErrorCode.values()).hasSize(9);
         assertThat(CapacityErrorCode.values()).hasSize(13);
         assertThat(DesktopErrorCode.values()).hasSize(72);
         assertThat(TransferErrorCode.values()).hasSize(18);
-        assertThat(ExecutionErrorCode.values()).hasSize(7);
-        assertThat(allNames()).hasSize(218);
+        assertThat(ExecutionErrorCode.values()).hasSize(8);
+        assertThat(allNames()).hasSize(221);
+    }
+
+    @Test
+    @DisplayName("S3-UC-07 S3-AR-03 the three stored-state codes of D3-13 are in the baseline's stage3Additions and in their enums; ARTIFACT_STORAGE_FULL (D3-03) is a 2.x code in ExecutionErrorCode only")
+    void theStageThreeCodesAreInTheBaselineAndTheEnums() {
+        JsonNode additions = readBaseline().path("x-portal-errorCodes").path("stage3Additions").path("entries");
+        List<String> listed = new ArrayList<>();
+        for (JsonNode entry : additions) {
+            listed.add(entry.get(0).stringValue());
+            assertThat(entry.get(1).stringValue()).isNotBlank();
+        }
+        assertThat(listed).containsExactlyInAnyOrder("POLICY_REVISION_CONFLICT", "MAINTENANCE_OWNER_USED", "OUTPUT_VERSION_CONFLICT");
+        assertThat(Arrays.stream(RequestErrorCode.values()).map(ErrorCode::name)).contains("POLICY_REVISION_CONFLICT", "MAINTENANCE_OWNER_USED");
+        assertThat(Arrays.stream(OperationErrorCode.values()).map(ErrorCode::name)).contains("OUTPUT_VERSION_CONFLICT");
+        assertThat(Arrays.stream(ArtifactErrorCode.values()).map(ErrorCode::name)).doesNotContain("ARTIFACT_STORAGE_FULL");
+        assertThat(Arrays.stream(ExecutionErrorCode.values()).map(ErrorCode::name)).contains("ARTIFACT_STORAGE_FULL");
+        assertThat(baselineCodes()).contains("ARTIFACT_STORAGE_FULL");
     }
 
     @Test
@@ -146,6 +164,7 @@ class ErrorCodeBaselineTest {
             }
         }
         collectFirst(block.path("stage2Additions").path("entries"), codes);
+        collectFirst(block.path("stage3Additions").path("entries"), codes);
         return codes;
     }
 

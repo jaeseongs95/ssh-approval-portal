@@ -168,11 +168,13 @@ class OperationStorage {
             return;
         }
         Optional<OperationResultRow> stored = results.findById(s.id().value());
-        if (stored.filter(row::equals).isPresent()) {
+        // The timeline of the execution is written after the outcome (ExecutionTimelineStore) and is not part of it: a result stored again keeps the instants it has.
+        OperationResultRow candidate = stored.map(old -> row.withTimeline(old.execConnectedAt(), old.execDispatchedAt(), old.execClosedAt())).orElse(row);
+        if (stored.filter(candidate::equals).isPresent()) {
             return;
         }
         stored.ifPresent(old -> results.deleteById(old.operationId()));
-        aggregates.insert(row);
+        aggregates.insert(candidate);
     }
 
     private static RequestRefusedException brokenRecord() {

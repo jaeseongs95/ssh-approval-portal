@@ -17,6 +17,26 @@ public sealed interface RemotePath permits PosixRemotePath, WindowsRemotePath {
     String basename();
 
     /**
+     * Whether this path is the root itself or lies below it, compared part by part in this path's own syntax: a POSIX path compares its parts exactly, a Windows path
+     * ignores the case of the drive letter and of every part and takes {@code \} and {@code /} as the same separator. A root of the other syntax contains nothing,
+     * and a part that only starts with the root's last part ({@code /data} and {@code /database/x}) is not inside it. This is a comparison of the written paths: it
+     * does not resolve links, which the adapter that touches the file does.
+     */
+    boolean isWithin(RemotePath root);
+
+    /**
+     * The directory that holds the file, as text: everything before the last part without the separator in front of it, or the root ({@code /} or {@code C:\})
+     * for a file at the top. The result is a directory, so it is not a {@code RemotePath} (a path of this type is a regular file).
+     */
+    String directory();
+
+    /**
+     * A file of the given name in the same directory, in the same syntax (the path of a temporary or backup file next to this one). The name must be a valid part of
+     * a path of this syntax; otherwise the constructor of the path type refuses it.
+     */
+    RemotePath sibling(String name);
+
+    /**
      * Picks the syntax from the text itself: a drive letter and a colon means Windows, anything else POSIX (2.x validation.mjs:37-40). It is for the places that
      * do not yet know which target the path is for (a staged file). Where the target is known, {@link PathSyntax#path(String)} chooses the syntax.
      */

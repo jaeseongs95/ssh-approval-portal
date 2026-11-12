@@ -13,9 +13,9 @@ public enum ExecutionStage {
     SSH_CONNECT(ExecutionErrorCode.SSH_CONNECT_FAILED),
     SSH_CHANNEL(ExecutionErrorCode.SSH_CHANNEL_OPEN_FAILED),
     SSH_EXECUTION(ExecutionErrorCode.SSH_EXECUTION_FAILED),
-    OUTPUT_RESERVATION(ExecutionErrorCode.OUTPUT_CAPACITY, ExecutionErrorCode.ARTIFACT_QUOTA),
+    OUTPUT_RESERVATION(ExecutionErrorCode.OUTPUT_CAPACITY, ExecutionErrorCode.ARTIFACT_QUOTA, ExecutionErrorCode.ARTIFACT_STORAGE_FULL),
     OUTPUT_CAPTURE(ExecutionErrorCode.OUTPUT_CAPTURE_FAILED),
-    OPERATION(ExecutionErrorCode.OPERATION_FAILED, ExecutionErrorCode.ARTIFACT_QUOTA);
+    OPERATION(ExecutionErrorCode.OPERATION_FAILED, ExecutionErrorCode.ARTIFACT_QUOTA, ExecutionErrorCode.ARTIFACT_STORAGE_FULL);
 
     private final Set<ExecutionErrorCode> codes;
 

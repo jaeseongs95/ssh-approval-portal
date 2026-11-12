@@ -146,6 +146,36 @@ public class FileOutputPayloadStore implements OutputPayloadStore {
         return new PayloadRead(Channels.newChannel(new ByteArrayInputStream(bytes)), size);
     }
 
+    /** The spool is read as the file holds it; it is a safe regular file or the read is refused. The caller closes the channel. */
+    @Override
+    public PayloadRead openStream(OutputId id) {
+        Path spool = files.path(id, PayloadKind.STREAM);
+        if (!files.exists(spool)) {
+            throw new RequestRefusedException(ExecutionErrorCode.OUTPUT_CAPTURE_FAILED);
+        }
+        long size = files.sizeOf(spool);
+        return new PayloadRead(files.openRead(spool), size);
+    }
+
+    /** The spool never exceeds {@link OutputLimits#maxOutputBytes()}, so it is hashed from memory like a rendering; a spool beyond that bound is damaged. */
+    @Override
+    public Digest streamDigest(OutputId id) {
+        try (PayloadRead read = openStream(id)) {
+            if (read.size() > limits.maxOutputBytes()) {
+                throw damaged(id, "the spool is larger than an output may be");
+            }
+            ByteBuffer bytes = ByteBuffer.allocate((int) read.size());
+            while (bytes.hasRemaining()) {
+                if (read.channel().read(bytes) < 0) {
+                    throw damaged(id, "the spool ended before its size");
+                }
+            }
+            return digester.digest(bytes.array());
+        } catch (IOException e) {
+            throw new RequestRefusedException(ExecutionErrorCode.OUTPUT_CAPTURE_FAILED, e);
+        }
+    }
+
     @Override
     public void delete(OutputId id) {
         for (PayloadKind kind : PayloadKind.values()) {
@@ -227,6 +257,11 @@ public class FileOutputPayloadStore implements OutputPayloadStore {
 
     private RequestRefusedException damaged(OutputId id, OutputFormat format, String reason) {
         LOG.warn("The {} rendering of the output {} failed verification: {}", format, id.value(), reason);
+        return new RequestRefusedException(ExecutionErrorCode.OUTPUT_CAPTURE_FAILED);
+    }
+
+    private RequestRefusedException damaged(OutputId id, String reason) {
+        LOG.warn("The spool of the output {} cannot be read: {}", id.value(), reason);
         return new RequestRefusedException(ExecutionErrorCode.OUTPUT_CAPTURE_FAILED);
     }
 

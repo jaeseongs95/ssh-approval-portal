@@ -42,9 +42,26 @@ public record ArtifactRow(@Id String id, ArtifactDirection direction, ArtifactPu
         return changing(ArtifactState.READY, receivedBytes, chunkCount, digestHex, retention, submissionId, consumeReason, nextVersion);
     }
 
+    /** A download is complete: its size is what was received (the reservation held the largest size a transfer may have), and the row is {@code READY}. */
+    public ArtifactRow downloaded(String digestHex, long nextVersion) {
+        return new ArtifactRow(id, direction, purpose, ArtifactState.READY, publicUuid, ownerId, operationKey, fileName, remotePath, receivedBytes, receivedBytes, chunkCount,
+            digestHex, targetId, targetRevision, fileTargetBinding, uploadProtocol, overwriteMode, elevation, retention, expiresAt, submissionId, consumeReason,
+            provenanceSourceUuid, provenanceOwnerId, provenanceRequestId, nextVersion, createdAt);
+    }
+
     /** An operation was made from the artifact; it is pinned for as long as the operation depends on it. */
     public ArtifactRow submittedAs(String operationId, long nextVersion) {
         return changing(state, receivedBytes, chunkCount, sha256, ArtifactRetention.PINNED, operationId, consumeReason, nextVersion);
+    }
+
+    /** The use of the staged file starts for {@code reason}: the state is {@code CONSUMING} and the reason is already recorded. */
+    public ArtifactRow consumingBecause(ConsumeReason reason, long nextVersion) {
+        return changing(ArtifactState.CONSUMING, receivedBytes, chunkCount, sha256, retention, submissionId, reason, nextVersion);
+    }
+
+    /** The operation that depended on the artifact is over: the owner no longer keeps it, so the expiry applies again. */
+    public ArtifactRow unpinned(long nextVersion) {
+        return changing(state, receivedBytes, chunkCount, sha256, ArtifactRetention.RELEASABLE, submissionId, consumeReason, nextVersion);
     }
 
     /** The staged file was used up for {@code reason}. */
