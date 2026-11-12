@@ -1,0 +1,72 @@
+{
+  "name": "show-approval",
+  "description": "Show the owner approval card for an existing request id. Displaying a card never approves or executes it.",
+  "inputSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+      "id": { "type": "string", "pattern": "^[a-f0-9]{48}$" }
+    },
+    "required": ["id"],
+    "additionalProperties": false
+  },
+  "outputSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$ref": "#/$defs/job",
+    "$defs": {
+      "identifier": { "type": "string", "pattern": "^[a-f0-9]{48}$" },
+      "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+      "job": {
+        "type": "object",
+        "properties": {
+          "id": { "$ref": "#/$defs/identifier" },
+          "kind": { "enum": ["command", "upload", "download"] },
+          "operation": {
+            "oneOf": [
+              { "type": "object", "properties": { "kind": { "const": "command" }, "command": { "type": "string" } }, "required": ["kind", "command"], "additionalProperties": true },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": { "const": "upload" }, "artifactId": { "$ref": "#/$defs/identifier" }, "remotePath": { "type": "string" }, "fileName": { "type": "string" },
+                  "size": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }, "sha256": { "$ref": "#/$defs/digest" }, "overwrite": { "type": "boolean" }, "elevate": { "type": "boolean" }
+                },
+                "required": ["kind", "artifactId", "remotePath", "fileName", "size", "sha256", "overwrite", "elevate"],
+                "additionalProperties": true
+              },
+              { "type": "object", "properties": { "kind": { "const": "download" }, "remotePath": { "type": "string" }, "elevate": { "type": "boolean" } }, "required": ["kind", "remotePath", "elevate"], "additionalProperties": true }
+            ]
+          },
+          "command": { "type": "string" },
+          "profile": { "type": "string" },
+          "commandClass": { "type": "string" },
+          "target": { "type": "string" },
+          "state": { "enum": ["accepted", "pending", "evaluating", "queued", "starting", "running", "terminating", "completed", "failed", "cancelled", "denied", "expired", "unknown"] },
+          "approvalMode": { "enum": ["automatic", "owner"] },
+          "createdAt": { "type": "number" },
+          "expiresAt": { "type": "number" },
+          "finishedAt": { "type": "number" },
+          "result": {
+            "type": "object",
+            "properties": {
+              "content": { "type": "array", "items": { "type": "object", "properties": { "type": { "const": "text" }, "text": { "type": "string" } }, "required": ["type", "text"] } },
+              "isError": { "type": "boolean" },
+              "structuredContent": { "type": "object", "additionalProperties": true }
+            },
+            "required": ["content"],
+            "additionalProperties": true
+          },
+          "auditError": { "type": "string" }
+        },
+        "required": ["id", "kind", "operation", "profile", "commandClass", "target", "state", "createdAt", "expiresAt"],
+        "additionalProperties": true
+      }
+    }
+  },
+  "annotations": { "readOnlyHint": true, "destructiveHint": false },
+  "_meta": { "ui": { "resourceUri": "ui://ssh-approval/card-{sha256 hex of the card HTML}.html", "visibility": ["model", "app"] } },
+  "portalRules": {
+    "outputSchema": "results.mjs:36-41,45 outputSchemas.job = jobSchema = z.object(jobFields).passthrough() (extra keys allowed). Not the Contract 2.0 envelope. Result: { content:[{type:'text',text}], structuredContent: presentJob(job) (+ message / approvalCallback for queued|pending|evaluating states, results.mjs:99-103), _meta: { sshApproval: capabilities.view(job) } } (server.mjs:44-47). Unknown id => thrown Error('Unknown request') => generic refused() text.",
+    "_meta": "_meta.ui.resourceUri is computed at runtime: `ui://ssh-approval/card-${hash(uiHtml)}.html`, hash = SHA-256 hex (server.mjs:15, validation.mjs:5). The literal above is a template, not a fixed value."
+  },
+  "visibility": "public"
+}

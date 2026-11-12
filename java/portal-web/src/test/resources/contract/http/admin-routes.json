@@ -1,0 +1,309 @@
+[
+  {
+    "port": "mcp", "method": "GET", "pathPattern": "^/health$", "source": "src/adapters/http/protocol.mjs:90",
+    "auth": "none: answered before the Bearer check (protocol.mjs:90 precedes :91). Matches req.url exactly, so a query string does not match.",
+    "requestShape": "none",
+    "responseShape": "200 JSON {healthy:true, version, deploymentGeneration, uiEnabled, adminAuthMode, ...lifecycle.snapshot(), requestAdmission:{mcp, admin}} (field set of lifecycle.snapshot() and requestAdmission snapshots: 미확인); on failure 503 {error:'Health check unavailable'}",
+    "note": "Listens on 127.0.0.1:BRIDGE_MCP_PORT (default 39124): bridge.mjs:16, config/settings-contract.json defaults. All JSON responses carry Cache-Control: no-store and X-Content-Type-Options: nosniff (protocol.mjs:15)."
+  },
+  {
+    "port": "mcp", "method": "POST", "pathPattern": "^/mcp$", "source": "src/adapters/http/protocol.mjs:91-110",
+    "auth": "Authorization: Bearer <BRIDGE_MCP_TOKEN> (tickets.mjs:9 authenticated(req, settings.mcpToken)). Any path other than /mcp, or a bad/missing token on any path other than GET /health, answers 401 {error:'Unauthorized'} (protocol.mjs:91); a valid token with a method other than POST on /mcp answers 405 {error:'Method not allowed'} (protocol.mjs:92).",
+    "requestShape": "Content-Type must be application/json (else 415 JSON-RPC error -32000); one JSON-RPC message per request (array body => 400 -32600 with data {error_code:'MCP_BATCH_NOT_SUPPORTED', executionAttempted:false, requestSubmitted:false}); invalid JSON/UTF-8 => 400 -32700; body > 1048576 bytes => 413 -32000 'Request body exceeds 1048576 bytes' (protocol.mjs:43-75, 96-99)",
+    "responseShape": "MCP Streamable HTTP, stateless (sessionIdGenerator undefined), enableJsonResponse true: a JSON-RPC response body (protocol.mjs:101-103). Admission saturation => 503 {error:<code>, executionAttempted:false, requestSubmitted:false, retryAfterMs:1000} with Retry-After: 1 and Connection: close (protocol.mjs:28-33); other failure => 500 {error:'MCP request failed'} (protocol.mjs:106)."
+  },
+  {
+    "port": "admin", "method": "GET", "pathPattern": "^/api/history$", "source": "src/adapters/http/protocol.mjs:123-128",
+    "auth": "admin-api: adminAccess.mode token => Authorization: Bearer <BRIDGE_ADMIN_TOKEN>; mode access|oidc => verified identity (adminAccess.identity) plus browser session (browserSessions.authenticated), no Bearer (admin-policy.mjs:4-25). GET in the allow-list (admin-policy.mjs:34) so no POST/Origin gate; additionally, if an Origin header is present it must equal adminOrigin else 403 (admin-policy.mjs:32).",
+    "requestShape": "query params only, each at most once: from, to, target, state, q, cursor (src/application/history.mjs:36); unknown or repeated param => 400 {error:'HISTORY_INVALID_FIELDS'}",
+    "responseShape": "200 JSON from retainedHistory(searchParams) (fields: 미확인); errors {error: HISTORY_INVALID_RANGE|HISTORY_INVALID_FIELDS|HISTORY_INVALID_FILTER|HISTORY_SEARCH_TOO_LARGE|HISTORY_INVALID_CURSOR|...} with error.status (history.mjs:13-47); 503 {error:'HISTORY_UNAVAILABLE'}; non-GET => 405 {error:'Method not allowed'}"
+  },
+  {
+    "port": "admin", "method": "GET", "pathPattern": "^/signed-out$", "source": "src/adapters/http/protocol.mjs:129-132",
+    "auth": "routeKind static (admin-policy.mjs:16): mode token => no authentication; mode access|oidc => verified identity required (principal), no browser session (admin-policy.mjs:21-24 applies the session check only to api|download).",
+    "requestShape": "none",
+    "responseShape": "200 text/html; charset=utf-8, fixed Korean/English sign-out page with CSP default-src 'none' (protocol.mjs:130-131)"
+  },
+  {
+    "port": "admin", "method": "POST", "pathPattern": "^/api/session/start$", "source": "src/adapters/http/protocol.mjs:133-142",
+    "auth": "api route but excluded from the browser-session check (admin-policy.mjs:24): mode token => Bearer <BRIDGE_ADMIN_TOKEN>; mode access|oidc => verified identity only. Not in the GET allow-list => POST + Origin == adminOrigin required (admin-policy.mjs:33-35). Handler additionally requires browserSessions, a principal and no query string, else the generic 409 (protocol.mjs:135).",
+    "requestShape": "Content-Type exactly application/json (else 415 {error:'Content type required'}); body at most 256 bytes (else 413 {error:'Request too large'}); must be a JSON object with no keys (else generic 409); invalid JSON => 400 {error:'Invalid request'}",
+    "responseShape": "200 {connected:true}; side effect browserSessions.start(req, res, principal) (cookie/session attributes: 미확인)"
+  },
+  {
+    "port": "admin", "method": "POST", "pathPattern": "^/api/session/logout$", "source": "src/adapters/http/protocol.mjs:133-142",
+    "auth": "same as POST /api/session/start (admin-policy.mjs:24, 33-35; handler requirements protocol.mjs:135).",
+    "requestShape": "same as POST /api/session/start: empty JSON object, application/json, at most 256 bytes",
+    "responseShape": "200 {connected:false}; side effects desktop.closeOwner('admin:' + sha256(principal.subject)) then browserSessions.end(req, res, principal) (protocol.mjs:140)"
+  },
+  {
+    "port": "admin", "method": "POST", "pathPattern": "^/api/artifacts$", "source": "src/adapters/http/opaque-file-api.mjs:22-76 (route :28, create :28/:35/:66/:69)",
+    "auth": "admin-api plus a mandatory verified principal (opaque-file-api.mjs:24-26 => 401 {error:'UNAUTHORIZED'} / 403 {error:'FORBIDDEN'}); artifact write routes require Origin == adminOrigin (admin-policy.mjs:26-27, else 403) and a principal (token mode uses the fixed subject 'portal-token-owner', admin-policy.mjs:30). Principal is re-checked after the body is read (opaque-file-api.mjs:49-52 => ARTIFACT_AUTHORIZATION_CHANGED).",
+    "requestShape": "Content-Type exactly application/json (Content-Encoding absent or identity) else 415 {error:'UNSUPPORTED_ARTIFACT_CONTENT_TYPE'}; body at most 8192 bytes else 413 {error:'ARTIFACT_REQUEST_TOO_LARGE'}; object with exactly the keys operationKey, fileName, size, sha256 else 400 {error:'INVALID_ARTIFACT_FIELDS'}; invalid JSON => 400 {error:'INVALID_JSON'}; query string => 400 {error:'INVALID_ARTIFACT_ROUTE'}",
+    "responseShape": "200 {uuid} (src/application/opaque-files.mjs:168); errors {error:<code>} with the status map in opaque-file-api.mjs:9-18 (400/403/404/409/410/413/422/500/503/507), unmapped => 500"
+  },
+  {
+    "port": "admin", "method": "GET", "pathPattern": "^/api/artifacts/([a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})$", "source": "src/adapters/http/opaque-file-api.mjs:5,31-33",
+    "auth": "same as POST /api/artifacts: artifact read requires Origin == adminOrigin and a principal (admin-policy.mjs:9,26-31; opaque-file-api.mjs:24-26).",
+    "requestShape": "none (a query string => 400 {error:'INVALID_ARTIFACT_ROUTE'})",
+    "responseShape": "200 opaqueFiles.stat({uuid}) result; fields per the MCP files tool projection: uuid, state, fileName, size, sha256, expiresAt, received, sequence, operations[{operationKey, action, requestId, state}] (public-contract.mjs:221-222; the HTTP body may contain further fields: 미확인)"
+  },
+  {
+    "port": "admin", "method": "POST", "pathPattern": "^/api/artifacts/([a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})/complete$", "source": "src/adapters/http/opaque-file-api.mjs:5,35,66,69",
+    "auth": "same as POST /api/artifacts.",
+    "requestShape": "Content-Type application/json; body must be an object with no keys, at most 8192 bytes",
+    "responseShape": "200 {uuid} (src/application/opaque-files.mjs:175)"
+  },
+  {
+    "port": "admin", "method": "PUT", "pathPattern": "^/api/artifacts/([a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})/chunks/(0|[1-9][0-9]*)$", "source": "src/adapters/http/opaque-file-api.mjs:5,34-61",
+    "auth": "same as POST /api/artifacts (artifact write: PUT is allowed through the Origin gate by admin-policy.mjs:11-12).",
+    "requestShape": "Content-Type exactly application/octet-stream (Content-Encoding absent or identity); raw bytes, 1..262144 (CHUNK_BYTES); required header X-Chunk-Sha256 = 64 lowercase hex SHA-256 of the body; path segment is the sequence number (safe integer) else 400 {error:'INVALID_ARTIFACT_CHUNK'}; body > 262144 => 413 {error:'ARTIFACT_REQUEST_TOO_LARGE'}",
+    "responseShape": "200 {uuid, ...ack} where ack is the store's append acknowledgement (src/application/opaque-files.mjs:173; ack fields: 미확인)"
+  },
+  {
+    "port": "admin", "method": "POST", "pathPattern": "^/api/files/uploads$", "source": "src/adapters/http/file-api.mjs:21-23,54-57",
+    "auth": "admin-api: mode token => Bearer <BRIDGE_ADMIN_TOKEN>; mode access|oidc => identity + browser session (admin-policy.mjs:4-25). Not in the GET allow-list => POST + Origin == adminOrigin (admin-policy.mjs:33-35). Authorization is re-evaluated after the body is read (file-api.mjs:45-49).",
+    "requestShape": "Content-Type exactly application/json else 415 {error:'JSON required'}; body at most 8192 bytes else 413 {error:'File request too large'}; keys required fileName, size, sha256, remotePath; optional target (^[a-z][a-z0-9_-]{0,31}$), overwrite (boolean), elevate (boolean), expectedTargetRevision (^[a-f0-9]{64}$, only with target) (file-api.mjs:11-18); no query string",
+    "responseShape": "200 {transferId, received:0, sequence:0, [targetId, targetRevision when item.fileTargetBound === true]} (file-api.mjs:56-57); schema violations surface as the generic 409 {error:'Request refused, expired, busy or unavailable'}"
+  },
+  {
+    "port": "admin", "method": "GET", "pathPattern": "^/api/files/uploads/([a-f0-9]{48})$", "source": "src/adapters/http/file-api.mjs:22,25-33",
+    "auth": "admin-api, GET in the allow-list (admin-policy.mjs:34): token => Bearer <BRIDGE_ADMIN_TOKEN>; access|oidc => identity + browser session; no Origin gate.",
+    "requestShape": "none (query string => thrown 'Unexpected file query' => generic 409)",
+    "responseShape": "200 {job: presentJob(job)} when an upload job exists for that artifactId, else {transfer:{id, state, received, sequence, expiresAt, fileName, size, sha256, remotePath, overwrite, elevate, targetId, targetRevision, fileTargetBound}} (only keys that are defined)"
+  },
+  {
+    "port": "admin", "method": "POST", "pathPattern": "^/api/files/uploads/([a-f0-9]{48})/chunks$", "source": "src/adapters/http/file-api.mjs:22,36-40,59-64",
+    "auth": "same as POST /api/files/uploads.",
+    "requestShape": "application/json; body at most Math.ceil(262144/3)*4 + 512 = 349528 + 512 bytes; keys exactly sequence, data; data = canonical base64 string of 1..262144 bytes, length at most 349528",
+    "responseShape": "200 files.appendUpload result {sequence, received} (inferred from the MCP chunk output; HTTP body fields: 미확인)"
+  },
+  {
+    "port": "admin", "method": "POST", "pathPattern": "^/api/files/uploads/([a-f0-9]{48})/finish$", "source": "src/adapters/http/file-api.mjs:22,65-68",
+    "auth": "same as POST /api/files/uploads.",
+    "requestShape": "application/json; body is an object with no keys, at most 8192 bytes",
+    "responseShape": "200 presentJob(job) (results.mjs:76-85: id, kind, operation, command, [targetId, targetRevision, targetDisplayName, hostKey], [decision], profile, commandClass, target, state, [approvalMode], createdAt, expiresAt, finishedAt, result, auditError)"
+  },
+  {
+    "port": "admin", "method": "POST", "pathPattern": "^/api/files/downloads$", "source": "src/adapters/http/file-api.mjs:22-23,58",
+    "auth": "same as POST /api/files/uploads.",
+    "requestShape": "application/json; body at most 8192 bytes; required key remotePath; optional target, elevate, expectedTargetRevision (file-api.mjs:12-13)",
+    "responseShape": "200 presentJob(files.requestDownload(...)) (fields as POST .../finish)"
+  },
+  {
+    "port": "admin", "method": "GET", "pathPattern": "^/api/targets$", "source": "src/adapters/http/protocol.mjs:149",
+    "auth": "admin-api, GET in the allow-list (admin-policy.mjs:34).",
+    "requestShape": "none",
+    "responseShape": "200 targets.list() ({targets, defaultTarget, ...}; full field set: 미확인) or, without a target router, {targets:[{id:'default', displayName, enabled:true, isDefault:true}], defaultTarget:'default'}"
+  },
+  {
+    "port": "admin", "method": "GET", "pathPattern": "^/api/capacity$", "source": "src/adapters/http/protocol.mjs:150-151",
+    "auth": "admin-api, GET in the allow-list (admin-policy.mjs:34). Registered only when the capacity service exists (protocol.mjs:150).",
+    "requestShape": "none",
+    "responseShape": "200 capacity.get() (fields: 미확인)"
+  },
+  {
+    "port": "admin", "method": "POST", "pathPattern": "^/api/capacity$", "source": "src/adapters/http/protocol.mjs:150,152-156",
+    "auth": "admin-api; not in the GET allow-list => POST + Origin == adminOrigin (admin-policy.mjs:33-35). Only when the capacity service exists.",
+    "requestShape": "Content-Type application/json (parameters after ';' ignored) else 415 {error:'JSON_REQUIRED'}; body at most 65536 bytes else 413 {error:'CAPACITY_BODY_TOO_LARGE'}; JSON object passed to capacity.set (fields: 미확인; error codes INVALID_CAPACITY_* / UNKNOWN_CAPACITY_TARGET / CAPACITY_REVISION_CONFLICT in src/application/runtime-capacity.mjs)",
+    "responseShape": "200 capacity.set(body) result (fields: 미확인); failure 409 {error: error.code ?? error.message}; other method => 405 {error:'METHOD_NOT_ALLOWED'}"
+  },
+  {
+    "port": "admin", "method": "POST", "pathPattern": "^/api/desktop/(open|status|observe|input|authenticate|close)$", "source": "src/adapters/http/protocol.mjs:158-168",
+    "auth": "admin-api; POST + Origin == adminOrigin (admin-policy.mjs:33-35). Registered only when the desktop service exists. The owner id is derived server-side: 'admin:' + sha256(principal.subject, or 'token-principal') (protocol.mjs:165).",
+    "requestShape": "application/json; body at most 65536 bytes else 413 {error:'DESKTOP_BODY_TOO_LARGE'}; JSON object that must not contain an 'ownerId' key else 400 {error:'INVALID_DESKTOP_INPUT'}; other fields: 미확인 (src/application/desktop.mjs)",
+    "responseShape": "200 desktop[<action>](body, owner) result (fields: 미확인); failure 409 {error: error.code ?? 'DESKTOP_REQUEST_FAILED'}; non-POST => 405 {error:'METHOD_NOT_ALLOWED'}; for 'authenticate' the request body value is zeroed after the call (protocol.mjs:167)"
+  },
+  {
+    "port": "admin", "method": "GET", "pathPattern": "^/api/session$", "source": "src/adapters/http/protocol.mjs:169",
+    "auth": "routeKind session (admin-policy.mjs:14): mode token => no authentication; mode access|oidc => verified identity required, no browser session.",
+    "requestShape": "none",
+    "responseShape": "200 {mode: adminAccess.mode} (mode values seen in source: token, access, oidc)"
+  },
+  {
+    "port": "admin", "method": "GET", "pathPattern": "^/api/version$", "source": "src/adapters/http/protocol.mjs:170-175",
+    "auth": "admin-api, GET in the allow-list (admin-policy.mjs:34).",
+    "requestShape": "query refresh=1 (optional)",
+    "responseShape": "200 releaseChecker.check({refresh}) or, without a checker, {currentVersion, latestVersion:null, updateAvailable:false, status:'unavailable', releaseUrl:'https://github.com/jaeseongs95/ssh-approval-portal/releases', publishedAt:null, checkedAt}; non-GET => 405 {error:'Method not allowed'}"
+  },
+  {
+    "port": "admin", "method": "GET", "pathPattern": "^/api/agent-cli$", "source": "src/adapters/http/protocol.mjs:176",
+    "auth": "admin-api, GET in the allow-list (admin-policy.mjs:34). Registered only when the agentCli service exists.",
+    "requestShape": "none",
+    "responseShape": "200 agentCli.get() (fields: 미확인)"
+  },
+  {
+    "port": "admin", "method": "GET", "pathPattern": "^/api/agent-cli/history$", "source": "src/adapters/http/protocol.mjs:177-183",
+    "auth": "admin-api, GET in the allow-list; if an Origin header is present it must equal adminOrigin (admin-policy.mjs:32,34).",
+    "requestShape": "query exactly targetId, provider, or targetId, provider, before, beforeId; each exactly once; before matches ^[1-9][0-9]{0,15}$ (converted to Number); otherwise thrown => generic 409",
+    "responseShape": "200 agentCli.history(fields) (fields: 미확인)"
+  },
+  {
+    "port": "admin", "method": "GET", "pathPattern": "^/api/agent-cli/lookup$", "source": "src/adapters/http/protocol.mjs:184-189",
+    "auth": "admin-api, GET in the allow-list (admin-policy.mjs:34).",
+    "requestShape": "query exactly key, targetId, provider; each exactly once",
+    "responseShape": "200 agentCli.lookup(fields); when value.found === true: {...value, job: presentJob(value.job)}; otherwise value as is"
+  },
+  {
+    "port": "admin", "method": "GET", "pathPattern": "^/api/agent-cli/requests/([a-f0-9]{48})$", "source": "src/adapters/http/protocol.mjs:190-191",
+    "auth": "admin-api, GET in the allow-list (admin-policy.mjs:34).",
+    "requestShape": "none",
+    "responseShape": "200 {...agentCli.request(id), job: presentJob(value.job)}"
+  },
+  {
+    "port": "admin", "method": "POST", "pathPattern": "^/api/agent-cli/(preview|submit|start|reconcile|login-status)$", "source": "src/adapters/http/protocol.mjs:192-200",
+    "auth": "admin-api; POST + Origin == adminOrigin (admin-policy.mjs:33-35). Registered only when the agentCli service exists.",
+    "requestShape": "Content-Type exactly application/json else 415 {error:'JSON required'}; body at most 8192 bytes else 413 {error:'CLI request too large'}; invalid JSON/UTF-8 => 400 {error:'Invalid JSON'}; body fields: 미확인 (src/application/agent-cli.mjs)",
+    "responseShape": "200 agentCli[<action>](body); for submit and start the result is wrapped with presentJob(); non-POST => 405 {error:'Method not allowed'}"
+  },
+  {
+    "port": "admin", "method": "GET", "pathPattern": "^/api/automation-metrics$", "source": "src/adapters/http/protocol.mjs:201",
+    "auth": "admin-api, GET in the allow-list (admin-policy.mjs:34). Registered only when automationMetrics exists.",
+    "requestShape": "optional single query target=<target id> (protocol.mjs:145-147)",
+    "responseShape": "200 automationMetrics(target) (fields: 미확인)"
+  },
+  {
+    "port": "admin", "method": "GET", "pathPattern": "^/api/environment$", "source": "src/adapters/http/protocol.mjs:202-204",
+    "auth": "admin-api, GET in the allow-list (admin-policy.mjs:34). Registered only when environmentEditor exists.",
+    "requestShape": "none",
+    "responseShape": "200 environmentEditor.get() (fields: 미확인); failure 409 {error: (error.refused ? 'ENV 요청 거절: ' : '') + (error.publicMessage ?? 'ENV 작업을 완료하지 못했습니다. 현재 상태를 다시 조회해 주세요.')}"
+  },
+  {
+    "port": "admin", "method": "POST", "pathPattern": "^/api/environment$", "source": "src/adapters/http/protocol.mjs:202-211",
+    "auth": "admin-api; POST + Origin == adminOrigin (admin-policy.mjs:33-35).",
+    "requestShape": "Content-Type exactly application/json else 415 {error:'JSON 형식으로 요청해 주세요.'}; body at most 32768 bytes else 413 {error:'ENV 변경 내용이 너무 큽니다.'}; invalid JSON => 400 {error:'잘못된 JSON 형식입니다.'}; fields: 미확인",
+    "responseShape": "200 environmentEditor.mutate('save', body) result (fields: 미확인); failure as GET /api/environment"
+  },
+  {
+    "port": "admin", "method": "POST", "pathPattern": "^/api/environment/restart$", "source": "src/adapters/http/protocol.mjs:202-211",
+    "auth": "admin-api; POST + Origin == adminOrigin (admin-policy.mjs:33-35).",
+    "requestShape": "same as POST /api/environment",
+    "responseShape": "200 environmentEditor.mutate('restart', body) result (fields: 미확인); failure as GET /api/environment"
+  },
+  {
+    "port": "admin", "method": "GET", "pathPattern": "^/api/([a-f0-9]{48})/source$", "source": "src/adapters/http/protocol.mjs:213-214",
+    "auth": "admin-api, GET in the allow-list (admin-policy.mjs:34).",
+    "requestShape": "none",
+    "responseShape": "200 commands.source(id) (fields: 미확인)"
+  },
+  {
+    "port": "admin", "method": "GET", "pathPattern": "^/api/outputs/([a-f0-9]{48})$", "source": "src/adapters/http/protocol.mjs:215-217",
+    "auth": "admin-api, GET in the allow-list (admin-policy.mjs:34).",
+    "requestShape": "query offset (default 0), limit (default 4096), format (default 'text'; the private tool allows text|json) -> commandOutputs.read({outputId, offsetBytes, maxBytes, format}); value validation: 미확인 (src/adapters/storage/command-output.mjs)",
+    "responseShape": "200 commandOutputs.read(...) result: {outputId, bytes, nextOffset, eof, text, ...} (server.mjs:86-91 pageSchema; full set: 미확인)"
+  },
+  {
+    "port": "admin", "method": "GET", "pathPattern": "^/api/command-policy$", "source": "src/adapters/http/protocol.mjs:218-219",
+    "auth": "admin-api, GET in the allow-list (admin-policy.mjs:34). Registered only when commandPolicy exists.",
+    "requestShape": "none",
+    "responseShape": "200 commandPolicy.get() (fields: 미확인)"
+  },
+  {
+    "port": "admin", "method": "POST", "pathPattern": "^/api/command-policy$", "source": "src/adapters/http/protocol.mjs:218,220-228",
+    "auth": "admin-api; POST + Origin == adminOrigin (admin-policy.mjs:33-35).",
+    "requestShape": "JSON body at most 65536 bytes (no Content-Type check here); fields policy, expectedRevision, reviewToken, acknowledged; refused during maintenance (thrown => generic 409)",
+    "responseShape": "200 commandPolicy.set(policy, expectedRevision, reviewToken, acknowledged) result (fields: 미확인)"
+  },
+  {
+    "port": "admin", "method": "POST", "pathPattern": "^/api/command-policy/review$", "source": "src/adapters/http/protocol.mjs:218,220-225",
+    "auth": "admin-api; POST + Origin == adminOrigin (admin-policy.mjs:33-35).",
+    "requestShape": "JSON body at most 65536 bytes; fields policy, expectedRevision",
+    "responseShape": "200 commandPolicy.review(policy, expectedRevision) result (fields: 미확인)"
+  },
+  {
+    "port": "admin", "method": "GET", "pathPattern": "^/downloads/([a-f0-9]{48})/([a-f0-9]{32})$", "source": "src/adapters/http/protocol.mjs:230-241",
+    "auth": "routeKind download (admin-policy.mjs:15): mode token => no admin token; mode access|oidc => verified identity + browser session. Authorization to the file is the one-time claim ticket: capabilities.claimDownload(id, key, ticket, method) (protocol.mjs:232).",
+    "requestShape": "path = request id + 32-hex key; query ticket=<ticket>",
+    "responseShape": "200 application/octet-stream with Content-Length, Content-Disposition: attachment; filename=\"download.bin\"; filename*=UTF-8''<url-encoded file name>, Cache-Control: no-store, Referrer-Policy: no-referrer, X-Content-Type-Options: nosniff; body = verified file bytes"
+  },
+  {
+    "port": "admin", "method": "HEAD", "pathPattern": "^/downloads/([a-f0-9]{48})/([a-f0-9]{32})$", "source": "src/adapters/http/protocol.mjs:230-235",
+    "auth": "same as GET /downloads/...",
+    "requestShape": "same as GET",
+    "responseShape": "200 same headers as GET, empty body"
+  },
+  {
+    "port": "admin", "method": "GET", "pathPattern": "^(/|/settings|/bridge|/preferences|/servers|/history|/app\\.js)$", "source": "src/adapters/http/protocol.mjs:242-246",
+    "auth": "routeKind static (admin-policy.mjs:16): mode token => no authentication; mode access|oidc => verified identity required, no browser session. (/signed-out is also static, listed separately.)",
+    "requestShape": "none",
+    "responseShape": "200: text/html; charset=utf-8 (admin web page; data-auth-mode, data-command-automation, data-multi-target, data-bridge-display-name, data-target-display-name injected, <title> rewritten) for every path except /app.js; text/javascript; charset=utf-8 for /app.js. Headers: Cache-Control: no-store, Content-Security-Policy \"default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'\", Referrer-Policy: no-referrer"
+  },
+  {
+    "port": "admin", "method": "GET", "pathPattern": "^/api/pending$", "source": "src/adapters/http/protocol.mjs:247",
+    "auth": "admin-api, GET in the allow-list (admin-policy.mjs:34).",
+    "requestShape": "optional single query target=<target id> (protocol.mjs:145-148); a second 'target' or an unregistered target => generic 409",
+    "responseShape": "200 JSON array of presentJob(job) for queue.list() filtered by target"
+  },
+  {
+    "port": "admin", "method": "GET", "pathPattern": "^/api/requests$", "source": "src/adapters/http/protocol.mjs:248",
+    "auth": "admin-api, GET in the allow-list (admin-policy.mjs:34).",
+    "requestShape": "optional single query target=<target id>",
+    "responseShape": "200 JSON array of presentJob(job) for queue.listAll() filtered by target"
+  },
+  {
+    "port": "admin", "method": "GET", "pathPattern": "^/api/operations/by-key$", "source": "src/adapters/http/protocol.mjs:250-274",
+    "auth": "admin-api: mode token => Bearer <BRIDGE_ADMIN_TOKEN>; access|oidc => identity + browser session. This route is exempt from the POST/Origin gate (admin-policy.mjs:10,33); the principal is re-authorized after a long wait (protocol.mjs:265-266 => 401/403 {error:'OWNER_REAUTH_REQUIRED'}). Non-GET => 405 {error:'Method not allowed'} (protocol.mjs:251).",
+    "requestShape": "query exactly operationKey (^[A-Za-z0-9_.:-]{16,128}(?![\\s\\S])) and optional waitMs (^(0|[1-9][0-9]{0,4})(?![\\s\\S]), at most 60000); anything else => 400 {error:'INVALID_OPERATION_OBSERVER'}",
+    "responseShape": "200 {contractVersion:'2.0', ok:true, data: presentOperation(result), error:null} (data = the operationData shape in mcp/tools/observe.json); errors {error: OPERATION_NOT_FOUND (404) | TARGET_REVISION_CONFLICT | OPERATION_OBSERVER_CAPACITY | OPERATION_OBSERVATION_FAILED (409)}; 503 {error:'OPERATION_OBSERVATION_UNAVAILABLE'} when operations is absent. waitMs > 0 detaches the admission lease (protocol.mjs:262)."
+  },
+  {
+    "port": "admin", "method": "GET", "pathPattern": "^/api/([a-f0-9]{48})$ with query observe=1", "source": "src/adapters/http/protocol.mjs:249,252-274",
+    "auth": "admin-api, GET in the allow-list (admin-policy.mjs:34); principal re-authorized after waiting (protocol.mjs:265-266).",
+    "requestShape": "query exactly observe=1 and optional waitMs (same validation as /api/operations/by-key); anything else => 400 {error:'INVALID_OPERATION_OBSERVER'}",
+    "responseShape": "same as GET /api/operations/by-key (the envelope with data = operationData)"
+  },
+  {
+    "port": "admin", "method": "GET", "pathPattern": "^/api/([a-f0-9]{48})$", "source": "src/adapters/http/protocol.mjs:275-276",
+    "auth": "admin-api, GET in the allow-list (admin-policy.mjs:34).",
+    "requestShape": "none",
+    "responseShape": "200 presentJob(job), or {error:'Unknown request'} (with status 200) when the id is unknown"
+  },
+  {
+    "port": "admin", "method": "*", "pathPattern": "^/api/maintenance/preservation/capture$", "source": "src/adapters/http/protocol.mjs:277; src/adapters/security/admin-policy.mjs:13,19-20",
+    "auth": "routeKind maintenance: Authorization: Bearer <BRIDGE_ADMIN_TOKEN> in every auth mode (admin-policy.mjs:19-20). Not in the GET allow-list, so effectively POST + Origin == adminOrigin (admin-policy.mjs:33-35); the handler itself does not check the method.",
+    "requestShape": "header X-Maintenance-Owner",
+    "responseShape": "200 {captured:true, ownership:'durable-v1'}"
+  },
+  {
+    "port": "admin", "method": "*", "pathPattern": "^/api/maintenance/preservation/compare$", "source": "src/adapters/http/protocol.mjs:278; src/adapters/security/admin-policy.mjs:13,19-20",
+    "auth": "same as /api/maintenance/preservation/capture.",
+    "requestShape": "headers X-Maintenance-Owner, X-Maintenance-Preservation-Contract",
+    "responseShape": "200 {...preservation.compare(owner, contract), ownership:'durable-v1'} (compare result fields: 미확인)"
+  },
+  {
+    "port": "admin", "method": "*", "pathPattern": "^/api/maintenance/capabilities$", "source": "src/adapters/http/protocol.mjs:279; src/adapters/security/admin-policy.mjs:13,19-20",
+    "auth": "same as /api/maintenance/preservation/capture.",
+    "requestShape": "none",
+    "responseShape": "200 {ownership:'durable-v1', baselineComparison: BASELINE_PRESERVATION_CONTRACT} (constant defined in src/adapters/storage/preservation-verification.mjs; value: 미확인)"
+  },
+  {
+    "port": "admin", "method": "*", "pathPattern": "^/api/maintenance/reserve$", "source": "src/adapters/http/protocol.mjs:280; src/adapters/security/admin-policy.mjs:13,19-20",
+    "auth": "same as /api/maintenance/preservation/capture.",
+    "requestShape": "header X-Maintenance-Owner",
+    "responseShape": "200 {reserved:true, ownership:'durable-v1'}"
+  },
+  {
+    "port": "admin", "method": "*", "pathPattern": "^/api/maintenance/status$", "source": "src/adapters/http/protocol.mjs:281; src/adapters/security/admin-policy.mjs:13,19-20",
+    "auth": "same as /api/maintenance/preservation/capture.",
+    "requestShape": "header X-Maintenance-Owner",
+    "responseShape": "200 {status: lifecycle.status(owner), ownership:'durable-v1'} (status values: 미확인)"
+  },
+  {
+    "port": "admin", "method": "*", "pathPattern": "^/api/maintenance/release$", "source": "src/adapters/http/protocol.mjs:282-287; src/adapters/security/admin-policy.mjs:13,19-20",
+    "auth": "same as /api/maintenance/preservation/capture.",
+    "requestShape": "headers X-Maintenance-Owner, optional X-Maintenance-Compare-Required ('1' only), optional X-Maintenance-Preservation-Contract (only allowed together with Compare-Required: 1); otherwise thrown => generic 409",
+    "responseShape": "200 {released:true, ownership:'durable-v1', [comparisonContract: BASELINE_PRESERVATION_CONTRACT when a contract header was sent]}"
+  },
+  {
+    "port": "admin", "method": "POST", "pathPattern": "^/api/([a-f0-9]{48})/(approve|deny|download)$", "source": "src/adapters/http/protocol.mjs:288-303",
+    "auth": "admin-api; POST + Origin == adminOrigin (admin-policy.mjs:33-35). The handler itself does not check the method.",
+    "requestShape": "no body; approve honours request header Prefer: respond-async",
+    "responseShape": "approve: 200 presentJob(result of queue.approve) after execution, or with Prefer: respond-async 202 presentJob(queue.start(id)) plus header Preference-Applied: respond-async; deny: 200 presentJob(queue.deny(id)); download: 200 {downloadUrl: capabilities.downloadLink(job)}. approve without respond-async detaches the admission lease (protocol.mjs:300)."
+  },
+  {
+    "port": "admin", "method": "*", "pathPattern": "(any other admin path)", "source": "src/adapters/http/protocol.mjs:289,304-306",
+    "auth": "unauthenticated or unauthorized requests are rejected before routing: 401 {error:'Unauthorized'} / 403 {error:'Forbidden'} / 409 {error:'Request refused, expired, busy or unavailable'} for an unparsable URL (protocol.mjs:121).",
+    "requestShape": "any",
+    "responseShape": "404 {error:'Not found'} for an unmatched authorized /api path; any thrown error => 409 {error:'Request refused, expired, busy or unavailable'}; admission saturation => 503 {error, executionAttempted:false, requestSubmitted:false, retryAfterMs:1000}"
+  }
+]

@@ -1,0 +1,43 @@
+{
+  "name": "ui-upload-begin",
+  "description": "Owner UI only: reserve the selected upload with its ticket, size and SHA-256.",
+  "inputSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+      "transfer": {
+        "type": "object",
+        "properties": {
+          "target": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}$" },
+          "direction": { "const": "upload", "type": "string" },
+          "remotePath": { "type": "string", "maxLength": 4096 },
+          "elevate": { "type": "boolean" },
+          "overwrite": { "type": "boolean" }
+        },
+        "required": ["direction", "remotePath", "elevate", "overwrite"]
+      },
+      "ticket": { "type": "string", "minLength": 1, "maxLength": 8192 },
+      "fileName": { "type": "string", "maxLength": 255 },
+      "size": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+      "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+    },
+    "required": ["transfer", "ticket", "fileName", "size", "sha256"],
+    "additionalProperties": false
+  },
+  "portalRules": {
+    "outputSchema": "results.mjs:44 outputSchemas.begin = z.object({ transferId: identifier, received: z.literal(0) }) (non-strict). Not the Contract 2.0 envelope. Result: structuredContent { transferId, received: 0 } + _meta.sshApproval { uploadTicket } (server.mjs:66-70). Handler: capabilities.guard(); capabilities.verifyBootstrap(transfer, ticket); files.beginUpload({...transfer, fileName, size, sha256}).",
+    "inputSchema.properties.transfer": "server.mjs:66 the nested transfer object is a plain z.object(...) (not .strict()): unknown keys are stripped, not rejected; additionalProperties is therefore intentionally not set here. How the live JSON Schema renders this nested object (additionalProperties) is unverified because ui-* tools are not exposed to the host."
+  },
+  "outputSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+      "transferId": { "type": "string", "pattern": "^[a-f0-9]{48}$" },
+      "received": { "const": 0 }
+    },
+    "required": ["transferId", "received"]
+  },
+  "annotations": { "readOnlyHint": false, "destructiveHint": true },
+  "_meta": { "ui": { "visibility": ["app"] } },
+  "visibility": "appOnly"
+}

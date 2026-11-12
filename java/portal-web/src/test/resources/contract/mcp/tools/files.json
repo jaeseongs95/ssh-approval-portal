@@ -1,0 +1,208 @@
+{
+  "name": "files",
+  "description": "Use a staged UUID from portal-files upload: stat reads metadata; copy retains it; move consumes it after confirmed publication; remove deletes staged bytes only. Copy/move require operationKey, target, expectedTargetRevision and remotePath. Observe data.request.id; pending/queued is not publication. If request is null, inspect file.operations on the same UUID. Policy and SSH permissions apply; no PC or internal staging paths are exposed.",
+  "inputSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+      "action": { "enum": ["stat", "copy", "move", "remove"], "type": "string" },
+      "uuid": { "type": "string", "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}(?![\\s\\S])" },
+      "operationKey": { "type": "string", "pattern": "^[A-Za-z0-9_.:-]{16,128}(?![\\s\\S])" },
+      "target": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}$" },
+      "expectedTargetRevision": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+      "remotePath": { "type": "string", "minLength": 1, "maxLength": 4096 },
+      "overwrite": { "type": "boolean" },
+      "elevate": { "type": "boolean" }
+    },
+    "required": ["action", "uuid"],
+    "additionalProperties": false
+  },
+  "portalRules": {
+    "outputSchema": "public-contract.mjs:74-75 responseSchema(): .refine(value => value.ok ? value.data !== null && value.error === null : value.data === null && value.error !== null, 'Expected data or error'). Not expressed in the outputSchema (a Zod .refine is absent from the SDK-published JSON Schema); recorded here only.",
+    "outputSchema.$defs.executionData": "public-contract.mjs:34-40 presentExecution(): each field is parsed with its own schema and replaced by null when it fails; the whole execution object is null when the source value is not a plain object.",
+    "inputSchema": "public-contract.mjs:208-213 handler rules, run after schema validation: for action copy|move the allowed fields are [action,uuid,operationKey,target,expectedTargetRevision,remotePath,overwrite,elevate] and operationKey, target, expectedTargetRevision and remotePath are all required; for stat|remove only [action,uuid] are allowed. Violations: any extra field => error code FILE_ACTION_INPUT_CONFLICT; missing required placement field => error code FILE_ACTION_INPUT_REQUIRED. Returned as an ok=false envelope."
+  },
+  "outputSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["contractVersion", "ok", "data", "error"],
+    "properties": {
+      "contractVersion": { "const": "2.0" },
+      "ok": { "type": "boolean" },
+      "data": { "anyOf": [{ "$ref": "#/$defs/filesData" }, { "type": "null" }] },
+      "error": { "anyOf": [{ "$ref": "#/$defs/errorData" }, { "type": "null" }] }
+    },
+    "$defs": {
+      "identifier": { "type": "string", "pattern": "^[a-f0-9]{48}$" },
+      "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+      "target": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}$" },
+      "key": { "type": "string", "pattern": "^[A-Za-z0-9_.:-]{16,128}(?![\\s\\S])" },
+      "uuid": { "type": "string", "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}(?![\\s\\S])" },
+      "nint": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+      "errorData": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "retryable", "executionAttempted"],
+        "properties": {
+          "code": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{1,95}$" },
+          "retryable": { "type": "boolean" },
+          "executionAttempted": { "anyOf": [{ "type": "boolean" }, { "const": "unknown" }] }
+        }
+      },
+      "stagedFile": {
+        "type": "object", "additionalProperties": false,
+        "required": ["uuid", "state", "fileName", "size", "sha256", "expiresAt", "received", "sequence", "operations"],
+        "properties": {
+          "uuid": { "$ref": "#/$defs/uuid" },
+          "state": { "enum": ["staging", "ready", "expired", "consuming", "moved", "removed"] },
+          "fileName": { "type": "string", "minLength": 1, "maxLength": 255 },
+          "size": { "type": "integer", "minimum": 0, "maximum": 67108864 },
+          "sha256": { "$ref": "#/$defs/digest" },
+          "expiresAt": { "$ref": "#/$defs/nint" },
+          "received": { "$ref": "#/$defs/nint" },
+          "sequence": { "$ref": "#/$defs/nint" },
+          "operations": {
+            "type": "array",
+            "items": {
+              "type": "object", "additionalProperties": false,
+              "required": ["operationKey", "action", "requestId", "state"],
+              "properties": {
+                "operationKey": { "$ref": "#/$defs/key" },
+                "action": { "enum": ["copy", "move"] },
+                "requestId": { "$ref": "#/$defs/identifier" },
+                "state": { "enum": ["accepted", "queued", "starting", "running", "terminating", "completed", "failed", "cancelled", "expired", "denied", "unknown", "admission-unconfirmed", "refused"] }
+              }
+            }
+          }
+        }
+      },
+      "streamMetadata": {
+        "type": "object", "additionalProperties": false,
+        "required": ["receivedBytes", "retainedBytes", "cursor", "truncated"],
+        "properties": { "receivedBytes": { "$ref": "#/$defs/nint" }, "retainedBytes": { "$ref": "#/$defs/nint" }, "cursor": { "$ref": "#/$defs/nint" }, "truncated": { "type": "boolean" } }
+      },
+      "executionData": {
+        "type": "object", "additionalProperties": false,
+        "required": ["phase", "reason", "remoteState", "exitCode", "signal", "automaticReplay", "signalDelivery", "timeoutMs", "cleanupComplete", "requiresReconciliation", "outputState", "captureFailed", "stdout", "stderr"],
+        "properties": {
+          "phase": { "enum": ["settled", null] },
+          "reason": { "enum": ["exit", "deadline", "cancel", "transport_lost", "channel_open_failed", "input_failed", null] },
+          "remoteState": { "enum": ["not_dispatched", "exited", "unknown", null] },
+          "exitCode": { "type": ["integer", "null"], "minimum": -9007199254740991, "maximum": 9007199254740991 },
+          "signal": { "type": ["string", "null"], "pattern": "^[A-Z0-9_-]{1,32}$" },
+          "automaticReplay": { "enum": [false, null] },
+          "signalDelivery": { "enum": ["requested", "unsupported", null] },
+          "timeoutMs": { "type": ["integer", "null"], "exclusiveMinimum": 0, "maximum": 9007199254740991 },
+          "cleanupComplete": { "type": ["boolean", "null"] },
+          "requiresReconciliation": { "type": ["boolean", "null"] },
+          "outputState": { "enum": ["partial", "complete", null] },
+          "captureFailed": { "type": ["boolean", "null"] },
+          "stdout": { "anyOf": [{ "$ref": "#/$defs/streamMetadata" }, { "type": "null" }] },
+          "stderr": { "anyOf": [{ "$ref": "#/$defs/streamMetadata" }, { "type": "null" }] }
+        }
+      },
+      "operationData": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "operationKey", "kind", "state", "targetId", "targetRevision", "approvalMode", "createdAt", "expiresAt", "finishedAt", "failed", "auditFailure", "failureCode", "remoteOutcome", "allowedRoot", "diagnostic", "remoteCleanup", "execution", "output", "artifact", "outputPage", "streamPage", "waitTimedOut"],
+        "properties": {
+          "id": { "$ref": "#/$defs/identifier" },
+          "operationKey": { "anyOf": [{ "$ref": "#/$defs/key" }, { "type": "null" }] },
+          "kind": { "enum": ["command", "source", "upload", "download"] },
+          "state": { "enum": ["accepted", "pending", "evaluating", "queued", "starting", "running", "terminating", "completed", "failed", "cancelled", "denied", "expired", "unknown"] },
+          "targetId": { "anyOf": [{ "$ref": "#/$defs/target" }, { "type": "null" }] },
+          "targetRevision": { "anyOf": [{ "$ref": "#/$defs/digest" }, { "type": "null" }] },
+          "approvalMode": { "enum": ["owner", "automatic", null] },
+          "createdAt": { "$ref": "#/$defs/nint" },
+          "expiresAt": { "type": ["integer", "null"], "minimum": 0, "maximum": 9007199254740991 },
+          "finishedAt": { "type": ["integer", "null"], "minimum": 0, "maximum": 9007199254740991 },
+          "failed": { "type": ["boolean", "null"] },
+          "auditFailure": { "type": "boolean" },
+          "failureCode": { "type": ["string", "null"] },
+          "remoteOutcome": { "enum": ["not_started", "completed", "unknown", null] },
+          "allowedRoot": { "type": ["string", "null"] },
+          "diagnostic": {
+            "anyOf": [
+              {
+                "type": "object", "additionalProperties": false,
+                "required": ["origin", "policyReason", "nativeStep", "nativeError"],
+                "properties": {
+                  "origin": { "enum": ["policy", "os"] },
+                  "policyReason": { "type": ["string", "null"] },
+                  "nativeStep": { "type": ["string", "null"] },
+                  "nativeError": { "type": ["integer", "null"], "minimum": 0, "maximum": 9007199254740991 }
+                }
+              },
+              { "type": "null" }
+            ]
+          },
+          "remoteCleanup": { "enum": ["confirmed", "unconfirmed", null] },
+          "execution": { "anyOf": [{ "$ref": "#/$defs/executionData" }, { "type": "null" }] },
+          "output": {
+            "anyOf": [
+              {
+                "type": "object", "additionalProperties": false,
+                "required": ["version", "captureSource", "sshCompleteness", "id", "state", "bytes", "snapshotBytes", "sha256", "expiresAt"],
+                "properties": {
+                  "version": { "const": 1 },
+                  "captureSource": { "const": "redacted-adapter-outcome" },
+                  "sshCompleteness": { "const": "unknown" },
+                  "id": { "anyOf": [{ "$ref": "#/$defs/identifier" }, { "type": "null" }] },
+                  "state": { "enum": ["pending", "ready", "unavailable", "expired"] },
+                  "bytes": { "type": ["integer", "null"], "minimum": 0, "maximum": 9007199254740991 },
+                  "snapshotBytes": { "type": ["integer", "null"], "minimum": 0, "maximum": 9007199254740991 },
+                  "sha256": { "anyOf": [{ "$ref": "#/$defs/digest" }, { "type": "null" }] },
+                  "expiresAt": { "type": ["integer", "null"], "minimum": 0, "maximum": 9007199254740991 }
+                }
+              },
+              { "type": "null" }
+            ]
+          },
+          "artifact": {
+            "anyOf": [
+              {
+                "type": "object", "additionalProperties": false,
+                "required": ["fileName", "size", "sha256"],
+                "properties": { "fileName": { "type": "string" }, "size": { "$ref": "#/$defs/nint" }, "sha256": { "$ref": "#/$defs/digest" } }
+              },
+              { "type": "null" }
+            ]
+          },
+          "outputPage": {
+            "anyOf": [
+              {
+                "type": "object", "additionalProperties": false,
+                "required": ["text", "cursor", "nextCursor", "bytes", "totalBytes", "sha256", "eof", "expiresAt"],
+                "properties": {
+                  "text": { "type": "string" },
+                  "cursor": { "$ref": "#/$defs/nint" },
+                  "nextCursor": { "$ref": "#/$defs/nint" },
+                  "bytes": { "$ref": "#/$defs/nint" },
+                  "totalBytes": { "$ref": "#/$defs/nint" },
+                  "sha256": { "$ref": "#/$defs/digest" },
+                  "eof": { "type": "boolean" },
+                  "expiresAt": { "$ref": "#/$defs/nint" }
+                }
+              },
+              { "type": "null" }
+            ]
+          },
+          "streamPage": { "type": "null" },
+          "waitTimedOut": { "type": "boolean" }
+        }
+      },
+      "filesData": {
+        "type": "object", "additionalProperties": false,
+        "required": ["action", "uuid", "file", "request"],
+        "properties": {
+          "action": { "enum": ["stat", "copy", "move", "remove"] },
+          "uuid": { "$ref": "#/$defs/uuid" },
+          "file": { "$ref": "#/$defs/stagedFile" },
+          "request": { "anyOf": [{ "$ref": "#/$defs/operationData" }, { "type": "null" }] }
+        }
+      }
+    }
+  },
+  "annotations": { "readOnlyHint": false, "destructiveHint": true, "idempotentHint": false },
+  "visibility": "public"
+}

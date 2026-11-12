@@ -1,0 +1,143 @@
+{
+  "name": "targets",
+  "description": "List target IDs, revisions, capabilities, path policy and limits before submitting. Use the selected revision in writes. GUI configured is not an opened or verified desktop. Remote tools need no local client; PC file transfer and hooks use the packaged client.",
+  "inputSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+  },
+  "outputSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["contractVersion", "ok", "data", "error"],
+    "properties": {
+      "contractVersion": { "const": "2.0" },
+      "ok": { "type": "boolean" },
+      "data": { "anyOf": [{ "$ref": "#/$defs/targetData" }, { "type": "null" }] },
+      "error": { "anyOf": [{ "$ref": "#/$defs/errorData" }, { "type": "null" }] }
+    },
+    "$defs": {
+      "identifier": { "type": "string", "pattern": "^[a-f0-9]{48}$" },
+      "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+      "target": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}$" },
+      "nint": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+      "errorData": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "retryable", "executionAttempted"],
+        "properties": {
+          "code": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{1,95}$" },
+          "retryable": { "type": "boolean" },
+          "executionAttempted": { "anyOf": [{ "type": "boolean" }, { "const": "unknown" }] }
+        }
+      },
+      "policy": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["testServerConfigured", "testServerActive", "mode", "allowedRoot", "allowedRootObservedAt", "osPermissionsEnforced", "pathSafetyEnforced", "elevationRequiresExplicitRequest"],
+        "properties": {
+          "testServerConfigured": { "type": "boolean" },
+          "testServerActive": { "type": "boolean" },
+          "mode": { "enum": ["configured-root", "test-server-bypass", "ssh-account-permissions"] },
+          "allowedRoot": { "type": ["string", "null"] },
+          "allowedRootObservedAt": { "type": ["integer", "null"], "minimum": 0, "maximum": 9007199254740991 },
+          "osPermissionsEnforced": { "const": true },
+          "pathSafetyEnforced": { "const": true },
+          "elevationRequiresExplicitRequest": { "const": true }
+        }
+      },
+      "guiDescriptor": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["configured", "backend", "lifecycle", "status", "reason", "actions", "requiresUserClient"],
+        "properties": {
+          "configured": { "type": "boolean" },
+          "backend": { "enum": ["rfb", "xvnc", "rdp", null] },
+          "lifecycle": { "enum": ["attached", "managed", null] },
+          "status": { "enum": ["disabled", "configured", "backend_unavailable"] },
+          "reason": { "type": ["string", "null"], "maxLength": 256 },
+          "actions": { "type": "array", "maxItems": 4, "items": { "enum": ["observe", "pointer", "key", "text"] } },
+          "requiresUserClient": { "const": false },
+          "openRequest": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["requestKey", "expiresAt"],
+            "properties": {
+              "requestKey": { "type": "string", "pattern": "^[a-f0-9]{32}_[0-9]{1,16}_[a-f0-9]{32}_[A-Za-z0-9_-]{43}(?![\\s\\S])" },
+              "expiresAt": { "$ref": "#/$defs/nint" }
+            }
+          }
+        }
+      },
+      "targetData": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["targets", "defaultTarget", "limits", "approval"],
+        "properties": {
+          "targets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "displayName", "enabled", "isDefault", "revision", "platform", "capabilities", "filePolicy"],
+              "properties": {
+                "id": { "$ref": "#/$defs/target" },
+                "displayName": { "type": "string" },
+                "enabled": { "type": "boolean" },
+                "isDefault": { "type": "boolean" },
+                "revision": { "anyOf": [{ "$ref": "#/$defs/digest" }, { "type": "null" }] },
+                "platform": { "enum": ["linux", "windows"] },
+                "capabilities": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["commandShell", "fileTransfer", "elevatedFileTransfer", "pythonSource", "agentCli", "commandNameApproval", "desktop"],
+                  "properties": {
+                    "commandShell": { "enum": ["posix", "windows-powershell-5.1"] },
+                    "fileTransfer": { "type": "boolean" },
+                    "elevatedFileTransfer": { "type": "boolean" },
+                    "pythonSource": { "type": "boolean" },
+                    "agentCli": { "type": "boolean" },
+                    "commandNameApproval": { "type": "boolean" },
+                    "desktop": { "type": "boolean" }
+                  }
+                },
+                "gui": { "$ref": "#/$defs/guiDescriptor" },
+                "filePolicy": { "anyOf": [{ "$ref": "#/$defs/policy" }, { "type": "null" }] }
+              }
+            }
+          },
+          "defaultTarget": { "anyOf": [{ "$ref": "#/$defs/target" }, { "type": "null" }] },
+          "limits": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["commandBytes", "sourceBytes", "artifactBytes", "chunkBytes", "outputPageBytes", "maxWaitMs"],
+            "properties": {
+              "commandBytes": { "$ref": "#/$defs/nint" },
+              "sourceBytes": { "$ref": "#/$defs/nint" },
+              "artifactBytes": { "$ref": "#/$defs/nint" },
+              "chunkBytes": { "$ref": "#/$defs/nint" },
+              "outputPageBytes": { "$ref": "#/$defs/nint" },
+              "maxWaitMs": { "$ref": "#/$defs/nint" }
+            }
+          },
+          "approval": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["ownerUrl", "agentSelfApproval"],
+            "properties": {
+              "ownerUrl": { "type": "string", "format": "uri" },
+              "agentSelfApproval": { "const": false }
+            }
+          }
+        }
+      }
+    }
+  },
+  "annotations": { "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true },
+  "portalRules": {
+    "outputSchema": "public-contract.mjs:74-75 responseSchema(): .refine(value => value.ok ? value.data !== null && value.error === null : value.data === null && value.error !== null, 'Expected data or error'). Not expressed in the outputSchema (a Zod .refine is absent from the SDK-published JSON Schema); recorded here only."
+  },
+  "visibility": "public"
+}

@@ -1,0 +1,101 @@
+{
+  "name": "desktop-status",
+  "description": "Read readiness, capabilities, nextInputSequence and lastInputReceipt without pixels, using the same sessionId/epoch. Distinguish transport_ready, auth_required and desktop_ready. Inspect status then a fresh frame after reconnecting; never replay uncertain input with a new key.",
+  "inputSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+      "sessionId": { "type": "string", "format": "uuid", "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$" },
+      "epoch": { "type": "integer", "exclusiveMinimum": 0, "maximum": 9007199254740991 }
+    },
+    "required": ["sessionId", "epoch"],
+    "additionalProperties": false
+  },
+  "outputSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["contractVersion", "ok", "data", "error"],
+    "properties": {
+      "contractVersion": { "const": "2.0" },
+      "ok": { "type": "boolean" },
+      "data": { "anyOf": [{ "$ref": "#/$defs/sessionData" }, { "type": "null" }] },
+      "error": { "anyOf": [{ "$ref": "#/$defs/errorData" }, { "type": "null" }] }
+    },
+    "$defs": {
+      "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+      "target": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}$" },
+      "nint": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+      "pint": { "type": "integer", "exclusiveMinimum": 0, "maximum": 9007199254740991 },
+      "sessionId": { "type": "string", "format": "uuid", "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$" },
+      "errorData": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "retryable", "executionAttempted"],
+        "properties": {
+          "code": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{1,95}$" },
+          "retryable": { "type": "boolean" },
+          "executionAttempted": { "anyOf": [{ "type": "boolean" }, { "const": "unknown" }] }
+        }
+      },
+      "desktopReadiness": {
+        "type": "object", "additionalProperties": false,
+        "required": ["state", "observedAt", "generation", "osSessionId", "locked", "sessionBindingVerified", "displayBindingVerified", "inputVerified", "inputAllowed", "ownerOnly", "blockers"],
+        "properties": {
+          "state": { "enum": ["transport_ready", "auth_required", "desktop_ready", "capture_unavailable"] },
+          "observedAt": { "$ref": "#/$defs/nint" },
+          "generation": { "anyOf": [{ "$ref": "#/$defs/digest" }, { "type": "null" }] },
+          "sessionRef": { "type": ["string", "null"], "pattern": "^[A-Za-z0-9_.:-]{1,256}(?![\\s\\S])" },
+          "resourceGeneration": { "anyOf": [{ "$ref": "#/$defs/digest" }, { "type": "null" }] },
+          "osSessionId": { "type": ["integer", "null"], "exclusiveMinimum": 0, "maximum": 9007199254740991 },
+          "locked": { "type": ["boolean", "null"] },
+          "sessionBindingVerified": { "type": "boolean" },
+          "displayBindingVerified": { "type": "boolean" },
+          "inputVerified": { "type": "boolean" },
+          "inputAllowed": { "type": "boolean" },
+          "ownerOnly": { "type": "boolean" },
+          "blockers": {
+            "type": "array", "maxItems": 8,
+            "items": { "enum": ["DESKTOP_AUTH_REQUIRED", "DESKTOP_SESSION_BINDING_UNVERIFIED", "DESKTOP_SESSION_QUERY_FAILED", "DESKTOP_SESSION_QUERY_UNSUPPORTED", "DESKTOP_AUTH_BROKER_UNAVAILABLE", "DESKTOP_CAPTURE_UNAVAILABLE"] }
+          }
+        }
+      },
+      "inputReceipt": {
+        "type": "object", "additionalProperties": false,
+        "required": ["sessionId", "sequence", "requestKey", "state"],
+        "properties": {
+          "sessionId": { "$ref": "#/$defs/sessionId" },
+          "sequence": { "$ref": "#/$defs/pint" },
+          "requestKey": { "type": "string" },
+          "state": { "const": "sent" }
+        }
+      },
+      "sessionData": {
+        "type": "object", "additionalProperties": false,
+        "required": ["sessionId", "epoch", "targetId", "targetRevision", "expiresAt", "idleExpiresAt", "kind"],
+        "properties": {
+          "sessionId": { "$ref": "#/$defs/sessionId" },
+          "epoch": { "$ref": "#/$defs/pint" },
+          "targetId": { "$ref": "#/$defs/target" },
+          "targetRevision": { "$ref": "#/$defs/digest" },
+          "expiresAt": { "$ref": "#/$defs/nint" },
+          "idleExpiresAt": { "$ref": "#/$defs/nint" },
+          "kind": { "const": "desktop" },
+          "readiness": { "$ref": "#/$defs/desktopReadiness" },
+          "capabilities": {
+            "type": "object", "additionalProperties": false,
+            "properties": { "observe": { "type": "boolean" }, "pointer": { "type": "boolean" }, "key": { "type": "boolean" }, "text": { "type": "boolean" } }
+          },
+          "lifecycle": { "enum": ["attached", "managed"] },
+          "nextInputSequence": { "$ref": "#/$defs/pint" },
+          "lastInputReceipt": { "anyOf": [{ "$ref": "#/$defs/inputReceipt" }, { "type": "null" }] }
+        }
+      }
+    }
+  },
+  "annotations": { "readOnlyHint": false, "destructiveHint": true, "idempotentHint": false },
+  "portalRules": {
+    "outputSchema": "public-contract.mjs:74-75 responseSchema(): .refine(value => value.ok ? value.data !== null && value.error === null : value.data === null && value.error !== null, 'Expected data or error'). Not expressed in the outputSchema (a Zod .refine is absent from the SDK-published JSON Schema); recorded here only."
+  },
+  "visibility": "public"
+}

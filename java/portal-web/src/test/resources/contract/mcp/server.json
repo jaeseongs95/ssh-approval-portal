@@ -1,0 +1,47 @@
+{
+  "contractVersion": "2.0",
+  "contractVersionSource": "src/adapters/mcp/public-contract.mjs:5 export const CONTRACT_VERSION = '2.0'",
+  "provenance": {
+    "inputSchemaAndDescription": "public tools (15) and show-* (3): compared with the live ssh-test exposure, identical (key order ignored); ui-* (6): source only, not exposed",
+    "outputSchemaAnnotationsMeta": "source basis, not comparable with the live exposure (the live tool list does not show them)",
+    "serverInfoAndResources": "source basis, not comparable with the live exposure"
+  },
+  "serverInfo": {
+    "name": "SSH Approval Portal",
+    "nameSource": "src/adapters/mcp/server.mjs:17 new McpServer({ name: 'SSH Approval Portal', version: metadata.version }, ...)",
+    "version": "2.4.2",
+    "versionSource": "src/adapters/mcp/server.mjs:1,17 metadata.version = package.json \"version\" (value 2.4.2 at HEAD a44c4d1). The Java server must report its own project version here; the 2.4.2 literal documents the 2.x baseline only. Contract tests must not require version equality."
+  },
+  "instructions": "Contract 2.0. Start with targets; use stable operationKey and exact target revision. submit accepts work; observe defaults to immediate status. A configured native completion hook automatically observes the same operation after submit/observe; continue independent work without starting another watcher. On the hook body, handle its same operation ID and ACK the exact receipt/claim. Installed/registered, watcher started and wake requested are not receipt evidence. Without native hook support, immediate observe and the packaged background watch remain explicit fallback paths. The packaged portal-files client reads and transmits bytes outside the model and returns a UUID. One remote MCP connection is sufficient; a second local MCP server is optional. The remote server cannot read a path on the caller computer. Do not transcribe large file bytes into model tool arguments. Preserve IDs after uncertainty; never replay unknown outcomes, expose credentials or self-approve. show-* is optional owner UI; private ui-* is not for agents. GUI leases support agent interaction within advertised capabilities.",
+  "instructionsSource": "src/adapters/mcp/server.mjs:20",
+  "serverOptions": {
+    "maxToolInputElements": 647,
+    "source": "src/adapters/mcp/server.mjs:19 maxToolInputElements: 7 + 128 * 5"
+  },
+  "resources": [
+    {
+      "name": "SSH approval card",
+      "uriPattern": "^ui://ssh-approval/card-[a-f0-9]{64}\\.html$",
+      "uriTemplate": "ui://ssh-approval/card-{sha256 hex of the card HTML}.html",
+      "mimeType": "text/html;profile=mcp-app",
+      "contents": {
+        "mimeType": "text/html;profile=mcp-app",
+        "textSource": "uiHtml (the owner approval card HTML bundle; content not part of this baseline)",
+        "_meta": { "ui": { "csp": { "connectDomains": [], "resourceDomains": [] }, "prefersBorder": true } }
+      },
+      "source": "src/adapters/mcp/server.mjs:15 (URI), 23 (registerResource)"
+    }
+  ],
+  "tools": {
+    "public": ["targets", "submit", "observe", "cancel", "files", "artifact-begin", "artifact-chunk", "artifact-status", "artifact-finish", "artifact-read", "desktop-open", "desktop-status", "desktop-observe", "desktop-input", "desktop-close"],
+    "ownerUiModelVisible": ["show-ui-probe", "show-approval", "show-file-transfer"],
+    "ownerUiAppOnly": ["ui-decide-request", "ui-upload-begin", "ui-upload-chunk", "ui-upload-finish", "ui-download-link", "ui-read-command-output"],
+    "note": "desktop-* tools are registered only when the desktop service is configured (public-contract.mjs:242 `if (desktop) registerDesktopTools(...)`). The Portal in front of the server adds the name prefix (BRIDGE_UI_TOOL_PREFIX, default \"ssh-approval-bridge_\", config/settings-contract.json defaults); the tool files in contract/mcp/tools use the unprefixed upstream names."
+  },
+  "transport": {
+    "kind": "MCP Streamable HTTP, stateless JSON responses",
+    "source": "src/adapters/http/protocol.mjs:101 new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true, maxRequestBodySize: 1024 * 1024 }); one McpServer instance per HTTP request (protocol.mjs:102)",
+    "sdkVersion": "@modelcontextprotocol/sdk 1.32.1 (package.json:22)",
+    "zodVersion": "zod 4.4.3 (package.json:25)"
+  }
+}

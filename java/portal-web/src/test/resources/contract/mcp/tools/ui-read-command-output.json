@@ -1,0 +1,38 @@
+{
+  "name": "ui-read-command-output",
+  "description": "Load a bounded output page for the original approval card. Body stays in private UI metadata.",
+  "inputSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+      "outputId": { "type": "string", "pattern": "^[a-f0-9]{48}$" },
+      "target": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}$" },
+      "offsetBytes": { "default": 0, "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+      "maxBytes": { "default": 4096, "type": "integer", "minimum": 4, "maximum": 16384 },
+      "format": { "default": "text", "enum": ["text", "json"], "type": "string" },
+      "id": { "type": "string", "pattern": "^[a-f0-9]{48}$" },
+      "ticket": { "type": "string", "minLength": 1, "maxLength": 8192 }
+    },
+    "required": ["outputId", "id", "ticket"],
+    "additionalProperties": false
+  },
+  "portalRules": {
+    "outputSchema": "server.mjs:86 pageSchema = z.object({ outputId: id, bytes: z.number(), nextOffset: z.number(), eof: z.boolean() }).passthrough(). Not the Contract 2.0 envelope. Result (server.mjs:92): { content: [], structuredContent: metadata (commandOutputs.read(args) result without text), _meta: { sshOutput: { text } } }; the output body is delivered only in _meta.sshOutput.text.",
+    "inputSchema": "server.mjs:90 handler rule: the job named by id must be kind 'command' and job.result.output.id must equal outputId, otherwise Error('Original request output required') => generic refused() text."
+  },
+  "outputSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+      "outputId": { "type": "string", "pattern": "^[a-f0-9]{48}$" },
+      "bytes": { "type": "number" },
+      "nextOffset": { "type": "number" },
+      "eof": { "type": "boolean" }
+    },
+    "required": ["outputId", "bytes", "nextOffset", "eof"],
+    "additionalProperties": true
+  },
+  "annotations": { "readOnlyHint": true, "destructiveHint": false },
+  "_meta": { "ui": { "visibility": ["app"] } },
+  "visibility": "appOnly"
+}

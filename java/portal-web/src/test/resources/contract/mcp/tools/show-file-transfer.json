@@ -1,0 +1,47 @@
+{
+  "name": "show-file-transfer",
+  "description": "Show an owner file picker/download card for target and remotePath. Without card rendering, use packaged portal-files for PC bytes. This tool cannot read PC paths.",
+  "inputSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+      "target": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}$" },
+      "direction": { "enum": ["upload", "download"], "type": "string" },
+      "remotePath": { "type": "string", "maxLength": 4096 },
+      "elevate": { "default": false, "type": "boolean" },
+      "overwrite": { "default": false, "type": "boolean" }
+    },
+    "required": ["direction", "remotePath"],
+    "additionalProperties": false
+  },
+  "portalRules": {
+    "outputSchema": "server.mjs:48-49 transferOutput = z.object({ transfer, uiEnabled, maxBytes }).strict() with transfer strict. Not the Contract 2.0 envelope. Result-level _meta.sshApproval keys (server.mjs:54-59): bridgeDisplayName, targetDisplayName, [targetId, targetRevision, targets], uiEnabled, namespace, maxBytes, chunkBytes, webUrl, [bootstrapTicket when uiEnabled].",
+    "_meta": "_meta.ui.resourceUri is computed at runtime: `ui://ssh-approval/card-${hash(uiHtml)}.html`, hash = SHA-256 hex (server.mjs:15, validation.mjs:5). The literal above is a template, not a fixed value.",
+    "inputSchema": "server.mjs:51 handler validates remotePath with remotePath() (POSIX targets) or windowsRemotePath() (Windows targets) from domain/validation.mjs; the exact path grammar is not transcribed here (see baseline: unverified). Failure => thrown error => generic refused() text."
+  },
+  "outputSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+      "transfer": {
+        "type": "object",
+        "properties": {
+          "target": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}$" },
+          "direction": { "enum": ["upload", "download"] },
+          "remotePath": { "type": "string", "maxLength": 4096 },
+          "elevate": { "type": "boolean" },
+          "overwrite": { "type": "boolean" }
+        },
+        "required": ["direction", "remotePath", "elevate", "overwrite"],
+        "additionalProperties": false
+      },
+      "uiEnabled": { "type": "boolean" },
+      "maxBytes": { "type": "integer", "exclusiveMinimum": 0, "maximum": 9007199254740991 }
+    },
+    "required": ["transfer", "uiEnabled", "maxBytes"],
+    "additionalProperties": false
+  },
+  "annotations": { "readOnlyHint": true, "destructiveHint": false },
+  "_meta": { "ui": { "resourceUri": "ui://ssh-approval/card-{sha256 hex of the card HTML}.html", "visibility": ["model", "app"] } },
+  "visibility": "public"
+}

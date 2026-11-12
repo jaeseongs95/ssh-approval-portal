@@ -1,0 +1,29 @@
+{
+  "name": "ui-download-link",
+  "description": "Owner UI only: get the authorized download link in private metadata.",
+  "inputSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+      "id": { "type": "string", "pattern": "^[a-f0-9]{48}$" },
+      "ticket": { "type": "string", "minLength": 1, "maxLength": 8192 }
+    },
+    "required": ["id", "ticket"],
+    "additionalProperties": false
+  },
+  "outputSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+      "ready": { "const": true },
+      "fileName": { "type": "string" }
+    },
+    "required": ["ready", "fileName"]
+  },
+  "annotations": { "readOnlyHint": true, "destructiveHint": false },
+  "_meta": { "ui": { "visibility": ["app"] } },
+  "portalRules": {
+    "outputSchema": "results.mjs:46 outputSchemas.ready = z.object({ ready: z.literal(true), fileName: z.string() }) (non-strict). Not the Contract 2.0 envelope. Result: structuredContent { ready: true, fileName } + _meta.sshApproval { downloadUrl, fileName } (server.mjs:80-84). Handler: capabilities.guard(); capabilities.verifyJob(id, ticket, 'view'); downloadUrl = capabilities.downloadLink(job)."
+  },
+  "visibility": "appOnly"
+}

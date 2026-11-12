@@ -1,0 +1,65 @@
+{
+  "name": "artifact-read",
+  "description": "Read a base64 page using the completed download operation id, not a path or UUID. Follow nextOffset to eof and verify totalBytes/SHA-256. completed means server snapshot ready, not saved on the PC. Only that authorized snapshot and current target revision are readable.",
+  "inputSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+      "id": { "type": "string", "pattern": "^[a-f0-9]{48}$" },
+      "offsetBytes": { "default": 0, "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+      "maxBytes": { "default": 65536, "type": "integer", "minimum": 1, "maximum": 262144 }
+    },
+    "required": ["id"],
+    "additionalProperties": false
+  },
+  "outputSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["contractVersion", "ok", "data", "error"],
+    "properties": {
+      "contractVersion": { "const": "2.0" },
+      "ok": { "type": "boolean" },
+      "data": { "anyOf": [{ "$ref": "#/$defs/artifactPage" }, { "type": "null" }] },
+      "error": { "anyOf": [{ "$ref": "#/$defs/errorData" }, { "type": "null" }] }
+    },
+    "$defs": {
+      "identifier": { "type": "string", "pattern": "^[a-f0-9]{48}$" },
+      "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+      "nint": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
+      "errorData": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "retryable", "executionAttempted"],
+        "properties": {
+          "code": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{1,95}$" },
+          "retryable": { "type": "boolean" },
+          "executionAttempted": { "anyOf": [{ "type": "boolean" }, { "const": "unknown" }] }
+        }
+      },
+      "artifactPage": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "artifactId", "fileName", "encoding", "data", "offsetBytes", "bytes", "nextOffset", "totalBytes", "sha256", "eof", "expiresAt"],
+        "properties": {
+          "id": { "$ref": "#/$defs/identifier" },
+          "artifactId": { "$ref": "#/$defs/identifier" },
+          "fileName": { "type": "string" },
+          "encoding": { "const": "base64" },
+          "data": { "type": "string" },
+          "offsetBytes": { "$ref": "#/$defs/nint" },
+          "bytes": { "type": "integer", "minimum": 0, "maximum": 262144 },
+          "nextOffset": { "$ref": "#/$defs/nint" },
+          "totalBytes": { "type": "integer", "minimum": 0, "maximum": 67108864 },
+          "sha256": { "$ref": "#/$defs/digest" },
+          "eof": { "type": "boolean" },
+          "expiresAt": { "$ref": "#/$defs/nint" }
+        }
+      }
+    }
+  },
+  "annotations": { "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true },
+  "portalRules": {
+    "outputSchema": "public-contract.mjs:74-75 responseSchema(): .refine(value => value.ok ? value.data !== null && value.error === null : value.data === null && value.error !== null, 'Expected data or error'). Not expressed in the outputSchema (a Zod .refine is absent from the SDK-published JSON Schema); recorded here only."
+  },
+  "visibility": "public"
+}

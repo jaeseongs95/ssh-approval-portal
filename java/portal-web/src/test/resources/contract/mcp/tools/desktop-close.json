@@ -1,0 +1,56 @@
+{
+  "name": "desktop-close",
+  "description": "Close the sessionId/epoch lease and release keys/buttons. Check releaseSent, cleanupError and sessionState (terminated/preserved/unknown); logout=false alone does not confirm cleanup. The original open requestKey cannot create another lease.",
+  "inputSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+      "sessionId": { "type": "string", "format": "uuid", "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$" },
+      "epoch": { "type": "integer", "exclusiveMinimum": 0, "maximum": 9007199254740991 }
+    },
+    "required": ["sessionId", "epoch"],
+    "additionalProperties": false
+  },
+  "outputSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["contractVersion", "ok", "data", "error"],
+    "properties": {
+      "contractVersion": { "const": "2.0" },
+      "ok": { "type": "boolean" },
+      "data": { "anyOf": [{ "$ref": "#/$defs/closeData" }, { "type": "null" }] },
+      "error": { "anyOf": [{ "$ref": "#/$defs/errorData" }, { "type": "null" }] }
+    },
+    "$defs": {
+      "sessionId": { "type": "string", "format": "uuid", "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$" },
+      "errorData": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "retryable", "executionAttempted"],
+        "properties": {
+          "code": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{1,95}$" },
+          "retryable": { "type": "boolean" },
+          "executionAttempted": { "anyOf": [{ "type": "boolean" }, { "const": "unknown" }] }
+        }
+      },
+      "closeData": {
+        "type": "object", "additionalProperties": false,
+        "required": ["sessionId", "closed", "releaseSent", "logout", "cleanupError"],
+        "properties": {
+          "sessionId": { "$ref": "#/$defs/sessionId" },
+          "closed": { "const": true },
+          "releaseSent": { "type": "boolean" },
+          "logout": { "const": false },
+          "sessionState": { "enum": ["terminated", "preserved", "unknown"] },
+          "cleanupError": { "type": ["string", "null"] }
+        }
+      }
+    }
+  },
+  "annotations": { "readOnlyHint": false, "destructiveHint": true, "idempotentHint": false },
+  "portalRules": {
+    "outputSchema": "public-contract.mjs:74-75 responseSchema(): .refine(value => value.ok ? value.data !== null && value.error === null : value.data === null && value.error !== null, 'Expected data or error'). Not expressed in the outputSchema (a Zod .refine is absent from the SDK-published JSON Schema); recorded here only."
+  },
+  "visibility": "public"
+}
