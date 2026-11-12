@@ -216,12 +216,13 @@ class RuleFixturesTest {
         Path right = directory.resolve("right.gradle.kts");
         Files.writeString(right, "dependencies { api(project(\":portal-domain\")) }\n");
         assertThat(sources.scanBuildFile(right, "app")).isEmpty();
-        // Sources: os.name and lombok are found, a clean file is not.
+        // Sources: the "os.name" literal and lombok are found; a clean file and an enum value named os (os.name()) are not.
         Path source = directory.resolve("portal-x/src/main/java/p");
         Files.createDirectories(source);
         Files.writeString(source.resolve("Os.java"), "package p;\nclass Os { String n = \"os.name\"; }\n");
         Files.writeString(source.resolve("L.java"), "package p;\nimport lombok.Getter;\nclass L { }\n");
         Files.writeString(source.resolve("Ok.java"), "package p;\nclass Ok { }\n");
+        Files.writeString(source.resolve("Target.java"), "package p;\nclass Target { enum TargetOs { LINUX } TargetOs os; String n() { return os.name(); } }\n");
         assertThat(sources.scanSources(directory.resolve("portal-x"))).extracting(SourceRules.Violation::rule).containsExactlyInAnyOrder("A-OS", "A-LOMBOK");
     }
 

@@ -44,7 +44,8 @@ final class SourceRules {
         try (Stream<Path> files = Files.walk(sources)) {
             for (Path file : files.filter(f -> f.toString().endsWith(".java")).toList()) {
                 String text = Files.readString(file);
-                if (text.contains("os.name")) {
+                // The system property key is a string literal. A value named "os" whose enum name() is read (os.name()) is no operating system judgement.
+                if (text.contains("\"os.name\"")) {
                     violations.add(new Violation("A-OS", file, "refers to os.name (Principles 1.1: no operating system judgement)"));
                 }
                 if (Pattern.compile("\\blombok\\b").matcher(text).find()) {

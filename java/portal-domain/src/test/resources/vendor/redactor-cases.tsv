@@ -1,0 +1,53 @@
+# Vendor ssh-mcp 2.18.0 redactor cases (docs/migration/vendor-ssh-mcp-rules.md section 2.2 and 7.1). UTF-8, columns separated by one TAB:
+#   id  input  mode  expected
+# mode: entropy = the 2.x call (entropy scan on, threshold 4.5); plain = entropy scan off; threshold=4.4 = entropy scan with that threshold.
+# input and expected: <LF> <CR> <TAB> <NBSP> one character, <U+1F600>-style any code point, <SAME> (expected only) = the input unchanged.
+# Cases that need a generated input (VR-290, VR-291) and the entropy unit cases (VR-315, VR-316) are in the test classes. VR-318 (redactRecord) is not ported: 2.x does not use it.
+VR-274	AKIAIOSFODNN7EXAMPLE	entropy	[REDACTED:aws-access-key:20]
+VR-275	AKIAIOSFODNN7EXAMPLEX	entropy	[REDACTED:aws-access-key:20]X
+VR-276	AKIAIOSFODNN7EXAMPL	entropy	<SAME>
+VR-276	akiaiosfodnn7example	entropy	<SAME>
+VR-277	ghp_0123456789abcdefghijklmnopqrstuvwxyz	entropy	[REDACTED:github-token:40]
+VR-278	ghp_0123456789abcdefghijklmnopqrstuvwxy	plain	<SAME>
+VR-278	ghp_0123456789abcdefghijklmnopqrstuvwxy	entropy	[REDACTED:entropy:39]
+VR-279	gho_0123456789abcdefghijklmnopqrstuvwxyz	entropy	[REDACTED:github-token:40]
+VR-279	ghu_0123456789abcdefghijklmnopqrstuvwxyz	entropy	[REDACTED:github-token:40]
+VR-279	ghs_0123456789abcdefghijklmnopqrstuvwxyz	entropy	[REDACTED:github-token:40]
+VR-279	ghr_0123456789abcdefghijklmnopqrstuvwxyz	entropy	[REDACTED:github-token:40]
+VR-280	ghx_0123456789abcdefghijklmnopqrstuvwxyz	plain	<SAME>
+VR-281	glpat-abcdefghij0123456789	entropy	[REDACTED:gitlab-token:26]
+VR-282	glpat-abcdefghij0123456789Z	entropy	[REDACTED:gitlab-token:26]Z
+VR-283	glpat-abcdefghij012345678	plain	<SAME>
+VR-284	eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abc_DEF-123	entropy	[REDACTED:jwt:48]
+VR-285	eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0	plain	<SAME>
+VR-286	-----BEGIN PRIVATE KEY-----<LF>abc<LF>-----END PRIVATE KEY-----	entropy	[REDACTED:pem-private-key:57]
+VR-287	-----BEGIN RSA PRIVATE KEY-----<LF>MIIE<LF>-----END RSA PRIVATE KEY-----	entropy	[REDACTED:pem-private-key:66]
+VR-288	-----BEGIN PRIVATE KEY-----<LF>abc	entropy	<SAME>
+VR-288	-----BEGIN PRIVATE KEY-----<LF>abc	plain	<SAME>
+VR-289	-----BEGIN ENCRYPTED PRIVATE KEY-----x-----END ENCRYPTED PRIVATE KEY-----	entropy	<SAME>
+VR-289	-----BEGIN ENCRYPTED PRIVATE KEY-----x-----END ENCRYPTED PRIVATE KEY-----	plain	<SAME>
+VR-292	-----BEGIN PRIVATE KEY-----<U+1F600>-----END PRIVATE KEY-----	entropy	[REDACTED:pem-private-key:54]
+VR-293	Authorization: Bearer abc.def-ghi==	entropy	Authorization: [REDACTED:bearer-auth:20]
+VR-294	bearer abc	entropy	[REDACTED:bearer-auth:10]
+VR-295	BEARER abc	entropy	<SAME>
+VR-296	Bearer token expired	entropy	[REDACTED:bearer-auth:12] expired
+VR-297	Bearer<LF>abc	entropy	[REDACTED:bearer-auth:10]
+VR-298	api_key="abcdefghij1234567890"	entropy	[REDACTED:generic-api-key:30]
+VR-299	{"apiKey": "abcdefghij1234567890"}	entropy	{"[REDACTED:generic-api-key:31]}
+VR-300	API-SECRET: 'abcdefghij1234567890'	entropy	[REDACTED:generic-api-key:34]
+VR-301	api_key="abcdefghij123456789"	entropy	<SAME>
+VR-302	api_key=abcdefghij1234567890	plain	<SAME>
+VR-303	-----BEGIN PRIVATE KEY-----<U+1F600>-----END PRIVATE KEY-----	entropy	[REDACTED:pem-private-key:54]
+VR-304	Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abc_DEF-123	entropy	Bearer [REDACTED:jwt:48]
+VR-305	api_key="AKIAIOSFODNN7EXAMPLE"	entropy	api_key="[REDACTED:aws-access-key:20]"
+VR-306	abcdefghijklmnopqrstuvwxyz	entropy	[REDACTED:entropy:26]
+VR-307	abcdefghijklmnopqrstuvwxyz	plain	<SAME>
+VR-308	abcdefghijklmnopqrstuvw	entropy	[REDACTED:entropy:23]
+VR-309	abcdefghijklmnopqrstuv	entropy	<SAME>
+VR-310	abcdefghijklmnopqrstuv	threshold=4.4	[REDACTED:entropy:22]
+VR-311	abcdefghijklmnopqrstuvwxyz.abcdefghijklmnopqrstuvwxyz	entropy	[REDACTED:entropy:26].[REDACTED:entropy:26]
+VR-312	/abcdefghijklmnopqrstuvwxyz/	entropy	[REDACTED:entropy:28]
+VR-313	aaaaaaaaaaaaaaaaaaaaaaaa	entropy	<SAME>
+VR-314	0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef	entropy	<SAME>
+VR-317	550e8400-e29b-41d4-a716-446655440000	entropy	<SAME>
+VR-520	echo AKIAIOSFODNN7EXAMPLE	entropy	echo [REDACTED:aws-access-key:20]

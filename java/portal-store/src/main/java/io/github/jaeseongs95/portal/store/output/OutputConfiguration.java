@@ -1,0 +1,18 @@
+package io.github.jaeseongs95.portal.store.output;
+
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+/**
+ * Registers the limits of the output store. Why a {@code @Bean} method and not a stereotype (Principles 3.1): {@link OutputLimits} is a value record whose
+ * components are numbers, so the container cannot build it by constructor injection; the limits are constants of the product (2.x had no setting for them), and
+ * this method is the one place that turns them into a bean.
+ */
+@Configuration(proxyBeanMethods = false)
+public class OutputConfiguration {
+
+    @Bean
+    public OutputLimits outputLimits() {
+        return OutputLimits.defaults();
+    }
+}
