@@ -313,6 +313,22 @@
         ["DESKTOP_AUTH_REQUIRED", "src/adapters/desktop/windows-state.mjs:75"]
       ]
     },
+    "stage2Additions": {
+      "description": "Eleven codes the grep above missed (decision D-19 of docs/migration/stage2-design.md, section 13.1): they are raised through Object.assign(Error(...), { code }) or a readFailure helper, or listed as desktop blockers, so no quoted literal sat next to a throw the grep could pair. Each entry is [code, first place in src/** where it is raised or listed].",
+      "entries": [
+        ["COMMAND_CONTEXT_CONTAINS_SECRET", "src/domain/execution-context.mjs:43"],
+        ["COMMAND_CONTEXT_TOO_LARGE", "src/domain/execution-context.mjs:42"],
+        ["INVALID_COMMAND_CONTEXT", "src/domain/execution-context.mjs:41"],
+        ["READ_COMMAND_BUSY", "src/application/commands.mjs:9"],
+        ["READ_COMMAND_REQUIRES_APPROVAL", "src/application/commands.mjs:10"],
+        ["READ_COMMAND_NOT_STARTED", "src/application/commands.mjs:15"],
+        ["READ_COMMAND_EXECUTION_UNKNOWN", "src/application/commands.mjs:18"],
+        ["SOURCE_CREDENTIAL_MATERIAL", "src/application/command-automation.mjs:170"],
+        ["SOURCE_ARGUMENTS_SENSITIVE", "src/application/command-automation.mjs:171"],
+        ["SOURCE_WORKDIR_SENSITIVE", "src/application/command-automation.mjs:172"],
+        ["DESKTOP_AUTH_BROKER_UNAVAILABLE", "src/domain/desktop-state.mjs:5"]
+      ]
+    },
     "excludedStrings": {
       "description": "UPPER_SNAKE literals found by the same grep but judged not to be error codes of the server envelope.",
       "entries": [

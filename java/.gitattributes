@@ -6,3 +6,5 @@ gradlew text eol=lf
 *.cmd text eol=crlf
 *.bat text eol=crlf
 *.jar binary
+# The risk catalogue and the automation question are copied byte for byte from 2.x and a test pins their SHA-256: no line-ending conversion on any checkout.
+portal-domain/src/main/resources/risk/*.json -text

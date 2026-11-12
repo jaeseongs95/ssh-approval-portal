@@ -14,6 +14,7 @@ import com.tngtech.archunit.lang.ConditionEvents;
 import com.tngtech.archunit.lang.SimpleConditionEvent;
 import com.tngtech.archunit.lang.syntax.ArchRuleDefinition;
 import com.tngtech.archunit.library.GeneralCodingRules;
+import com.tngtech.archunit.library.dependencies.SlicesRuleDefinition;
 import java.lang.reflect.AccessibleObject;
 import java.util.ArrayList;
 import java.util.Calendar;
@@ -178,6 +179,20 @@ final class PortalRules {
             .should().onlyDependOnClassesThat().resideInAnyPackage("java..", "javax..", "com.fasterxml.jackson.annotation..", domain + "..")
             .allowEmptyShould(true)
             .as("A-DOMAIN: the domain module depends on the JDK, Jackson annotations and itself only (Principles 3.2)"));
+    }
+
+    /**
+     * A-CYCLE, Principles 3.2: the sub-packages directly below a module's root package form no dependency cycle. A cycle means two packages that cannot be understood,
+     * tested or moved one without the other (stage 2 design 13.6, the contract / operation / failure cycles of portal-domain). Classes that sit in the root
+     * package itself are not part of any slice. One rule per package root, so the report names the module.
+     */
+    static List<ArchRule> cycles(List<String> packageRoots) {
+        List<ArchRule> rules = new ArrayList<>();
+        for (String root : packageRoots) {
+            rules.add(SlicesRuleDefinition.slices().matching(root + ".(*)..").should().beFreeOfCycles()
+                .as("A-CYCLE: the sub-packages of " + root + " have no dependency cycle (Principles 3.2)"));
+        }
+        return rules;
     }
 
     /** A-STRING, Principles 3.3 (check 26): no new String("..."), no hand-made intern. The comparisons themselves ({@code ==}, {@code v.equals("c")}) are a review judgement. */

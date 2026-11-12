@@ -1,0 +1,8 @@
+package io.github.jaeseongs95.portal.domain.error;
+
+/** Failures of the file-transfer and agent CLI install adapters (stage 3 throws them; the values are fixed here). */
+public enum TransferErrorCode implements ErrorCode {
+    INSTALL_FAILED, PARENT_NOT_FOUND, FILE_NOT_FOUND, PERMISSION_DENIED, DESTINATION_EXISTS, UNSAFE_PATH, PATH_OUTSIDE_ALLOWED_ROOT, PATH_POLICY_UNSUPPORTED,
+    STAGING_UNAVAILABLE, FILE_CHANGED, INVALID_REQUEST, UNTRUSTED_OWNER, MISSING_DACL, UNSAFE_ANCESTOR, UNTRUSTED_WRITER, UNSUPPORTED_ACE,
+    SECURITY_DESCRIPTOR_TOO_LARGE, WINDOWS_COMMAND_TOO_LARGE
+}

@@ -2,6 +2,8 @@ package io.github.jaeseongs95.portal.archchecks;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.tngtech.archunit.base.DescribedPredicate;
+import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.lang.ArchRule;
@@ -12,6 +14,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.TestInstance.Lifecycle;
@@ -45,6 +48,32 @@ class ArchitectureRulesTest {
         assertThat(modules).contains("portal-domain", "portal-app", "portal-store", "portal-ssh", "portal-desktop", "portal-web", "portal-server", "portal-client", "portal-migrate");
         assertThat(product.contain("io.github.jaeseongs95.portal.server.PortalServerApplication"))
             .as("the product classes were imported: a rule over nothing proves nothing").isTrue();
+    }
+
+    /**
+     * S2-AR-01: the classes of the three modules stage 2 added are in the scope of A-UTIL, A-DOMAIN and A-OPTIONAL-SLOT and break none of them. {@link #check} lets a
+     * rule pass over no class at all, so this test first proves that each module's package holds classes (the compiled directories of portal-domain, portal-app and
+     * portal-store were imported, and a class of each stage 2 package is among them) and then runs the three rules on those classes alone, with no empty pass.
+     */
+    @Test
+    @DisplayName("S2-AR-01: the classes of portal-domain, portal-app and portal-store are in the scope of A-UTIL, A-DOMAIN and A-OPTIONAL-SLOT, and the three rules find no violation in them")
+    void s2_ar_01_stage2ModulesAreUnderUtilDomainAndOptionalSlot() {
+        assertThat(modules).contains("portal-domain", "portal-app", "portal-store");
+        List<String> stage2Packages = List.of(TABLE.packageOf("domain"), TABLE.packageOf("app"), TABLE.packageOf("store"));
+        for (String stage2Package : stage2Packages) {
+            assertThat(product.stream().filter(c -> c.getPackageName().startsWith(stage2Package + ".")).count()).as("classes below %s", stage2Package).isPositive();
+        }
+        assertThat(product.contain(TABLE.packageOf("domain") + ".operation.Operation")).isTrue();
+        assertThat(product.contain(TABLE.packageOf("app") + ".journal.RestartRecovery")).isTrue();
+        assertThat(product.contain(TABLE.packageOf("store") + ".journal.JdbcRestartRecovery")).isTrue();
+        JavaClasses stage2 = product.that(DescribedPredicate.describe("in portal-domain, portal-app or portal-store",
+            (JavaClass c) -> stage2Packages.stream().anyMatch(p -> c.getPackageName().equals(p) || c.getPackageName().startsWith(p + "."))));
+        assertThat(stage2.stream().count()).isPositive();
+        List<ArchRule> rules = new ArrayList<>();
+        rules.addAll(PortalRules.util());
+        rules.addAll(PortalRules.domain(TABLE));
+        rules.addAll(PortalRules.optionalSlot());
+        rules.forEach(rule -> rule.check(stage2));
     }
 
     @Test
@@ -140,6 +169,11 @@ class ArchitectureRulesTest {
     @Test
     void a_domain_domainDependsOnTheJdkOnly() {
         check(PortalRules.domain(TABLE));
+    }
+
+    @Test
+    void a_cycle_noPackageCycleInAnyModule() {
+        check(PortalRules.cycles(TABLE.mayUse().keySet().stream().sorted().map(TABLE::packageOf).toList()));
     }
 
     @Test
