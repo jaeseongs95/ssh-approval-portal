@@ -1,0 +1,20 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "kind": { "type": "string", "enum": ["command", "source", "download"] },
+    "operationKey": { "type": "string", "pattern": "^[A-Za-z0-9_.:-]{16,128}(?![\\s\\S])" },
+    "target": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}$" },
+    "expectedTargetRevision": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "command": { "type": "string", "minLength": 1, "maxLength": 32768 },
+    "source": { "type": "string", "minLength": 1, "maxLength": 16384 },
+    "argv": { "type": "array", "items": { "type": "string", "maxLength": 512 }, "maxItems": 16 },
+    "cwd": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "remotePath": { "type": "string", "minLength": 1, "maxLength": 4096 },
+    "elevate": { "type": "boolean" },
+    "context": { "type": "string", "maxLength": 8192 },
+    "displayContext": { "type": "string", "maxLength": 8192 }
+  },
+  "required": ["kind", "operationKey"],
+  "additionalProperties": false
+}

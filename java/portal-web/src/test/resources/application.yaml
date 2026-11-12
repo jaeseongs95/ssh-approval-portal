@@ -1,0 +1,9 @@
+spring:
+  ai:
+    mcp:
+      server:
+        protocol: STREAMABLE
+        name: ssh-approval-portal-spike
+        version: 3.0.0
+        streamable-http:
+          mcp-endpoint: /mcp

@@ -1,0 +1,5 @@
+# Build outputs and the Gradle project cache: never committed.
+build/
+.gradle/
+.kotlin/
+*.log

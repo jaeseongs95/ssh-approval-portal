@@ -1,0 +1,8 @@
+# Line endings are fixed per file kind so that a checkout on Windows or Linux runs the same files:
+# shell scripts and the Unix Gradle wrapper script must stay LF (a CR breaks the shebang line), Windows command files must stay CRLF.
+* text=auto eol=lf
+*.sh text eol=lf
+gradlew text eol=lf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.jar binary
