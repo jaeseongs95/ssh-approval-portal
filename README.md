@@ -262,7 +262,7 @@ Packaging produces server and client `.tar.gz`/`.zip` assets and checksums. Node
 
 ## License
 
-Starting with version 3.0.0, SSH Approval Portal is licensed under the [GNU Affero General Public License, version 3 only](LICENSE) (SPDX identifier `AGPL-3.0-only`). Releases up to and including 2.4.2 remain available under the MIT License with which they were published.
+Starting with version 3.0.0, SSH Approval Portal is licensed under the [GNU Affero General Public License, version 3 or (at your option) any later version](LICENSE) (SPDX identifier `AGPL-3.0-or-later`). Releases up to and including 2.4.2 remain available under the MIT License with which they were published.
 
 Files that carry their own license notice keep that license: `native/freerdp-input/` (Apache-2.0, a patch to FreeRDP) and the Gradle wrapper (`java/gradlew`, `java/gradlew.bat`, `java/gradle/wrapper/`, Apache-2.0).
 
