@@ -11,6 +11,16 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import io.github.jaeseongs95.portal.app.remote.AgentCliPlan;
+import io.github.jaeseongs95.portal.app.remote.ElevationPlan;
+import io.github.jaeseongs95.portal.app.remote.ExecReply;
+import io.github.jaeseongs95.portal.app.remote.PathPolicyBinding;
+import io.github.jaeseongs95.portal.app.remote.PermissionSupport;
+import io.github.jaeseongs95.portal.app.remote.PreparedCommand;
+import io.github.jaeseongs95.portal.app.remote.SourceArguments;
+import io.github.jaeseongs95.portal.app.remote.WorkingDirectory;
+import io.github.jaeseongs95.portal.domain.agentcli.AgentCliIntent;
+import io.github.jaeseongs95.portal.domain.agentcli.AgentRelease;
 import io.github.jaeseongs95.portal.domain.classify.CommandClassification;
 import io.github.jaeseongs95.portal.domain.command.CommandLineGrammar;
 import io.github.jaeseongs95.portal.domain.command.TargetRule;
@@ -19,6 +29,7 @@ import io.github.jaeseongs95.portal.domain.target.Target;
 import io.github.jaeseongs95.portal.domain.target.TargetCapabilities;
 import io.github.jaeseongs95.portal.domain.target.TargetOs;
 import io.github.jaeseongs95.portal.domain.text.CommandText;
+import io.github.jaeseongs95.portal.domain.text.SourceText;
 
 class TargetPlatformRegistryTest {
 
@@ -47,6 +58,41 @@ class TargetPlatformRegistryTest {
 
         @Override
         public boolean deniesName(TargetRule rule, CommandText command) {
+            throw new IllegalStateException("not used by the registry");
+        }
+
+        @Override
+        public PreparedCommand prepareCommand(CommandText command, WorkingDirectory workdir) {
+            throw new IllegalStateException("not used by the registry");
+        }
+
+        @Override
+        public PreparedCommand prepareSource(SourceText source, SourceArguments args, WorkingDirectory workdir) {
+            throw new IllegalStateException("not used by the registry");
+        }
+
+        @Override
+        public PathPolicyBinding pathPolicy(Target target) {
+            throw new IllegalStateException("not used by the registry");
+        }
+
+        @Override
+        public PermissionSupport permissionSupport() {
+            throw new IllegalStateException("not used by the registry");
+        }
+
+        @Override
+        public ElevationPlan elevationPlan() {
+            throw new IllegalStateException("not used by the registry");
+        }
+
+        @Override
+        public AgentCliPlan agentCliPlan(AgentCliIntent intent, AgentRelease release) {
+            throw new IllegalStateException("not used by the registry");
+        }
+
+        @Override
+        public ExecReply execReply() {
             throw new IllegalStateException("not used by the registry");
         }
     }
