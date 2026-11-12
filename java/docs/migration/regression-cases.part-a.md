@@ -4,8 +4,8 @@
 
 - 목적: ssh-approval-portal v2.4.2의 기존 시험(Node mjs) 중 A범위의 행동을 3.0(Java 25·Spring Boot 3.0.0) JUnit 회귀 사례로 옮기기 위한 기준표이다. Java 구현 담당은 이 표의 사례를 모두 JUnit으로 고정한다.
 - 범위(A범위): `test-inventory.raw.md`의 mjs 사례 표에서 경로가 `test/` 다음 첫 글자 `a`~`l`로 시작하는 파일 전부(`test/browser/**` 포함, `test/admin-access-http.test.mjs`부터 `test/local-secret-store.test.mjs`까지). py·ps1·sh와 m~z mjs는 범위 밖이다(다른 담당).
-- 원자료 행 수(A범위): 970행(원자료 252~1221행, 110개 파일). 결과: 사례 885건(RC-A-001~RC-A-907 중 결번 22개 제외, 원 시험 920행 대응), 삭제 50행, 미확인 0행. 사례 한 건이 여러 원 시험을 묶으므로 사례 수와 사례로 간 행 수는 다르다.
-- 결번(메인 판정으로 삭제 표로 옮긴 사례, ID는 다시 매기지 않음): RC-A-136~141, RC-A-431, RC-A-514, RC-A-869~879, RC-A-881, RC-A-884, RC-A-885(22개). RC-A-867은 evaluation report 부분만 제외하고 유지. 반대로 삭제에서 사례로 되돌린 `test/agent-cli-delivery.test.mjs:49`·`:54`는 RC-A-906·RC-A-907로 사례 표 끝에 추가했다.
+- 원자료 행 수(A범위): 970행(원자료 252~1221행, 110개 파일). 결과: 사례 872건(RC-A-001~RC-A-907 중 결번 35개 제외, 원 시험 907행 대응), 삭제 63행, 미확인 0행. 사례 한 건이 여러 원 시험을 묶으므로 사례 수와 사례로 간 행 수는 다르다.
+- 결번(메인 판정으로 삭제 표로 옮긴 사례, ID는 다시 매기지 않음): RC-A-136~141, RC-A-431, RC-A-514, RC-A-779~791, RC-A-869~879, RC-A-881, RC-A-884, RC-A-885(35개). RC-A-867은 evaluation report 부분만 제외하고 유지. 반대로 삭제에서 사례로 되돌린 `test/agent-cli-delivery.test.mjs:49`·`:54`는 RC-A-906·RC-A-907로 사례 표 끝에 추가했다.
 - 메인 판정 반영: Q5 AIK 어댑터 삭제, Q6 Jev 그림자 평가 연구 도구 삭제(SHADOW-06·08·09·12는 서버 런타임 JevRiskEvaluator 사례 RC-A-880·882·883·886으로 남기고 D-0037 확정), Q3 agent-cli 설치 유지와 Python 원본 실행 유지, 관리자 Access·OIDC 모드·카드 UI 도구·로컬 비밀 저장소 유지, 클라이언트 인증은 기기 등록 토큰(cloudflared 인자는 기기 토큰 기준으로 조정).
 - 「(추정)」은 시험 본문으로 확정하지 못한 부분 또는 2.x 구현 세부(Node 파일·SQLite·fd 등)를 3.0 구현 방식으로 옮기는 방식에 붙였다. 유지 여부 판단 사항에는 붙이지 않는다.
 - 사용 규칙:
@@ -790,19 +790,6 @@
 | RC-A-776 | 가져오기 동시성은 open 전에 예약하고 유지보수가 이기면 staged 파일이 남지 않음 | 한도 안에서 동시 import 2건(open 보류), 세 번째 import, maintenance true 뒤 open 해제 | 보류 중 reserved 32, 세 번째는 `busy`로 거절(open 2회 유지). maintenance 승리 시 두 import가 `Maintenance`로 reject, reserved 0·size 0·디렉터리 비어 있음 | 예외 메시지, 저장소 상태 | portal-app,portal-store | test/file-contracts.test.mjs:107 | - |
 | RC-A-777 | 일반·sudo 다운로드는 검토된 정책 없이 owner 승인을 기다림 | requestDownload(elevate false·true), start(id, true), 승인 2회, maintenance true | 일반은 state `pending`·효과 0, start(true)는 `authority` 예외, 승인 뒤 `completed`·효과 1, 재승인 reject. sudo는 commandClass `privileged`·pending, 승인 뒤 효과 2. maintenance 중 새 요청은 `Maintenance` 예외 | state·commandClass, 예외 메시지, 효과 횟수 | portal-app,portal-domain | test/file-contracts.test.mjs:120 | - |
 | RC-A-778 | source 해제 실패가 pin된 업로드를 방치하거나 quota를 소비하지 않음 | source.open의 close가 `release failed` 예외 | requestUpload가 `release failed`로 reject, reserved 0·size 0·대기열 job 0건·디렉터리 비어 있음 | 예외 메시지, 상태 | portal-app,portal-store | test/file-contracts.test.mjs:136 | - |
-| RC-A-779 | 결속된 source는 서명된 URL을 노출하지 않는 중립 capability를 제공 | `signature=SECRET_URL`이 담긴 URL을 bind, 다른 host bind | inspect `{sourceHost:'files.example.test', allowed:true}`, bound 직렬화에 `SECRET_URL` 없음, open 스트림 바이트 [0,255,1]. 다른 host는 allowed false | 반환 deepEqual, 직렬화 부재 | portal-app | test/file-source.test.mjs:38 | - |
-| RC-A-780 | inspect는 오프라인이며 정확한 허용 host만 수락하고 모호하거나 위험한 URL·패턴을 거절 | 허용 host 외 3종, 위험 URL 12종(http·포트 444·userinfo·`@`·`#`·끝 점·127.0.0.1·2130706433·[::1]·앞 공백·백슬래시·개행), hosts 빈 목록, 잘못된 허용 패턴 13종(`*`·`files.*.test`·`*example.test`·`*.localhost`·IP·`https://…`·포트·userinfo·끝 점 등) | 허용 host면 `{hostname, allowed:true}`, 외 host는 allowed false이고 open은 generic 메시지 `File source refused, expired or unavailable`로 reject. 위험 URL은 inspect·open 모두 같은 메시지로 거절하고 DNS 호출 0. hosts 빈 목록은 allowed false. 잘못된 패턴은 생성 시 같은 메시지로 거절 | 예외 메시지 고정, DNS 호출 횟수 | portal-app | test/file-source.test.mjs:48 | SSH_PORTAL-D-0034 |
-| RC-A-781 | 정확 host와 와일드카드 host를 섞으면 지역 회전·중첩 host를 label 경계로 허용 | hosts [`files.example.test`,`*.upload.example.test`], 허용 후보 4종, 거절 후보 4종(`upload.example.test`·`evil-upload.example.test`·`...upload.example.test.evil.test`·`sub.files.example.test`) | 허용 host는 inspect allowed true, open 성공·요청 1회·servername과 Host 헤더가 해당 host. 거절 host는 allowed false, open은 generic 메시지로 reject, DNS 호출 0·요청 0 | allowed 값, 요청 인자, 호출 횟수 | portal-app | test/file-source.test.mjs:68 | - |
-| RC-A-782 | 와일드카드로 허용된 host여도 사설 DNS 응답과 redirect를 파일 노출 전에 거절 | hosts `*.example.test`, DNS 응답에 8.8.8.8과 127.0.0.1, 302 redirect | inspect는 allowed true지만 open은 generic 메시지로 reject·요청 0. redirect는 reject·요청 1·요청 destroy 1회 | 예외 메시지, 요청·destroy 횟수 | portal-app | test/file-source.test.mjs:86 | - |
-| RC-A-783 | 모든 DNS 응답이 공인 주소여야 하며 매핑·전환 IPv6 포함 | 공인 주소와 함께 비공인 28종(0.0.0.0·10/8·100.64/10·127/8·169.254·172.16/12·192.0.0/24·192.0.2/24·192.88.99/24·192.168/16·198.18/15·198.51.100/24·203.0.113/24·224/4·255.255.255.255·`::`·`::1`·fc00::/7·fe80::/10·ff00::/8·`::ffff:127.0.0.1`·`::ffff:8.8.8.8`·64:ff9b::·2001::·2001:db8::·2002::·3ffe::·3fff::)를 섞은 응답, 빈 목록·family 불일치·`not-an-ip` | 모두 generic 메시지로 reject, 요청 0 | 예외 메시지, 요청 횟수 반복 | portal-app | test/file-source.test.mjs:97 | - |
-| RC-A-784 | transport는 host/TLS를 보존하고 검증된 DNS 주소로 고정하며 raw binary를 반환 | content-length 3 응답, IPv6 공인 주소 1개 | DNS 1회(all true). 요청 method GET·agent false·rejectUnauthorized true·servername host·헤더 `{Host, Accept-Encoding:'identity'}`·maxHeaderSize 16384. lookup은 검증된 주소(`2606:4700:4700::1111`, family 6)만 반환(all·단일 형식). expectedSize 3·본문 [0,255,1], close 두 번에도 destroy 1회 | 요청 옵션 deepEqual, lookup 결과, destroy 횟수 | portal-app | test/file-source.test.mjs:108 | - |
-| RC-A-785 | redirect·상태·인코딩·과대 header·신뢰할 수 없는 content-length는 노출 전에 실패 | 302 http redirect, 401, 206, `content-encoding: gzip`, rawHeaders 130개, content-length 4(maxBytes 3)·`-1`·`1e2`·`9007199254740992` | 모두 generic 메시지로 reject, 요청 1회·destroy 1회 | 예외 메시지, 횟수 | portal-app | test/file-source.test.mjs:122 | - |
-| RC-A-786 | 스트림 한도는 실제 바이트로 측정하며 잘리거나 초과된 payload를 거절 | maxBytes 2 초과, content-length 2·4와 실제 3바이트 불일치, 본문 중 오류, 빈 본문(content-length 없음·`0`+`identity`) | 앞 4종은 stream 소비 중 generic 메시지로 reject·destroy 1회. 빈 본문은 expectedSize null(없음)·0이고 읽은 길이 0 | 예외 메시지, expectedSize | portal-app | test/file-source.test.mjs:128 | - |
-| RC-A-787 | 미해결 DNS에서도 시한·호출자 abort가 요청 생성 없이 적용 | timeoutMs 30 DNS 보류(자연 시한·5ms 뒤 abort), 이미 abort된 signal | 모두 generic 메시지(abort 원인 `SECRET_URL` 비노출)로 reject, DNS가 뒤늦게 끝나도 요청 0 | 예외 메시지, 요청 횟수 | portal-app | test/file-source.test.mjs:139 | - |
-| RC-A-788 | header·body 정체, 취소, 명시적 close는 요청을 정확히 한 번 해제 | header 미응답(idle 20ms), body 정체(idle 30ms)와 abort, 명시 close 두 번 | 모두 generic 메시지로 reject·destroy 1회. 명시 close는 stream destroyed·응답 destroyed·요청 destroy 1회 | 예외 메시지, destroy 횟수·상태 | portal-app | test/file-source.test.mjs:152 | - |
-| RC-A-789 | 총 시한은 idle 시한이 계속 갱신되어도 진행 중인 body를 중단 | timeoutMs 80·idle 1000ms, 5ms마다 1바이트 기록 | body 소비가 generic 메시지로 reject·destroy 1회 | 예외 메시지, destroy 횟수 | portal-app | test/file-source.test.mjs:164 | - |
-| RC-A-790 | DNS·요청 예외가 원시 source 오류로 새지 않음 | resolve가 URL을 담은 예외 / request가 예외 / req 'error'에 URL | 모두 generic 메시지로 reject(URL 비노출) | 예외 메시지 | portal-app | test/file-source.test.mjs:171 | SSH_PORTAL-D-0034 |
-| RC-A-791 | 실제 HTTP 파서에서도 조각난 응답 header 전반에 정책 검사가 유지 | loopback TCP fixture(DNS는 공인 주입). 64개 header+identity, 64개 뒤 gzip, 64개 뒤 content-length 4(maxBytes 3), 16KiB 초과 header | 64개 header+`Content-Encoding: identity`+length 3은 expectedSize 3·본문 `abc` 수락. gzip·초과 길이·16KiB 초과 header는 open에서 generic 메시지로 reject | 본문·예외 메시지 | portal-app | test/file-source.test.mjs:182 | - |
 | RC-A-792 | 소유자 target 메타데이터가 정확한 불투명 revision을 노출(legacy·명시 모드) | GET `/api/targets`(기본 target·BRIDGE_TARGETS 명시 모드) | 항목 revision이 runtime.revision과 같고 64자 소문자 hex, readProfile·trustedHostKey 필드 없음 | 응답 필드 비교, 정규식 | portal-web,portal-app | test/file-target-binding.test.mjs:49 | - |
 | RC-A-793 | 오래됨·형식 오류·없는 target·비활성 결속은 artifact·job·SSH 효과를 만들지 않음 | 업로드·다운로드 요청에 revision 누락, 다른 revision, null·0·빈 값·대문자·배열 revision, 없는 target, 비활성 `offline` target(명시 모드) | 모두 HTTP 409, store size 0·queue job 0·SSH 호출 0 | HTTP 상태, 저장소·queue·호출 | portal-web,portal-app,portal-store | test/file-target-binding.test.mjs:58 | - |
 | RC-A-794 | 결속된 바이너리·빈 업로드는 불변 승인 operation 안에 서버 identity를 보존 | 결속 업로드(바이너리·빈 파일, legacy·명시 모드), 승인 | artifact의 targetId·targetRevision·fileTargetBound true, job.operation.fileTargetId·fileTargetRevision, `expectedTargetRevision` 필드 없음·pending, operation 동결. 승인 subject가 operation 변경 시 달라짐. 승인 200, 원격 업로드 바이트가 원본과 동일, state `completed` | 필드 비교, subject 해시 비교, 업로드 바이트 | portal-web,portal-app,portal-store | test/file-target-binding.test.mjs:72 | - |
@@ -960,6 +947,19 @@
 | test/completion-wake.test.mjs:227 | codex queue·agentapi CLI 깨우기(hook만 남김): W09·W10 agy 전송 실패 재시도 없음과 원시 진단 비노출 시험 |
 | test/completion-wake.test.mjs:242 | codex queue·agentapi CLI 깨우기(hook만 남김): W11 하위 프로세스 콜백 부재 시 5000ms 시한과 SIGKILL 1회 시험 |
 | test/config-contracts.test.mjs:65 | Node 런타임 고유(esbuild 묶음, package.json·npm, node:sqlite 특유 동작): `scripts/validate-origin.mjs` Node24 CLI를 `process.execPath`로 실행해 stdin·stdout·stderr(`Origin validation failed.\n`)를 확인하는 시험이며 origin 검증 규칙 자체는 RC-A-614가 담당. 3.0 install 명령의 origin 검증 종료코드·스트림 계약은 packaging 사례에서 별도 확인 필요(애매) |
+| test/file-source.test.mjs:38 | 메인 판정 D-18: feature-map Q11 — `file-source.mjs`는 3.0으로 옮기지 않는다(2.x에서도 쓰지 않는다). 구 RC-A-779 |
+| test/file-source.test.mjs:48 | 메인 판정 D-18: feature-map Q11 — `file-source.mjs`는 3.0으로 옮기지 않는다(2.x에서도 쓰지 않는다). 구 RC-A-780 |
+| test/file-source.test.mjs:68 | 메인 판정 D-18: feature-map Q11 — `file-source.mjs`는 3.0으로 옮기지 않는다(2.x에서도 쓰지 않는다). 구 RC-A-781 |
+| test/file-source.test.mjs:86 | 메인 판정 D-18: feature-map Q11 — `file-source.mjs`는 3.0으로 옮기지 않는다(2.x에서도 쓰지 않는다). 구 RC-A-782 |
+| test/file-source.test.mjs:97 | 메인 판정 D-18: feature-map Q11 — `file-source.mjs`는 3.0으로 옮기지 않는다(2.x에서도 쓰지 않는다). 구 RC-A-783 |
+| test/file-source.test.mjs:108 | 메인 판정 D-18: feature-map Q11 — `file-source.mjs`는 3.0으로 옮기지 않는다(2.x에서도 쓰지 않는다). 구 RC-A-784 |
+| test/file-source.test.mjs:122 | 메인 판정 D-18: feature-map Q11 — `file-source.mjs`는 3.0으로 옮기지 않는다(2.x에서도 쓰지 않는다). 구 RC-A-785 |
+| test/file-source.test.mjs:128 | 메인 판정 D-18: feature-map Q11 — `file-source.mjs`는 3.0으로 옮기지 않는다(2.x에서도 쓰지 않는다). 구 RC-A-786 |
+| test/file-source.test.mjs:139 | 메인 판정 D-18: feature-map Q11 — `file-source.mjs`는 3.0으로 옮기지 않는다(2.x에서도 쓰지 않는다). 구 RC-A-787 |
+| test/file-source.test.mjs:152 | 메인 판정 D-18: feature-map Q11 — `file-source.mjs`는 3.0으로 옮기지 않는다(2.x에서도 쓰지 않는다). 구 RC-A-788 |
+| test/file-source.test.mjs:164 | 메인 판정 D-18: feature-map Q11 — `file-source.mjs`는 3.0으로 옮기지 않는다(2.x에서도 쓰지 않는다). 구 RC-A-789 |
+| test/file-source.test.mjs:171 | 메인 판정 D-18: feature-map Q11 — `file-source.mjs`는 3.0으로 옮기지 않는다(2.x에서도 쓰지 않는다). 구 RC-A-790 |
+| test/file-source.test.mjs:182 | 메인 판정 D-18: feature-map Q11 — `file-source.mjs`는 3.0으로 옮기지 않는다(2.x에서도 쓰지 않는다). 구 RC-A-791 |
 
 ## 3. 대응표
 
@@ -1806,19 +1806,19 @@
 | test/file-contracts.test.mjs:107 | RC-A-776 |
 | test/file-contracts.test.mjs:120 | RC-A-777 |
 | test/file-contracts.test.mjs:136 | RC-A-778 |
-| test/file-source.test.mjs:38 | RC-A-779 |
-| test/file-source.test.mjs:48 | RC-A-780 |
-| test/file-source.test.mjs:68 | RC-A-781 |
-| test/file-source.test.mjs:86 | RC-A-782 |
-| test/file-source.test.mjs:97 | RC-A-783 |
-| test/file-source.test.mjs:108 | RC-A-784 |
-| test/file-source.test.mjs:122 | RC-A-785 |
-| test/file-source.test.mjs:128 | RC-A-786 |
-| test/file-source.test.mjs:139 | RC-A-787 |
-| test/file-source.test.mjs:152 | RC-A-788 |
-| test/file-source.test.mjs:164 | RC-A-789 |
-| test/file-source.test.mjs:171 | RC-A-790 |
-| test/file-source.test.mjs:182 | RC-A-791 |
+| test/file-source.test.mjs:38 | 삭제 |
+| test/file-source.test.mjs:48 | 삭제 |
+| test/file-source.test.mjs:68 | 삭제 |
+| test/file-source.test.mjs:86 | 삭제 |
+| test/file-source.test.mjs:97 | 삭제 |
+| test/file-source.test.mjs:108 | 삭제 |
+| test/file-source.test.mjs:122 | 삭제 |
+| test/file-source.test.mjs:128 | 삭제 |
+| test/file-source.test.mjs:139 | 삭제 |
+| test/file-source.test.mjs:152 | 삭제 |
+| test/file-source.test.mjs:164 | 삭제 |
+| test/file-source.test.mjs:171 | 삭제 |
+| test/file-source.test.mjs:182 | 삭제 |
 | test/file-target-binding.test.mjs:49 | RC-A-792 |
 | test/file-target-binding.test.mjs:58 | RC-A-793 |
 | test/file-target-binding.test.mjs:72 | RC-A-794 |
@@ -1941,11 +1941,11 @@
 | 항목 | 행 수 |
 |---|---|
 | 원자료 행 수(A범위) | 970 |
-| 사례로 간 행 수(사례 885건, 결번 22개 제외) | 920 |
-| 삭제 행 수(삭제 표와 같음) | 50 |
+| 사례로 간 행 수(사례 872건, 결번 35개 제외) | 907 |
+| 삭제 행 수(삭제 표와 같음) | 63 |
 | 미확인 행 수 | 0 |
 
-- 검산: 920 + 50 + 0 = 970 = 원자료 행 수. 대응표 행 970개를 정규식으로 센 결과이며, 원자료 행(파일, 줄)과 대응표 행의 일치, 삭제 표와 대응표 「삭제」의 일치, 사례 행 `원 시험` 열과 대응표 사례 ID의 양방향 일치를 파일별로 대조했다.
+- 검산: 907 + 63 + 0 = 970 = 원자료 행 수. 대응표 행 970개를 정규식으로 센 결과이며, 원자료 행(파일, 줄)과 대응표 행의 일치, 삭제 표와 대응표 「삭제」의 일치, 사례 행 `원 시험` 열과 대응표 사례 ID의 양방향 일치를 파일별로 대조했다.
 - 순서 참고: 대응표는 구간별로 이어 붙였기 때문에 `test/command-lifecycle`·`test/command-limits` 행(RC-A-467~483)이 `test/command-line*` 행 뒤에 있다. 행 집합은 원자료와 같다.
 
 ## 4. 결함 연결
