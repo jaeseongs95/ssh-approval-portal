@@ -487,20 +487,20 @@ S3-AR-01~09(8.3절). 핵심: 「예산 거절과 디스크 거절은 다른 변�
   - 사례 표 1,631행(`| RC-A-nnn |` 872행 + `| RC-B-nnn |` 759행). 설계 시점의 1,673행에서 42행이 줄었다.
   - 3.0 모듈 열에 `portal-ssh`가 있는 행 219행(A 54 + B 165). 설계 시점의 257행에서 38행이 줄었다(D3-16의 38건이 모두 `portal-ssh`를 적은 행이었다).
   - 아래 8.2~8.4절의 묶음 수(330·58·38, 합집합 426)는 설계 시점 값을 그대로 둔다.
-- `[구현 시점 갱신]` 시험 수(커밋 `22c26a8`의 빌드 결과, 메인이 실행). `skip`은 호스트 파일 시스템이 심볼릭 링크·하드 링크 개수·ACL 규칙을 지원하지 않을 때 건너뛰는 `Assumptions` 시험이며 Linux CI에서 실행한다.
+- `[구현 시점 갱신]` 시험 수(커밋 `2dad50c`의 빌드 결과, 메인이 실행). `skip`은 호스트 파일 시스템이 심볼릭 링크·하드 링크 개수·ACL 규칙을 지원하지 않을 때 건너뛰는 `Assumptions` 시험이며 Linux CI에서 실행한다.
 
   | 모듈 | 시험 수 | 비고 |
   |---|---|---|
   | `portal-domain` | 845 | |
   | `portal-app` | 90 | 실제 store를 쓰는 유스케이스 시험은 `portal-server`에 있다(11.3절 2번) |
   | `portal-store` | 296 | skip 7 |
-  | `portal-ssh` | 429 | 실제 OpenSSH 시험(`realOpenSshTest`)은 별도 소스 세트라 이 수에 없다 |
+  | `portal-ssh` | 439 | 실제 OpenSSH 시험(`realOpenSshTest`)은 별도 소스 세트라 이 수에 없다 |
   | `portal-web` | 10 | |
   | `portal-server` | 95 | |
   | `portal-arch-checks` | 74 | |
-  | 합계 | 1,839 | skip 7 포함 |
+  | 합계 | 1,849 | skip 7 포함 |
 
-  위 표는 커밋 `22c26a8`의 빌드 결과(메인 빌드)다. `d0ad13c`에서는 store 295, ssh 428, server 80(합계 1,822)이었다.
+  위 표는 커밋 `2dad50c`의 빌드 결과(메인 빌드)다. `22c26a8`에서는 ssh 429(합계 1,839), `d0ad13c`에서는 store 295, ssh 428, server 80(합계 1,822)이었다.
 
 ### 8.2 닫는 사례 330건 (묶음별)
 | 묶음 | 사례 ID | 건수 | 구현 담당 | 비고 |
@@ -650,8 +650,8 @@ Java 판에 같은 행동이 없다. 각 묶음의 대체 사례는 8.5절에서
 | S3-RO-03 | `signal` 요청(RO) `[구현: OpenSshExecPilotTest, P3-3]` | 실행 중인 명령에 `signal`(INT) 요청 | Linux는 `exit-signal INT`로 끝낸다. Windows는 서버가 무엇을 하든 채널을 닫을 수 있다 |
 | S3-RO-04 | rename·posix-rename(RO) `[구현: RealSftpTest]` | 대상 있음/없음 | 일반 rename은 대상이 있으면 실패하고, posix-rename은(광고될 때) 대체한다. 어댑터는 광고된 것을 쓴다. 왕복(S3-RW-03)과 한 시험에 묶었다 |
 | S3-RO-05 | 세션 한도·heartbeat(RO) `[구현: OpenSshSessionPilotTest]` | `MaxSessions` 초과, 연결을 끊은 뒤의 생존 확인 | 한도를 넘은 채널은 열기 실패로 거절되고 세션은 계속 쓸 수 있다. 생존 확인은 성공이든 실패든 살아 있음을 증명하고, 연결을 끊은 뒤에는 I/O 오류로 실패한다. 한 사례의 두 확인이며 시험 메서드 둘이 같은 ID를 쓴다(아래 설명) |
-| S3-RO-06 | 에이전트 CLI 설치(RO) `[구현: RealAgentCliTest, P3-6]` | 실제 tgz | 실제 서버에서 tgz를 풀고(`tar`), 버전을 읽고, `current`를 전환해 다시 읽는다. 이어 상태 질의가 그 버전을 보인다. S3-AG-01·05의 실제 서버판 |
-| S3-RO-07 | 승격 SFTP(RO) `[구현: RealElevationTest, RealSftpTest, P3-4, S3-EL-01]` | 비밀번호 없이 sudo가 되는 POSIX 계정 / 그렇지 않은 계정 / Windows | 전자는 exec 채널에서 `sudo -n`으로 띄운 SFTP 서버를 MINA 클라이언트가 말하고(루트 디렉터리 목록), 어댑터 전체로 업로드·다운로드가 왕복한다(파일은 root의 것). 후자는 쓰기 전에 거절하고 열기 결과가 이유를 말한다. Windows는 관리자 probe가 결정한다 |
+| S3-RO-06 | 에이전트 CLI 설치(RO) `[구현: RealAgentCliTest, P3-6]` | 실제 tgz | 실제 서버에서 tgz를 풀고(`tar`), 버전을 읽고, `current`를 전환해 다시 읽는다. 이어 상태 질의가 그 버전을 보인다. S3-AG-01·05의 실제 서버판. 결과: **Linux·Windows 통과**(run 43187733400) |
+| S3-RO-07 | 승격 SFTP(RO) `[구현: RealElevationTest, RealSftpTest, P3-4, S3-EL-01]` | 비밀번호 없이 sudo가 되는 POSIX 계정 / 그렇지 않은 계정 / Windows | 전자는 exec 채널에서 `sudo -n`으로 띄운 SFTP 서버를 MINA 클라이언트가 말하고(루트 디렉터리 목록), 어댑터 전체로 업로드·다운로드가 왕복한다(파일은 root의 것). 후자는 쓰기 전에 거절하고 열기 결과가 이유를 말한다. Windows는 관리자 probe가 결정한다. 결과: **Linux·Windows 통과**(run 43187733400, Linux 22건·Windows 22건 실행, skipped 0, failures 0. 앞서 run 43185116678과 43186009809의 Linux도 통과) |
 | S3-RO-08 | SFTP 상태 코드(RO) `[구현: RealSftpTest, D-0013·D-0034]` | 읽을 수 없는 파일, 공간이 모자란 쓰기 | 읽기 거절은 `PERMISSION_DENIED`이며 transport 오류가 아니다. 공간 부족은 권한 문제로 읽지 않는다 |
 | S3-RW-01 | PowerShell 래퍼(RW) | 한글·따옴표·종료 코드·stderr 원문 | B-604의 Java판, CLIXML 제거(D-0011), 8000자 경계 |
 | S3-RW-02 | SFTP 경로 형식(RW) | `C:\x`, `/C:/x` | 어느 형식이 통하는지 관측하고 어댑터가 그 형식으로 변환(`[미확인]` 해소) |
@@ -894,9 +894,10 @@ Java 판에 같은 행동이 없다. 각 묶음의 대체 사례는 8.5절에서
 17. 에이전트 CLI 계획의 원격 명령은 압축 해제 하나뿐이다(21번). 시험(S3-AG-10)은 계획의 원격 명령이 그것뿐이고 `readlink`·`mkdir`·`sed`·`grep`·`cp`·`rm`·`mv`·`ln`이 없음을, 두 도구의 명령이 도구 디렉터리만 다르고 설치된 프로그램을 실행하는 단계가 없음을, Windows 명령이 8000자 아래 PowerShell 한 줄임을 고정한다. 원격을 바꾼 뒤의 실패는 `NotDispatched`가 아니다(`Unconfirmed` 또는 `RolledBack`). 위치: `ssh.platform.LinuxTargetPlatform`, `WindowsTargetPlatform`, `AgentCliPlansTest`, `ssh.cli.AgentCliInstaller`. (구현 초기에는 단계마다 다른 명령 문자열 `: before;`·`: after;`를 고정했으나 해당 단계가 SFTP로 옮겨져 사라졌다.)
 18. 동시에 같은 새 이름으로 올리는 경합(S3-SF-16)에서 진 쪽은 `DESTINATION_EXISTS`다. 위치: `ssh.sftp.SftpUploader`, `AtomicReplacer`, 시험 `UploadTest`.
 19. D-0012 해석: 예산 판정은 디스크 값과 무관하고, 디스크 거절은 여백(`diskMarginBytes`)이 모자랄 때만 한다. 판정 순서는 파일 한도, 예산, 디스크다. 위치: `store.artifact.JdbcArtifactRegistry#reserve`, `app.artifact.ArtifactRegistry`.
-20. 승격 전송은 exec 폴백이 아니라 `sudo -n <sftp-server>` 위의 MINA SFTP로 한다(시범 P3-4를 채택). 앞서 만든 exec 폴백 `ElevatedExecTransfer`는 삭제했다. 구조: exec 채널에서 `sudo -n <sftp-server>`를 띄우고(`ssh.sftp.SudoSftpChannels`), 그 위에서 MINA SFTP 클라이언트가 말한다(`ssh.sftp.ExecSftpClient`). 서버 프로그램은 고정 목록 `/usr/lib/openssh/sftp-server`, `/usr/libexec/openssh/sftp-server`, `/usr/lib/ssh/sftp-server`, `/usr/libexec/sftp-server`에서 일반 SFTP `stat`으로 찾는다. 업로드·교체·경로 검사(`RemotePathChecker`)·다운로드는 일반 SFTP와 같은 코드다(`MinaRemoteFileTransfer`가 승격 채널로 같은 `uploadOver`·`downloadOver`·`permissionsOver`를 돌린다). 그래서 폴백의 한계였던 64MiB 상한, 메모리 적재, 소유자·그룹 미보존, 조상 `lstat` 검사 생략이 모두 사라졌다. 덮어쓴 파일은 uid와 gid를 되돌린다(`SftpUploader`). 거절은 쓰기 전에 한다. 서버 프로그램이 없으면 `INVALID_REQUEST`, sudo가 거부하면 `PERMISSION_DENIED`다. Windows는 관리자 probe(`ElevationProbe`) 뒤 일반 SFTP를 쓴다. 경로 검사는 서버의 `realpath` 대신 조상 디렉터리마다 `lstat`으로 한다(`RemotePathChecker`). 시험: S3-RO-07(실제 서버, CI 결과 대기), S3-EL-01·02.
+20. 승격 전송은 exec 폴백이 아니라 `sudo -n <sftp-server>` 위의 MINA SFTP로 한다(시범 P3-4를 채택). 앞서 만든 exec 폴백 `ElevatedExecTransfer`는 삭제했다. 구조: exec 채널에서 `sudo -n <sftp-server>`를 띄우고(`ssh.sftp.SudoSftpChannels`), 그 위에서 MINA SFTP 클라이언트가 말한다(`ssh.sftp.ExecSftpClient`). 서버 프로그램은 고정 목록 `/usr/lib/openssh/sftp-server`, `/usr/libexec/openssh/sftp-server`, `/usr/lib/ssh/sftp-server`, `/usr/libexec/sftp-server`에서 일반 SFTP `stat`으로 찾는다. 업로드·교체·경로 검사(`RemotePathChecker`)·다운로드는 일반 SFTP와 같은 코드다(`MinaRemoteFileTransfer`가 승격 채널로 같은 `uploadOver`·`downloadOver`·`permissionsOver`를 돌린다). 그래서 폴백의 한계였던 64MiB 상한, 메모리 적재, 소유자·그룹 미보존, 조상 `lstat` 검사 생략이 모두 사라졌다. 덮어쓴 파일은 uid와 gid를 되돌린다(`SftpUploader`). 거절은 쓰기 전에 한다. 서버 프로그램이 없으면 `INVALID_REQUEST`, sudo가 거부하면 `PERMISSION_DENIED`다. Windows는 관리자 probe(`ElevationProbe`) 뒤 일반 SFTP를 쓴다. 경로 검사는 서버의 `realpath` 대신 조상 디렉터리마다 `lstat`으로 한다(`RemotePathChecker`). 시험: S3-RO-07(실제 서버, Linux 통과), S3-EL-01·02.
 21. 사용자 원칙에 따라 승격 폴백과 설치기의 원격 명령을 SFTP·Java로 대체했다. 남는 원격 명령은 `tar`(Windows는 `tar.exe`)와 `sudo -n`(과 그 점검 `sudo -n true`)이다. 원문은 「java로 할수있는걸 외부프로그램으로 굳이 하지 말란소리야」다. `tar`가 남는 이유는 대상이 압축 전체를 한 번에 풀어 파일의 모드를 보존하기 때문이며, Java가 하면 파일 수천 개를 SFTP로 하나씩 올려야 한다. `sudo -n`은 대상이 계정에 권한을 주는 수단이라 대체할 수 없다. 설치기는 현재 판 읽기, 디렉터리 만들기, 패키지의 `package/package.json`에서 버전 읽기(Jackson), 전환, 정리를 SFTP로 한다. 전환은 심볼릭 링크 `current.next`를 만들어 posix-rename으로 교체하고, 광고되지 않으면 삭제한 뒤 rename한다. 링크를 거절하는 서버(Windows)는 포인터 파일 `current.txt`를 같은 방식으로 교체한다. 위치: `ssh.cli.AgentCliInstaller`, `ssh.cli.CurrentLink`, `ssh.platform.AgentCliStep`(`UNPACK`만 있음). `docs/external-programs.{en,ko}.md`는 이 판정에 맞췄다.
 22. 조립과 정산: `AssemblyDefaults.agentReleaseCatalog()`는 4단계의 카탈로그 어댑터가 나오기 전까지 `TarballResult.Unavailable`을 돌려준다. 이때 설치는 원격에 아무것도 보내지 않고 `NOT_DISPATCHED`로 끝난다. `StagedActionSettlement`가 업로드 작업이 끝날 때 staged action을 정산한다(`ArtifactRegistry.actionOf`). 위치: `server.assembly.AssemblyDefaults`, `app.file.StagedActionSettlement`. 시험 `JdbcHistoryQueryTest`에서는 RC-B-393 표시를 뺐다(삭제 표로 옮긴 사례). `HistoryService`의 사례는 RC-B-394, 396, 397, 399다.
+23. Windows 대상의 junction과 다른 reparse point는 SFTP로 볼 수 없어 숨은 링크 검사로 거절한다(4.4절 19번의 보완). 사실: Win32-OpenSSH는 심볼릭 링크만 링크로 보고한다. junction(mount point)은 SFTP `stat`, `lstat`, `readlink` 모두에서 일반 디렉터리로 보인다(openssh-portable `contrib/win32/win32compat/fileio.c`: `lstat`는 `fileio_readlink`가 성공할 때만 링크로 보고, `readlink`는 `IO_REPARSE_TAG_SYMLINK`만 받는다. B가 확인했다). 그래서 CI run 43186009809에서 junction을 거친 업로드가 게시되었다. 2.x는 `scripts/windows-file-native.cs`의 `Inspect`에서 모든 reparse point를 거부했다(RC-B-621). 수정: `ssh.sftp.HiddenLinkProbe`를 두고 업로드·다운로드·권한 변경에서 경로 정책 다음, 세션을 빌리기 전에 실행한다(관리자 권한 계획 포함). 판정: Linked는 `UNSAFE_PATH`, Unverified는 `INVALID_REQUEST`, 실행하지 못하면 업로드·권한 변경은 NotDispatched, 다운로드는 Failed다. 구현은 `ssh.platform.WindowsReparseProbe`이며 Windows 대상에서만 고정된 읽기 전용 PowerShell 명령 하나를 기존 래퍼로 실행한다. 경로는 base64 데이터로만 넘기고 구성요소마다 `[IO.File]::GetAttributes`로 걷는다. 종료 코드는 reparse point를 만나면 3, 구성요소가 없어 걷기가 끝나면 0, 다른 오류나 드라이브 형식이 아닌 경로는 4(Unverified)다. POSIX 대상은 이 검사를 하지 않는다(경로 검사가 구성요소마다 `lstat`로 링크를 이미 본다). 이 명령은 `docs/external-programs.{en,ko}.md`에 적었다. 수정 뒤 CI run 43187733400에서 Windows S3-RW-04(링크·junction `UNSAFE_PATH`: 업로드 파일·디렉터리, 다운로드 junction)가 통과했다.
 
 ### 11.4 미결·후속
 | 항목 | 상태 | 다음 |
@@ -910,9 +911,10 @@ Java 판에 같은 행동이 없다. 각 묶음의 대체 사례는 8.5절에서
 | testkit의 FSYNC·변조 주입이 없음 | `EmbeddedSshServer`는 권한 거절·공간 부족·rename 실패·다운로드 중 단절을 주입하지만 FSYNC 실패와 바이트 변조는 못 낸다. 그 시험(S3-SF-05 b, S3-SF-20)은 지금 JDK 프록시(`SftpDoubles`)로 한다 | 미정 |
 | `ArtifactRefusal` 값을 오류 봉투로 옮기는 일 | `ArtifactRefusal`(코드와 값)을 `envelope.schema.json`의 오류 봉투로 옮기는 일이 남았다 | 4단계 |
 | `ArtifactSpec` provenance | `ArtifactSpec`에 `ArtifactProvenance`를 담는 자리가 없다. 다운로드·복사의 출처 기록은 이 값 없이 처리한다 | 미정 |
-| P3-4·P3-6 | 코드와 시험은 있다. P3-4(`sudo -n <sftp-server>` 위 SFTP)는 S3-RO-07이, P3-6(압축을 푼 뒤 도구가 대상에서 npm을 필요로 하는가)은 S3-RO-06이 실제 OpenSSH에서 확인한다. 둘 다 CI 결과(실제 Linux·Windows 서버)를 기다린다. 폴백은 없으므로 P3-4가 실패하면 승격은 거절이다(쓰기 전에 `INVALID_REQUEST`·`PERMISSION_DENIED`) | CI 결과 |
+| P3-4·P3-6 | 코드와 시험이 있고 Linux·Windows 통과(run 43187733400)했다. P3-4(`sudo -n <sftp-server>` 위 SFTP)는 S3-RO-07과 S3-EL-01이, P3-6(실제 tgz 설치)은 S3-RO-06이 확인했다. 폴백은 없으므로 P3-4가 실패하는 대상에서 승격은 거절이다(쓰기 전에 `INVALID_REQUEST`·`PERMISSION_DENIED`). 압축을 푼 뒤 도구가 대상에서 npm·node를 필요로 하는지는 이 시험이 보이지 않는다 | 닫음(npm 필요 여부만 열려 있음) |
 | Windows 설치기의 `current` 전환 | 심볼릭 링크를 만들지 못하는 서버(Win32-OpenSSH)는 포인터 파일 `current.txt`를 posix-rename 또는 삭제 뒤 rename으로 교체한다. posix-rename이 광고되지 않으면 원자적이지 않아, 설치기가 `current`를 다시 읽어 확인한 뒤에야 설치 완료로 본다. 실제 Windows 서버(S3-RW)에서 확인하지 않았다 | S3-RW |
 | S3-RW-05(DACL) | SFTP로는 DACL을 읽을 수 없다. 덮어쓴 뒤의 DACL·소유자가 임시 파일의 것이라는 사실(8.4절, 릴리스 노트와 짝)을 단정하려면 Windows CI에서 대상 명령으로 읽는 시험이 필요하다. 시험 소스가 없다 | 미정(Windows CI) |
+| 숨은 링크 검사(Windows)의 한계 | (1) 검사(`WindowsReparseProbe`)와 SFTP 작업 사이에 시간 차이가 있다(TOCTOU). POSIX의 `lstat` 검사와 같은 성격이다. 2.x는 핸들을 `FILE_FLAG_OPEN_REPARSE_POINT`로 열어 최종 경로를 비교했으나 SFTP로는 그 강도를 줄 수 없다. 이 잔여 위험은 8단계 보안 감사 범위에 넣는다. (2) 접근 거부일 때 종료 코드 4가 실제 서버에서 나오는지는 시험하지 않았다 | 8단계 감사, S3-RW |
 | 릴리스 카탈로그 어댑터 | `AssemblyDefaults.agentReleaseCatalog()`는 `TarballResult.Unavailable`을 돌려준다. 그래서 에이전트 CLI 설치는 지금 원격에 아무것도 보내지 않고 `NOT_DISPATCHED`로 끝난다 | 4단계 |
 
 ### 11.5 구현 분담(9절 대체)

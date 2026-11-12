@@ -24,7 +24,7 @@
 
 포털이 이 프로그램을 실행하는 것이 아니다. SSH 채널로 대상에 보내면 대상이 실행한다. 대상에는 JVM이 없으며, 승인된 명령을 대상에서 실행하는 것이 제품의 기능이다. 포털 호스트의 Java 클래스는 문장을 만들어 보낼 수 있을 뿐이다. 그래서 이 절의 프로그램은 어느 것도 Java로 대체할 수 없고, 포털 호스트에서 시작하지도 않는다.
 
-이 절의 명령은 사용자가 제출한 명령과 원문을 제외하면 모두 고정 문장이다. 고정 명령에 넣는 값은 검증을 마친 값(고정 목록에서 고른 SFTP 서버 프로그램의 경로, 에이전트 CLI 릴리스의 구성 요소)뿐이며, 각 값은 대상 셸에 맞게 적는다. 고정 명령에는 호출자의 자유 문장이 들어가지 않는다.
+이 절의 명령은 사용자가 제출한 명령과 원문을 제외하면 모두 고정 문장이다. 고정 명령에 넣는 값은 검증을 마친 값(고정 목록에서 고른 SFTP 서버 프로그램의 경로, 에이전트 CLI 릴리스의 구성 요소, 숨은 링크 검사에서는 스크립트가 해독만 하고 실행하지 않는 base64 데이터인 전송 경로)뿐이며, 각 값은 대상 셸에 맞게 적는다. 고정 명령에는 호출자의 자유 문장이 들어가지 않는다.
 
 ### 승인된 요청의 실행
 
@@ -33,6 +33,7 @@
 | 사용자 명령, `source` 요청의 Python 원문: POSIX 대상은 `/usr/bin/python3 -I -B -S -X utf8 -c <수신기>`, Windows 대상은 관리자가 대상에 설정한 `python.exe`(PowerShell 실행기가 시작한다) | 승인 뒤 원격 대상. | 사용자가 승인한 명령을 대상에서 실행하는 것이 제품 기능이다. 명령과 해석기는 포털이 아니라 대상 시스템의 것이다. 수신기는 요청과 함께 보내는 Python 문장이며, 표준 입력을 끝까지 읽고 길이와 SHA-256을 확인한 뒤 컴파일한다. 잘렸거나 바뀐 원문은 효과가 생기기 전에 종료 코드 125로 거절하고, UTF-8이 아니거나 컴파일되지 않으면 126으로 거절한다. 전송 무결성 확인이며 샌드박스가 아니다. | `portal-ssh`의 `exec`(`MinaRemoteExecutor`), `platform.LinuxTargetPlatform`·`platform.WindowsTargetPlatform`·`platform.PythonSourceReceiver`, `src/main/resources/ssh/remote/`의 수신기 원문 `python-receiver-posix.py`·`python-receiver-windows.py`와 실행기 원문 `windows-source-launcher.ps1`·`windows-source-bootstrap.ps1`. |
 | Windows 대상의 PowerShell 래퍼: `powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden ... -EncodedCommand <base64>`(오류 보고, 진행 기록과 CLIXML 억제, Windows 명령줄 8000자 한도) | 원격 Windows 대상(기본 셸은 `cmd.exe`). | 래퍼는 대상의 해석기에 보내는 데이터이다. 해석은 대상이 하고, Java는 문장을 만들어 보낼 뿐이다. | `portal-ssh`의 `platform.WindowsCommandWrapper`, 리소스 파일 `src/main/resources/ssh/remote/*.ps1`. 시험 S3-TP-04(`RemoteScriptsTest`)가 리소스 파일 12개의 SHA-256을 고정한다. |
 | Windows 대상의 관리자 연결 확인: Windows 신원(`WindowsPrincipal.IsInRole(Administrator)`)을 묻는 읽기 전용 PowerShell 질의이며 위 래퍼로 보낸다. 연결이 관리자의 것이면 종료 코드 0으로 끝난다 | 원격 Windows 대상, 상승한 파일 작업 전. | 연결 토큰이 관리자 그룹에 속하는지는 대상의 운영체제만 안다. | `portal-ssh`의 `platform.WindowsTargetPlatform`(상승 계획)과 `sftp.ElevationProbe`. |
+| Windows 대상으로 가는 파일 전송 경로의 숨은 링크 검사: 고정된 읽기 전용 PowerShell 명령 하나이며 위 래퍼로 보낸다. 드라이브부터 경로의 구성요소마다 따라가지 않고 `[IO.File]::GetAttributes`로 본다. 경로는 base64 데이터로만 넘긴다. reparse point를 만나면 3, 하나도 없으면 0(없는 구성요소를 만나면 걷기가 끝난다), 구성요소를 볼 수 없거나 경로가 드라이브 형식이 아니면 4로 끝난다 | 원격 Windows 대상. 업로드, 다운로드, 권한 변경(상승한 요청 포함)에서 경로 정책 다음, SFTP 세션을 쓰기 전에 실행한다. POSIX 대상은 이렇게 검사하지 않는다. SFTP 서버가 링크를 보여 주고 경로 검사가 거절한다. | 정보가 대상의 파일 시스템에만 있다. Win32-OpenSSH의 SFTP 서버(SFTP v3 속성)는 심볼릭 링크만 링크로 보고하고, junction(mount point reparse point)은 `stat`, `lstat`, `readlink`에서 모두 일반 디렉터리로 보이므로 어떤 SFTP 요청으로도 찾을 수 없다. | `portal-ssh`의 `platform.WindowsReparseProbe`(이유는 `sftp.HiddenLinkProbe`에 적었다). 링크를 찾으면 `UNSAFE_PATH`, 답을 읽을 수 없으면(코드 4) `INVALID_REQUEST`, 명령이 실행되지 못하면 보내지 않은 것으로 끝난다. |
 | 원격 Linux 대상에서 `Xvnc`와 보조 프로그램의 기동 | 원격 Linux 대상. | 대상 시스템의 명령이다. | `portal-desktop`의 원격 Linux 데스크톱 기동기(예정, 5단계). |
 
 ### 상승한 파일 작업(POSIX 대상)
