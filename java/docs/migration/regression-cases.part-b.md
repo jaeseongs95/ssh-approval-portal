@@ -431,10 +431,7 @@
 | RC-B-417 | Jev 동시 호출 거절·호출자 변조 격리 | 첫 요청이 전송 중일 때 입력 객체의 command를 `rm -rf /`로 변조하고 둘째 요청 | 둘째는 즉시 reason='busy', 전송된 본문 state.command는 `id -u` 유지, 첫 요청은 assessed, 이후 요청도 assessed | reason·본문 assert | portal-web | test/safety.test.mjs:101 | - |
 | RC-B-418 | Jev 시간 초과·응답 닫기·복구 | timeoutMs 15: 헤더 대기 중단, 본문 일부만 전송 후 중단; 고정 서버 timeoutMs 500에서 hold=headers/body | reason='timeout', 요청 신호 abort됨, 중단된 호출이 끝나기 전까지 둘째 호출은 reason='busy'(호출 1회); 본문 스트림 cancel 호출됨; 서버 보유 응답 1건이 닫히고 대기열에 중복 요청이 쌓이지 않으며(서버 기록 1) 이후 요청은 assessed(기록 2) | reason·cancel·서버 기록 assert | portal-web | test/safety.test.mjs:111, test/safety.test.mjs:122, test/safety-http.test.mjs:98 | - |
 | RC-B-419 | Jev 후보 임계값 판정 | valid 평가(label low_risk, confidence 1); confidence 0.989; probabilities {0.998,0.002}; label high_risk; confidence NaN; inputTokens Infinity | candidateMatch는 정상만 true, 나머지 false; validateAssessment(Infinity)=null; SAFETY_PROTOCOL.automaticExecutionEnabled=false·thresholdStatus='unvalidated' | 불리언·상수 assert | portal-domain | test/safety.test.mjs:131 | - |
-| RC-B-420 | 안전성 평가 실행: 입력 고정·말뭉치 검증 | 사례 2건(S001 low_risk, S002 high_risk), 평가기가 첫 호출 중 사례를 변조·둘째에서 예외; 잘못된 말뭉치 `[]`·중복 id·33건·expected `unknown` | 평가기에 전달되는 키는 command,target,environment,context뿐(라벨·근거 비전달); total 2·correct 1·unavailable 1·accuracy 0.5, records[1].expected 원본 유지·reason='request_failed', 보고서에 내부 오류·명령·context 없음, stage5Ready=false; 잘못된 말뭉치는 `Invalid safety` 예외·전송 0 | 보고서 필드 assert | portal-app | test/safety.test.mjs:139, test/safety.test.mjs:153 | - |
-| RC-B-421 | 안전성 평가 시뮬레이션 보고서 | 기본 모의 실행(runSafetyEvaluation) | source='simulated', modelQualityStatus='NOT_MEASURED', total 20·assessed 19·unavailable 1·correct 16·incorrect 3·accuracy 0.8, candidates 7·falseCandidates 2, usage {inputTokens:1900, outputTokens:380}, confusion `{low_risk:{low_risk:5,high_risk:1}, high_risk:{low_risk:2,high_risk:11}}`, stage5Ready=false·usageComplete=false, datasetDigest `sha256:`+64hex, sourceFiles 4개 | 수치 deepEqual | portal-app | test/safety.test.mjs:161 | - |
 | RC-B-422 | 안전성 평가 주입 전송 경로 | mode live + apiKey + 주입 fetch(모든 응답 low_risk 고정) 20사례; 임시 고정 서버 경유 | 호출 20회, 전송 state 키 = command,target,environment,context(근거·expected·id 없음), correct 6·incorrect 14·falseCandidates 14, usage {400, 80}, source='simulated'(주입 전송은 실모델 평가로 보고 안 함), modelQualityStatus='NOT_MEASURED', transport='injected', stage5Ready=false, protocol.automaticExecutionEnabled=false, 보고서에 키·명령 없음 | 호출 수·수치 assert | portal-app, portal-web | test/safety.test.mjs:173, test/safety-http.test.mjs:42 | - |
-| RC-B-423 | 안전성 평가 CLI 보호 | 키 없이 `--mode live`; 이미 있는 출력 파일에 `--out`; replay 모드 | 키 없음 종료 코드 2; 기존 출력은 덮어쓰지 않고 종료 코드 2·내용 `preserve` 유지, stdout·stderr에 키 없음; replay는 종료 코드 1, 보고서 JSON total 20·unavailable 1·stage5Ready=false (유료 호출 없음) | 종료 코드·파일 내용 assert | portal-app | test/safety.test.mjs:184 | - |
 | RC-B-424 | 비밀 CLI TTY 등록·교체·취소(Linux) | 실제 의사 터미널에서 `set secret://local-file/model-key`를 값 입력 후 Enter, 다른 값으로 교체, 취소(Ctrl-C), status | 등록 시 출력에 `"stored":true`·값 에코 없음·종료 0; 교체 후 revision이 달라짐; 취소는 종료 1·`input_cancelled`이고 직전 값·파일 내용 보존; status는 present=true, 출력에 `synthetic-` 값 없음 | PTY 출력·저장 파일 assert(Linux 전용) | portal-server | test/secret-cli-pty.test.mjs:6 | - |
 | RC-B-425 | 비밀 참조 해석: Jev 키 성공 경로 | 모드 reference(`BRIDGE_JEV_KEY_REF=secret://another-vendor/model-key`)·environment(`JEV_API_KEY` 환경 변수); 소유자 externalDisclosure=true; submit 후 observe | 도구 이름에 secret 없음; reference는 해석기 1회 호출·환경 변수 모드는 0회; 외부 호출 1회에 `Authorization: Bearer <값>`; 결정 decision='review'·reasonCode='observation_only'·assessment.label='low_risk', 요청 state pending; 결과·결정·감사 어디에도 비밀 값 없음 | 호출 수·결정·정규식 부재 assert | portal-web, portal-app | test/secret-integration.test.mjs:52 | - |
 | RC-B-426 | 비밀 참조 해석: 실패 닫힘 | 모드 missing(해석기가 비밀 표식 예외)·disabled(`BRIDGE_JEV_ENABLED=false`) | missing은 해석기 1회·외부 호출 0, disabled는 해석기 0·외부 호출 0; 결정 reasonCode='evaluation_unavailable'·assessment 없음, 요청 state pending; 결과·결정·감사에 비밀 표식 없음 | 호출 수·reasonCode assert | portal-web, portal-app | test/secret-integration.test.mjs:52 | - |
@@ -450,7 +447,6 @@
 | RC-B-436 | 종료: 미완료 HTTP 본문 | 관리자 POST `/api/environment`가 Content-Length 1000인데 `{`만 보내고 중단, close 호출 | close가 7초 안에 끝나고(클라이언트 완료를 기다리지 않음), close 재호출은 같은 진행 약속, 연결 레지스트리 정리됨 | 시간 상한·정리 플래그 assert | portal-server | test/shutdown.test.mjs:26 | - |
 | RC-B-437 | 종료: 정상 진행 응답 유예 | 환경 조회 응답이 처리 중일 때 close, 이후 처리 완료 | close 중에도 연결 정리는 응답 완료 전에는 일어나지 않고, 응답은 HTTP 200·marker `response-preserved`, 완료 후 정리됨 | 응답·정리 시점 assert | portal-server | test/shutdown.test.mjs:43 | - |
 | RC-B-438 | 모듈 경계 규칙(구조 검사) | 소스 구조 검사: 안쪽 계층(domain·application) 소스 | 안쪽 계층은 바깥 어댑터·인프라에 의존하지 않고(허용: 계약·domain, application은 application; 암호 해시용 표준 라이브러리 예외 지정 클래스만), 전송 DTO(structuredContent·_meta·download_url·file_id·statusCode)나 저장소 내부(store.items·reserved·pinned·state)를 노출·조작하지 않음 → 3.0은 portal-domain·portal-app이 portal-web·portal-store·portal-ssh·Spring Web에 의존하지 않는 ArchUnit(또는 Gradle 의존 검사)와 호스트 DTO 비노출 검사로 이식 | ArchUnit 규칙 위반 0 | portal-domain, portal-app | test/solid-architecture.test.mjs:38 | - |
-| RC-B-439 | 파일 원본(FileSource) 대체 가능성 | 4바이트 `[0,255,1,2]`을 스트림 한 번 / 비동기 반복자 두 조각(expectedSize null)으로 제공하는 원본, 최대 16바이트·예산 32 저장소 | requestUpload 결과 type='job'·state='pending', operation.sha256·size 일치, 승인 전 실행 0, 원본 close 1회; 승인 후 completed·실행 1회, 같은 job 재시작은 예외; reap 후 활성 작업 없음·예약 0 | 해시·크기·실행 횟수 assert | portal-app | test/solid-architecture.test.mjs:70 | - |
 | RC-B-440 | 업로드 스테이징 기본 예산 | 기본 저장소: 건당 최대 64MiB·예산 512MiB, 64MiB 항목 8개 begin 후 9번째 | maxBytes=67108864·budget=536870912, 8개 예약 시 reserved=budget·size 8(내용 할당 없음), 9번째는 `Staging budget exhausted`로 거절·상태 불변, 전부 제거 후 reserved 0·size 0·활성 작업 없음 | 숫자·예외 assert | portal-app, portal-store | test/solid-architecture.test.mjs:99 | - |
 | RC-B-441 | 공개 경계 회귀 AP-01: 만료 감사 실패에도 서비스 유지 | submit(command `printf fixture-never-execute`, operationKey `solid-expiry-key-0001`) 후 시계 +3,600,001ms, 만료 감사가 예외 | `/health` 200·pending 0, 만료 감사 시도 정확히 1회(재시도 안 함), 큐 항목 auditError에 `must not be retried`; observe state='expired'·auditFailure=true; 응답에 감사 예외 메시지 없음; 관리자 approve는 409, 실행 0 | HTTP 상태·상태 문자열 assert | portal-web, portal-app | test/solid-regressions.test.mjs:14 | - |
 | RC-B-442 | 공개 경계 회귀 AP-02: 읽기 명령 실행기 예외 | maxConcurrency 1, `id fail-read` 실행기가 예외, 조회 키 id·operationKey 각각; 이후 `id recovered` | 상태 'unknown'·failed=true·failureCode='OPERATION_FAILED'·remoteOutcome='unknown', 비공개 예외 문자열 응답에 없음, 감사 순서 `submitted`,`execution-queued`,`policy-execution-started`,`unknown`; 같은 operationKey 재제출은 같은 id·state 'unknown'이고 실행기를 다시 호출하지 않음; health.busy=false; 후속 `id recovered`는 completed·outputPage.text='read-ok' | 상태·감사 목록·실행 횟수 assert | portal-web, portal-app | test/solid-regressions.test.mjs:14 | - |
@@ -941,6 +937,11 @@
 | 원 시험(파일:줄) | 사유 |
 |---|---|
 | test/solid-architecture.test.mjs:46 | Node 런타임 고유(소스 구조 검사 도구): `.mjs` import 구문을 정규식으로 추출하는 파서 자체를 자체 시험하며(문자열·주석 속 `from` 무시, 정적·동적 import 구분) 3.0 Java에는 그 파서가 없음. 계층 의존 규칙 자체는 RC-B-438(ArchUnit)로 이식 |
+| test/safety.test.mjs:139 | 메인 판정 D-18: feature-map Q6 A안 — 안전성 평가 연구 도구 삭제. 구 RC-B-420 |
+| test/safety.test.mjs:153 | 메인 판정 D-18: feature-map Q6 A안 — 안전성 평가 연구 도구 삭제. 구 RC-B-420 |
+| test/safety.test.mjs:161 | 메인 판정 D-18: feature-map Q6 A안 — 안전성 평가 연구 도구 삭제. 구 RC-B-421 |
+| test/safety.test.mjs:184 | 메인 판정 D-18: feature-map Q6 A안 — 안전성 평가 연구 도구 삭제. 구 RC-B-423 |
+| test/solid-architecture.test.mjs:70 | 메인 판정 D-18: feature-map Q11 — `file-source.mjs`는 3.0으로 옮기지 않는다(2.x에서도 쓰지 않는다). 구 RC-B-439 |
 
 ### G06 삭제
 
@@ -1591,11 +1592,11 @@ B범위 원자료 모든 행(파일:줄)을 사례 ID 또는 「삭제」(또는
 | test/safety.test.mjs:111 | RC-B-418 |
 | test/safety.test.mjs:122 | RC-B-418 |
 | test/safety.test.mjs:131 | RC-B-419 |
-| test/safety.test.mjs:139 | RC-B-420 |
-| test/safety.test.mjs:153 | RC-B-420 |
-| test/safety.test.mjs:161 | RC-B-421 |
+| test/safety.test.mjs:139 | 삭제 |
+| test/safety.test.mjs:153 | 삭제 |
+| test/safety.test.mjs:161 | 삭제 |
 | test/safety.test.mjs:173 | RC-B-422 |
-| test/safety.test.mjs:184 | RC-B-423 |
+| test/safety.test.mjs:184 | 삭제 |
 | test/secret-cli-pty.test.mjs:6 | RC-B-424 |
 | test/secret-integration.test.mjs:52 | RC-B-425, RC-B-426 |
 | test/secret-io-failures.test.mjs:24 | RC-B-427 |
@@ -1612,7 +1613,7 @@ B범위 원자료 모든 행(파일:줄)을 사례 ID 또는 「삭제」(또는
 | test/shutdown.test.mjs:43 | RC-B-437 |
 | test/solid-architecture.test.mjs:38 | RC-B-438 |
 | test/solid-architecture.test.mjs:46 | 삭제 |
-| test/solid-architecture.test.mjs:70 | RC-B-439 |
+| test/solid-architecture.test.mjs:70 | 삭제 |
 | test/solid-architecture.test.mjs:99 | RC-B-440 |
 | test/solid-regressions.test.mjs:14 | RC-B-441, RC-B-442, RC-B-443, RC-B-444, RC-B-445, RC-B-446 |
 
@@ -2299,19 +2300,19 @@ B범위 원자료 모든 행(파일:줄)을 사례 ID 또는 「삭제」(또는
 | G02 | 74 | 74 | 0 | 0 | 73 (RC-B-091~163) |
 | G03 | 97 | 76 | 21 | 0 | 76 (RC-B-181~267, 삭제로 빠진 250·252·258~260·262~267 제외) |
 | G04 | 102 | 98 | 4 | 0 | 88 (RC-B-271~359, 삭제로 빠진 299 제외) |
-| G05 | 95 | 94 | 1 | 0 | 86 (RC-B-361~446) |
+| G05 | 95 | 89 | 6 | 0 | 82 (RC-B-361~446, 삭제로 빠진 420·421·423·439 제외) |
 | G06 | 112 | 110 | 2 | 0 | 89 (RC-B-451~537, 메인 판정 6으로 되살린 538·539 포함) |
 | G07 | 56 | 56 | 0 | 0 | 89 (RC-B-541~629) |
 | G08 | 102 | 54 | 48 | 0 | 52 (RC-B-631~682) |
 | G09 | 106 | 33 | 73 | 0 | 35 (RC-B-721~755) |
 | G10 | 127 | 115 | 12 | 0 | 82 (RC-B-811~892) |
 | G11 | 142 | 106 | 36 | 0 | 47 (RC-B-901~947) |
-| **합계** | **1,088** | **891** | **197** | **0** | **805** |
+| **합계** | **1,088** | **886** | **202** | **0** | **801** |
 
 - 원자료 행 수(B범위) 1,088 = mjs 611 + py 335 + ps1·sh 142. 대응표 행 수 1,088(파일 Grep으로 확인: 대응표 행 `| test/...:줄 | RC-B-…·삭제·미확인`이 1,088개, 그중 `삭제` 197개, `미확인` 0개).
-- 사례로 간 행 891 + 삭제 197 + 미확인 0 = 1,088. 삭제 표의 행 수도 197이다(두 칸 표 행 1,285 = 대응표 1,088 + 삭제 표 197).
-- 사례 수 805(`| RC-B-nnn |` 행 805개). 한 원자료 행이 여러 사례에 걸치는 경우가 있어(대응표 셀에 사례 ID를 쉼표로 나열) 「사례 수」와 「사례로 간 행」은 같지 않다.
-- 결번: 대역의 빈 번호(RC-B-089·090, 164~180, 268~270, 360, 447~450, 540, 630, 683~720, 756~810, 893~900, 948~990)와 메인 판정 2·5로 삭제 표로 옮긴 사례 번호(RC-B-250·252·258~260·262~267·299).
+- 사례로 간 행 886 + 삭제 202 + 미확인 0 = 1,088. 삭제 표의 행 수도 202이다(두 칸 표 행 1,290 = 대응표 1,088 + 삭제 표 202).
+- 사례 수 801(`| RC-B-nnn |` 행 801개). 한 원자료 행이 여러 사례에 걸치는 경우가 있어(대응표 셀에 사례 ID를 쉼표로 나열) 「사례 수」와 「사례로 간 행」은 같지 않다.
+- 결번: 대역의 빈 번호(RC-B-089·090, 164~180, 268~270, 360, 447~450, 540, 630, 683~720, 756~810, 893~900, 948~990)와 메인 판정 2·5로 삭제 표로 옮긴 사례 번호(RC-B-250·252·258~260·262~267·299)와 메인 판정 D-18로 옮긴 사례 번호(RC-B-420·421·423·439).
 
 ### 교차 검증 결과 (메인 판정 7)
 
@@ -2320,10 +2321,10 @@ B범위 원자료 모든 행(파일:줄)을 사례 ID 또는 「삭제」(또는
 | 비교 | 결과 |
 |---|---|
 | 사례 표의 원 시험(파일:줄) 집합 − 대응표 사례 행 집합 | 0건 (사례 표에만 있는 줄 없음) |
-| 대응표 사례 행 집합(891) − 사례 표의 원 시험 집합 | 0건 (사례 표에 없는 사례 행 없음) |
-| 대응표 `삭제` 행 집합(197) − 삭제 표 행 집합(197) | 0건 |
+| 대응표 사례 행 집합(886) − 사례 표의 원 시험 집합 | 0건 (사례 표에 없는 사례 행 없음) |
+| 대응표 `삭제` 행 집합(202) − 삭제 표 행 집합(202) | 0건 |
 | 삭제 표 행 집합 − 대응표 `삭제` 행 집합 | 0건 |
-| 개수 | 대응표 1,088 = 원자료 1,088, 삭제 197 = 197, 사례 행 805 |
+| 개수 | 대응표 1,088 = 원자료 1,088, 삭제 202 = 202, 사례 행 801 |
 
 - 같은 대조에서 한 가지 해석이 필요했다. G11의 `windows-file-helper.tests.ps1`은 사례 표의 원 시험 열이 아닌 설명 열에도 줄 번호(여러 줄 assert 15개 등)를 인용한다. 이 인용 줄은 원자료 행이 아니므로 대응표 행에서 제외했고, 사례 표의 원 시험 열에 있는 줄과 대응표 사례 행이 정확히 일치함을 확인했다.
 - 한 줄이 여러 사례에 속하는 경우(예: `test/mcp-contracts.test.mjs:83` → RC-B-013·RC-B-032, `test/solid-regressions.test.mjs:14` → RC-B-441~446)는 사례 표에서 해당 줄이 해당 사례 행마다 나오고 대응표 셀에 ID가 모두 적혀 있어 일치한다.
