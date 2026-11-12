@@ -266,6 +266,36 @@ class ServerKeyPolicyTest {
     }
 
     @Test
+    @DisplayName("VR-447 (non-standard port): in strict mode a record for the same host on another port, or for the host alone (which means port 22), does not record this server")
+    void strictModeMatchesTheHostAndThePort() throws IOException {
+        KeyPair hostKey = EmbeddedSshServer.newKeyPair();
+        try (EmbeddedSshServer server = server(hostKey)) {
+            ServerKeyPolicy policy = policy(HostKeyMode.STRICT);
+            String key = PublicKeyEntry.toString(hostKey.getPublic());
+            int otherPort = server.port() == 65535 ? 65534 : server.port() + 1;
+            Files.writeString(knownHosts, "[" + server.host() + "]:" + otherPort + " " + key + "\n" + server.host() + " " + key + "\n");
+
+            assertRefused(policy, server, profile(server, Setting.unset()));
+
+            assertThat(events.refusals()).singleElement().satisfies(refusal -> assertThat(refusal.reason()).isEqualTo(HostKeyRefusal.Reason.UNKNOWN));
+        }
+    }
+
+    @Test
+    @DisplayName("VR-447 (the line of the CI script): a record of two fields, [host]:port and the key, exactly as java/ci/openssh-linux.sh writes it, accepts the server in strict mode")
+    void strictModeAcceptsALineOfTwoFields() throws IOException {
+        KeyPair hostKey = EmbeddedSshServer.newKeyPair();
+        try (EmbeddedSshServer server = server(hostKey)) {
+            ServerKeyPolicy policy = policy(HostKeyMode.STRICT);
+            Files.writeString(knownHosts, "[" + server.host() + "]:" + server.port() + " " + PublicKeyEntry.toString(hostKey.getPublic()) + "\n");
+
+            connect(policy, server, profile(server, Setting.unset()));
+
+            assertThat(events.refusals()).isEmpty();
+        }
+    }
+
+    @Test
     @DisplayName("VR-448, VR-451: the default mode is tofu, and the first key of a host is recorded")
     void theDefaultModeRecordsTheFirstKey() throws IOException {
         assertThat(SshSettings.defaults(knownHosts).hostKeyMode()).isEqualTo(HostKeyMode.TOFU);

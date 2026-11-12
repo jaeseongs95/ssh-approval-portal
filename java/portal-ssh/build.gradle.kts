@@ -1,4 +1,12 @@
 // SSH adapter on Apache MINA SSHD: exec with deadline and cancel, SFTP file operations, direct-tcpip forwarding, host key TOFU.
+plugins {
+    // The embedded SSH server and its helpers (package ssh.testkit, src/testFixtures/java) are shared with the assembly tests of portal-server. Gradle's test fixtures plugin
+    // is the standard way to publish test helpers of one project to the tests of another (the consumer declares testImplementation of the testFixtures of this project,
+    // https://docs.gradle.org/current/userguide/java_testing.html#sec:java_test_fixtures); the tests of this project see the fixtures without a declaration.
+    // The fixtures also hold ssh.profile.TestFiles (owner-only temporary files and folders), which the assembly tests use to write a private profile file.
+    `java-test-fixtures`
+}
+
 dependencies {
     api(project(":portal-app"))
     // Not in the Spring Boot BOM (spring-boot-dependencies-4.1.2.pom has no org.apache.sshd entry). 2.20.1 is the newest 2.x GA release on Maven Central
@@ -20,6 +28,14 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-validation")
     // testImplementation, not testRuntimeOnly: LoggingHostKeyEventsTest attaches a logback ListAppender, so the logback classes are on the test compile class path.
     testImplementation("ch.qos.logback:logback-classic")
+
+    // The test fixtures (ssh.testkit): the embedded server exposes MINA types (sessions, SFTP accessors) to its users, so MINA is an API of the fixtures; JUnit and AssertJ
+    // are used by the fixture helpers that assert. The versions are the ones above and the Spring Boot BOM's.
+    testFixturesImplementation(platform("org.springframework.boot:spring-boot-dependencies:${property("springBootVersion")}"))
+    testFixturesApi("org.apache.sshd:sshd-core:2.20.1")
+    testFixturesApi("org.apache.sshd:sshd-sftp:2.20.1")
+    testFixturesImplementation("org.junit.jupiter:junit-jupiter-api")
+    testFixturesImplementation("org.assertj:assertj-core")
 }
 
 // ---- realOpenSshTest: the tests that need a real OpenSSH server (stage 3 design 7.2 and 7.3, cases S3-RO-nn and S3-RW-nn) ----

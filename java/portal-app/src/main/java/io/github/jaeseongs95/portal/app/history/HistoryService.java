@@ -30,7 +30,7 @@ import io.github.jaeseongs95.portal.domain.target.ResolvedTarget;
 import io.github.jaeseongs95.portal.domain.target.TargetLookup;
 
 /**
- * The history of finished operations as the owner reads it (2.x {@code history.mjs}, cases RC-B-393 to RC-B-401). The storage reads keyset pages of the journal
+ * The history of finished operations as the owner reads it (2.x {@code history.mjs}, cases RC-B-394, RC-B-396, RC-B-397 and RC-B-399). The storage reads keyset pages of the journal
  * ({@link HistoryQuery}); this use case adds what only it knows (the page size and the response limit that the query leaves to it) and what depends on the targets as they are
  * configured now:
  * <ul>

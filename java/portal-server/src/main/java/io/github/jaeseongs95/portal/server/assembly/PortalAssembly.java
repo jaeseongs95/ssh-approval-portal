@@ -1,28 +1,15 @@
 package io.github.jaeseongs95.portal.server.assembly;
 
-import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
-import org.springframework.scheduling.annotation.EnableScheduling;
-
-import io.github.jaeseongs95.portal.app.agentcli.AgentCliConfiguration;
-import io.github.jaeseongs95.portal.app.config.DomainBeans;
-import io.github.jaeseongs95.portal.store.StoreConfiguration;
 
 /**
- * The minimal assembly of stage 3 (decision D3-12): the storage adapters, the helper beans of the domain, and the use cases of the file, artifact, output, storage, agent CLI,
- * history, capacity and lifecycle packages of portal-app. What it does not make is made elsewhere: the {@link StorageSettings} (a test supplies one; stage 4 binds
- * {@code bridge.*}), the ports of the remote side (the SSH adapter, the release catalog, the admission of uploads, the targets) and the use cases of the execution side
- * (implementer C's packages, which the merge adds to the scan below). {@code @EnableScheduling} turns the two reapers on.
- *
- * <p>This class is the one place where portal-store and portal-app meet; portal-ssh is added here when its adapters exist (portal-ssh may not depend on portal-store, so only the
- * server can hold both).
+ * The assembly of the product (decision D3-12): the storage adapters and the file, artifact, output, agent CLI, history, capacity and lifecycle use cases
+ * ({@link CoreAssembly}), the execution side ({@link ExecutionAssembly}) and the SSH adapter ({@link SshAssembly}). It makes none of the values the parts ask for: the
+ * {@link StorageSettings}, the SSH settings, the profiles, the limits, the targets and the pools are the beans of the application that imports it. {@link DefaultAssembly} is
+ * that application for the product until stage 4 binds {@code bridge.*}; a test imports this class and makes the values it needs.
  */
 @Configuration(proxyBeanMethods = false)
-@Import({StoreConfiguration.class, DomainBeans.class, AgentCliConfiguration.class, StorageBeans.class, StorageStartup.class})
-@ComponentScan(basePackages = {"io.github.jaeseongs95.portal.app.artifact", "io.github.jaeseongs95.portal.app.file", "io.github.jaeseongs95.portal.app.output",
-    "io.github.jaeseongs95.portal.app.storage", "io.github.jaeseongs95.portal.app.agentcli", "io.github.jaeseongs95.portal.app.history",
-    "io.github.jaeseongs95.portal.app.capacity", "io.github.jaeseongs95.portal.app.lifecycle"})
-@EnableScheduling
+@Import({CoreAssembly.class, ExecutionAssembly.class, SshAssembly.class})
 public class PortalAssembly {
 }

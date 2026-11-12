@@ -3,20 +3,25 @@ package io.github.jaeseongs95.portal.ssh.cli;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import io.github.jaeseongs95.portal.app.cli.CliVersion;
-import io.github.jaeseongs95.portal.app.output.StreamFrame;
-import io.github.jaeseongs95.portal.app.output.StreamKind;
+import io.github.jaeseongs95.portal.app.cli.RemoteState;
+import io.github.jaeseongs95.portal.app.cli.RemoteStatus;
 import io.github.jaeseongs95.portal.app.remote.AgentCliInstallRequest;
 import io.github.jaeseongs95.portal.app.remote.AgentCliInstallResult;
 import io.github.jaeseongs95.portal.app.remote.AgentCliPlan;
 import io.github.jaeseongs95.portal.app.remote.AgentCliRefusal;
+import io.github.jaeseongs95.portal.app.remote.AgentCliStatusRequest;
+import io.github.jaeseongs95.portal.app.remote.AgentCliStatusResult;
 import io.github.jaeseongs95.portal.app.remote.CancelSource;
+import io.github.jaeseongs95.portal.app.remote.CancelToken;
 import io.github.jaeseongs95.portal.app.remote.DownloadRequest;
 import io.github.jaeseongs95.portal.app.remote.DownloadResult;
 import io.github.jaeseongs95.portal.app.remote.ElevationRequest;
 import io.github.jaeseongs95.portal.app.remote.ElevationResult;
 import io.github.jaeseongs95.portal.app.remote.ExecutionControl;
+import io.github.jaeseongs95.portal.app.remote.ExecutionLimits;
 import io.github.jaeseongs95.portal.app.remote.ExecutionReport;
 import io.github.jaeseongs95.portal.app.remote.ExecutionTimeline;
+import io.github.jaeseongs95.portal.app.remote.LoginState;
 import io.github.jaeseongs95.portal.app.remote.OutputSink;
 import io.github.jaeseongs95.portal.app.remote.PayloadSink;
 import io.github.jaeseongs95.portal.app.remote.PayloadSource;
@@ -27,6 +32,7 @@ import io.github.jaeseongs95.portal.app.remote.RemoteExecutor;
 import io.github.jaeseongs95.portal.app.remote.RemoteFileTransfer;
 import io.github.jaeseongs95.portal.app.remote.RemoteTarget;
 import io.github.jaeseongs95.portal.app.remote.ReplaceMethod;
+import io.github.jaeseongs95.portal.app.remote.SinkResult;
 import io.github.jaeseongs95.portal.app.remote.TransferFailureCause;
 import io.github.jaeseongs95.portal.app.remote.TransferLimits;
 import io.github.jaeseongs95.portal.app.remote.UnconfirmedCause;
@@ -39,58 +45,83 @@ import io.github.jaeseongs95.portal.domain.error.ExecutionErrorCode;
 import io.github.jaeseongs95.portal.domain.error.ExecutionFailure;
 import io.github.jaeseongs95.portal.domain.error.ExecutionStage;
 import io.github.jaeseongs95.portal.domain.error.RemoteOutcome;
+import io.github.jaeseongs95.portal.domain.error.TransferErrorCode;
 import io.github.jaeseongs95.portal.domain.id.Sha256Digester;
 import io.github.jaeseongs95.portal.domain.id.TargetId;
 import io.github.jaeseongs95.portal.domain.operation.CleanupState;
 import io.github.jaeseongs95.portal.domain.operation.ExecutionOutcome;
-import io.github.jaeseongs95.portal.domain.operation.ExecutionReason;
-import io.github.jaeseongs95.portal.domain.operation.OverwriteMode;
 import io.github.jaeseongs95.portal.domain.target.AccessMode;
 import io.github.jaeseongs95.portal.domain.target.ProfileAlias;
 import io.github.jaeseongs95.portal.domain.target.TargetRevision;
-import io.github.jaeseongs95.portal.ssh.platform.AgentCliStep;
+import io.github.jaeseongs95.portal.ssh.platform.AgentCliLayout;
 import io.github.jaeseongs95.portal.ssh.platform.LinuxTargetPlatform;
 import io.github.jaeseongs95.portal.ssh.platform.PlatformFixtures;
 import io.github.jaeseongs95.portal.ssh.platform.PosixCommandLineGrammar;
 import io.github.jaeseongs95.portal.ssh.platform.PythonSourceReceiver;
 import io.github.jaeseongs95.portal.ssh.platform.RemoteScripts;
+import io.github.jaeseongs95.portal.ssh.sftp.SessionAcquisition;
+import io.github.jaeseongs95.portal.ssh.sftp.SessionLease;
+import io.github.jaeseongs95.portal.ssh.sftp.SessionSource;
+import io.github.jaeseongs95.portal.ssh.sftp.SftpChannels;
+import io.github.jaeseongs95.portal.ssh.testkit.EmbeddedSshServer;
+import io.github.jaeseongs95.portal.ssh.testkit.SftpFault;
+import io.github.jaeseongs95.portal.ssh.testkit.SshTestClient;
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.nio.channels.Channels;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Base64;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.function.IntFunction;
+import java.util.concurrent.atomic.AtomicInteger;
+import org.apache.sshd.client.session.ClientSession;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.io.TempDir;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
- * The agent CLI installer (S3-AG-01 to S3-AG-09, defect D-0035). The target is a state machine of the test, not a script: it keeps where {@code current} points, what the
- * keep and the switch and the rollback do to it, and answers the read-only steps from that state, so a test says what happens to the target and the installer is judged
- * by what it answers. The commands are the ones a POSIX target platform made; the file transfer is a recording class.
+ * The agent CLI installer (S3-AG-01 to S3-AG-10, defect D-0035) on the embedded SFTP server: the directories, the reading of {@code current} and the switch are the
+ * installer's own SFTP work, run for real; the unpacking, which is the one command of the target, is a test class that does what {@code tar} would do to the server's
+ * directory; the upload of the package, which has its own tests, is a test class that writes the file. Where the file system of the machine makes no symbolic link, the
+ * installer's own fallback (a pointer file) is what these tests exercise; the Linux build exercises the link.
  */
+@Timeout(120)
 class AgentCliInstallerTest {
 
     private static final byte[] PACKAGE = "the bytes of the package".getBytes(StandardCharsets.UTF_8);
     private static final RemoteTarget TARGET = new RemoteTarget(new TargetId("files"), TargetRevision.of("a".repeat(64)), new ProfileAlias("writer"), AccessMode.READ_WRITE);
-    private static final String HOME = "/home/someone";
+    private static final String USER = "tester";
+    private static final String PASSWORD = "secret-for-the-test";
+    private static final String PACKAGE_JSON = "{\"name\":\"fixture\",\"version\":\"1.2.3\"}\n";
+
+    @TempDir
+    Path root;
 
     private final PlatformFixtures fixtures = new PlatformFixtures();
     private final RemoteScripts scripts = new RemoteScripts();
     private final LinuxTargetPlatform platform = new LinuxTargetPlatform(command -> {
         throw new IllegalStateException("not used");
     }, new PosixCommandLineGrammar(), new PythonSourceReceiver(scripts, new Sha256Digester()));
-    private final AgentRelease release = fixtures.release(AgentCliProviderId.CODEX, integrityOf(PACKAGE));
-    private final AgentCliPlan plan = platform.agentCliPlan(fixtures.intent(release), release);
-    private final String finalPath = HOME + "/.ssh-approval-portal/agent-cli/codex/versions/1.2.3-" + release.releaseDigest().hex().substring(0, 16);
-    private final String tarballPath = finalPath + ".partial/package.tgz";
+    private final List<AutoCloseable> toClose = new ArrayList<>();
+
+    @AfterEach
+    void closeAll() throws Exception {
+        for (AutoCloseable closeable : toClose) {
+            closeable.close();
+        }
+    }
 
     private static String integrityOf(byte[] bytes) {
         try {
@@ -100,97 +131,100 @@ class AgentCliInstallerTest {
         }
     }
 
-    /** What one command does on the target. */
-    private sealed interface Answer permits Answer.Exits, Answer.Lost {
-        record Exits(int code, String stdout) implements Answer {
+    /** A package: its bytes and the plan to install it. A release with other bytes has another digest and so another directory. */
+    private record Release(byte[] bytes, AgentRelease release, AgentCliPlan plan, String directory) {
+    }
+
+    private Release release(String contents) {
+        byte[] bytes = contents.getBytes(StandardCharsets.UTF_8);
+        AgentRelease release = fixtures.release(AgentCliProviderId.CLAUDE, integrityOf(bytes));
+        AgentCliPlan plan = platform.agentCliPlan(fixtures.intent(release), release);
+        return new Release(bytes, release, plan, new AgentCliLayout(AgentCliProviderId.CLAUDE, release).versionDirectory());
+    }
+
+    private Path toolDirectory() {
+        return root.resolve(".ssh-approval-portal/agent-cli/claude");
+    }
+
+    /** The release directory that is current, read the way the installer writes it: the link, or the pointer file; empty when there is none. */
+    private String current() throws IOException {
+        Path link = toolDirectory().resolve("current");
+        if (Files.isSymbolicLink(link)) {
+            return link.toRealPath().getFileName().toString();
+        }
+        Path pointer = toolDirectory().resolve("current.txt");
+        return Files.exists(pointer) ? Files.readString(pointer, StandardCharsets.UTF_8).strip() : "";
+    }
+
+    // ---- the doubles of this file ----
+
+    /** What the unpack command does on the test target. */
+    private sealed interface Unpacking permits Unpacking.Works, Unpacking.Exits, Unpacking.Lost {
+        record Works(String metadata) implements Unpacking {
         }
 
-        record Lost() implements Answer {
+        record Exits(int code) implements Unpacking {
+        }
+
+        record Lost() implements Unpacking {
         }
     }
 
-    /** The target: where {@code current} points, what was kept, and the steps the installer ran, in order. Overrides change the answer of the n-th run of a step. */
-    private final class Target implements RemoteExecutor {
-        private String current;
-        private String kept = "";
-        private boolean rollbackWorks = true;
-        private final List<AgentCliStep> steps = new ArrayList<>();
-        private final Map<AgentCliStep, Integer> counts = new HashMap<>();
-        private final Map<AgentCliStep, IntFunction<Answer>> overrides = new HashMap<>();
-        private final Map<String, AgentCliStep> byCommand = new HashMap<>();
+    /** The target's shell for the one command: it records the command line and unpacks "package.tgz" by writing the metadata file the package would hold. */
+    private static final class TarExecutor implements RemoteExecutor {
+        private final Path base;
+        private final List<String> commandLines = new ArrayList<>();
+        private Unpacking behaviour = new Unpacking.Works(PACKAGE_JSON);
 
-        Target(String current) {
-            this.current = current;
-            for (AgentCliStep step : AgentCliStep.values()) {
-                assertThat(byCommand.put(step.in(plan).commandLine(), step)).as("the plan gives each step a command of its own: %s", step).isNull();
-            }
-        }
-
-        void override(AgentCliStep step, IntFunction<Answer> answer) {
-            overrides.put(step, answer);
+        TarExecutor(Path base) {
+            this.base = base;
         }
 
         @Override
         public ExecutionReport run(RemoteExecution request, OutputSink sink, ExecutionControl control) {
-            AgentCliStep step = byCommand.get(request.command().commandLine());
-            assertThat(step).as("every command sent is one of the plan's fixed commands: %s", request.command().commandLine()).isNotNull();
-            steps.add(step);
-            int number = counts.merge(step, 1, Integer::sum);
-            Answer answer = overrides.containsKey(step) ? overrides.get(step).apply(number) : behave(step);
-            if (answer instanceof Answer.Lost) {
-                return new ExecutionReport(ExecutionOutcome.transportLost(new ExecutionFailure.Classified(ExecutionStage.SSH_EXECUTION, ExecutionErrorCode.SSH_EXECUTION_FAILED,
-                    RemoteOutcome.UNKNOWN), List.of()), ExecutionTimeline.empty());
-            }
-            Answer.Exits exits = (Answer.Exits) answer;
-            if (!exits.stdout().isEmpty()) {
-                sink.accept(new StreamFrame(StreamKind.STDOUT, exits.stdout().getBytes(StandardCharsets.UTF_8)));
-            }
-            return new ExecutionReport(ExecutionOutcome.exited(exits.code(), List.of()), ExecutionTimeline.empty());
-        }
-
-        private Answer behave(AgentCliStep step) {
-            return switch (step) {
-                case TARBALL_PATH -> new Answer.Exits(0, tarballPath);
-                case FINAL_PATH -> new Answer.Exits(0, finalPath);
-                case CURRENT_BEFORE, CURRENT_AFTER -> new Answer.Exits(0, current);
-                case VERSION -> new Answer.Exits(0, "1.2.3");
-                case KEEP_PREVIOUS -> {
-                    kept = current;
-                    yield new Answer.Exits(0, "");
-                }
-                case SWITCH -> {
-                    current = finalPath;
-                    yield new Answer.Exits(0, "");
-                }
-                case ROLLBACK -> {
-                    if (rollbackWorks) {
-                        current = kept;
+            commandLines.add(request.command().commandLine());
+            return switch (behaviour) {
+                case Unpacking.Lost lost -> new ExecutionReport(ExecutionOutcome.transportLost(new ExecutionFailure.Classified(ExecutionStage.SSH_EXECUTION,
+                    ExecutionErrorCode.SSH_EXECUTION_FAILED, RemoteOutcome.UNKNOWN), List.of()), ExecutionTimeline.empty());
+                case Unpacking.Exits exits -> new ExecutionReport(ExecutionOutcome.exited(exits.code(), List.of()), ExecutionTimeline.empty());
+                case Unpacking.Works works -> {
+                    String command = request.command().commandLine();
+                    String partial = command.substring(command.indexOf("$HOME/") + "$HOME/".length(), command.indexOf("\" && tar"));
+                    Path directory = base.resolve(partial);
+                    try {
+                        assertThat(directory.resolve("package.tgz")).as("the package was uploaded where the command unpacks it").exists();
+                        Files.createDirectories(directory.resolve("package"));
+                        Files.writeString(directory.resolve("package/package.json"), works.metadata(), StandardCharsets.UTF_8);
+                    } catch (IOException e) {
+                        throw new IllegalStateException(e);
                     }
-                    yield new Answer.Exits(0, "");
+                    yield new ExecutionReport(ExecutionOutcome.exited(0, List.of()), ExecutionTimeline.empty());
                 }
-                case ROLLBACK_NONE -> {
-                    if (rollbackWorks) {
-                        current = "";
-                    }
-                    yield new Answer.Exits(0, "");
-                }
-                case PREPARE, UNPACK, DROP_PREVIOUS, CLEANUP -> new Answer.Exits(0, "");
             };
         }
     }
 
-    /** A file transfer that records the upload, keeps the bytes it was given and answers what the test says. */
-    private static final class RecordingTransfer implements RemoteFileTransfer {
+    /** A file transfer that writes the package where the request says (the real one has its own tests) and answers what the test says. */
+    private static final class WritingTransfer implements RemoteFileTransfer {
+        private final Path base;
         private final List<UploadRequest> requests = new ArrayList<>();
-        private byte[] received = new byte[0];
         private UploadResult answer;
+
+        WritingTransfer(Path base) {
+            this.base = base;
+        }
 
         @Override
         public UploadResult upload(UploadRequest request, PayloadSource source, ExecutionControl control) {
             requests.add(request);
             try (PayloadRead read = source.open()) {
-                received = Channels.newInputStream(read.channel()).readAllBytes();
-            } catch (java.io.IOException e) {
+                byte[] bytes = Channels.newInputStream(read.channel()).readAllBytes();
+                if (answer == null) {
+                    Path file = base.resolve(request.path().value().substring(1));
+                    Files.createDirectories(file.getParent());
+                    Files.write(file, bytes);
+                }
+            } catch (IOException e) {
                 throw new IllegalStateException(e);
             }
             return answer != null ? answer : new UploadResult.Published(request.sha256(), Instant.parse("2026-11-12T00:00:00Z"), ReplaceMethod.POSIX_RENAME);
@@ -212,224 +246,261 @@ class AgentCliInstallerTest {
         }
     }
 
-    private AgentCliInstaller installer(Target target, RecordingTransfer transfer, Clock clock) {
-        return new AgentCliInstaller(target, transfer, (remote, cancel) -> {
-            throw new IllegalStateException("install needs no session of its own");
-        }, new io.github.jaeseongs95.portal.ssh.sftp.SftpChannels(), clock);
+    /** Leases a new session of the embedded server for every call; counts leases and discards. */
+    private final class Sessions implements SessionSource {
+        private final SshTestClient client = SshTestClient.startAcceptingAnyHostKey();
+        private final EmbeddedSshServer server;
+        private final AtomicInteger leases = new AtomicInteger();
+        private final AtomicInteger discards = new AtomicInteger();
+
+        Sessions(EmbeddedSshServer server) {
+            this.server = server;
+            toClose.add(client);
+        }
+
+        @Override
+        public SessionAcquisition lease(RemoteTarget target, CancelToken cancel) {
+            ClientSession session;
+            try {
+                session = client.open(server, USER, PASSWORD);
+            } catch (IOException e) {
+                return new SessionAcquisition.Unavailable(TransferFailureCause.CONNECT_FAILED);
+            }
+            leases.incrementAndGet();
+            return new SessionAcquisition.Acquired(new SessionLease() {
+                @Override
+                public ClientSession session() {
+                    return session;
+                }
+
+                @Override
+                public void discard() {
+                    discards.incrementAndGet();
+                }
+
+                @Override
+                public void close() {
+                    session.close(true);
+                }
+            });
+        }
     }
 
-    private AgentCliInstallRequest request(byte[] bytes) {
-        PayloadSource source = () -> new PayloadRead(Channels.newChannel(new ByteArrayInputStream(bytes)), bytes.length);
-        return new AgentCliInstallRequest(TARGET, plan, source, TransferLimits.defaults());
+    /** The installer on the embedded server with the doubles above. */
+    private final class Bed {
+        final EmbeddedSshServer server;
+        final Sessions sessions;
+        final TarExecutor executor = new TarExecutor(root);
+        final WritingTransfer transfer = new WritingTransfer(root);
+        final AgentCliInstaller installer;
+
+        Bed(Clock clock) throws IOException {
+            server = EmbeddedSshServer.builder().password(USER, PASSWORD).sftp(root).start();
+            toClose.add(server);
+            sessions = new Sessions(server);
+            installer = new AgentCliInstaller(executor, transfer, sessions, new SftpChannels(), JsonMapper.builder().build(), clock);
+        }
+
+        AgentCliInstallResult install(Release release) {
+            return install(release, new ExecutionControl(new CancelSource(), () -> { }));
+        }
+
+        AgentCliInstallResult install(Release release, ExecutionControl control) {
+            PayloadSource source = () -> new PayloadRead(Channels.newChannel(new ByteArrayInputStream(release.bytes())), release.bytes().length);
+            return installer.install(new AgentCliInstallRequest(TARGET, release.plan(), source, TransferLimits.defaults()), control);
+        }
     }
 
-    private ExecutionControl control() {
-        return new ExecutionControl(new CancelSource(), () -> { });
+    private Bed bed() throws IOException {
+        return new Bed(Clock.systemUTC());
     }
-
-    private static final String OLD = HOME + "/.ssh-approval-portal/agent-cli/codex/versions/0.9.0-0123456789abcdef";
 
     // ---- S3-AG-01 to S3-AG-04 ----
 
     @Test
-    @DisplayName("S3-AG-01 D-0035 an installation: integrity, read-only questions, the package over SFTP, unpack and version, keep, switch, read back twice, then Installed; every command is one of the plan's")
-    void installation() {
-        Target target = new Target(OLD);
-        RecordingTransfer transfer = new RecordingTransfer();
+    @DisplayName("S3-AG-01 S3-AG-10 D-0035 an installation: integrity, SFTP work, the package, one remote command (the unpack), the version read over SFTP, the switch read back, then Installed")
+    void installation() throws IOException {
+        Bed bed = bed();
+        Release release = release("package one");
 
-        AgentCliInstallResult result = installer(target, transfer, Clock.systemUTC()).install(request(PACKAGE), control());
+        AgentCliInstallResult result = bed.install(release);
 
         assertThat(result).isInstanceOf(AgentCliInstallResult.Installed.class);
         AgentCliInstallResult.Installed installed = (AgentCliInstallResult.Installed) result;
         assertThat(installed.version()).isEqualTo(new CliVersion("1.2.3"));
         assertThat(installed.cleanupFailures()).isZero();
-        assertThat(target.steps).containsExactly(AgentCliStep.TARBALL_PATH, AgentCliStep.FINAL_PATH, AgentCliStep.CURRENT_BEFORE, AgentCliStep.PREPARE, AgentCliStep.UNPACK,
-            AgentCliStep.VERSION, AgentCliStep.KEEP_PREVIOUS, AgentCliStep.SWITCH, AgentCliStep.CURRENT_AFTER, AgentCliStep.VERSION, AgentCliStep.DROP_PREVIOUS, AgentCliStep.CLEANUP);
-        assertThat(transfer.requests).hasSize(1);
-        assertThat(transfer.requests.get(0).path().value()).isEqualTo(tarballPath);
-        assertThat(transfer.requests.get(0).sizeBytes()).isEqualTo(PACKAGE.length);
-        assertThat(transfer.requests.get(0).overwrite()).isEqualTo(OverwriteMode.REPLACE);
-        assertThat(transfer.received).isEqualTo(PACKAGE);
-        assertThat(target.current).isEqualTo(finalPath);
+        assertThat(bed.executor.commandLines).as("the only command sent to the target is the one the plan made for the unpack")
+            .containsExactly(release.plan().commands().get(0).commandLine());
+        assertThat(bed.transfer.requests).hasSize(1);
+        assertThat(bed.transfer.requests.get(0).path().value()).isEqualTo("/.ssh-approval-portal/agent-cli/claude/versions/" + release.directory() + ".partial/package.tgz");
+        assertThat(current()).isEqualTo(release.directory());
+        assertThat(toolDirectory().resolve("versions").resolve(release.directory()).resolve("package/package.json")).exists();
+        assertThat(toolDirectory().resolve("versions").resolve(release.directory() + ".partial")).doesNotExist();
+        assertThat(bed.server.execRequests().size()).as("no exec request reached the server: the target's shell is the double").isZero();
     }
 
     @Test
     @DisplayName("S3-AG-02 RC-B-637 a package that is not the one the release announced is Refused(PACKAGE_INTEGRITY_MISMATCH) and nothing at all is sent to the target")
-    void tamperedPackage() {
-        Target target = new Target(OLD);
-        RecordingTransfer transfer = new RecordingTransfer();
+    void tamperedPackage() throws IOException {
+        Bed bed = bed();
+        Release release = release("package one");
+        PayloadSource changed = () -> new PayloadRead(Channels.newChannel(new ByteArrayInputStream("changed bytes".getBytes(StandardCharsets.UTF_8))), 13);
 
-        AgentCliInstallResult result = installer(target, transfer, Clock.systemUTC()).install(request("changed bytes".getBytes(StandardCharsets.UTF_8)), control());
+        AgentCliInstallResult result = bed.installer.install(new AgentCliInstallRequest(TARGET, release.plan(), changed, TransferLimits.defaults()),
+            new ExecutionControl(new CancelSource(), () -> { }));
 
         assertThat(result).isEqualTo(new AgentCliInstallResult.Refused(AgentCliRefusal.PACKAGE_INTEGRITY_MISMATCH));
-        assertThat(target.steps).isEmpty();
-        assertThat(transfer.requests).isEmpty();
+        assertThat(bed.sessions.leases.get()).isZero();
+        assertThat(bed.executor.commandLines).isEmpty();
+        assertThat(bed.transfer.requests).isEmpty();
     }
 
     @Test
-    @DisplayName("S3-AG-03 RC-B-633 a release that is already current is Reused: three read-only questions, no write, no upload")
-    void sameVersionIsReused() {
-        Target target = new Target(finalPath);
-        RecordingTransfer transfer = new RecordingTransfer();
+    @DisplayName("S3-AG-03 RC-B-633 a release that is already current is Reused: nothing is written, no command and no upload")
+    void sameVersionIsReused() throws IOException {
+        Bed bed = bed();
+        Release release = release("package one");
+        bed.install(release);
 
-        AgentCliInstallResult result = installer(target, transfer, Clock.systemUTC()).install(request(PACKAGE), control());
+        AgentCliInstallResult again = bed.install(release);
 
-        assertThat(result).isEqualTo(new AgentCliInstallResult.Reused(new CliVersion("1.2.3")));
-        assertThat(target.steps).containsExactly(AgentCliStep.TARBALL_PATH, AgentCliStep.FINAL_PATH, AgentCliStep.CURRENT_BEFORE);
-        assertThat(transfer.requests).isEmpty();
+        assertThat(again).isEqualTo(new AgentCliInstallResult.Reused(new CliVersion("1.2.3")));
+        assertThat(bed.executor.commandLines).hasSize(1);
+        assertThat(bed.transfer.requests).hasSize(1);
     }
 
     @Test
-    @DisplayName("S3-AG-04 RC-B-636 an update keeps the previous version: nothing removes a version directory, only the partial one of this release")
-    void updateKeepsThePreviousVersion() {
-        Target target = new Target(OLD);
+    @DisplayName("S3-AG-04 RC-B-636 an update keeps the previous version: its directory stays, current moves to the new one")
+    void updateKeepsThePreviousVersion() throws IOException {
+        Bed bed = bed();
+        Release first = release("package one");
+        Release second = release("package two");
+        bed.install(first);
 
-        installer(target, new RecordingTransfer(), Clock.systemUTC()).install(request(PACKAGE), control());
+        AgentCliInstallResult result = bed.install(second);
 
-        assertThat(target.steps).doesNotContain(AgentCliStep.ROLLBACK, AgentCliStep.ROLLBACK_NONE);
-        assertThat(plan.commands().stream().filter(command -> command.commandLine().contains("rm -rf")).map(command -> command.label()).toList())
-            .containsExactlyInAnyOrder("unpack", "cleanup");
-        assertThat(AgentCliStep.CLEANUP.in(plan).commandLine()).endsWith(".partial\"");
+        assertThat(result).isInstanceOf(AgentCliInstallResult.Installed.class);
+        assertThat(current()).isEqualTo(second.directory());
+        assertThat(toolDirectory().resolve("versions").resolve(first.directory()).resolve("package/package.json")).exists();
     }
 
     // ---- S3-AG-05, S3-AG-06: after the switch (D-0035) ----
 
     @Test
-    @DisplayName("S3-AG-05 D-0035 a read-back of the switch that fails puts the old current back: RolledBack with the restore read back, never Installed")
-    void failedReadBackIsRolledBack() {
-        Target target = new Target(OLD);
-        target.override(AgentCliStep.VERSION, number -> number == 1 ? new Answer.Exits(0, "1.2.3") : new Answer.Exits(1, ""));
+    @DisplayName("S3-AG-05 D-0035 a read-back of the new current that the server refuses puts the old current back: RolledBack, never Installed")
+    void failedReadBackIsRolledBack() throws IOException {
+        Bed bed = bed();
+        Release first = release("package one");
+        Release second = release("package two");
+        bed.install(first);
+        // Only the read of the release directory after the switch matches: the unpacking was read in the .partial directory.
+        bed.server.injectSftpFault(SftpFault.of(SftpFault.Operation.OPEN_FOR_READ, second.directory() + "/package/package.json", SftpFault.Failure.PERMISSION_DENIED).times(1));
 
-        AgentCliInstallResult result = installer(target, new RecordingTransfer(), Clock.systemUTC()).install(request(PACKAGE), control());
+        AgentCliInstallResult result = bed.install(second);
 
         assertThat(result).isInstanceOf(AgentCliInstallResult.RolledBack.class);
         assertThat(((AgentCliInstallResult.RolledBack) result).reason()).isEqualTo(AgentCliRefusal.INSTALL_COMMAND_FAILED);
-        assertThat(target.current).isEqualTo(OLD);
-        assertThat(target.steps).contains(AgentCliStep.ROLLBACK).doesNotContain(AgentCliStep.DROP_PREVIOUS);
+        assertThat(current()).isEqualTo(first.directory());
     }
 
     @Test
-    @DisplayName("S3-AG-05 a first installation that fails its read-back goes back to no current at all: ROLLBACK_NONE, RolledBack")
-    void firstInstallationRolledBack() {
-        Target target = new Target("");
-        target.override(AgentCliStep.VERSION, number -> number == 1 ? new Answer.Exits(0, "1.2.3") : new Answer.Exits(0, "9.9.9"));
+    @DisplayName("S3-AG-05 a first installation that fails its read-back goes back to no current at all: RolledBack")
+    void firstInstallationRolledBack() throws IOException {
+        Bed bed = bed();
+        Release release = release("package one");
+        bed.server.injectSftpFault(SftpFault.of(SftpFault.Operation.OPEN_FOR_READ, release.directory() + "/package/package.json", SftpFault.Failure.PERMISSION_DENIED).times(1));
 
-        AgentCliInstallResult result = installer(target, new RecordingTransfer(), Clock.systemUTC()).install(request(PACKAGE), control());
+        AgentCliInstallResult result = bed.install(release);
 
         assertThat(result).isInstanceOf(AgentCliInstallResult.RolledBack.class);
-        assertThat(target.current).isEmpty();
-        assertThat(target.steps).contains(AgentCliStep.ROLLBACK_NONE).doesNotContain(AgentCliStep.ROLLBACK);
+        assertThat(current()).isEmpty();
     }
 
     @Test
-    @DisplayName("S3-AG-05 D-0035 a rollback that is not read back as done is Unconfirmed(RestoreUnconfirmed), never RolledBack and never Installed")
-    void rollbackThatIsNotConfirmed() {
-        Target target = new Target(OLD);
-        target.rollbackWorks = false;
-        target.override(AgentCliStep.VERSION, number -> number == 1 ? new Answer.Exits(0, "1.2.3") : new Answer.Exits(1, ""));
+    @DisplayName("S3-AG-06 D-0035 a connection lost right after the switch is Unconfirmed(TransportLost): no Installed, no rollback sent over a connection that is gone, the session discarded")
+    void connectionLostAfterTheSwitch() throws IOException {
+        Bed bed = bed();
+        Release release = release("package one");
+        bed.server.injectSftpFault(SftpFault.of(SftpFault.Operation.OPEN_FOR_READ, release.directory() + "/package/package.json", SftpFault.Failure.CONNECTION_DROPPED).times(1));
 
-        AgentCliInstallResult result = installer(target, new RecordingTransfer(), Clock.systemUTC()).install(request(PACKAGE), control());
+        AgentCliInstallResult result = bed.install(release);
 
         assertThat(result).isInstanceOf(AgentCliInstallResult.Unconfirmed.class);
-        assertThat(((AgentCliInstallResult.Unconfirmed) result).cause()).isEqualTo(new UnconfirmedCause.RestoreUnconfirmed("current"));
+        assertThat(((AgentCliInstallResult.Unconfirmed) result).cause()).isEqualTo(new UnconfirmedCause.TransportLost());
+        assertThat(bed.sessions.discards.get()).isEqualTo(1);
+        assertThat(current()).as("the switch had happened: nothing undid it over the dead connection").isEqualTo(release.directory());
+        assertThat(bed.executor.commandLines).as("nothing was sent twice").hasSize(1);
     }
 
     @Test
-    @DisplayName("S3-AG-06 D-0035 a connection lost right after the switch is Unconfirmed(TransportLost): no Installed, no rollback sent over a connection that is gone")
-    void connectionLostAfterTheSwitch() {
-        Target target = new Target(OLD);
-        target.override(AgentCliStep.CURRENT_AFTER, number -> new Answer.Lost());
+    @DisplayName("S3-AG-06 D-0035 whatever the failure after the switch, the answer is never NotDispatched and never Installed")
+    void nothingAfterTheSwitchIsNotDispatched() throws IOException {
+        for (SftpFault.Failure failure : List.of(SftpFault.Failure.PERMISSION_DENIED, SftpFault.Failure.IO_ERROR, SftpFault.Failure.CONNECTION_DROPPED)) {
+            Path directory = Files.createTempDirectory(root, "after-");
+            try (EmbeddedSshServer server = EmbeddedSshServer.builder().password(USER, PASSWORD).sftp(directory).start()) {
+                Sessions sessions = new Sessions(server);
+                TarExecutor executor = new TarExecutor(directory);
+                Release release = release("package one");
+                server.injectSftpFault(SftpFault.of(SftpFault.Operation.OPEN_FOR_READ, release.directory() + "/package/package.json", failure).times(1));
+                AgentCliInstaller installer = new AgentCliInstaller(executor, new WritingTransfer(directory), sessions, new SftpChannels(), JsonMapper.builder().build(),
+                    Clock.systemUTC());
 
-        AgentCliInstallResult result = installer(target, new RecordingTransfer(), Clock.systemUTC()).install(request(PACKAGE), control());
+                AgentCliInstallResult result = installer.install(new AgentCliInstallRequest(TARGET, release.plan(), () -> new PayloadRead(
+                    Channels.newChannel(new ByteArrayInputStream(release.bytes())), release.bytes().length), TransferLimits.defaults()), new ExecutionControl(new CancelSource(), () -> { }));
 
-        assertThat(result).isEqualTo(new AgentCliInstallResult.Unconfirmed(new UnconfirmedCause.TransportLost(), 0));
-        assertThat(target.steps).doesNotContain(AgentCliStep.ROLLBACK, AgentCliStep.DROP_PREVIOUS);
-        assertThat(target.steps.stream().filter(step -> step == AgentCliStep.SWITCH).count()).as("nothing is sent twice").isEqualTo(1);
-    }
-
-    @Test
-    @DisplayName("S3-AG-06 D-0035 whatever fails after the switch was sent, the answer is never NotDispatched and never Installed")
-    void nothingAfterTheSwitchIsNotDispatched() {
-        List<AgentCliStep> afterSwitch = List.of(AgentCliStep.CURRENT_AFTER, AgentCliStep.VERSION, AgentCliStep.ROLLBACK, AgentCliStep.CLEANUP);
-        for (AgentCliStep failing : afterSwitch) {
-            for (Answer failure : List.<Answer>of(new Answer.Lost(), new Answer.Exits(1, ""))) {
-                Target target = new Target(OLD);
-                // VERSION runs twice: the first run (the unpack check) is before the switch and must pass, the second one is the confirmation.
-                target.override(failing, number -> failing == AgentCliStep.VERSION && number == 1 ? new Answer.Exits(0, "1.2.3") : failure);
-                if (failing == AgentCliStep.ROLLBACK || failing == AgentCliStep.CLEANUP) {
-                    target.override(AgentCliStep.VERSION, number -> number == 1 ? new Answer.Exits(0, "1.2.3") : new Answer.Exits(1, ""));
-                    target.override(failing, number -> failure);
-                }
-
-                AgentCliInstallResult result = installer(target, new RecordingTransfer(), Clock.systemUTC()).install(request(PACKAGE), control());
-
-                assertThat(result).as("%s failing with %s", failing, failure).isNotInstanceOf(AgentCliInstallResult.NotDispatched.class);
-                assertThat(target.steps).as("the switch was sent").contains(AgentCliStep.SWITCH);
+                assertThat(result).as("%s", failure).isNotInstanceOf(AgentCliInstallResult.NotDispatched.class).isNotInstanceOf(AgentCliInstallResult.Installed.class);
+                assertThat(executor.commandLines).as("the one command was sent once").hasSize(1);
             }
         }
-    }
-
-    @Test
-    @DisplayName("S3-AG-06 a switch that fails and leaves the old version current is a refusal and the old version stays")
-    void switchThatDidNotHappen() {
-        Target target = new Target(OLD);
-        target.override(AgentCliStep.SWITCH, number -> new Answer.Exits(1, ""));
-
-        AgentCliInstallResult result = installer(target, new RecordingTransfer(), Clock.systemUTC()).install(request(PACKAGE), control());
-
-        assertThat(result).isEqualTo(new AgentCliInstallResult.Refused(AgentCliRefusal.INSTALL_COMMAND_FAILED));
-        assertThat(target.current).isEqualTo(OLD);
-        assertThat(target.steps).contains(AgentCliStep.CLEANUP);
     }
 
     // ---- S3-AG-08, S3-AG-09: clean-up and stops ----
 
     @Test
     @DisplayName("S3-AG-08 cleanupFailures counts the removals that failed: 0 is none, a positive number is how many")
-    void cleanupFailures() {
-        Target none = new Target(OLD);
-        Target two = new Target(OLD);
-        two.override(AgentCliStep.DROP_PREVIOUS, number -> new Answer.Exits(1, ""));
-        two.override(AgentCliStep.CLEANUP, number -> new Answer.Exits(1, ""));
+    void cleanupFailures() throws IOException {
+        Bed bed = bed();
+        Release release = release("package one");
+        bed.server.injectSftpFault(SftpFault.of(SftpFault.Operation.REMOVE, "package.tgz", SftpFault.Failure.PERMISSION_DENIED));
 
-        AgentCliInstallResult clean = installer(none, new RecordingTransfer(), Clock.systemUTC()).install(request(PACKAGE), control());
-        AgentCliInstallResult dirty = installer(two, new RecordingTransfer(), Clock.systemUTC()).install(request(PACKAGE), control());
+        AgentCliInstallResult result = bed.install(release);
 
-        assertThat(((AgentCliInstallResult.Installed) clean).cleanupFailures()).isZero();
-        assertThat(((AgentCliInstallResult.Installed) dirty).cleanupFailures()).isEqualTo(2);
+        assertThat(result).isInstanceOf(AgentCliInstallResult.Installed.class);
+        assertThat(((AgentCliInstallResult.Installed) result).cleanupFailures()).isEqualTo(1);
     }
 
     @Test
     @DisplayName("S3-AG-09 a cancel before the switch removes the partial directory, keeps the previous version and answers NotDispatched(CANCELLED); nothing is uploaded")
-    void cancelBeforeTheSwitch() {
-        Target target = new Target(OLD);
-        RecordingTransfer transfer = new RecordingTransfer();
+    void cancelBeforeTheSwitch() throws IOException {
+        Bed bed = bed();
+        Release first = release("package one");
+        Release second = release("package two");
+        bed.install(first);
         CancelSource cancel = new CancelSource();
         cancel.cancel();
 
-        AgentCliInstallResult result = installer(target, transfer, Clock.systemUTC()).install(request(PACKAGE), new ExecutionControl(cancel, () -> { }));
+        AgentCliInstallResult result = bed.install(second, new ExecutionControl(cancel, () -> { }));
 
         assertThat(result).isEqualTo(new AgentCliInstallResult.NotDispatched(TransferFailureCause.CANCELLED));
-        assertThat(target.steps).endsWith(AgentCliStep.CLEANUP).doesNotContain(AgentCliStep.PREPARE, AgentCliStep.SWITCH);
-        assertThat(transfer.requests).isEmpty();
-        assertThat(target.current).isEqualTo(OLD);
+        assertThat(bed.transfer.requests).hasSize(1);
+        assertThat(current()).isEqualTo(first.directory());
+        assertThat(toolDirectory().resolve("versions").resolve(second.directory() + ".partial")).doesNotExist();
     }
 
     @Test
     @DisplayName("S3-AG-09 a time limit that has run out before the switch ends the installation the same way: NotDispatched(DEADLINE), partial directory removed")
-    void deadlineBeforeTheSwitch() {
-        Target target = new Target(OLD);
-        // The clock moves a second with every reading, so the 2 second limit of the request is over by the time the read-only questions are answered.
+    void deadlineBeforeTheSwitch() throws IOException {
+        // The clock moves a second with every reading, so the 2 second limit of the request is over by the time the target has been looked at.
         Clock stepping = new Clock() {
             private Instant now = Instant.parse("2026-11-12T00:00:00Z");
 
             @Override
-            public java.time.ZoneId getZone() {
+            public ZoneId getZone() {
                 return ZoneOffset.UTC;
             }
 
             @Override
-            public Clock withZone(java.time.ZoneId zone) {
+            public Clock withZone(ZoneId zone) {
                 return this;
             }
 
@@ -439,65 +510,118 @@ class AgentCliInstallerTest {
                 return now;
             }
         };
-        AgentCliInstallRequest request = new AgentCliInstallRequest(TARGET, plan, () -> new PayloadRead(Channels.newChannel(new ByteArrayInputStream(PACKAGE)), PACKAGE.length),
-            new TransferLimits(java.time.Duration.ofSeconds(2), TransferLimits.DEFAULT_MAX_FILE_SIZE));
+        Bed bed = new Bed(stepping);
+        Release release = release("package one");
 
-        AgentCliInstallResult result = installer(target, new RecordingTransfer(), stepping).install(request, control());
+        AgentCliInstallResult result = bed.installer.install(new AgentCliInstallRequest(TARGET, release.plan(),
+            () -> new PayloadRead(Channels.newChannel(new ByteArrayInputStream(release.bytes())), release.bytes().length),
+            new TransferLimits(Duration.ofSeconds(2), TransferLimits.DEFAULT_MAX_FILE_SIZE)), new ExecutionControl(new CancelSource(), () -> { }));
 
         assertThat(result).isEqualTo(new AgentCliInstallResult.NotDispatched(TransferFailureCause.DEADLINE));
-        assertThat(target.steps).endsWith(AgentCliStep.CLEANUP);
-        assertThat(target.current).isEqualTo(OLD);
+        assertThat(current()).isEmpty();
+        assertThat(bed.executor.commandLines).isEmpty();
     }
 
     // ---- what goes wrong before the switch ----
 
     @Test
-    @DisplayName("S3-AG-01 a version that is not the announced one is a refusal and the partial directory is removed; a missing tar is PREREQUISITE_MISSING")
-    void unpackProblems() {
-        Target wrongVersion = new Target(OLD);
-        wrongVersion.override(AgentCliStep.VERSION, number -> new Answer.Exits(0, "9.9.9"));
-        Target noTar = new Target(OLD);
-        noTar.override(AgentCliStep.UNPACK, number -> new Answer.Exits(127, ""));
+    @DisplayName("S3-AG-01 an unpack that ends with a failure is a refusal and the partial directory is removed; a missing tar (127) is PREREQUISITE_MISSING")
+    void unpackProblems() throws IOException {
+        Bed failing = bed();
+        failing.executor.behaviour = new Unpacking.Exits(2);
+        Release release = release("package one");
 
-        AgentCliInstallResult wrong = installer(wrongVersion, new RecordingTransfer(), Clock.systemUTC()).install(request(PACKAGE), control());
-        AgentCliInstallResult missing = installer(noTar, new RecordingTransfer(), Clock.systemUTC()).install(request(PACKAGE), control());
+        AgentCliInstallResult failed = failing.install(release);
+        failing.executor.behaviour = new Unpacking.Exits(127);
+        AgentCliInstallResult missing = failing.install(release);
 
-        assertThat(wrong).isEqualTo(new AgentCliInstallResult.Refused(AgentCliRefusal.INSTALL_COMMAND_FAILED));
-        assertThat(wrongVersion.steps).endsWith(AgentCliStep.CLEANUP).doesNotContain(AgentCliStep.SWITCH);
+        assertThat(failed).isEqualTo(new AgentCliInstallResult.Refused(AgentCliRefusal.INSTALL_COMMAND_FAILED));
         assertThat(missing).isEqualTo(new AgentCliInstallResult.Refused(AgentCliRefusal.PREREQUISITE_MISSING));
-        assertThat(noTar.steps).endsWith(AgentCliStep.CLEANUP);
+        assertThat(toolDirectory().resolve("versions").resolve(release.directory() + ".partial")).doesNotExist();
+        assertThat(current()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("S3-AG-01 a package whose metadata names another version, or is no JSON, is refused with the partial directory removed and current untouched")
+    void metadataProblems() throws IOException {
+        Bed bed = bed();
+        Release release = release("package one");
+
+        bed.executor.behaviour = new Unpacking.Works("{\"version\":\"9.9.9\"}");
+        AgentCliInstallResult wrongVersion = bed.install(release);
+        bed.executor.behaviour = new Unpacking.Works("this is not json");
+        AgentCliInstallResult notJson = bed.install(release);
+
+        assertThat(wrongVersion).isEqualTo(new AgentCliInstallResult.Refused(AgentCliRefusal.INSTALL_COMMAND_FAILED));
+        assertThat(notJson).isEqualTo(new AgentCliInstallResult.Refused(AgentCliRefusal.INSTALL_COMMAND_FAILED));
+        assertThat(toolDirectory().resolve("versions").resolve(release.directory() + ".partial")).doesNotExist();
+        assertThat(current()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("S3-AG-01 an unpack whose end is not seen is Unconfirmed(TransportLost); it is not sent again")
+    void unpackThatIsNotSeenToEnd() throws IOException {
+        Bed bed = bed();
+        bed.executor.behaviour = new Unpacking.Lost();
+
+        AgentCliInstallResult result = bed.install(release("package one"));
+
+        assertThat(result).isEqualTo(new AgentCliInstallResult.Unconfirmed(new UnconfirmedCause.TransportLost(), 0));
+        assertThat(bed.executor.commandLines).hasSize(1);
+        assertThat(current()).isEmpty();
     }
 
     @Test
     @DisplayName("S3-AG-01 an upload that the target refused is a refusal with the partial directory removed; one whose end is not known is Unconfirmed with the cause of the upload")
-    void uploadProblems() {
-        Target refusedTarget = new Target(OLD);
-        RecordingTransfer refusing = new RecordingTransfer();
-        refusing.answer = new UploadResult.Refused(io.github.jaeseongs95.portal.domain.error.TransferErrorCode.PERMISSION_DENIED,
-            new io.github.jaeseongs95.portal.app.remote.FileDiagnostic.None(), CleanupState.COMPLETE);
-        Target lostTarget = new Target(OLD);
-        RecordingTransfer lost = new RecordingTransfer();
-        lost.answer = new UploadResult.Unconfirmed(new UnconfirmedCause.TransportLost(), CleanupState.INCOMPLETE);
+    void uploadProblems() throws IOException {
+        Bed refusing = bed();
+        refusing.transfer.answer = new UploadResult.Refused(TransferErrorCode.PERMISSION_DENIED, new io.github.jaeseongs95.portal.app.remote.FileDiagnostic.None(), CleanupState.COMPLETE);
+        Release release = release("package one");
 
-        AgentCliInstallResult refused = installer(refusedTarget, refusing, Clock.systemUTC()).install(request(PACKAGE), control());
-        AgentCliInstallResult unknown = installer(lostTarget, lost, Clock.systemUTC()).install(request(PACKAGE), control());
+        AgentCliInstallResult refused = refusing.install(release);
+        refusing.transfer.answer = new UploadResult.Unconfirmed(new UnconfirmedCause.TransportLost(), CleanupState.INCOMPLETE);
+        AgentCliInstallResult unknown = refusing.install(release);
 
         assertThat(refused).isEqualTo(new AgentCliInstallResult.Refused(AgentCliRefusal.INSTALL_COMMAND_FAILED));
-        assertThat(refusedTarget.steps).endsWith(AgentCliStep.CLEANUP).doesNotContain(AgentCliStep.UNPACK);
         assertThat(unknown).isEqualTo(new AgentCliInstallResult.Unconfirmed(new UnconfirmedCause.TransportLost(), 0));
-        assertThat(lostTarget.steps).doesNotContain(AgentCliStep.UNPACK, AgentCliStep.SWITCH);
+        assertThat(refusing.executor.commandLines).isEmpty();
+    }
+
+    // ---- status ----
+
+    @Test
+    @DisplayName("S3-AG-07 the status reads the version and the login over SFTP, and runs nothing: not installed, then installed and signed out, then signed in")
+    void status() throws IOException {
+        Bed bed = bed();
+        AgentCliStatusRequest request = new AgentCliStatusRequest(TARGET, AgentCliProviderId.CLAUDE, ExecutionLimits.defaults());
+        ExecutionControl control = new ExecutionControl(new CancelSource(), () -> { });
+
+        AgentCliStatusResult before = bed.installer.status(request, control);
+        bed.install(release("package one"));
+        AgentCliStatusResult signedOut = bed.installer.status(request, control);
+        Files.createDirectories(root.resolve(".claude"));
+        Files.writeString(root.resolve(".claude/.credentials.json"), "{}", StandardCharsets.UTF_8);
+        AgentCliStatusResult signedIn = bed.installer.status(request, control);
+
+        assertThat(((AgentCliStatusResult.Observed) before).remote()).isEqualTo(new RemoteStatus.NotFound());
+        assertThat(((AgentCliStatusResult.Observed) before).login()).isEqualTo(LoginState.NOT_INSTALLED);
+        assertThat(((AgentCliStatusResult.Observed) signedOut).remote()).isEqualTo(new RemoteStatus.Known(RemoteState.COMPLETED, new CliVersion("1.2.3"), 0));
+        assertThat(((AgentCliStatusResult.Observed) signedOut).login()).isEqualTo(LoginState.SIGNED_OUT);
+        assertThat(((AgentCliStatusResult.Observed) signedIn).login()).isEqualTo(LoginState.SIGNED_IN);
+        assertThat(bed.executor.commandLines).as("only the installation ran its one command; the status ran none").hasSize(1);
     }
 
     @Test
-    @DisplayName("S3-AG-01 a read-only question that cannot be asked is NotDispatched with its reason: nothing was changed")
-    void questionThatCannotBeAsked() {
-        Target target = new Target(OLD);
-        target.override(AgentCliStep.CURRENT_BEFORE, number -> new Answer.Lost());
+    @DisplayName("S3-SS-02 a session that cannot be had is NotDispatched(CONNECT_FAILED) for an installation and Failed(CONNECT_FAILED) for a status")
+    void noSession() throws IOException {
+        Bed bed = bed();
+        bed.server.close();
 
-        AgentCliInstallResult result = installer(target, new RecordingTransfer(), Clock.systemUTC()).install(request(PACKAGE), control());
+        AgentCliInstallResult installed = bed.install(release("package one"));
+        AgentCliStatusResult status = bed.installer.status(new AgentCliStatusRequest(TARGET, AgentCliProviderId.CLAUDE, ExecutionLimits.defaults()),
+            new ExecutionControl(new CancelSource(), () -> { }));
 
-        assertThat(result).isInstanceOf(AgentCliInstallResult.NotDispatched.class);
-        assertThat(target.steps).doesNotContain(AgentCliStep.PREPARE);
-        assertThat(ExecutionReason.TRANSPORT_LOST).isNotNull();
+        assertThat(installed).isEqualTo(new AgentCliInstallResult.NotDispatched(TransferFailureCause.CONNECT_FAILED));
+        assertThat(status).isEqualTo(new AgentCliStatusResult.Failed(TransferFailureCause.CONNECT_FAILED));
     }
 }

@@ -6,37 +6,15 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * The fixed commands of an agent CLI installation, by the part they play (stage 3 design 6.2). A target platform makes one {@link FixedRemoteCommand} for each step
- * ({@code TargetPlatform#agentCliPlan}); the installer finds them in the plan by the label of the step and decides when to run which. The meaning of each step is the
- * same on every platform, the text of the command is the platform's: a POSIX target runs {@code sh} commands, a Windows target PowerShell.
+ * The commands of an agent CLI installation that are run on the target (stage 3 design 6.2). There is one: unpacking the package. Everything else the installer does
+ * (the directories, the reading of the current version, the version in the package's metadata, the switch of {@code current}, the removals) is SFTP and Java, and is
+ * not a command. The unpacking stays a command of the target because the target unpacks the whole archive at once and keeps the modes of its files, where Java would
+ * have to put thousands of files one by one over SFTP; {@code tar} (Windows: {@code tar.exe}) is an external program of the target and Java cannot replace it there
+ * (docs/external-programs). A target platform makes the command ({@code TargetPlatform#agentCliPlan}); the installer finds it in the plan by the label.
  */
 public enum AgentCliStep {
-    /** Prints the absolute path the package file goes to, in the target's own syntax (the installer uploads it there over SFTP). */
-    TARBALL_PATH("tarball-path"),
-    /** Prints the absolute path of the directory this version is installed in. */
-    FINAL_PATH("final-path"),
-    /** Prints where {@code current} points now; prints nothing when there is no current version. Read only. */
-    CURRENT_BEFORE("current-before"),
-    /** Makes the directory the package file goes to. */
-    PREPARE("prepare"),
-    /** Unpacks the package and moves the unpacked directory to its final name. */
-    UNPACK("unpack"),
-    /** Prints the version the unpacked package says it is (read from its metadata file; no installed program is run). Read only. */
-    VERSION("version"),
-    /** Keeps where {@code current} points now, so that the switch can be undone. */
-    KEEP_PREVIOUS("keep-previous"),
-    /** Makes {@code current} point to the new version. */
-    SWITCH("switch"),
-    /** Prints where {@code current} points now (the read that confirms the switch). Read only. */
-    CURRENT_AFTER("current-after"),
-    /** Puts {@code current} back to the version that was kept. */
-    ROLLBACK("rollback"),
-    /** Removes {@code current}: the state before the first installation. */
-    ROLLBACK_NONE("rollback-none"),
-    /** Removes what {@link #KEEP_PREVIOUS} kept. */
-    DROP_PREVIOUS("drop-previous"),
-    /** Removes the partial directory of this version. */
-    CLEANUP("cleanup");
+    /** Unpacks {@code package.tgz} in the partial directory of the release; ends with the exit code of {@code tar}. */
+    UNPACK("unpack");
 
     private final String label;
 
@@ -49,7 +27,7 @@ public enum AgentCliStep {
         return label;
     }
 
-    /** The command of this step in the plan; a plan that lacks a step is a programming error of the platform that made it. */
+    /** The command of this step in the plan; a plan that lacks it is a programming error of the platform that made it. */
     public FixedRemoteCommand in(AgentCliPlan plan) {
         Objects.requireNonNull(plan, "plan");
         List<FixedRemoteCommand> matching = plan.commands().stream().filter(command -> command.label().equals(label)).toList();

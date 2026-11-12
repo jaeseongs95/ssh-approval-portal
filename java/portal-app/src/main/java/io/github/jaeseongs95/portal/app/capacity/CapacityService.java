@@ -17,7 +17,6 @@ import io.github.jaeseongs95.portal.domain.error.RequestErrorCode;
 import io.github.jaeseongs95.portal.domain.error.RequestRefusedException;
 import io.github.jaeseongs95.portal.domain.id.TargetId;
 import io.github.jaeseongs95.portal.domain.target.Target;
-import io.github.jaeseongs95.portal.domain.target.Targets;
 
 /**
  * The administrator's override of the queue and concurrency limits (2.x {@code runtime-capacity.mjs}, cases RC-B-410 and its neighbours). The installation's own values are
@@ -37,11 +36,11 @@ public class CapacityService {
 
     private final RuntimeCapacityStore store;
     private final MaintenanceStore maintenance;
-    private final Targets targets;
+    private final ConfiguredTargets targets;
     private final AvailableCpus cpus;
     private final SecureRandom random;
 
-    public CapacityService(RuntimeCapacityStore store, MaintenanceStore maintenance, Targets targets, AvailableCpus cpus, SecureRandom random) {
+    public CapacityService(RuntimeCapacityStore store, MaintenanceStore maintenance, ConfiguredTargets targets, AvailableCpus cpus, SecureRandom random) {
         this.store = store;
         this.maintenance = maintenance;
         this.targets = targets;

@@ -16,6 +16,10 @@ interface StagedActionRowRepository extends CrudRepository<StagedActionRow, Stri
     @Query("SELECT * FROM staged_action WHERE artifact_id = :id AND operation_key = :key")
     Optional<StagedActionRow> findOne(@Param("id") String id, @Param("key") String key);
 
+    /** The actions of one operation (the table is small: the actions of the staged files that are still held; the row goes with its artifact). */
+    @Query("SELECT * FROM staged_action WHERE request_id = :operation")
+    List<StagedActionRow> findByOperation(@Param("operation") String operation);
+
     /** Moves the action to {@code next} when it still is in {@code current}; returns 1 or 0 (a concurrent change). */
     @Modifying
     @Query("UPDATE staged_action SET state = :next WHERE artifact_id = :id AND operation_key = :key AND state = :current")

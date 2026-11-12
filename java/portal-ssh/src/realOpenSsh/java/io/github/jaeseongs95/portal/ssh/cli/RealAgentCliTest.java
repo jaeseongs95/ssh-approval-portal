@@ -36,7 +36,7 @@ import io.github.jaeseongs95.portal.ssh.platform.WindowsCommandLineGrammar;
 import io.github.jaeseongs95.portal.ssh.platform.WindowsCommandWrapper;
 import io.github.jaeseongs95.portal.ssh.platform.WindowsTargetPlatform;
 import io.github.jaeseongs95.portal.ssh.sftp.AtomicReplacer;
-import io.github.jaeseongs95.portal.ssh.sftp.ElevatedExecTransfer;
+import io.github.jaeseongs95.portal.ssh.sftp.SudoSftpChannels;
 import io.github.jaeseongs95.portal.ssh.sftp.ElevationProbe;
 import io.github.jaeseongs95.portal.ssh.sftp.MinaRemoteFileTransfer;
 import io.github.jaeseongs95.portal.ssh.sftp.RealServer;
@@ -61,6 +61,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * The agent CLI installation on a real server (S3-RO-06, pilot P3-6, the real-server counterpart of S3-AG-01): a package that is a real {@code .tgz} made here is
@@ -99,9 +100,10 @@ class RealAgentCliTest {
             SftpChannels channels = new SftpChannels();
             ElevationProbe probe = new ElevationProbe(server.executor(), id -> new TargetLookup.NotRegistered(id));
             MinaRemoteFileTransfer transfer = new MinaRemoteFileTransfer(server.sessions(), channels, checker, new SftpUploader(checker, replacer, classifier, channels, new SpaceProbe()),
-                new SftpDownloader(checker, classifier), classifier, new ElevatedExecTransfer(probe, server.executor(), replacer, Clock.systemUTC()), probe, scheduler,
+                new SftpDownloader(checker, classifier), classifier, new SudoSftpChannels(channels), probe, scheduler,
                 Clock.systemUTC());
-            AgentCliInstaller installer = new AgentCliInstaller(server.executor(), transfer, server.sessions(), channels, Clock.systemUTC());
+            AgentCliInstaller installer = new AgentCliInstaller(server.executor(), transfer, server.sessions(), channels, JsonMapper.builder().build(), Clock.systemUTC());
+            assertThat(plan.commands()).as("the only command of the installation on the target is the unpack").hasSize(1);
             RemoteTarget target = new RemoteTarget(new TargetId("realserver"), TargetRevision.of("b".repeat(64)), new ProfileAlias("writer"), AccessMode.READ_WRITE);
             ExecutionControl control = new ExecutionControl(new CancelSource(), () -> { });
             PayloadSource source = () -> new PayloadRead(Channels.newChannel(new ByteArrayInputStream(tarball)), tarball.length);
@@ -111,10 +113,10 @@ class RealAgentCliTest {
             AgentCliInstallResult again = installer.install(new AgentCliInstallRequest(target, plan, source, TransferLimits.defaults()), control);
 
             try {
-                assertThat(installed).as("the first installation").isInstanceOf(AgentCliInstallResult.Installed.class);
+                assertThat(installed).as("the first installation; every command the installer sent, with exit code and output: %s", server.diagnostics()).isInstanceOf(AgentCliInstallResult.Installed.class);
                 assertThat(status).isInstanceOf(AgentCliStatusResult.Observed.class);
                 assertThat(((AgentCliStatusResult.Observed) status).remote()).isEqualTo(new RemoteStatus.Known(RemoteState.COMPLETED, new CliVersion(VERSION), 0));
-                assertThat(again).as("the same release is already current").isEqualTo(new AgentCliInstallResult.Reused(new CliVersion(VERSION)));
+                assertThat(again).as("the same release is already current; every command the installer sent, with exit code and output: %s", server.diagnostics()).isEqualTo(new AgentCliInstallResult.Reused(new CliVersion(VERSION)));
             } finally {
                 removeInstallation(server);
             }

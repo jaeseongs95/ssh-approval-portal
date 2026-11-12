@@ -119,7 +119,7 @@ public interface RemoteExecutor {
 public record RemoteExecution(TargetId target, TargetRevision revision, AccessMode access, PreparedCommand command, ExecutionLimits limits) {}
 public record ExecutionLimits(Duration deadline, Duration stopGrace, DataSize outputPerStream) {}  // 2.x 기본 120s·5s·1MiB(execution-supervisor.mjs:3-5)
 public record ExecutionControl(CancelToken cancel, DispatchGuard guard) {}
-public interface DispatchGuard { void beforeDispatch(); }   // 연결 뒤·exec 요청 전 재확인. 거절은 DispatchRefusedException(target_changed 등)
+public interface DispatchGuard { void beforeDispatch(); }   // 연결 뒤·채널을 열기 전 재확인(11.3절 10번). 거절은 DispatchRefusedException(target_changed 등)
 public interface CancelToken { boolean requested(); /* 구독은 ApplicationEvent 또는 CompletableFuture로 */ }
 public interface OutputSink { SinkResult accept(StreamFrame frame); }  // sealed SinkResult: Accepted · Failed(원인 보존). Failed 뒤에도 채널은 계속 비운다(D-0040)
 /** 결과는 domain의 ExecutionOutcome을 그대로 쓰고, 시각 기록을 더한다. */
@@ -219,7 +219,7 @@ exec 한 번의 단계(`ExecPhase`, `ssh.exec` 내부 sealed 상태)와 결과 �
 | P0 연결 전 취소·마감·`DispatchGuard` 거절 | 없음 | `notDispatched`(reason CANCEL/DEADLINE) 또는 `DispatchRefusedException` | 아무것도 보내지 않았다 |
 | P1 연결·인증·호스트 키 실패 | 없음 | `NOT_STARTED`, `SSH_CONNECT_FAILED`(stage `SSH_CONNECT`) | 채널이 없다 |
 | P2 `CHANNEL_OPEN_FAILURE`(`SshChannelOpenException`) | 없음 | `NOT_STARTED`, `SSH_CHANNEL_OPEN_FAILED` | 서버가 채널 열기를 거절했다(MINA `handleOpenFailure`, 부록 A.4) |
-| P3 채널 열림 뒤 `DispatchGuard.beforeDispatch()` 거절 | 없음 | `DispatchRefusedException`(`target_changed`·`policy_changed` 등), 채널은 닫는다 | exec 요청을 쓰기 전 |
+| P3 세션을 얻은 뒤, 채널을 열기 전의 `DispatchGuard.beforeDispatch()` 거절 `[구현 중 판정 11.3절 10번으로 고침]` | 없음 | `DispatchRefusedException`(`target_changed`·`policy_changed` 등), 채널은 열지 않고 세션 lease만 돌려준다 | 채널을 열기 전. 근거는 RC-B-462(「연결 확립 후 channel 열기 전」)와 포트 문서(`DispatchGuard`: 연결이 열린 뒤 exec 요청 전)다. 구현은 `MinaRemoteExecutor` |
 | P4 exec 요청 쓴 뒤 **응답 FAILURE** | 없음(서버가 거절) | `NOT_STARTED`, `SSH_EXECUTION_FAILED` | `channel-exec-want-reply=true`일 때만 확정할 수 있다 |
 | P5 요청 쓴 뒤 응답 없이 단절·시간 초과 | **있을 수 있음** | `transportLost`(UNKNOWN, `requiresReconciliation`) | 2.x가 「그 밖의 오류는 시작」으로 본 경합(`execution-supervisor.mjs:112`) |
 | P6 `exit-status` 수신 | 끝남 | `exited(code)` | 증거가 있다 |
@@ -482,6 +482,22 @@ S3-AR-01~09(8.3절). 핵심: 「예산 거절과 디스크 거절은 다른 변�
   2. **미룸**: 이유와 단계를 적는다.
   3. **삭제 표 이동 제안**: 2.x helper 내부 구현 세부로, Java 판에 같은 행동이 없다. 대체 행동은 새 사례(S3-)로 고정한다. 삭제 표로 옮기는 것은 메인이 판정한다(결정 D3-16).
 - ID는 `RC-` 접두를 생략했다. 모든 ID가 사례 표에 있음을 부록 A.3에서 확인했다.
+- `[구현 시점 갱신]`(2026-11-12, HEAD `d0ad13c`) 위의 1,673행·257행은 설계 시점 값이다. 그 뒤 D3-16(38건)과 구현 중 판정(4건, 11.3절 RC-B-393·398·400·401)이 사례 표에서 42건을 삭제 표로 옮겼다. `regression-cases*.md`를 직접 센 현재 값은 다음과 같다.
+  - 사례 표 1,631행(`| RC-A-nnn |` 872행 + `| RC-B-nnn |` 759행). 설계 시점의 1,673행에서 42행이 줄었다.
+  - 3.0 모듈 열에 `portal-ssh`가 있는 행 219행(A 54 + B 165). 설계 시점의 257행에서 38행이 줄었다(D3-16의 38건이 모두 `portal-ssh`를 적은 행이었다).
+  - 아래 8.2~8.4절의 묶음 수(330·58·38, 합집합 426)는 설계 시점 값을 그대로 둔다.
+- `[구현 시점 갱신]` 시험 수(HEAD `d0ad13c`의 빌드 결과, 메인이 실행). `skip`은 호스트 파일 시스템이 심볼릭 링크·하드 링크 개수·ACL 규칙을 지원하지 않을 때 건너뛰는 `Assumptions` 시험이며 Linux CI에서 실행한다.
+
+  | 모듈 | 시험 수 | 비고 |
+  |---|---|---|
+  | `portal-domain` | 845 | |
+  | `portal-app` | 90 | 실제 store를 쓰는 유스케이스 시험은 `portal-server`에 있다(11.3절 2번) |
+  | `portal-store` | 295 | skip 7 |
+  | `portal-ssh` | 428 | 실제 OpenSSH 시험(`realOpenSshTest`)은 별도 소스 세트라 이 수에 없다 |
+  | `portal-web` | 10 | |
+  | `portal-server` | 80 | |
+  | `portal-arch-checks` | 74 | |
+  | 합계 | 1,822 | skip 7 포함 |
 
 ### 8.2 닫는 사례 330건 (묶음별)
 | 묶음 | 사례 ID | 건수 | 구현 담당 | 비고 |
@@ -529,7 +545,7 @@ Java 판에 같은 행동이 없다. 각 묶음의 대체 사례는 8.5절에서
 
 - `[제안]` D3-02에서 (b)를 고르면 B-904·B-905는 닫는 쪽으로 돌아간다(고정 PowerShell 조회가 같은 판정을 한다).
 
-### 8.5 새 사례 104건 (`S3-xx-nn`, 개발원칙 7.1: 사례를 먼저 적는다)
+### 8.5 새 사례 104건, 구현 중 19건 추가(`S3-xx-nn`, 개발원칙 7.1: 사례를 먼저 적는다)
 판정은 JUnit이다. 약어: 내장 = MINA 내장 서버, RO = 실제 OpenSSH Linux CI, RW = Windows CI.
 
 | ID | 대상 | 입력 | 기대·판정 |
@@ -626,11 +642,11 @@ Java 판에 같은 행동이 없다. 각 묶음의 대체 사례는 8.5절에서
 | S3-UC-06 | reaper | 유지보수 중·정책 변경 | A-173 대로 reap 보류, B-004 대로 보호 장치 실패 시 reap 금지 |
 | S3-UC-07 | 저장소 전용 오류 코드 | 정책 개정 충돌·소유자 재사용·출력 버전 충돌 | 값 enum에 존재, 기준본 `x-portal-errorCodes` 포함, 각 던지는 자리에서 해당 코드 |
 | S3-UC-08 | 서버 빈 조립 | `portal-server` 최소 조립 | `StorageRoots`·`ArtifactLimits`·`OutputLimits`·`AuditFileLocation`이 설정값으로 만들어지고 `ApplicationContext`가 올라옴, 외부 DBMS(H2)에서 파일 I/O가 트랜잭션 밖(4.4) |
-| S3-RO-01 | exec 응답·signal(RO) | OpenSSH 서버에 exec 요청, 취소 | 응답 FAILURE/SUCCESS 구분, `signal` 처리 여부 관측(시범 P3-1·P3-3) |
-| S3-RO-02 | `sudo -n sftp-server`(RO) | 승격 SFTP | 6.1절 시범 결과대로(성공 시 왕복) |
-| S3-RO-03 | SFTP 3판 오류 코드(RO) | EACCES·ENOSPC(작은 파일 시스템)·ENOENT | 4.5절 표의 코드, 뭉쳐지면 `statvfs`로 구분 |
-| S3-RO-04 | rename·posix-rename(RO) | 대상 있음/없음 | 일반 rename 실패(`DESTINATION_EXISTS`), `posixRename` 성공 |
-| S3-RO-05 | 세션 한도·heartbeat(RO) | `MaxSessions` 초과, 유휴 단절 | 거절은 `SSH_CHANNEL_OPEN_FAILED`, 죽은 세션 사전 감지 |
+| S3-RO-01 | exec 응답(RO) `[구현: OpenSshExecPilotTest, P3-1]` | 응답을 요구한 exec 요청 | 실제 서버가 SUCCESS로 답하고 출력과 종료 상태가 뒤따른다 |
+| S3-RO-02 | `sudo -n sftp-server`(RO) `[구현: RealElevationTest, P3-4]` | 비밀번호 없이 sudo가 되는 POSIX 계정 / sudo 없는 계정 | 전자는 exec 채널에서 `sudo -n`으로 띄운 SFTP 서버가 `SSH_FXP_VERSION`으로 답하고, 후자는 못 한다. 결과에 따라 SFTP 승격 경로를 더할지 정한다(그 전에는 고정 명령 exec 폴백). `OpenSshExecPilotTest`도 같은 ID로 「없는 명령의 exec 요청도 SUCCESS 뒤 0이 아닌 종료 상태」(거절이 아님, P3-1)를 확인한다 |
+| S3-RO-03 | SFTP 3판 오류 코드(RO) `[구현: RealSftpTest, D-0013·D-0034]` | 읽을 수 없는 파일, 공간이 모자란 쓰기 | 읽기 거절은 `PERMISSION_DENIED`이며 transport 오류가 아니다. 공간 부족은 권한 문제로 읽지 않는다. `OpenSshExecPilotTest`도 같은 ID로 `signal`(INT) 요청을 확인한다(Linux는 `exit-signal INT`로 끝남, Windows는 서버가 무엇을 하든 채널을 닫을 수 있음, P3-3) |
+| S3-RO-04 | rename·posix-rename(RO) `[구현: RealSftpTest]` | 대상 있음/없음 | 일반 rename은 대상이 있으면 실패하고, posix-rename은(광고될 때) 대체한다. 어댑터는 광고된 것을 쓴다. 왕복(S3-RW-03)과 한 시험에 묶었다 |
+| S3-RO-05 | 세션 한도·heartbeat(RO) `[구현: OpenSshSessionPilotTest]` | `MaxSessions` 초과, 연결을 끊은 뒤의 생존 확인 | 한도를 넘은 채널은 열기 실패로 거절되고 세션은 계속 쓸 수 있다. 생존 확인은 성공이든 실패든 살아 있음을 증명하고, 연결을 끊은 뒤에는 I/O 오류로 실패한다 |
 | S3-RO-06 | 에이전트 CLI 설치(RO) | 가짜 레지스트리 | S3-AG-01·05의 실제 서버판 |
 | S3-RW-01 | PowerShell 래퍼(RW) | 한글·따옴표·종료 코드·stderr 원문 | B-604의 Java판, CLIXML 제거(D-0011), 8000자 경계 |
 | S3-RW-02 | SFTP 경로 형식(RW) | `C:\x`, `/C:/x` | 어느 형식이 통하는지 관측하고 어댑터가 그 형식으로 변환(`[미확인]` 해소) |
@@ -638,8 +654,27 @@ Java 판에 같은 행동이 없다. 각 묶음의 대체 사례는 8.5절에서
 | S3-RW-04 | 위험 경로(RW) | 심볼릭 링크·리파스 포인트·ADS(`:`) | `UNSAFE_PATH`(어댑터가 서버 보고만큼 판정) |
 | S3-RW-05 | 문서화된 차이(RW) | 덮어쓰기 뒤 DACL·소유자 | 임시 파일의 속성을 가짐(보존 안 됨)을 시험이 명시적으로 단정, 릴리스 노트와 짝 |
 | S3-RW-06 | 관리자 확인·열린 핸들 교체(RW) | 비관리자 승격 요청, 읽기 핸들이 열린 대상 덮어쓰기 | 전송 전 거절(B-616), 열린 핸들이면 `PERMISSION_DENIED`+원본 보존(B-915) |
+| S3-AB-09 `[구현 중 추가]` | A-SSH-NO-PLATFORM-BRANCH | `portal-ssh`의 클래스가 `TargetOs`를 `switch`·비교·열거 | `TargetPlatform` 밖의 분기를 규칙이 잡는다. 자기 OS 상수를 읽는 `TargetPlatform`·`CommandLineGrammar` 구현은 통과한다(`ArchitectureRulesTest`, `RuleFixturesTest`) |
+| S3-AB-10 `[구현 중 추가]` | A-AUDIT-BOUNDARY | `app.execution`·`app.file`의 공개 메서드가 `AuditFailedException`을 선언 | 위반으로 잡는다. 감사 실패는 유스케이스 경계에서 업무 결과로 바뀐다(D3-14) |
+| S3-TK-01 `[구현 중 추가]` | 내장 서버: 비밀번호 로그인 | 맞는 비밀번호, 틀린 비밀번호 | 맞으면 수락, 틀리면 거절. 두 시도 모두 기록되며 비밀 값은 기록에 없다 |
+| S3-TK-02 `[구현 중 추가]` | 내장 서버: 공개 키 로그인 | 등록한 키, 다른 키 | 등록한 키는 수락, 다른 키는 거절 |
+| S3-TK-03 `[구현 중 추가]` | 내장 서버: 호스트 키 | 서버에 준 호스트 키 | 서버가 그 키를 내보이고, 지문은 MINA가 찍는 지문과 같다 |
+| S3-TK-04 `[구현 중 추가]` | 내장 서버: 대본 명령 | 대본에 있는 명령, 없는 명령 | 종료 코드·stdout·stderr가 대본대로, 대본에 없는 명령은 127로 끝난다. 모든 요청을 센다 |
+| S3-TK-05 `[구현 중 추가]` | 내장 서버: 큰 출력 | 큰 출력 | 두 스트림에 온전히 도착하고 종료 상태가 그 뒤에 온다 |
+| S3-TK-06 `[구현 중 추가]` | 내장 서버: `dropConnections` | 연결 모두 끊기 | 끊김 메시지 없이 모든 세션을 끊고, 클라이언트는 세션이 닫힌 것을 본다 |
+| S3-TK-07 `[구현 중 추가]` | 내장 서버: `disconnectIdleSessions` | 채널 없는 세션, 명령을 실행 중인 세션 | 채널 없는 세션만 끊고 명령을 실행 중인 세션은 둔다 |
+| S3-TK-08 `[구현 중 추가]` | 내장 서버: 임시 루트 위 SFTP | 업로드·다운로드 | 왕복이 되고 `posix-rename@openssh.com`을 기본으로 광고한다 |
+| S3-TK-09 `[구현 중 추가]` | 내장 서버: posix-rename 숨김 | 확장 하나를 숨김 | 그 확장만 광고하지 않고 나머지 확장은 광고한다 |
+| S3-TK-10 `[구현 중 추가]` | 내장 서버: 권한 거절 주입 | 쓰기용 열기에 권한 거절 주입 | 클라이언트는 상태 3으로 실패하고 파일은 만들어지지 않는다. 주입은 `times(1)`로 한 번 발동하고 해제할 수 있다 |
+| S3-TK-11 `[구현 중 추가]` | 내장 서버: 공간 부족 주입 | 업로드 도중 「공간 없음」 주입 | 예산만큼 쓴 뒤 클라이언트가 상태 14로 실패한다 |
+| S3-TK-12 `[구현 중 추가]` | 내장 서버: rename 실패 주입 | rename에 실패 주입 | 원본은 제자리에 남고 클라이언트는 `SftpException`을 받는다 |
+| S3-TK-13 `[구현 중 추가]` | 내장 서버: 다운로드 중 단절 | 다운로드 도중 연결 끊기 | 읽기가 `IOException`으로 실패하고 클라이언트의 세션이 닫힌다 |
+| S3-TK-14 `[구현 중 추가]` | 내장 서버: 사건 기록 | 기다리는 개수에 도달, 도달하지 못함 | 도달하면 기다림이 끝난다. 도달하지 못한 기다림은 본 사건 수를 알린다 |
+| S3-SS-12 `[구현 중 추가]` | 유휴 세션 정리(VR-419, 11.3절 13번) | 유휴 시간 동안 아무도 쓰지 않은 세션, 채널을 쓰는 중인 세션 | 전자는 정리가 닫고 다음 요청이 다시 연결한다. 후자는 닫지 않는다(`SshSessionPoolTest`) |
+| S3-SS-13 `[구현 중 추가]` | agent 자격 증명 거절(11.3절 14번) | agent 자격 증명 프로필 | 연결 전에 자기 원인(`AGENT_UNSUPPORTED`)으로 거절한다(`SshSessionPoolTest`) |
+| S3-SS-14 `[구현 중 추가]` | ProxyJump 점프 지정(11.3절 12번) | 밑줄이 든 호스트 이름, 포트가 있는 호스트, IPv6 리터럴(괄호 유무) | `URI` 없이 MINA에 넘긴다. 점프가 없으면 지정도 없고, 한 세션의 hop은 접속 주소(괄호 유무 무관)로 찾는다(`JumpEntriesTest`) |
 
-신규 사례 수 **104건**: EX 14, SS 11, SF 20, AR 9, AG 10, EL 4, TP 8, AB 8, UC 8, RO 6, RW 6.
+신규 사례 수 **104건**: EX 14, SS 11, SF 20, AR 9, AG 10, EL 4, TP 8, AB 8, UC 8, RO 6, RW 6. `[구현 중 추가]` 19건(AB 2, TK 14, SS 3)을 더하면 **123건**이다: EX 14, SS 14, SF 20, AR 9, AG 10, EL 4, TP 8, AB 10, UC 8, RO 6, RW 6, TK 14. S3-RO-01~05의 행은 실제 시험의 뜻에 맞춰 고쳤고, 같은 ID를 두 시험이 쓰는 경우(RO-02, RO-03)는 행에 적었다.
 
 ### 8.6 결함 4건과 사례 연결 [제안]
 「원인은 2.x에서 미확인」이라 확정하지 않는다. 수정 기록에는 「Java 판에서 해당 실패 범주를 이렇게 막고 이 시험으로 고정함」으로 적는다.
@@ -809,7 +844,7 @@ Java 판에 같은 행동이 없다. 각 묶음의 대체 사례는 8.5절에서
 - **vendor 사례 146건(VR-319~464) 채택.** S2 구현 4와 같은 방식으로 채택한다.
   - 기대는 소스를 추적해 정하고, 처음 실행해 확인한다.
   - 어긋나면 사례를 고치지 않고 보고하며, 고칠 때는 더 엄격한 쪽으로만 고친다.
-  - 담당은 A2(11.3)다.
+  - 담당은 A2(11.5)다. 이 절은 2026-11-12 구현 중 판정을 11.3절·11.4절로 더하면서 구현 분담을 11.5절로 옮겼다.
 - **시범 게이트는 막지 않는다.** 9.2절 2번 「판정 전에는 구현을 시작하지 않는다」는 채택하지 않는다.
   - 각 구현은 보수적 기본값으로 먼저 만든다. 응답이 확정되지 않으면 UNKNOWN, 확장이 없으면 백업 방식을 쓰는 식이다.
   - 실제 서버 동작은 S3-RO·S3-RW 시험이 확인한다.
@@ -818,7 +853,58 @@ Java 판에 같은 행동이 없다. 각 묶음의 대체 사례는 8.5절에서
 - **출력 펌프 스레드**: `getInvertedOut()`·`getInvertedErr()`를 읽는 작업은 주입받은 Spring `TaskExecutor`(`AsyncTaskExecutor`)로 돌린다. `new Thread`·`Executors`는 쓰지 않는다(A-THREAD).
 - **원격 고정 문장 리소스**(`src/main/resources/ssh/remote/**`)는 대상에 보내는 데이터다. 이 리소스와 대상 고정 명령은 「원격 대상 명령」 범주의 대체 불가 예외다. 이유는 `docs/external-programs.{en,ko}.md`에 적는다. 이 문서가 없으면 E가 만든다.
 
-### 11.3 구현 분담(9절 대체)
+### 11.3 구현 중 판정(2026-11-12)
+구현 중에 정한 것이다. 이 절은 코드가 정본이며, 본문(1~10절)과 어긋나면 이 절을 따른다. 위치는 클래스 이름이다(패키지는 `io.github.jaeseongs95.portal` 아래).
+
+1. `ExecutionTimelineStore`의 정본은 `app.history`다. C가 `app.execution`에 따로 만든 포트는 지웠다. 위치: `app.history.ExecutionTimelineStore`(구현 `store.journal.JdbcExecutionTimelineStore`, 소비 `app.execution.ExecutionDispatcher`).
+2. 실제 store를 쓰는 유스케이스 시험은 `portal-server`의 `server.usecase`에 둔다. portal-app 시험이 portal-store를 의존하면 ArchUnit A-DIR 위반이다. 위치: `server.usecase`(`UseCaseKit`, `ExecutionDispatcherTest`, `DispatcherLifecycleTest`, `StartupRecoveryTest` 등), 규칙은 `archchecks.PortalRules`의 A-DIR.
+3. 재시작 복구는 `SmartInitializingSingleton`으로 한다. 디스패처는 복구가 끝난 뒤 `open()`한다. `ContextRefreshedEvent`를 쓰지 않는 이유는 부모 컨텍스트에 자식 웹 컨텍스트 2개가 붙고 자식의 이벤트가 부모로 전파되어 복구가 여러 번 돌 수 있기 때문이다. 위치: `app.recovery.StartupRecovery`(복구 뒤 `ExecutionDispatcher.open()`), `app.lifecycle.StartupProtection`, `server.assembly.StorageStartup`.
+4. portal-app의 로그는 SLF4J로 한다. 위치: `app.operation.OutcomeAudit`, `app.operation.AuditGate`, `app.execution.ExecutionDispatcher`, `app.file.DownloadService` 등.
+5. `AuditAction`에 2.x 값을 추가했다(`APPROVED`, `POLICY_EXECUTION_STARTED`, `COMPLETED`, `FAILED`, `CANCELLED`, `UNKNOWN`, `EXPIRED` 등, 와이어 값은 2.x 문자열). 시작 감사가 실패하면 첫 바이트 전에 멈춘다(`DispatchRefusedException`, 단계 `START_AUDIT`, 사유 `AUDIT_FAILED`). 종료 감사가 실패해도 결과는 바뀌지 않고 `Operation.recordAuditFailure`로 표시해 남긴다. 위치: `app.audit.AuditAction`, `app.operation.AuditGate`(시작), `app.operation.OutcomeAudit`(종료), `app.execution.DispatchChecks`.
+6. 읽기 시작 규칙(자동 시작, 명령, 읽기 프로필, 실행 결정 없음)은 `ApprovalPolicy.checkDispatch(Operation, ProfileAlias, MaintenanceState, Instant)` 오버로드로 옮겼다. 위치: `domain.approval.ApprovalPolicy`(호출 `app.execution.DispatchChecks`).
+7. 프로필 `[policy]` 표는 호환을 위해 받아들이고, 집행하지 않는다는 경고를 한 번 낸다. 위치: `ssh.profile.ProfileEvents#policyNotEnforced`(구현 `LoggingProfileEvents`, 호출 `TomlProfileLoader`).
+8. `known_hosts`는 다른 계정이 쓸 수 없어야 한다. 읽기 금지는 요구하지 않는다(공개 키이기 때문이다). 위치: `ssh.hostkey.ServerKeyPolicy`(`FileAccessGuard.inspect(file, Protection.NO_OTHER_WRITE)`).
+9. vendor 사례 13건을 2.x보다 엄격하게 바꿨다. 목록은 시험의 DisplayName 「2.x와 다름」에서 모았다. 위치: `ssh.profile`·`ssh.hostkey` 시험.
+   - VR-344: 포트의 TOML 실수 `22.0`도 거절한다(2.x의 JavaScript 숫자는 받았다). `TomlProfileLoaderTest`.
+   - VR-386: `~u/x`는 홈 경로로 확장하지 않는다. `EnvironmentCredentialSourceTest`.
+   - VR-387: 홈을 모르는 `~/k`는 확장하지 않고 작업 디렉터리에서 찾지 않는다. `HOME`이 없으면 `user.home`을 쓴다. 같은 시험.
+   - VR-388: 키 프로필의 키 파일이 없으면 파일 이름을 댄 실패이며, 더 약한 방식으로 조용히 넘어가지 않는다. 같은 시험.
+   - VR-389: 키 경로가 폴더이면 건너뛰지 않고 「읽을 수 없다」는 miss다. 같은 시험.
+   - VR-396·397: keychain 프로필은 `Unsupported`다. 같은 시험.
+   - VR-398: 비밀번호 프로필은 비밀번호만 받는다. 같은 시험.
+   - VR-399: 비밀번호 변수가 없으면 두 변수 이름을 댄 miss다(문장을 던지지 않는다). 같은 시험.
+   - VR-400: agent 프로필인데 `SSH_AUTH_SOCK`이 없으면 miss이고, 환경의 비밀번호로 물러서지 않는다. 같은 시험.
+   - VR-443: 빈 핀은 설정 오류다(2.x는 핀 없음으로 보고 핀 검사를 조용히 껐다). `HostKeyFingerprintTest`, `ServerKeyPolicyTest`.
+   - VR-449·450: 알 수 없는 모드는 설정을 읽는 자리에서 거절한다(2.x는 tofu처럼 다뤘다). `ServerKeyPolicyTest`.
+   - 이 밖에 VR이 아닌 EV-01(`a-b`와 `a_b`가 같은 자격 증명 접두를 내면 로드 때 거절)과 PF-11(프로필 이름은 `ProfileAlias` 규칙)도 같은 표시를 단다(`TomlProfileLoaderTest`).
+10. `DispatchGuard`는 채널을 열기 전에 호출한다. 3.2절 P3 문장을 고쳤다. 근거는 RC-B-462(「연결 확립 후 channel 열기 전」)와 포트 문서(`app.remote.DispatchGuard`)다. 위치: `ssh.exec.MinaRemoteExecutor`(`runOnLease`), `ssh.sftp.MinaRemoteFileTransfer`, `ssh.cli.AgentCliInstaller`.
+11. 연결 실패와 exec 거절은 `ExecutionReason.CHANNEL_OPEN_FAILED`로 내고, 단계와 코드로 나눈다. `SSH_CONNECT`/`SSH_CONNECT_FAILED`, `SSH_CHANNEL`/`SSH_CHANNEL_OPEN_FAILED`, `SSH_EXECUTION`/`SSH_EXECUTION_FAILED`가 서로 다르다는 것을 S3-SS-03이 확인한다(`SshSessionPoolTest`: 연결 안 됨, 채널 허가 없음, 단절 뒤 `TRANSPORT_LOST`·UNKNOWN이 세 값). `SSH_EXECUTION_FAILED`는 exec 요청 거절(`NOT_STARTED`)과 요청 뒤 단절(`UNKNOWN`) 두 경우에 쓰며 `RemoteOutcome`으로 가른다. 위치: `ssh.exec.ExecOutcomes`.
+12. ProxyJump는 (a) `HostConfigEntry` 체인 방식으로 한다. 근거는 hop별 호스트 키 검증이다(`AbstractClientSession.checkKeys`가 세션마다 그 세션이 향한 서버의 주소를 주므로 hop마다 자기 핀·기록과 대조한다). MINA는 (a)·(b) 모두 루프백 리스너를 연다(`SshClient.doConnect`의 `createLocalPortForwardingTracker`). 그래서 이것은 둘을 가르는 근거가 아니다. 점프 지정은 `URI`가 아니라 `JumpEntries`와 `HostConfigEntryResolver`로 해석한다(밑줄이 든 호스트 이름과 IPv6 리터럴이 `URI`에서 깨지기 때문이다. S3-SS-14). 위치: `ssh.session.ProxyJumpResolver`, `JumpEntries`, `SessionConnector`, `HopHostKeyVerifier`.
+13. 유휴 연결 정리(VR-416·419)는 `SessionReapSettings`(15분/1분, 2.x `connectionIdleReapMs`)로 한다. 채널을 쓰는 중인 세션(lease가 있는 세션)은 닫지 않는다(S3-SS-12). 위치: `ssh.session.SessionReapSettings`, `SshSessionPool`.
+14. agent 자격 증명은 지원하지 않는다. 연결 전에 `AGENT_UNSUPPORTED`로 거절한다(S3-SS-13). 2.x는 EV-08·EV-11로 ssh-agent를 썼으므로 이것은 동작 변경이며, 3.0.0 릴리스 노트의 「동작 변경」에 넣을 대상이다. 위치: `ssh.session.ConnectFailureCause`, `ProxyJumpResolver`.
+15. 실패가 겹치면 원인의 종류로 우선순위를 정한다. 세션 상실이 입력 실패보다 앞선다(죽은 세션에 쓴 입력의 실패는 상실 때문이다). 채널이 닫히면 마감이 없어도 정산한다. 위치: `ssh.exec.ExecOutcomes#afterDispatch`, `ExecSupervisor`.
+16. ArchUnit A-SSH-NO-PLATFORM-BRANCH(S3-AB-09)를 넓혀 `CommandLineGrammar` 구현도 자기 `TargetOs` 상수를 읽을 수 있게 했다(`platform()`이 그 문법이 따옴표를 다루는 OS를 답하고, 등록기가 그 답으로 문법을 플랫폼에 잇는다). 위치: `archchecks.PortalRules#noPlatformBranch`.
+17. 에이전트 CLI 계획의 명령 문자열은 단계마다 서로 다르다(POSIX는 `: before;`·`: after;`, Windows는 `$when='before';`·`$when='after';`). 한 단계의 명령이 다른 단계로 오인되지 않게 시험(S3-AG-10)으로 고정했다. 원격을 바꾼 뒤의 실패는 `NotDispatched`가 아니다(`Unconfirmed` 또는 `RolledBack`). 위치: `ssh.platform.LinuxTargetPlatform`, `WindowsTargetPlatform`, `AgentCliPlansTest`, `ssh.cli.AgentCliInstaller`.
+18. 동시에 같은 새 이름으로 올리는 경합(S3-SF-16)에서 진 쪽은 `DESTINATION_EXISTS`다. 위치: `ssh.sftp.SftpUploader`, `AtomicReplacer`, 시험 `UploadTest`.
+19. D-0012 해석: 예산 판정은 디스크 값과 무관하고, 디스크 거절은 여백(`diskMarginBytes`)이 모자랄 때만 한다. 판정 순서는 파일 한도, 예산, 디스크다. 위치: `store.artifact.JdbcArtifactRegistry#reserve`, `app.artifact.ArtifactRegistry`.
+20. 승격 폴백 `ElevatedExecTransfer`의 한계: 파일 하나가 64MiB 이하이고 전체를 메모리에 올리며, 덮어쓴 파일의 소유자·그룹을 보존하지 않는다(root가 만든 새 파일의 것이 된다). 경로 검사(`RemotePathChecker`)는 서버의 `realpath` 대신 조상 디렉터리마다 `lstat`으로 한다. 위치: `ssh.sftp.ElevatedExecTransfer`, `RemotePathChecker`. 승격 폴백은 허용 루트 판정(`judgePolicy`)만 거치고 이 `lstat` 검사는 거치지 않는다. 폴백이 스스로 하는 것은 다운로드에서 마지막 요소가 링크·일반 파일이 아닌지 보는 `[ -L ]`·`[ -f ]`뿐이다(11.4절).
+
+### 11.4 미결·후속
+| 항목 | 상태 | 다음 |
+|---|---|---|
+| SOURCE 실행기 | `TargetPlatform.prepareSource`가 명령은 만들지만, 이를 실행하는 SOURCE용 실행기(유스케이스)가 없다. 명령 실행기(`CommandOperationRunner`)만 있다 | 미정 |
+| 출력 JSON 모양 | 출력을 JSON 응답으로 내는 모양은 3단계에서 정하지 않았다 | 4단계 |
+| 설정 바인딩 | `StorageSettings` 등은 시험용 값을 생성자로 받는다(결정 D3-12). `SessionReapSettings`도 속성 바인딩이 채워 주기를 기다린다 | 4단계 `BridgeProperties` |
+| `TargetPlatform.prepareSource`의 Windows 서명 | 포트에 해석기(`WindowsPythonExecutable`) 매개변수가 없어 `WindowsTargetPlatform.prepareSource(…)`는 `TARGET_CAPABILITY_UNSUPPORTED`로 거절한다. 해석기를 받는 오버로드는 따로 있다 | C가 포트 서명을 정한다 |
+| `UnconfirmedCause`의 「교체 뒤 확정 실패」 값 | 지금 값은 `TransportLost`, `RestoreUnconfirmed`, `DurabilityUnconfirmed`, `CleanupUnconfirmed`다. 교체가 끝난 뒤 확정 읽기가 실패한 경우를 가리키는 값이 없다 | 미정 |
+| `TransferErrorCode`에 `FILE_TOO_LARGE`가 없음 | 상한 초과는 `TransferOutcomes`가 문장 접두(`FILE_TOO_LARGE:`)로만 낸다. 오류 코드 enum에는 값이 없다 | 미정 |
+| testkit의 FSYNC·변조 주입이 없음 | `EmbeddedSshServer`는 권한 거절·공간 부족·rename 실패·다운로드 중 단절을 주입하지만 FSYNC 실패와 바이트 변조는 못 낸다. 그 시험(S3-SF-05 b, S3-SF-20)은 지금 JDK 프록시(`SftpDoubles`)로 한다 | 미정 |
+| `ArtifactRefusal` 값을 오류 봉투로 옮기는 일 | `ArtifactRefusal`(코드와 값)을 `envelope.schema.json`의 오류 봉투로 옮기는 일이 남았다 | 4단계 |
+| `ArtifactSpec` provenance | `ArtifactSpec`에 `ArtifactProvenance`를 담는 자리가 없다. 다운로드·복사의 출처 기록은 이 값 없이 처리한다 | 미정 |
+| P3-4·P3-6 | P3-4(`sudo -n sftp-server` 위 SFTP)와 P3-6(CLI tarball의 대상에서 npm 필요 여부)은 실제 OpenSSH CI 결과를 기다린다. 그때까지 승격은 고정 명령 exec 폴백이다 | CI 결과 |
+| Windows 설치기의 junction 교체 | `current` junction을 지우고 다시 만드는 순서라 원자적이지 않다. 설치기가 `CURRENT_AFTER`로 읽어 확인한 뒤에야 설치 완료로 본다. Windows 실제 서버(S3-RW)에서 확인하지 않았다 | S3-RW |
+
+### 11.5 구현 분담(9절 대체)
 쓰기 범위는 서로 겹치지 않는다. Gradle은 메인만 실행한다. 아래 순서로 진행한다.
 1. **1차**: C·E·A1(testkit)
 2. **2차**: A1·A2·B·D(C의 포트 위에서)

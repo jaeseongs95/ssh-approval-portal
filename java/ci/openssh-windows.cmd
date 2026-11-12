@@ -72,13 +72,19 @@ rem 3. Keys. The host key is readable by SYSTEM and Administrators only (S-1-5-1
 if errorlevel 1 goto :keyfail
 "%KEYGEN%" -q -t ed25519 -N "" -f "%SRV%\host_key"
 if errorlevel 1 goto :keyfail
-icacls "%SRV%\host_key" /inheritance:r /grant:r *S-1-5-18:(F) *S-1-5-32-544:(F) >nul
-if errorlevel 1 goto :keyfail
-icacls "%SRV%\host_key" /setowner *S-1-5-32-544 >nul
+rem Win32-OpenSSH refuses a host key whose owner is not SYSTEM or Administrators, or whose ACL names any other account (Repair-SshdHostKeyPermission and
+rem Repair-FilePermission of OpenSSHUtils.psm1, FixHostFilePermissions.ps1: owners SYSTEM and Administrators, access for those two only). ssh-keygen leaves an explicit entry
+rem for the account that ran it (the runner administrator), which "/inheritance:r /grant:r" alone does not remove: the ACL is reset first, then inheritance is cut, then
+rem only SYSTEM and Administrators are granted, then the owner is set. See :secure.
+call :secure "%SRV%\host_key"
 if errorlevel 1 goto :keyfail
 copy /y "%CLIENT%\client_key.pub" "%SRV%\authorized_keys" >nul
 if errorlevel 1 goto :keyfail
-icacls "%SRV%\authorized_keys" /inheritance:r /grant:r *S-1-5-18:(F) *S-1-5-32-544:(F) "%CI_USER%:(R)" >nul
+rem authorized_keys of the test account: owned by Administrators, SYSTEM and Administrators full control, and the account itself may read it (Repair-AuthorizedKeyPermission
+rem allows the user's own entry; the file is not in the profile folder, so StrictModes only needs the owner and the entries to be trusted ones).
+call :secure "%SRV%\authorized_keys"
+if errorlevel 1 goto :keyfail
+icacls "%SRV%\authorized_keys" /grant "%CI_USER%:(R)" >nul
 if errorlevel 1 goto :keyfail
 
 rem 4. A random loopback port that nothing listens on (bound to port 0 and released again).
@@ -109,6 +115,10 @@ set "SFTP_F=%SFTP_F:\=/%"
 >> "%SRV%\sshd_config" echo StrictModes yes
 >> "%SRV%\sshd_config" echo LogLevel VERBOSE
 >> "%SRV%\sshd_config" echo Subsystem sftp %SFTP_F%
+rem sshd_config is checked like the host key (Repair-SshdConfigPermission: owners SYSTEM and Administrators, full access for SYSTEM): the directory's entry for the account
+rem must not reach it.
+call :secure "%SRV%\sshd_config"
+if errorlevel 1 goto :keyfail
 "%SSHD%" -t -f "%SRV%\sshd_config"
 if errorlevel 1 (
     echo The sshd configuration is not valid.>&2
@@ -151,6 +161,8 @@ exit /b 0
 :notready
 echo The prepared sshd does not accept the test account (port %PORT%). Last lines of its log:>&2
 if exist "%SRV%\sshd.log" powershell -NoProfile -NonInteractive -Command "Get-Content -LiteralPath '%SRV%\sshd.log' -Tail 20"
+echo The ACLs of the server files (no secret in them):>&2
+icacls "%SRV%\host_key" "%SRV%\sshd_config" "%SRV%\authorized_keys" >&2
 exit /b 1
 
 :stop
@@ -159,6 +171,22 @@ powershell -NoProfile -NonInteractive -Command "Stop-ScheduledTask -TaskName '%T
 if not exist "%CLIENT%\user" exit /b 0
 set /p CI_USER=<"%CLIENT%\user"
 powershell -NoProfile -NonInteractive -Command "Remove-LocalUser -Name '%CI_USER%' -ErrorAction SilentlyContinue"
+exit /b 0
+
+:secure
+rem Makes the file what Win32-OpenSSH's StrictModes wants of a server file: no inherited entry, no explicit entry of the account that created it, full control for SYSTEM
+rem (S-1-5-18) and the Administrators group (S-1-5-32-544) only, owned by Administrators. Sources:
+rem   https://github.com/PowerShell/openssh-portable/blob/latestw_all/contrib/win32/openssh/OpenSSHUtils.psm1  (Repair-SshdHostKeyPermission, Repair-FilePermission)
+rem   https://github.com/PowerShell/openssh-portable/blob/latestw_all/contrib/win32/openssh/FixHostFilePermissions.ps1
+rem   https://learn.microsoft.com/en-us/windows-server/administration/openssh/openssh_keymanagement  (server files and their permissions)
+icacls "%~1" /reset >nul
+if errorlevel 1 exit /b 1
+icacls "%~1" /inheritance:r >nul
+if errorlevel 1 exit /b 1
+icacls "%~1" /grant:r *S-1-5-18:(F) *S-1-5-32-544:(F) >nul
+if errorlevel 1 exit /b 1
+icacls "%~1" /setowner *S-1-5-32-544 >nul
+if errorlevel 1 exit /b 1
 exit /b 0
 
 :keyfail

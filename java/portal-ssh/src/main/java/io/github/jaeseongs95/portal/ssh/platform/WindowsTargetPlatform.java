@@ -155,38 +155,16 @@ public final class WindowsTargetPlatform implements TargetPlatform {
     }
 
     /**
-     * The fixed PowerShell commands that install a release under the profile folder of the account, with the same steps as on a POSIX target: unpacked with
-     * {@code tar.exe} (Windows 10 version 1803 and later; the target's own), the version read from {@code package.json}, {@code current} a junction that is replaced by
-     * removing it and making it again (not atomic: the installer reads it back before it calls the installation done). Unchecked against a real Windows server (S3-RW).
+     * The fixed PowerShell command that unpacks a release under the profile folder of the account: {@code tar.exe} (Windows 10 version 1803 and later; the target's own) on
+     * the package file the installer uploaded. It is the only command of the installation; the installer does the rest over SFTP. Unchecked against a real Windows server
+     * (S3-RW).
      */
     @Override
     public AgentCliPlan agentCliPlan(AgentCliIntent intent, AgentRelease release) {
         AgentCliLayout layout = new AgentCliLayout(intent.provider(), release);
-        String partial = profilePath(layout.partialDirectory());
-        String finalDirectory = profilePath(layout.finalDirectory());
-        String current = profilePath(layout.currentLink());
-        String previous = profilePath(layout.providerRoot() + "/current.previous");
-        String drop = "if(Test-Path -LiteralPath " + current + "){(Get-Item -LiteralPath " + current + ").Delete()};";
-        String printCurrent = "$i=Get-Item -LiteralPath " + current + " -ErrorAction SilentlyContinue;if($i -and $i.Target){[Console]::Out.Write(($i.Target | Select-Object -First 1))};exit 0";
+        // The one command: unpack the package where the installer put it, and end with the exit code of tar.exe.
         List<FixedRemoteCommand> commands = new ArrayList<>();
-        commands.add(step(AgentCliStep.TARBALL_PATH, "[Console]::Out.Write(" + profilePath(layout.partialDirectory() + "/package.tgz") + ")"));
-        commands.add(step(AgentCliStep.FINAL_PATH, "[Console]::Out.Write(" + finalDirectory + ")"));
-        // The two reads of current differ by an assignment, so that every step of a plan is a command of its own and a step is never mistaken for another by its text.
-        commands.add(step(AgentCliStep.CURRENT_BEFORE, "$when='before';" + printCurrent));
-        commands.add(step(AgentCliStep.PREPARE, "New-Item -ItemType Directory -Force -Path " + partial + " | Out-Null"));
-        commands.add(step(AgentCliStep.UNPACK, "Set-Location -LiteralPath " + partial + ";tar.exe -xzf package.tgz;if($LASTEXITCODE -ne 0){exit 1};Remove-Item -Force package.tgz;"
-            + "Set-Location -LiteralPath ..;if(Test-Path -LiteralPath " + finalDirectory + "){Remove-Item -Recurse -Force -LiteralPath " + finalDirectory + "};"
-            + "Move-Item -LiteralPath " + partial + " -Destination " + finalDirectory));
-        commands.add(step(AgentCliStep.VERSION, "[Console]::Out.Write((Get-Content -Raw -LiteralPath (Join-Path " + finalDirectory + " 'package\\package.json') | ConvertFrom-Json).version)"));
-        commands.add(step(AgentCliStep.KEEP_PREVIOUS, "Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath " + previous + ";$i=Get-Item -LiteralPath " + current
-            + " -ErrorAction SilentlyContinue;if($i -and $i.Target){Set-Content -LiteralPath " + previous + " -Value ($i.Target | Select-Object -First 1) -NoNewline}"));
-        commands.add(step(AgentCliStep.SWITCH, drop + "New-Item -ItemType Junction -Path " + current + " -Target " + finalDirectory + " | Out-Null"));
-        commands.add(step(AgentCliStep.CURRENT_AFTER, "$when='after';" + printCurrent));
-        commands.add(step(AgentCliStep.ROLLBACK, "$t=(Get-Content -Raw -LiteralPath " + previous + ").Trim();" + drop + "New-Item -ItemType Junction -Path " + current
-            + " -Target $t | Out-Null"));
-        commands.add(step(AgentCliStep.ROLLBACK_NONE, drop));
-        commands.add(step(AgentCliStep.DROP_PREVIOUS, "Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath " + previous));
-        commands.add(step(AgentCliStep.CLEANUP, "Remove-Item -Recurse -Force -ErrorAction SilentlyContinue -LiteralPath " + partial + ";exit 0"));
+        commands.add(step(AgentCliStep.UNPACK, "Set-Location -LiteralPath " + profilePath(layout.partialDirectory()) + ";tar.exe -xzf package.tgz;exit $LASTEXITCODE"));
         return new AgentCliPlan(intent.provider(), release, commands);
     }
 

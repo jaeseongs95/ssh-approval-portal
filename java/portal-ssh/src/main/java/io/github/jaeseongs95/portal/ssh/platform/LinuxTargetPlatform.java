@@ -126,34 +126,16 @@ public final class LinuxTargetPlatform implements TargetPlatform {
     }
 
     /**
-     * The fixed commands that install a release under the home directory of the account. The package file is unpacked with {@code tar} and its version is read from its
-     * metadata file ({@code package.json}); nothing that was installed is run, so a package that lies about itself cannot execute anything on the target at this point.
-     * Whether a target needs {@code npm} or {@code node} for the tool to work after that is not known (pilot P3-6).
+     * The fixed command that unpacks a release under the home directory of the account: {@code tar} on the package file the installer uploaded. It is the only command
+     * of the installation; nothing that was installed is run, so a package that lies about itself cannot execute anything on the target. Whether a target needs
+     * {@code npm} or {@code node} for the tool to work after that is not known (pilot P3-6).
      */
     @Override
     public AgentCliPlan agentCliPlan(AgentCliIntent intent, AgentRelease release) {
         AgentCliLayout layout = new AgentCliLayout(intent.provider(), release);
-        String partial = home(layout.partialDirectory());
-        String finalDirectory = home(layout.finalDirectory());
-        String current = home(layout.currentLink());
-        String next = home(layout.providerRoot() + "/current.next");
-        String previous = home(layout.providerRoot() + "/current.previous");
+        // The one command: unpack the package where the installer put it. The directories, the version, the switch and the removals are the installer's SFTP and Java.
         List<FixedRemoteCommand> commands = new ArrayList<>();
-        commands.add(step(AgentCliStep.TARBALL_PATH, "printf '%s' " + home(layout.partialDirectory() + "/package.tgz")));
-        commands.add(step(AgentCliStep.FINAL_PATH, "printf '%s' " + finalDirectory));
-        // The two reads of current differ by a no-op word, so that every step of a plan is a command of its own and a step is never mistaken for another by its text.
-        commands.add(step(AgentCliStep.CURRENT_BEFORE, ": before; readlink " + current + " 2>/dev/null; exit 0"));
-        commands.add(step(AgentCliStep.PREPARE, "mkdir -p " + partial));
-        commands.add(step(AgentCliStep.UNPACK, "cd " + partial + " && tar -xzf package.tgz && rm -f package.tgz && cd .. && rm -rf " + finalDirectory + " && mv " + partial
-            + " " + finalDirectory));
-        commands.add(step(AgentCliStep.VERSION, "sed -n 's/^ *\"version\": *\"\\([^\"]*\\)\".*/\\1/p' " + home(layout.finalDirectory() + "/package/package.json") + " | head -n 1"));
-        commands.add(step(AgentCliStep.KEEP_PREVIOUS, "rm -f " + previous + "; if [ -L " + current + " ]; then cp -P " + current + " " + previous + "; fi"));
-        commands.add(step(AgentCliStep.SWITCH, "ln -sfn " + finalDirectory + " " + next + " && mv -Tf " + next + " " + current));
-        commands.add(step(AgentCliStep.CURRENT_AFTER, ": after; readlink " + current + " 2>/dev/null; exit 0"));
-        commands.add(step(AgentCliStep.ROLLBACK, "mv -Tf " + previous + " " + current));
-        commands.add(step(AgentCliStep.ROLLBACK_NONE, "rm -f " + current));
-        commands.add(step(AgentCliStep.DROP_PREVIOUS, "rm -f " + previous));
-        commands.add(step(AgentCliStep.CLEANUP, "rm -rf " + partial));
+        commands.add(step(AgentCliStep.UNPACK, "cd " + home(layout.partialDirectory()) + " && tar -xzf package.tgz"));
         return new AgentCliPlan(intent.provider(), release, commands);
     }
 

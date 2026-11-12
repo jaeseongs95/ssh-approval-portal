@@ -187,7 +187,12 @@ public class SftpUploader {
             return Optional.empty();
         }
         try {
-            client.setStat(tempPath, new SftpClient.Attributes().perms(present.state().permissions() & 0777));
+            SftpClient.Attributes attributes = new SftpClient.Attributes().perms(present.state().permissions() & 0777);
+            if (request.access() instanceof io.github.jaeseongs95.portal.app.remote.FileAccess.Elevated) {
+                // An elevated server (sudo sftp-server) is root, whose new file belongs to root: the owner and group the file had are given back (only root may).
+                attributes.owner(present.state().userId(), present.state().groupId());
+            }
+            client.setStat(tempPath, attributes);
             return Optional.empty();
         } catch (IOException e) {
             SftpFailure.Kind kind = classifier.classify(e).kind();

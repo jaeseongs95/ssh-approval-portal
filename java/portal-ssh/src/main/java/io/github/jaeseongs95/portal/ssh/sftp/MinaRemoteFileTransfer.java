@@ -53,8 +53,9 @@ import org.springframework.stereotype.Component;
  *       D-0013);</li>
  *   <li>permission bits: a target that cannot set them ({@code PermissionSupport.Unsupported}, a Windows target) is answered without calling SFTP.</li>
  * </ul>
- * An elevated request ({@link FileAccess.Elevated}) is served by the {@link ElevationPlan} it carries: a POSIX target by fixed {@code sudo -n} commands
- * ({@link ElevatedExecTransfer}), a Windows target by the administrator probe and then the same SFTP path (its login either is the administrator's or is not).
+ * An elevated request ({@link FileAccess.Elevated}) is served by the {@link ElevationPlan} it carries, and in both cases by the same adapter code as a plain one: a POSIX
+ * target by the SFTP server of the target started with {@code sudo -n} ({@link SudoSftpChannels}; no server program or a {@code sudo} that needs a password refuses the
+ * request before anything is written), a Windows target by the administrator probe and then the plain SFTP channel (its login either is the administrator's or is not).
  * What the 2.x Windows helper checked about owners and DACLs is not done here (decision D3-02): the {@code UNTRUSTED_OWNER}, {@code MISSING_DACL},
  * {@code UNSAFE_ANCESTOR}, {@code UNTRUSTED_WRITER}, {@code UNSUPPORTED_ACE} and {@code SECURITY_DESCRIPTOR_TOO_LARGE} codes stay in the contract and are never produced,
  * because the SYSTEM-owned staging root they guarded does not exist in 3.0, SFTP runs with the rights of the login account (the operating system's check is the first
@@ -77,7 +78,7 @@ public class MinaRemoteFileTransfer implements RemoteFileTransfer {
     private final SftpUploader uploader;
     private final SftpDownloader downloader;
     private final SftpFailureClassifier classifier;
-    private final ElevatedExecTransfer elevatedExec;
+    private final SudoSftpChannels sudoChannels;
     private final ElevationProbe elevationProbe;
     private final TaskScheduler scheduler;
     private final Clock clock;
@@ -89,20 +90,20 @@ public class MinaRemoteFileTransfer implements RemoteFileTransfer {
      * @param uploader writes a file
      * @param downloader reads a file
      * @param classifier the meaning of an SFTP failure
-     * @param elevatedExec the fixed {@code sudo -n} commands of an elevated request on a POSIX target
+     * @param sudoChannels opens the SFTP channel of the SFTP server run under {@code sudo -n}, for an elevated request on a POSIX target
      * @param elevationProbe asks a target whether elevated file work is allowed
      * @param scheduler runs the deadline of a transfer
      * @param clock the one source of time
      */
     public MinaRemoteFileTransfer(SessionSource sessions, SftpChannels channels, RemotePathChecker checker, SftpUploader uploader, SftpDownloader downloader,
-                                  SftpFailureClassifier classifier, ElevatedExecTransfer elevatedExec, ElevationProbe elevationProbe, TaskScheduler scheduler, Clock clock) {
+                                  SftpFailureClassifier classifier, SudoSftpChannels sudoChannels, ElevationProbe elevationProbe, TaskScheduler scheduler, Clock clock) {
         this.sessions = Objects.requireNonNull(sessions, "sessions");
         this.channels = Objects.requireNonNull(channels, "channels");
         this.checker = Objects.requireNonNull(checker, "checker");
         this.uploader = Objects.requireNonNull(uploader, "uploader");
         this.downloader = Objects.requireNonNull(downloader, "downloader");
         this.classifier = Objects.requireNonNull(classifier, "classifier");
-        this.elevatedExec = Objects.requireNonNull(elevatedExec, "elevatedExec");
+        this.sudoChannels = Objects.requireNonNull(sudoChannels, "sudoChannels");
         this.elevationProbe = Objects.requireNonNull(elevationProbe, "elevationProbe");
         this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
         this.clock = Objects.requireNonNull(clock, "clock");
@@ -122,7 +123,7 @@ public class MinaRemoteFileTransfer implements RemoteFileTransfer {
         return switch (request.access()) {
             case FileAccess.Direct direct -> uploadDirect(request, source, control);
             case FileAccess.Elevated elevated -> switch (elevated.plan()) {
-                case ElevationPlan.SudoNonInteractive sudo -> elevatedExec.upload(request, sudo, source, control);
+                case ElevationPlan.SudoNonInteractive sudo -> uploadOver(request, source, control, true);
                 case ElevationPlan.WindowsAdministratorCheck check -> switch (administrator(request.target(), check, request.limits(), control)) {
                     case ElevationResult.Granted granted -> uploadDirect(request, source, control);
                     case ElevationResult.Denied denied -> new UploadResult.Refused(TransferErrorCode.PERMISSION_DENIED, new FileDiagnostic.None(), CleanupState.COMPLETE);
@@ -145,7 +146,7 @@ public class MinaRemoteFileTransfer implements RemoteFileTransfer {
         return switch (request.access()) {
             case FileAccess.Direct direct -> downloadDirect(request, sink, control);
             case FileAccess.Elevated elevated -> switch (elevated.plan()) {
-                case ElevationPlan.SudoNonInteractive sudo -> elevatedExec.download(request, sudo, sink, control);
+                case ElevationPlan.SudoNonInteractive sudo -> downloadOver(request, sink, control, true);
                 case ElevationPlan.WindowsAdministratorCheck check -> switch (administrator(request.target(), check, request.limits(), control)) {
                     case ElevationResult.Granted granted -> downloadDirect(request, sink, control);
                     case ElevationResult.Denied denied -> new DownloadResult.Refused(TransferErrorCode.PERMISSION_DENIED, new FileDiagnostic.None());
@@ -170,7 +171,7 @@ public class MinaRemoteFileTransfer implements RemoteFileTransfer {
         return switch (request.access()) {
             case FileAccess.Direct direct -> permissionsDirect(request, control);
             case FileAccess.Elevated elevated -> switch (elevated.plan()) {
-                case ElevationPlan.SudoNonInteractive sudo -> elevatedExec.applyPermissions(request, sudo, control);
+                case ElevationPlan.SudoNonInteractive sudo -> permissionsOver(request, control, true);
                 case ElevationPlan.WindowsAdministratorCheck check -> new PermissionResult.Refused(TransferErrorCode.INVALID_REQUEST, new FileDiagnostic.None());
                 case ElevationPlan.NotSupported notSupported -> new PermissionResult.Refused(TransferErrorCode.INVALID_REQUEST, new FileDiagnostic.None());
             };
@@ -185,17 +186,33 @@ public class MinaRemoteFileTransfer implements RemoteFileTransfer {
     // ---- the direct paths ----
 
     private UploadResult uploadDirect(UploadRequest request, PayloadSource source, ExecutionControl control) {
-        return withSftp(request.target(), request.limits(), control, UploadResult.NotDispatched::new,
+        return uploadOver(request, source, control, false);
+    }
+
+    /** The upload over the plain SFTP channel, or over the elevated one: the work is the same code. */
+    private UploadResult uploadOver(UploadRequest request, PayloadSource source, ExecutionControl control, boolean elevated) {
+        return withSftp(request.target(), request.limits(), control, elevated, UploadResult.NotDispatched::new,
+            code -> new UploadResult.Refused(code, new FileDiagnostic.None(), CleanupState.COMPLETE),
             (client, lease, watch) -> uploader.upload(client, lease, watch, request, source));
     }
 
     private DownloadResult downloadDirect(DownloadRequest request, PayloadSink sink, ExecutionControl control) {
-        return withSftp(request.target(), request.limits(), control, DownloadResult.Failed::new,
+        return downloadOver(request, sink, control, false);
+    }
+
+    private DownloadResult downloadOver(DownloadRequest request, PayloadSink sink, ExecutionControl control, boolean elevated) {
+        return withSftp(request.target(), request.limits(), control, elevated, DownloadResult.Failed::new,
+            code -> new DownloadResult.Refused(code, new FileDiagnostic.None()),
             (client, lease, watch) -> downloader.download(client, lease, watch, request, sink));
     }
 
     private PermissionResult permissionsDirect(PermissionRequest request, ExecutionControl control) {
-        return withSftp(request.target(), request.limits(), control, PermissionResult.NotDispatched::new,
+        return permissionsOver(request, control, false);
+    }
+
+    private PermissionResult permissionsOver(PermissionRequest request, ExecutionControl control, boolean elevated) {
+        return withSftp(request.target(), request.limits(), control, elevated, PermissionResult.NotDispatched::new,
+            code -> new PermissionResult.Refused(code, new FileDiagnostic.None()),
             (client, lease, watch) -> setPermissions(client, lease, request));
     }
 
@@ -251,16 +268,55 @@ public class MinaRemoteFileTransfer implements RemoteFileTransfer {
      * Leases a session, calls the guard, opens the SFTP channel and runs the work with the watch armed. A session or a channel that cannot be had is the result of
      * {@code notDispatched}; a {@code DispatchRefusedException} of the guard passes out after the lease is closed, with nothing sent.
      */
-    private <R> R withSftp(RemoteTarget target, TransferLimits limits, ExecutionControl control, Function<TransferFailureCause, R> notDispatched, SftpWork<R> work) {
+    private <R> R withSftp(RemoteTarget target, TransferLimits limits, ExecutionControl control, boolean elevated, Function<TransferFailureCause, R> notDispatched,
+                           Function<TransferErrorCode, R> refused, SftpWork<R> work) {
         try (TransferWatch watch = new TransferWatch(scheduler, clock, limits.deadline(), control.cancel())) {
             return switch (sessions.lease(target, control.cancel())) {
                 case SessionAcquisition.Unavailable unavailable -> notDispatched.apply(unavailable.cause());
-                case SessionAcquisition.Acquired acquired -> withLease(acquired.lease(), control, watch, notDispatched, work);
+                case SessionAcquisition.Acquired acquired -> withLease(acquired.lease(), control, watch, elevated, notDispatched, refused, work);
             };
         }
     }
 
-    private <R> R withLease(SessionLease lease, ExecutionControl control, TransferWatch watch, Function<TransferFailureCause, R> notDispatched, SftpWork<R> work) {
+    /** What opening the SFTP channel of a transfer came to. */
+    private sealed interface Attempt permits Attempt.Ready, Attempt.Refused, Attempt.Unreachable {
+        record Ready(SftpClient client) implements Attempt {
+        }
+
+        /** The target cannot serve the elevated request: no SFTP server program, or {@code sudo -n} does not start it. */
+        record Refused(TransferErrorCode code) implements Attempt {
+        }
+
+        record Unreachable(TransferFailureCause cause) implements Attempt {
+        }
+    }
+
+    private Attempt attempt(SessionLease lease, boolean elevated, TransferWatch watch) {
+        if (elevated) {
+            return switch (sudoChannels.open(lease.session())) {
+                case SudoSftpChannels.Opening.Opened opened -> new Attempt.Ready(opened.client());
+                case SudoSftpChannels.Opening.NoServer noServer -> new Attempt.Refused(TransferErrorCode.INVALID_REQUEST);
+                case SudoSftpChannels.Opening.NotStarted notStarted -> new Attempt.Refused(TransferErrorCode.PERMISSION_DENIED);
+                case SudoSftpChannels.Opening.Lost lost -> {
+                    lease.discard();
+                    yield new Attempt.Unreachable(watch.fired().orElse(TransferFailureCause.TRANSPORT_LOST));
+                }
+            };
+        }
+        try {
+            return new Attempt.Ready(channels.open(lease.session()));
+        } catch (IOException e) {
+            boolean sessionAlive = lease.session().isOpen();
+            if (!sessionAlive) {
+                lease.discard();
+            }
+            LOG.debug("The SFTP channel could not be opened", e);
+            return new Attempt.Unreachable(watch.fired().orElse(sessionAlive ? TransferFailureCause.CHANNEL_OPEN_FAILED : TransferFailureCause.TRANSPORT_LOST));
+        }
+    }
+
+    private <R> R withLease(SessionLease lease, ExecutionControl control, TransferWatch watch, boolean elevated, Function<TransferFailureCause, R> notDispatched,
+                            Function<TransferErrorCode, R> refused, SftpWork<R> work) {
         try (lease) {
             control.guard().beforeDispatch();
             Optional<TransferFailureCause> stopped = watch.stopRequested();
@@ -268,15 +324,14 @@ public class MinaRemoteFileTransfer implements RemoteFileTransfer {
                 return notDispatched.apply(stopped.orElseThrow());
             }
             SftpClient client;
-            try {
-                client = channels.open(lease.session());
-            } catch (IOException e) {
-                boolean sessionAlive = lease.session().isOpen();
-                if (!sessionAlive) {
-                    lease.discard();
+            switch (attempt(lease, elevated, watch)) {
+                case Attempt.Ready ready -> client = ready.client();
+                case Attempt.Refused denied -> {
+                    return refused.apply(denied.code());
                 }
-                LOG.debug("The SFTP channel could not be opened", e);
-                return notDispatched.apply(watch.fired().orElse(sessionAlive ? TransferFailureCause.CHANNEL_OPEN_FAILED : TransferFailureCause.TRANSPORT_LOST));
+                case Attempt.Unreachable unreachable -> {
+                    return notDispatched.apply(unreachable.cause());
+                }
             }
             watch.interruptWith(() -> closeQuietly(client));
             try {

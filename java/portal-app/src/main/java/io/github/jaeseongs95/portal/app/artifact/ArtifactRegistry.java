@@ -88,5 +88,11 @@ public interface ArtifactRegistry {
 
     List<StagedAction> actions(ArtifactId id);
 
+    /**
+     * The use of a staged file that the operation was submitted for, or nothing when the operation is not the operation of a staged file. An operation belongs to at most one
+     * staged action, so the answer is one action or none.
+     */
+    Optional<StagedAction> actionOf(OperationId operation);
+
     void updateAction(ArtifactId id, String operationKey, StagedActionState state);
 }

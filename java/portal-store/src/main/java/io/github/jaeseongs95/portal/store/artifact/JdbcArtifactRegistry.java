@@ -390,6 +390,13 @@ public class JdbcArtifactRegistry implements ArtifactRegistry {
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public Optional<StagedAction> actionOf(OperationId operation) {
+        Objects.requireNonNull(operation, "operation");
+        return actions.findByOperation(operation.value()).stream().findFirst().map(mapper::toAction);
+    }
+
+    @Override
     @Transactional
     public void updateAction(ArtifactId id, String operationKey, StagedActionState state) {
         Objects.requireNonNull(operationKey, "operationKey");

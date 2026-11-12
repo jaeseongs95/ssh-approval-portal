@@ -46,6 +46,12 @@ public final class RealServer implements AutoCloseable {
     private final SshClient client;
     private final ClientSession session;
     private final boolean windows;
+    private final java.util.List<String> diagnostics = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    /** Every command the executor of this server ran, with its exit code and output: a failing test puts this in its message. */
+    public java.util.List<String> diagnostics() {
+        return java.util.List.copyOf(diagnostics);
+    }
 
     private RealServer(SshClient client, ClientSession session, boolean windows) {
         this.client = client;
@@ -150,6 +156,11 @@ public final class RealServer implements AutoCloseable {
                 if (!result.stdout().isEmpty()) {
                     sink.accept(new StreamFrame(StreamKind.STDOUT, result.stdout().getBytes(StandardCharsets.UTF_8)));
                 }
+                if (!result.stderr().isEmpty()) {
+                    sink.accept(new StreamFrame(StreamKind.STDERR, result.stderr().getBytes(StandardCharsets.UTF_8)));
+                }
+                String tail = result.stderr().length() > 1024 ? result.stderr().substring(result.stderr().length() - 1024) : result.stderr();
+                diagnostics.add("exit " + result.exitStatus() + " of [" + request.command().commandLine() + "] stdout [" + result.stdout() + "] stderr [" + tail + "]");
                 if (result.exitStatus() < 0) {
                     return lost();
                 }

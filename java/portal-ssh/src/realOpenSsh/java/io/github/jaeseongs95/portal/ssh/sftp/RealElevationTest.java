@@ -10,62 +10,38 @@ import io.github.jaeseongs95.portal.ssh.platform.RemoteScripts;
 import io.github.jaeseongs95.portal.ssh.platform.WindowsCommandLineGrammar;
 import io.github.jaeseongs95.portal.ssh.platform.WindowsCommandWrapper;
 import io.github.jaeseongs95.portal.ssh.platform.WindowsTargetPlatform;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.OutputStream;
-import java.time.Duration;
-import java.util.EnumSet;
-import org.apache.sshd.client.channel.ChannelExec;
-import org.apache.sshd.client.channel.ClientChannelEvent;
+import org.apache.sshd.sftp.client.SftpClient;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 /**
- * Elevation on a real server: pilot P3-4 (can an SFTP server run under {@code sudo -n} and be spoken to over an exec channel) and the administrator probe of a Windows server
- * (S3-RO-02, S3-RW-06, S3-EL-01, S3-EL-03). They run only through the Gradle task {@code realOpenSshTest}; nothing here was run on the machine that wrote it.
- *
- * <p>What the P3-4 test shows is the first half of the question: whether {@code sudo -n} starts the SFTP server and the server answers the SFTP handshake on an exec
- * channel. Whether MINA's {@code SftpClient} can be attached to such a channel is a separate question that its public API does not answer (it opens the {@code sftp}
- * subsystem itself); until it is shown, the elevated file work is the fixed-command fallback ({@link ElevatedExecTransfer}, ruling 11.2).
+ * Elevation on a real server: pilot P3-4 (the SFTP server of the target started with {@code sudo -n} and spoken to with MINA's own client over an {@code exec} channel) and
+ * the administrator probe of a Windows server (S3-RO-07, S3-RW-06, S3-EL-03). They run only through the Gradle task {@code realOpenSshTest}; nothing here was run on the
+ * machine that wrote it. The server's system is data ({@link RealServer#isWindows()}), so the same test runs on both and no test is skipped. The elevated file work through
+ * the whole adapter is {@code RealSftpTest#elevatedRoundTrip}.
  */
 @Timeout(300)
 class RealElevationTest {
 
-    private static final Duration LIMIT = Duration.ofSeconds(30);
-    /** The SFTP packet SSH_FXP_INIT, version 3: length 5, type 1, version 3. */
-    private static final byte[] SFTP_INIT = {0, 0, 0, 5, 1, 0, 0, 0, 3};
-
     @Test
-    @DisplayName("S3-RO-02 P3-4 a POSIX account with passwordless sudo can start the SFTP server under sudo -n and gets the SSH_FXP_VERSION answer on an exec channel; an account without sudo cannot")
+    @DisplayName("S3-RO-07 P3-4 on an account with passwordless sudo the SFTP server runs under sudo -n and MINA's client speaks to it over exec and lists the root directory; elsewhere the opening says why not")
     void sftpServerUnderSudo() throws IOException {
         try (RealServer server = RealServer.open()) {
-            RealServer.Result probe = server.exec("sudo -n true");
-            if (server.isWindows()) {
-                // A Windows server has no sudo: the probe of its platform is the administrator check, below.
-                assertThat(probe.exitStatus()).as("sudo does not exist on this server").isNotZero();
-                return;
-            }
-            // The path of the sftp-server binary is the server's: the first of the usual places that exists is used (docs/migration pilot P3-4 question 2).
-            RealServer.Result binary = server.exec("for p in /usr/lib/openssh/sftp-server /usr/libexec/openssh/sftp-server /usr/lib/ssh/sftp-server /usr/libexec/sftp-server; do "
-                + "if [ -x \"$p\" ]; then printf '%s' \"$p\"; break; fi; done");
-            assertThat(binary.stdout()).as("the account's server has an sftp-server binary in a usual place").isNotBlank();
+            boolean sudoWorks = server.exec("sudo -n true").exitStatus() == 0;
 
-            try (ChannelExec channel = server.session().createExecChannel("sudo -n " + binary.stdout().strip())) {
-                ByteArrayOutputStream answer = new ByteArrayOutputStream();
-                channel.setOut(answer);
-                channel.setErr(OutputStream.nullOutputStream());
-                channel.setIn(new java.io.ByteArrayInputStream(SFTP_INIT));
-                channel.open().verify(LIMIT);
-                channel.waitFor(EnumSet.of(ClientChannelEvent.CLOSED), LIMIT.toMillis());
-                byte[] bytes = answer.toByteArray();
+            SudoSftpChannels.Opening opening = new SudoSftpChannels(new SftpChannels()).open(server.session());
 
-                if (probe.exitStatus() == 0) {
-                    // SSH_FXP_VERSION (type 2) with the version the server speaks.
-                    assertThat(bytes.length).as("an SFTP server started under sudo answers the handshake").isGreaterThanOrEqualTo(9);
-                    assertThat(bytes[4]).isEqualTo((byte) 2);
-                } else {
-                    assertThat(bytes).as("without passwordless sudo nothing is served").isEmpty();
+            if (sudoWorks && !server.isWindows()) {
+                assertThat(opening).as("the account may use sudo -n: the server program is found and starts").isInstanceOf(SudoSftpChannels.Opening.Opened.class);
+                try (SftpClient client = ((SudoSftpChannels.Opening.Opened) opening).client()) {
+                    assertThat(client.stat("/").isDirectory()).isTrue();
+                }
+            } else {
+                assertThat(opening).as("no passwordless sudo, or no sudo at all: no elevated channel").isNotInstanceOf(SudoSftpChannels.Opening.Opened.class);
+                if (opening instanceof SudoSftpChannels.Opening.Opened opened) {
+                    opened.client().close();
                 }
             }
         }

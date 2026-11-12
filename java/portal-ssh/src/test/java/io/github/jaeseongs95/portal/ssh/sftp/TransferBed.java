@@ -35,7 +35,11 @@ import java.nio.file.Path;
 import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Duration;
+import java.nio.file.Files;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.apache.sshd.server.command.CommandFactory;
+import org.apache.sshd.sftp.server.SftpSubsystemFactory;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 /**
@@ -55,9 +59,35 @@ final class TransferBed implements AutoCloseable {
     private final MinaRemoteFileTransfer transfer;
     private final Sha256Digester digester = new Sha256Digester();
 
-    private TransferBed(Path root, boolean posixRename, SftpChannels channels, RemoteExecutor executor, FilePathPolicy policy) throws IOException {
+    /** The program the test target's {@link SudoSftpChannels} looks for, and the command line that starts it under {@code sudo -n}. */
+    static final String SUDO_SERVER = "/usr/lib/openssh/sftp-server";
+    static final String SUDO_COMMAND = "sudo -n " + SUDO_SERVER;
+
+    /** What the test target offers for elevated file work. */
+    enum Sudo {
+        /** No SFTP server program in the usual places. */
+        NO_SERVER,
+        /** The program is there and {@code sudo -n} does not start it (the command fails at once, as for an account that needs a password). */
+        DENIED,
+        /** The program is there and {@code sudo -n} starts an SFTP server (here the server of the test target itself). */
+        WORKS
+    }
+
+    private TransferBed(Path root, boolean posixRename, SftpChannels channels, RemoteExecutor executor, FilePathPolicy policy, Sudo sudo) throws IOException {
         this.root = root;
-        this.server = EmbeddedSshServer.builder().password(TestSessions.USER, TestSessions.PASSWORD).sftp(root).sftpAdvertisesPosixRename(posixRename).start();
+        if (sudo != Sudo.NO_SERVER) {
+            Files.createDirectories(root.resolve("usr/lib/openssh"));
+            Files.writeString(root.resolve("usr/lib/openssh/sftp-server"), "not a program: the test target only has to show a regular file there");
+        }
+        EmbeddedSshServer.Builder builder = EmbeddedSshServer.builder().password(TestSessions.USER, TestSessions.PASSWORD).sftp(root).sftpAdvertisesPosixRename(posixRename);
+        if (sudo == Sudo.WORKS) {
+            builder.customize(sshd -> {
+                CommandFactory original = sshd.getCommandFactory();
+                SftpSubsystemFactory subsystem = new SftpSubsystemFactory.Builder().build();
+                sshd.setCommandFactory((channel, command) -> SUDO_COMMAND.equals(command) ? subsystem.createSubsystem(channel) : original.createCommand(channel, command));
+            });
+        }
+        this.server = builder.start();
         this.sessions = new TestSessions(server);
         scheduler.setDaemon(true);
         scheduler.setPoolSize(1);
@@ -70,8 +100,8 @@ final class TransferBed implements AutoCloseable {
         SftpDownloader downloader = new SftpDownloader(checker, classifier);
         TargetSource noTargets = id -> new TargetLookup.NotRegistered(id);
         ElevationProbe probe = new ElevationProbe(executor, noTargets);
-        ElevatedExecTransfer elevated = new ElevatedExecTransfer(probe, executor, replacer, Clock.systemUTC());
-        this.transfer = new MinaRemoteFileTransfer(sessions, channels, checker, uploader, downloader, classifier, elevated, probe, scheduler, Clock.systemUTC());
+        SudoSftpChannels sudoChannels = new SudoSftpChannels(channels, List.of(SUDO_SERVER));
+        this.transfer = new MinaRemoteFileTransfer(sessions, channels, checker, uploader, downloader, classifier, sudoChannels, probe, scheduler, Clock.systemUTC());
     }
 
     /** A bed with the MINA SFTP channel, a policy that does not apply and an executor that runs nothing. */
@@ -80,7 +110,12 @@ final class TransferBed implements AutoCloseable {
     }
 
     static TransferBed start(Path root, boolean posixRename, SftpChannels channels, RemoteExecutor executor, FilePathPolicy policy) throws IOException {
-        return new TransferBed(root, posixRename, channels, executor, policy);
+        return new TransferBed(root, posixRename, channels, executor, policy, Sudo.NO_SERVER);
+    }
+
+    /** A bed whose target offers (or does not offer) elevated file work through an SFTP server under {@code sudo -n}; the executor is the one of the probes. */
+    static TransferBed start(Path root, Sudo sudo, RemoteExecutor executor) throws IOException {
+        return new TransferBed(root, true, new SftpChannels(), executor, (target, path) -> new PathPolicyDecision.NotApplicable(), sudo);
     }
 
     Path root() {

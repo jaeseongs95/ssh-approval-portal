@@ -289,13 +289,29 @@ public class StagedFileService {
         ArtifactRecord record = owned(owner, uuid);
         StagedAction action = registry.actions(record.id()).stream().filter(candidate -> candidate.operationKey().equals(operationKey)).findFirst()
             .orElseThrow(() -> new RequestRefusedException(ArtifactErrorCode.ARTIFACT_NOT_FOUND));
+        settle(record, action, state, evidence);
+    }
+
+    /**
+     * The operation ended, told by what the operation is and not by who asked: finds the use of a staged file that the operation was submitted for and settles it as
+     * {@link #operationSettled(OwnerId, ArtifactUuid, String, OperationState, CompletionEvidence)} does. An operation that is not the operation of a staged file, or whose
+     * staged file is gone, is none of this service's business and changes nothing. Telling it twice is harmless (a restart tells every terminal operation again).
+     */
+    public void operationSettled(OperationId operation, OperationState state, CompletionEvidence evidence) {
+        Objects.requireNonNull(operation, "operation");
+        Objects.requireNonNull(state, "state");
+        Objects.requireNonNull(evidence, "evidence");
+        registry.actionOf(operation).ifPresent(action -> registry.find(action.artifactId()).ifPresent(record -> settle(record, action, state, evidence)));
+    }
+
+    private void settle(ArtifactRecord record, StagedAction action, OperationState state, CompletionEvidence evidence) {
         if (!state.isFinal() || action.state() == StagedActionState.SETTLED || action.state() == StagedActionState.REFUSED) {
             return;
         }
         if (action.kind() == StagedActionKind.MOVE && state == OperationState.COMPLETED && publishedThisFile(record, evidence)) {
             consume(record);
         }
-        registry.updateAction(record.id(), operationKey, StagedActionState.SETTLED);
+        registry.updateAction(record.id(), action.operationKey(), StagedActionState.SETTLED);
     }
 
     private boolean publishedThisFile(ArtifactRecord record, CompletionEvidence evidence) {

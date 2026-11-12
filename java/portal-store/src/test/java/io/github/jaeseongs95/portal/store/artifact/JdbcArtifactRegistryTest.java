@@ -488,6 +488,22 @@ class JdbcArtifactRegistryTest {
     }
 
     @Test
+    @DisplayName("staged actions: the use of a staged file is found by the operation it was submitted for; another operation finds nothing, and the release of the artifact takes the answer away")
+    void anActionIsFoundByItsOperation() {
+        ArtifactId id = fixtures.reservedId(registry.reserve(fixtures.stagedFile(0), fixtures.at()));
+        StagedAction action = new StagedAction(id, "action-key-0002", new RequestKey("request-key-000002"), fixtures.digest(new byte[] {2}), OPERATION_A,
+            StagedActionKind.MOVE, StagedActionState.RESERVED, new TargetId("alpha"), TargetRevision.of("b".repeat(64)), new PosixRemotePath("/tmp/moved.bin"),
+            OverwriteMode.REPLACE, Elevation.NONE);
+        registry.addAction(action);
+
+        assertThat(registry.actionOf(OPERATION_A)).contains(action);
+        assertThat(registry.actionOf(new OperationId("c".repeat(48)))).isEmpty();
+
+        registry.release(id, ReleaseReason.ABANDONED);
+        assertThat(registry.actionOf(OPERATION_A)).isEmpty();
+    }
+
+    @Test
     @DisplayName("deletion: an artifact marked for deletion still charges its bytes until it is released, and it is not in the listing of expired artifacts")
     void aDeletingArtifactStillCharges() {
         ArtifactId id = fixtures.readyArtifact(registry, fixtures.upload(4), fixtures.bytes(4, 1));

@@ -404,15 +404,11 @@
 | RC-B-390 | Jev 사용 설정값 검증 | `BRIDGE_JEV_ENABLED` 미설정/`true`, `BRIDGE_JEV_MAX_CALLS` 미설정/`3`; 잘못된 값 `TRUE`,`1`,`yes` 및 MAX_CALLS `0`,`1.5`,`1e2`,`10001`,`''` | 기본 jevEnabled=false, jevMaxCalls=100, `true`·`3`은 그대로 반영, 잘못된 값은 모두 설정 오류 | 설정 파서 assert | portal-server | test/request-safety.test.mjs:69 | - |
 | RC-B-391 | 요청 위험 평가: 완료 요청의 이력 출처 | 평가 후 요청 deny, 시계 100→900, 새 context로 재평가 | 첫 결과 provenance.assessedAt=100·requestState='pending'·storedContextProvided=true; 재평가는 assessedAt 100 유지, historical=true, additionalContextApplied=false, 호출 1회(유료 재시도 없음), assessment 동일 | provenance·호출 수 assert | portal-app | test/request-safety.test.mjs:78 | - |
 | RC-B-392 | 보관 이력: 오래된 명령 기간 조회 | 장부 저장 명령 1건(createdAt 1000, 결과 텍스트·data에 비밀 표식) 조회 `from=0&to=86400000` | items[0].id 일치, history.stateSource='journal'·storage='command', result.content=[], 응답에 비밀 표식 없음, coverage.snapshot=false, coverage.fileHistory='memory-only', 응답에 `total` 필드 없음 | 응답 필드·정규식 부재 assert | portal-app, portal-store, portal-web | test/retained-history.test.mjs:28 | D-0017(후보) |
-| RC-B-393 | 보관 이력: 중복 제거·메모리 상태 우선·결속 충돌 | 저장 pending·현재 메모리 failed 같은 id; 메모리 running+저장 completed; 같은 id인데 command가 다름 | `state=failed` 조회는 1건·state='failed'·history={stateSource:'memory', storage:'command', targetStatus:'active'}; 메모리 running과 저장 completed는 조건 `기본`에서 제외(items 빔); 결속 불일치는 `HISTORY_AMBIGUOUS_REQUEST` HTTP 409 | 결과·오류 코드 assert | portal-app | test/retained-history.test.mjs:40 | - |
 | RC-B-394 | 보관 이력: 같은 생성시각 페이지 순회 | 생성시각 같은 41건, 한 페이지 기본 20건, 첫 조회 뒤 새 항목(createdAt 3000) 추가·시계 5000, nextCursor로 이어서 조회 | 1페이지 id = id(41)…id(22) 내림차순 20건, 2페이지 id(21)…id(2) 20건, 3페이지 id(1) 1건·nextCursor=null, 41건 중복 없이 방문, 2페이지 asOf=2000·observedAt=5000(새 항목 미포함) | 페이지 id 순서·asOf assert | portal-app | test/retained-history.test.mjs:50 | - |
 | RC-B-395 | 보관 이력: 기간 경계·입력 검증 | createdAt 999/1000/2000 3건 `from=1000&to=2000`; 21건 커서에 `q=changed` 추가; `from=1.5`·`9007199254740992`·`from=2&to=2`; `target=alpha&target=alpha`, `limit=100`; 커서 `''`,`a=`,2049자,`{}` base64url; 검색어 `가`*201 / `😀`*200; `state=running` | 포함 하한·제외 상한(id(2)만); 조건 변경 커서 `HISTORY_INVALID_CURSOR`; 범위 오류 `HISTORY_INVALID_RANGE`; 중복 필드·알 수 없는 필드 `HISTORY_INVALID_FIELDS`; 비정규 커서 `HISTORY_INVALID_CURSOR`; 검색어 201자 `HISTORY_SEARCH_TOO_LARGE`, 이모지 200개는 허용(결과 빔); `state=running` `HISTORY_INVALID_FILTER`; 모두 HTTP 400 | 오류 historyCode·status assert | portal-app, portal-web | test/retained-history.test.mjs:65, test/retained-history.test.mjs:73 | - |
 | RC-B-396 | 보관 이력: 대상 결속 표시 | 대상 revision 변경(`b`*64)·미등록 대상(removed)·사용 중지 대상 | 미등록 대상 항목 제외(id(1)만), 항목 targetRevision은 기록 당시 값, history.targetStatus='changed', coverage.registeredTargetsOnly=true; 사용 중지 대상은 targetStatus='disabled' | 항목·표시 assert | portal-app | test/retained-history.test.mjs:82 | - |
 | RC-B-397 | 보관 이력: 도구(CLI) 장부 범위 | CLI 장부 5건(정상, 연결 revision 불일치, 프로필 불일치, 알 수 없는 공급자, 미등록 대상); verifyCliTarget이 통과/예외 | 현재 활성 대상·연결 revision·프로필·공급자가 모두 맞는 id(1)만 노출, history.storage='cli', 검증 호출 1회, coverage.cliCurrentBindingOnly=true; 대상 비활성이면 빈 결과; verify가 예외를 던지면 빈 결과·coverage.metadataIncomplete=true | 항목·coverage assert | portal-app | test/retained-history.test.mjs:95 | - |
-| RC-B-398 | 보관 이력: 잘못된 관측 메타데이터 | 장부 포트 미제공; state `future-unknown`·createdAt null 항목 | 장부 없음이면 coverage.commandJournal=false·cliJournal=false; 알 수 없는 상태 항목은 노출하지 않고 coverage.metadataIncomplete=true | coverage assert | portal-app | test/retained-history.test.mjs:110 | - |
 | RC-B-399 | 보관 이력: 응답 바이트 상한 | 9000자 한글 명령 20건; command에 `HISTORY_RESPONSE_BYTES` 크기 extra를 가진 1건 | 각 페이지 JSON UTF-8 바이트 ≤ `HISTORY_RESPONSE_BYTES`, 페이지당 1건 이상 20건 미만, 커서로 전체 20건을 중복 없이 id(20)…id(1) 순회; 단일 거대 행은 `HISTORY_ENTRY_TOO_LARGE` HTTP 413 | 바이트 수·순회 id assert | portal-app | test/retained-history.test.mjs:119 | - |
-| RC-B-400 | 보관 이력: 본문 지연 읽기 | 장부 100건, 조회 한 페이지 | 반환된 20건의 본문만 읽음(읽은 id = id(100)…id(81)), 장부 원자료는 조회 전후 동일 | 본문 읽기 호출 기록 assert | portal-app, portal-store | test/retained-history.test.mjs:133 | - |
-| RC-B-401 | 보관 이력: 저장소 읽기 전용·비활성/부재 장부 | 명령·CLI 장부에 합성 행 저장 후 조회; 비활성(휴면) 명령 장부 열람; 장부가 없는 저장소; 본문 600000자 extra로 변조한 행 | 조회가 스키마·행 내용을 바꾸지 않음(조회 전후 preservationRows 동일); 휴면 장부 파일·디렉터리 목록이 조회 전후 동일; 장부가 없으면 열람 객체 undefined이고 새 장부를 만들지 않음; 과도한 본문은 `HISTORY_ENTRY_TOO_LARGE` 413 (3.0은 H2 테이블 기준으로 행 수·내용 불변을 확인) | 행 비교·파일 목록 assert | portal-store, portal-app | test/retained-history.test.mjs:149, test/retained-history.test.mjs:167 | - |
 | RC-B-402 | 관리자 이력 경로 인증·정적 경로 분류 | 토큰 모드: `/api/history` 인증 없음, Bearer 정상, Bearer+다른 Origin; access 모드: 세션 없음; 정적 경로 `/settings`,`/bridge`,`/preferences`,`/servers` | 인증 없음 401, 정상 allowed=true, 다른 Origin 403, access 모드 세션 없음 401; 정적 경로는 `{allowed:true, routeKind:'static'}` | 인가 결과 deepEqual | portal-web | test/retained-history.test.mjs:181 | - |
 | RC-B-403 | 이력·요청 조회 읽기 전용 및 동시 승인 | 보관 요청 N건(100·1000·10000) 복원 + pending 1건; `/api/requests`와 `/api/history` 번갈아 7회 조회; 조회와 동시에 `/api/<id>/approve`(Prefer: respond-async) | 조회는 감사·실행 0회, 보관 행 해시·DB 파일 해시·파일 목록 불변; `/api/requests`는 N+1건, `/api/history`는 20건·바이트 ≤ HISTORY_RESPONSE_BYTES·coverage.snapshot=false; 승인은 HTTP 202·state='queued'·targetRevision 일치, 이어서 실행 1회·running→completed, 승인당 감사 순서 `execution-queued`,`approved`,`completed`(3회); 조회와 승인 요청의 시간 구간이 겹침; 지연 수치는 진단만 기록(임계 assert 없음) | 응답 상태·감사 목록·해시 assert | portal-web, portal-app, portal-store | test/retained-history.test.mjs:218 | D-0017(후보) |
 | RC-B-404 | 롤백 스크립트의 정지된 설치 거절 | 서비스가 `is-active` 종료 코드 3(정지)인 상태에서 rollback 스크립트에 백업 디렉터리 지정 | 스크립트가 0이 아닌 종료 코드, 출력에 `independently verified offline rollback is required`, systemctl 다른 호출 없음(trace 없음), app 파일 교체·approval-bridge 생성 없음, 원본 마커 유지 | 종료 코드·출력·파일 상태 assert | packaging | test/rollback-stopped.test.mjs:6 | - |
@@ -904,6 +900,11 @@
 | test/safety.test.mjs:161 | 메인 판정 D-18: feature-map Q6 A안 — 안전성 평가 연구 도구 삭제. 구 RC-B-421 |
 | test/safety.test.mjs:184 | 메인 판정 D-18: feature-map Q6 A안 — 안전성 평가 연구 도구 삭제. 구 RC-B-423 |
 | test/solid-architecture.test.mjs:70 | 메인 판정 D-18: feature-map Q11 — `file-source.mjs`는 3.0으로 옮기지 않는다(2.x에서도 쓰지 않는다). 구 RC-B-439 |
+| test/retained-history.test.mjs:40 | 3단계 구현 판정(2026-11-12)으로 RC-B-393을 사례 표에서 옮겼다(stage3-design 11.3). 2.x의 메모리 이력과 장부 이력을 한 목록으로 합치며 중복을 제거하던 시험이다. 3.0은 저널이 하나라 합칠 출처가 없고, 기본 키가 같은 operation의 중복 행을 막는다. 대체: 저널 한 곳에서 한 operation을 한 번만 읽는 동작은 `JdbcHistoryQueryTest`(DisplayName RC-B-393, id로 한 operation의 메타데이터를 읽음)가 고정한다 |
+| test/retained-history.test.mjs:110 | 3단계 구현 판정(2026-11-12)으로 RC-B-398을 사례 표에서 옮겼다. 2.x는 알 수 없는 상태값과 null 생성시각의 장부 항목을 읽을 때 걸러 내고 `coverage.metadataIncomplete`로 알렸다. 3.0은 상태를 enum과 CHECK 제약(`ck_operation_state`, `V1__operation_journal.sql`)으로 제한하므로 그런 행이 저장되지 않고, 손상된 행은 매퍼가 `IllegalStateException`으로 보고한다(조회 결과를 조용히 줄이지 않는다) |
+| test/retained-history.test.mjs:133 | 3단계 구현 판정(2026-11-12)으로 RC-B-400을 사례 표에서 옮겼다. 2.x는 목록을 만든 뒤 반환할 20건의 본문만 지연해서 읽었다. 3.0은 `HistoryQuery.page`가 한 행에서 한 쪽 20건을 읽는다. 대체: 쪽 나누기(20·20·1, 같은 생성시각)는 RC-B-394(`HistoryServiceTest`)와 RC-A-028(`JdbcHistoryQueryTest`)이 고정한다 |
+| test/retained-history.test.mjs:149 | 3단계 구현 판정(2026-11-12)으로 RC-B-401을 사례 표에서 옮겼다(두 원 시험 줄 :149·:167 모두). 2.x의 시험은 SQLite 장부 파일·휴면 장부 디렉터리를 조회 전후로 비교했다. 3.0의 대상은 H2·DBMS 표이고 이력 조회는 읽기 전용 트랜잭션(`@Transactional(readOnly = true)`)이다. 과도한 본문의 `HISTORY_ENTRY_TOO_LARGE`(본문 상한)는 RC-B-399(`HistoryServiceTest`)가 맡는다 |
+| test/retained-history.test.mjs:167 | 위 :149와 같다(RC-B-401). 비활성(휴면)·부재 장부 파일이 3.0에 없다. 같은 사유로 사례 표에서 옮겼다 |
 
 ### G06 삭제
 
@@ -1568,17 +1569,17 @@ B범위 원자료 모든 행(파일:줄)을 사례 ID 또는 「삭제」(또는
 | test/request-safety.test.mjs:69 | RC-B-390 |
 | test/request-safety.test.mjs:78 | RC-B-391 |
 | test/retained-history.test.mjs:28 | RC-B-392 |
-| test/retained-history.test.mjs:40 | RC-B-393 |
+| test/retained-history.test.mjs:40 | 삭제 |
 | test/retained-history.test.mjs:50 | RC-B-394 |
 | test/retained-history.test.mjs:65 | RC-B-395 |
 | test/retained-history.test.mjs:73 | RC-B-395 |
 | test/retained-history.test.mjs:82 | RC-B-396 |
 | test/retained-history.test.mjs:95 | RC-B-397 |
-| test/retained-history.test.mjs:110 | RC-B-398 |
+| test/retained-history.test.mjs:110 | 삭제 |
 | test/retained-history.test.mjs:119 | RC-B-399 |
-| test/retained-history.test.mjs:133 | RC-B-400 |
-| test/retained-history.test.mjs:149 | RC-B-401 |
-| test/retained-history.test.mjs:167 | RC-B-401 |
+| test/retained-history.test.mjs:133 | 삭제 |
+| test/retained-history.test.mjs:149 | 삭제 |
+| test/retained-history.test.mjs:167 | 삭제 |
 | test/retained-history.test.mjs:181 | RC-B-402 |
 | test/retained-history.test.mjs:218 | RC-B-403 |
 | test/rollback-stopped.test.mjs:6 | RC-B-404 |
@@ -2314,20 +2315,21 @@ B범위 원자료 모든 행(파일:줄)을 사례 ID 또는 「삭제」(또는
 | G02 | 74 | 74 | 0 | 0 | 73 (RC-B-091~163) |
 | G03 | 97 | 76 | 21 | 0 | 76 (RC-B-181~267, 삭제로 빠진 250·252·258~260·262~267 제외) |
 | G04 | 102 | 98 | 4 | 0 | 88 (RC-B-271~359, 삭제로 빠진 299 제외) |
-| G05 | 95 | 89 | 6 | 0 | 82 (RC-B-361~446, 삭제로 빠진 420·421·423·439 제외) |
+| G05 | 95 | 84 | 11 | 0 | 78 (RC-B-361~446, 삭제로 빠진 420·421·423·439와 3단계 구현 판정으로 옮긴 393·398·400·401 제외) |
 | G06 | 112 | 110 | 2 | 0 | 89 (RC-B-451~537, 메인 판정 6으로 되살린 538·539 포함) |
 | G07 | 56 | 50 | 6 | 0 | 75 (RC-B-541~629, 결정 D3-16으로 삭제 표로 옮긴 541~549·553~557 제외) |
 | G08 | 102 | 36 | 66 | 0 | 34 (RC-B-631~682, 결정 D3-16으로 삭제 표로 옮긴 644~648·657·661·672~682 제외) |
 | G09 | 106 | 33 | 73 | 0 | 35 (RC-B-721~755) |
 | G10 | 127 | 115 | 12 | 0 | 82 (RC-B-811~892) |
 | G11 | 142 | 90 | 52 | 0 | 41 (RC-B-901~947, 결정 D3-16으로 삭제 표로 옮긴 902·904·905·914·916·917 제외) |
-| **합계** | **1,088** | **846** | **242** | **0** | **763** |
+| **합계** | **1,088** | **841** | **247** | **0** | **759** |
 
 - 3단계 결정 D3-16(3단계 설계 8.4절, 11.1절)으로 사례 38건(RC-B-541~549, 553~557, 644~648, 657, 661, 672~682, 902, 904, 905, 914, 916, 917)을 사례 표에서 삭제 표로 옮겼다. 이 38건이 걸치던 원 시험 행 40개(G07 6, G08 18, G11 16)가 「사례로 간 행」에서 「삭제 행」으로 바뀌었다(886 - 40 = 846, 202 + 40 = 242). RC-B-646~648·661(원 시험 4행)은 시범 P3-6 결과가 나올 때까지 「보류」이며 원문을 3절 끝 「보류 사례 원문」에 남겼다(`| 보류 RC-B-…` 형식이라 사례 표 행 수에 세지 않는다).
-- 원자료 행 수(B범위) 1,088 = mjs 611 + py 335 + ps1·sh 142. 대응표 행 수 1,088(파일 Grep으로 확인: 대응표 행 `| test/...:줄 | RC-B-…·삭제·미확인`이 1,088개, 그중 `삭제` 242개, `미확인` 0개).
-- 사례로 간 행 846 + 삭제 242 + 미확인 0 = 1,088. 삭제 표의 행 수도 242이다(`| test/파일:줄 |` 행. 두 칸 표 행 1,330 = 대응표 1,088 + 삭제 표 242).
-- 사례 수 763(`| RC-B-nnn |` 행 763개). 한 원자료 행이 여러 사례에 걸치는 경우가 있어(대응표 셀에 사례 ID를 쉼표로 나열) 「사례 수」와 「사례로 간 행」은 같지 않다.
-- 결번: 대역의 빈 번호(RC-B-089·090, 164~180, 268~270, 360, 447~450, 540, 630, 683~720, 756~810, 893~900, 948~990)와 메인 판정 2·5로 삭제 표로 옮긴 사례 번호(RC-B-250·252·258~260·262~267·299)와 메인 판정 D-18로 옮긴 사례 번호(RC-B-420·421·423·439)와 결정 D3-16으로 옮긴 사례 번호 38개(위 괄호의 번호. 보류 4개 포함). 결번은 이번에도 다시 매기지 않는다.
+- 3단계 구현 판정(2026-11-12, stage3-design 11.3)으로 사례 4건(RC-B-393, 398, 400, 401)을 사례 표에서 삭제 표로 옮겼다(G05, 사유는 G05 삭제 표). 이 4건이 걸치던 원 시험 행 5개(`test/retained-history.test.mjs`의 :40, :110, :133, :149, :167)가 「사례로 간 행」에서 「삭제 행」으로 바뀌었다(846 - 5 = 841, 242 + 5 = 247).
+- 원자료 행 수(B범위) 1,088 = mjs 611 + py 335 + ps1·sh 142. 대응표 행 수 1,088(파일 Grep으로 확인: 대응표 행 `| test/...:줄 | RC-B-…·삭제·미확인`이 1,088개, 그중 `삭제` 247개, `미확인` 0개).
+- 사례로 간 행 841 + 삭제 247 + 미확인 0 = 1,088. 삭제 표의 행 수도 247이다(`| test/파일:줄 |` 행. 두 칸 표 행 1,335 = 대응표 1,088 + 삭제 표 247).
+- 사례 수 759(`| RC-B-nnn |` 행 759개). 한 원자료 행이 여러 사례에 걸치는 경우가 있어(대응표 셀에 사례 ID를 쉼표로 나열) 「사례 수」와 「사례로 간 행」은 같지 않다.
+- 결번: 대역의 빈 번호(RC-B-089·090, 164~180, 268~270, 360, 447~450, 540, 630, 683~720, 756~810, 893~900, 948~990)와 메인 판정 2·5로 삭제 표로 옮긴 사례 번호(RC-B-250·252·258~260·262~267·299)와 메인 판정 D-18로 옮긴 사례 번호(RC-B-420·421·423·439)와 결정 D3-16으로 옮긴 사례 번호 38개(위 괄호의 번호. 보류 4개 포함)와 3단계 구현 판정으로 옮긴 사례 번호 4개(RC-B-393·398·400·401). 결번은 이번에도 다시 매기지 않는다.
 
 ### 교차 검증 결과 (메인 판정 7)
 
@@ -2336,10 +2338,10 @@ B범위 원자료 모든 행(파일:줄)을 사례 ID 또는 「삭제」(또는
 | 비교 | 결과 |
 |---|---|
 | 사례 표의 원 시험(파일:줄) 집합 − 대응표 사례 행 집합 | 0건 (사례 표에만 있는 줄 없음) |
-| 대응표 사례 행 집합(846) − 사례 표의 원 시험 집합 | 0건 (사례 표에 없는 사례 행 없음) |
-| 대응표 `삭제` 행 집합(242) − 삭제 표 행 집합(242) | 0건 |
+| 대응표 사례 행 집합(841) − 사례 표의 원 시험 집합 | 0건 (사례 표에 없는 사례 행 없음) |
+| 대응표 `삭제` 행 집합(247) − 삭제 표 행 집합(247) | 0건 |
 | 삭제 표 행 집합 − 대응표 `삭제` 행 집합 | 0건 |
-| 개수 | 대응표 1,088 = 원자료 1,088, 삭제 242 = 242, 사례 행 763 |
+| 개수 | 대응표 1,088 = 원자료 1,088, 삭제 247 = 247, 사례 행 759 |
 
 - 같은 대조에서 한 가지 해석이 필요했다. G11의 `windows-file-helper.tests.ps1`은 사례 표의 원 시험 열이 아닌 설명 열에도 줄 번호(여러 줄 assert 15개 등)를 인용한다. 이 인용 줄은 원자료 행이 아니므로 대응표 행에서 제외했고, 사례 표의 원 시험 열에 있는 줄과 대응표 사례 행이 정확히 일치함을 확인했다.
 - 한 줄이 여러 사례에 속하는 경우(예: `test/mcp-contracts.test.mjs:83` → RC-B-013·RC-B-032, `test/solid-regressions.test.mjs:14` → RC-B-441~446)는 사례 표에서 해당 줄이 해당 사례 행마다 나오고 대응표 셀에 ID가 모두 적혀 있어 일치한다.

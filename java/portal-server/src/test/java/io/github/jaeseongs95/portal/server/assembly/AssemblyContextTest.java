@@ -3,9 +3,7 @@ package io.github.jaeseongs95.portal.server.assembly;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.Clock;
-import java.time.Instant;
 import java.util.Arrays;
-import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -49,20 +47,14 @@ import io.github.jaeseongs95.portal.domain.file.FileBinding;
 import io.github.jaeseongs95.portal.domain.file.FileName;
 import io.github.jaeseongs95.portal.domain.file.FileTargetBinding;
 import io.github.jaeseongs95.portal.domain.id.ArtifactUuid;
-import io.github.jaeseongs95.portal.domain.id.Digester;
 import io.github.jaeseongs95.portal.domain.id.OwnerId;
-import io.github.jaeseongs95.portal.domain.id.RequestKey;
 import io.github.jaeseongs95.portal.domain.id.Sha256Digester;
-import io.github.jaeseongs95.portal.domain.operation.CommandInput;
 import io.github.jaeseongs95.portal.domain.operation.CompletionEvidence;
-import io.github.jaeseongs95.portal.domain.operation.ConflictKey;
-import io.github.jaeseongs95.portal.domain.operation.Deadline;
 import io.github.jaeseongs95.portal.domain.operation.DownloadInput;
 import io.github.jaeseongs95.portal.domain.operation.Elevation;
 import io.github.jaeseongs95.portal.domain.operation.ExecutionOutcome;
 import io.github.jaeseongs95.portal.domain.operation.NewOperation;
 import io.github.jaeseongs95.portal.domain.operation.Operation;
-import io.github.jaeseongs95.portal.domain.operation.OperationEvent;
 import io.github.jaeseongs95.portal.domain.operation.OperationState;
 import io.github.jaeseongs95.portal.domain.operation.OverwriteMode;
 import io.github.jaeseongs95.portal.domain.operation.StartAuthority;
@@ -70,7 +62,6 @@ import io.github.jaeseongs95.portal.domain.operation.UploadInput;
 import io.github.jaeseongs95.portal.domain.path.PosixRemotePath;
 import io.github.jaeseongs95.portal.domain.schedule.ConcurrencyLimits;
 import io.github.jaeseongs95.portal.domain.target.ResolvedTarget;
-import io.github.jaeseongs95.portal.domain.text.CommandText;
 import io.github.jaeseongs95.portal.domain.text.Utf8Text;
 import io.github.jaeseongs95.portal.store.StorageRoots;
 import io.github.jaeseongs95.portal.store.artifact.ArtifactLimits;
@@ -78,9 +69,9 @@ import io.github.jaeseongs95.portal.store.audit.AuditFileLocation;
 
 /**
  * S3-UC-08: the minimal assembly of the server. The store and the use cases are in one context; the four values that the store asks for are made from the settings; the
- * file I/O of the stores happens outside a transaction. Then one upload, one download and one execution run from the start to the end through the real stores, with only the
- * SSH boundary faked (the real adapter of portal-ssh is connected by the merge): the staged file, its copy, the admitted upload, the transfer, the settlement in the journal,
- * the timeline, the release of the pinned artifact; the read of a file into a ready artifact; the settlement of a command.
+ * file I/O of the stores happens outside a transaction. Then one upload and one download run from the start to the end through the real stores, with only the SSH boundary
+ * faked: the staged file, its copy, the admitted upload, the transfer, the settlement in the journal, the timeline, the release of the pinned artifact; the read of a file into
+ * a ready artifact. The execution of a command through the real dispatcher and the real SSH adapter is {@link FullAssemblyFlowTest}.
  */
 @AssemblyTest
 class AssemblyContextTest {
@@ -110,14 +101,13 @@ class AssemblyContextTest {
     private final FakeAdmission admission;
     private final FakeRemote remote;
     private final FakeTargets targets;
-    private final Digester digester;
     private final JdbcTemplate jdbc;
     private final Clock clock;
 
     AssemblyContextTest(StorageSettings settings, StorageRoots roots, ArtifactLimits artifactLimits, AuditFileLocation audit, TransferLimits transferLimits,
                         AgentCliCatalog providers, StorageProtection protection, ArtifactPayloadStore artifactPayloads, OutputPayloadStore outputPayloads, ArtifactReaper reaper,
                         StagedFileService staged, UploadService uploads, DownloadService downloads, ArtifactRegistry registry, ArtifactPinning pinning, OperationJournal journal,
-                        ClaimStore claims, ExecutionTimelineStore timelines, FakeAdmission admission, FakeRemote remote, FakeTargets targets, Digester digester,
+                        ClaimStore claims, ExecutionTimelineStore timelines, FakeAdmission admission, FakeRemote remote, FakeTargets targets,
                         JdbcTemplate jdbc, Clock clock) {
         this.settings = settings;
         this.roots = roots;
@@ -140,7 +130,6 @@ class AssemblyContextTest {
         this.admission = admission;
         this.remote = remote;
         this.targets = targets;
-        this.digester = digester;
         this.jdbc = jdbc;
         this.clock = clock;
     }
@@ -225,24 +214,6 @@ class AssemblyContextTest {
         assertThat(artifact.spec().sizeBytes()).isEqualTo(850);
         assertThat(execution.outcome().verdict()).isEqualTo(OperationState.COMPLETED);
         assertThat(registry.find(artifact.id()).orElseThrow()).isEqualTo(artifact);
-    }
-
-    @Test
-    @DisplayName("S3-UC-08: one execution runs once through the journal: accepted, approved, claimed, running, settled as COMPLETED with the exit as evidence, and its timeline is stored")
-    void anExecutionIsSettledOnceThroughTheJournal() {
-        RequestKey key = new RequestKey("assembly-command-key-00001");
-        ResolvedTarget linux = targets.linux();
-        NewOperation spec = NewOperation.of(digester, key, OWNER, FakeTargets.LINUX_ID, linux.revision(), FakeTargets.LINUX_WRITE,
-            new CommandInput(new CommandText("echo ok"), new Utf8Text("caller"), new Utf8Text("display")), new ConflictKey.None(), new Deadline.None());
-
-        Operation running = claimAndRun(spec);
-        Operation settled = journal.save(running.settle(ExecutionOutcome.exited(0, List.of("ok")), clock.instant()), running.version());
-        Instant at = clock.instant();
-        timelines.record(settled.id(), ExecutionTimeline.empty().marked(ExecutionPhase.CONNECTED, at));
-
-        assertThat(settled.state()).isEqualTo(OperationState.COMPLETED);
-        assertThat(timelines.timelineOf(settled.id()).at(ExecutionPhase.CONNECTED)).isPresent();
-        assertThat(journal.events(settled.id())).extracting(OperationEvent::state).endsWith(OperationState.RUNNING, OperationState.COMPLETED);
     }
 
     /** Accepts the operation, has the owner approve it, claims it and marks it running: the steps of the dispatcher that the journal records. */

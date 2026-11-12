@@ -16,6 +16,11 @@ import io.github.jaeseongs95.portal.app.remote.UploadRequest;
 import io.github.jaeseongs95.portal.app.remote.UploadResult;
 import io.github.jaeseongs95.portal.domain.error.TransferErrorCode;
 import io.github.jaeseongs95.portal.domain.id.Sha256Digester;
+import io.github.jaeseongs95.portal.ssh.platform.PythonSourceReceiver;
+import io.github.jaeseongs95.portal.ssh.platform.RemoteScripts;
+import io.github.jaeseongs95.portal.ssh.platform.WindowsCommandLineGrammar;
+import io.github.jaeseongs95.portal.ssh.platform.WindowsCommandWrapper;
+import io.github.jaeseongs95.portal.ssh.platform.WindowsTargetPlatform;
 import io.github.jaeseongs95.portal.domain.id.TargetId;
 import io.github.jaeseongs95.portal.domain.operation.OverwriteMode;
 import io.github.jaeseongs95.portal.domain.path.RemotePath;
@@ -42,7 +47,7 @@ import org.junit.jupiter.api.Timeout;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 /**
- * The file adapter against a real OpenSSH server (S3-RO-03, S3-RO-04, S3-RW-02 to S3-RW-04; the real-server counterparts of the embedded-server tests). It runs only through
+ * The file adapter against a real OpenSSH server (S3-RO-04, S3-RO-07, S3-RO-08, S3-RW-02 to S3-RW-04; the real-server counterparts of the embedded-server tests). It runs only through
  * the Gradle task {@code realOpenSshTest}, on a machine where the CI preparation scripts started the server; nothing here was run on the machine that wrote it. The server's
  * system is data ({@link RealServer#isWindows()}), so the same tests run on Linux and on Windows and no test is skipped. Where one system has nothing to observe, the
  * test states what it checks instead. Each test works in a directory of its own in the home directory of the account and removes it.
@@ -68,7 +73,7 @@ class RealSftpTest {
         SftpChannels channels = new SftpChannels();
         ElevationProbe probe = new ElevationProbe(server.executor(), id -> new TargetLookup.NotRegistered(id));
         transfer = new MinaRemoteFileTransfer(server.sessions(), channels, checker, new SftpUploader(checker, replacer, classifier, channels, new SpaceProbe()),
-            new SftpDownloader(checker, classifier), classifier, new ElevatedExecTransfer(probe, server.executor(), replacer, Clock.systemUTC()), probe, scheduler, Clock.systemUTC());
+            new SftpDownloader(checker, classifier), classifier, new SudoSftpChannels(channels), probe, scheduler, Clock.systemUTC());
         target = new RemoteTarget(new TargetId("realserver"), TargetRevision.of("b".repeat(64)), new ProfileAlias("writer"), AccessMode.READ_WRITE);
         directoryName = "ssh-approval-portal-test-" + HexFormat.of().formatHex(new SecureRandom().generateSeed(6));
         server.exec(server.isWindows() ? "cmd /c mkdir \"%USERPROFILE%\\" + directoryName + "\"" : "mkdir -p \"$HOME/" + directoryName + "\"");
@@ -228,7 +233,7 @@ class RealSftpTest {
     }
 
     @Test
-    @DisplayName("S3-RO-03 D-0013 D-0034 a file the account may not read is PERMISSION_DENIED (not a transport error); a write that fails for lack of space is not read as a permission problem either")
+    @DisplayName("S3-RO-08 D-0013 D-0034 a file the account may not read is PERMISSION_DENIED (not a transport error); a write that fails for lack of space is not read as a permission problem either")
     void statusCodesOfARealServer() throws IOException {
         byte[] content = "secret".getBytes(StandardCharsets.UTF_8);
         RemotePath file = path("secret.bin");
@@ -253,5 +258,41 @@ class RealSftpTest {
             }
         }
         System.getLogger(RealSftpTest.class.getName()).log(System.Logger.Level.INFO, "sftp-server status for a write to /dev/full: {0}", observed.get());
+    }
+
+    @Test
+    @DisplayName("S3-RO-07 S3-EL-01 an elevated upload and download through the whole adapter: with passwordless sudo the file is written by the SFTP server under sudo -n (it belongs to root) and read back; "
+        + "without it the request is refused before anything is written; on Windows the administrator probe decides")
+    void elevatedRoundTrip() throws IOException {
+        RemoteScripts scripts = new RemoteScripts();
+        io.github.jaeseongs95.portal.app.remote.ElevationPlan plan = server.isWindows()
+            ? new WindowsTargetPlatform(new WindowsCommandLineGrammar(), new WindowsCommandWrapper(scripts), new PythonSourceReceiver(scripts, new Sha256Digester())).elevationPlan()
+            : new io.github.jaeseongs95.portal.app.remote.ElevationPlan.SudoNonInteractive(new io.github.jaeseongs95.portal.app.remote.FixedRemoteCommand("sudo-probe", "sudo -n true"));
+        String probe = plan instanceof io.github.jaeseongs95.portal.app.remote.ElevationPlan.WindowsAdministratorCheck check ? check.probe().commandLine() : "sudo -n true";
+        boolean allowed = server.exec(probe).exitStatus() == 0;
+        byte[] content = "elevated bytes".getBytes(StandardCharsets.UTF_8);
+        RemotePath file = path("elevated.bin");
+        UploadRequest request = new UploadRequest(target, file, content.length, digester.digest(content), OverwriteMode.FAIL_IF_EXISTS,
+            new FileAccess.Elevated(plan), new PathPolicyBinding.NoRootPolicy(), TransferLimits.defaults());
+
+        UploadResult result = transfer.upload(request, source(content), control());
+
+        if (allowed) {
+            assertThat(result).isInstanceOf(UploadResult.Published.class);
+            if (!server.isWindows()) {
+                assertThat(server.exec("stat -c %U \"$HOME/" + directoryName + "/elevated.bin\"").stdout().strip()).as("the SFTP server ran as root").isEqualTo("root");
+            }
+            java.io.ByteArrayOutputStream read = new java.io.ByteArrayOutputStream();
+            DownloadResult fetched = transfer.download(new DownloadRequest(target, file, new FileAccess.Elevated(plan), new PathPolicyBinding.NoRootPolicy(), TransferLimits.defaults()),
+                data -> {
+                    read.write(data, 0, data.length);
+                    return new io.github.jaeseongs95.portal.app.remote.SinkResult.Accepted();
+                }, control());
+            assertThat(fetched).isEqualTo(new DownloadResult.Fetched(content.length, digester.digest(content)));
+            assertThat(read.toByteArray()).isEqualTo(content);
+        } else {
+            assertThat(result).isInstanceOf(UploadResult.Refused.class);
+            assertThat(((UploadResult.Refused) result).code()).isIn(TransferErrorCode.PERMISSION_DENIED, TransferErrorCode.INVALID_REQUEST);
+        }
     }
 }

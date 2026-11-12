@@ -12,8 +12,10 @@ import org.apache.sshd.sftp.client.SftpClient;
  * @param size the bytes
  * @param modifiedMillis the modification time in milliseconds since the epoch, or -1 when the server did not report one
  * @param permissions the permission bits (the file-type bits are not part of the comparison)
+ * @param userId the numeric owner (0 when the server reports none)
+ * @param groupId the numeric group (0 when the server reports none)
  */
-record LeafState(long size, long modifiedMillis, int permissions) {
+record LeafState(long size, long modifiedMillis, int permissions, int userId, int groupId) {
 
     private static final int PERMISSION_BITS = 07777;
 
@@ -21,6 +23,7 @@ record LeafState(long size, long modifiedMillis, int permissions) {
     static LeafState of(SftpClient.Attributes attributes) {
         Objects.requireNonNull(attributes, "attributes");
         FileTime modified = attributes.getModifyTime();
-        return new LeafState(attributes.getSize(), modified == null ? -1 : modified.toMillis(), attributes.getPermissions() & PERMISSION_BITS);
+        return new LeafState(attributes.getSize(), modified == null ? -1 : modified.toMillis(), attributes.getPermissions() & PERMISSION_BITS, attributes.getUserId(),
+            attributes.getGroupId());
     }
 }

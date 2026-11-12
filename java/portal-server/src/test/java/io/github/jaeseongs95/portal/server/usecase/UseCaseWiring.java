@@ -14,7 +14,16 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 import tools.jackson.databind.json.JsonMapper;
 
+import io.github.jaeseongs95.portal.app.artifact.ArtifactImporter;
+import io.github.jaeseongs95.portal.app.artifact.StagingTimes;
 import io.github.jaeseongs95.portal.app.config.DomainBeans;
+import io.github.jaeseongs95.portal.app.file.DownloadService;
+import io.github.jaeseongs95.portal.app.file.OperationUploadAdmission;
+import io.github.jaeseongs95.portal.app.file.StagedFileService;
+import io.github.jaeseongs95.portal.app.file.TransferOutcomes;
+import io.github.jaeseongs95.portal.app.file.TransferSupport;
+import io.github.jaeseongs95.portal.app.file.UploadService;
+import io.github.jaeseongs95.portal.app.remote.TransferLimits;
 import io.github.jaeseongs95.portal.app.event.ChangeWaiters;
 import io.github.jaeseongs95.portal.app.journal.OperationJournal;
 import io.github.jaeseongs95.portal.app.remote.ExecutionLimits;
@@ -27,6 +36,7 @@ import io.github.jaeseongs95.portal.domain.schedule.AdmissionLimits;
 import io.github.jaeseongs95.portal.domain.schedule.ConcurrencyLimits;
 import io.github.jaeseongs95.portal.domain.target.TargetOs;
 import io.github.jaeseongs95.portal.store.StorageRoots;
+import io.github.jaeseongs95.portal.store.artifact.ArtifactLimits;
 import io.github.jaeseongs95.portal.store.output.OutputConfiguration;
 
 /**
@@ -37,11 +47,13 @@ import io.github.jaeseongs95.portal.store.output.OutputConfiguration;
  * once, two on one target.
  */
 @TestConfiguration(proxyBeanMethods = false)
-@Import({DomainBeans.class, OutputConfiguration.class, TargetPlatformRegistry.class})
+@Import({DomainBeans.class, OutputConfiguration.class, TargetPlatformRegistry.class, StagedFileService.class, UploadService.class, DownloadService.class,
+    TransferSupport.class, TransferOutcomes.class, OperationUploadAdmission.class, ArtifactImporter.class})
 @ComponentScan(basePackages = {"io.github.jaeseongs95.portal.app.event", "io.github.jaeseongs95.portal.app.admission", "io.github.jaeseongs95.portal.app.operation",
-    "io.github.jaeseongs95.portal.app.execution", "io.github.jaeseongs95.portal.app.recovery"})
+    "io.github.jaeseongs95.portal.app.execution", "io.github.jaeseongs95.portal.app.recovery"}, excludeFilters = @ComponentScan.Filter(type = FilterType.REGEX,
+    pattern = "io\\.github\\.jaeseongs95\\.portal\\.app\\.execution\\.AgentCliOperationRunner"))
 @ComponentScan(basePackages = "io.github.jaeseongs95.portal.store", excludeFilters = @ComponentScan.Filter(type = FilterType.REGEX,
-    pattern = "io\\.github\\.jaeseongs95\\.portal\\.store\\.(artifact|audit|capacity|cli)\\..*|io\\.github\\.jaeseongs95\\.portal\\.store\\.StoreConfiguration"))
+    pattern = "io\\.github\\.jaeseongs95\\.portal\\.store\\.(audit|capacity|cli)\\..*|io\\.github\\.jaeseongs95\\.portal\\.store\\.StoreConfiguration"))
 @EnableJdbcRepositories(basePackages = "io.github.jaeseongs95.portal.store")
 class UseCaseWiring {
 
@@ -63,6 +75,28 @@ class UseCaseWiring {
     @Bean
     ExecutionLimits executionLimits() {
         return ExecutionLimits.defaults();
+    }
+
+    @Bean
+    TransferLimits transferLimits() {
+        return TransferLimits.defaults();
+    }
+
+    @Bean
+    StagingTimes stagingTimes() {
+        return StagingTimes.defaults();
+    }
+
+    /** No disk margin: a test must not fail because the disk of the machine is nearly full; the rule of the margin has its own tests in portal-store. */
+    @Bean
+    ArtifactLimits artifactLimits() {
+        return new ArtifactLimits(ArtifactLimits.DEFAULT_BUDGET_BYTES, ArtifactLimits.MAX_FILE_BYTES, ArtifactLimits.CHUNK_BYTES, ArtifactLimits.UPLOAD_TTL, 0);
+    }
+
+    /** The SFTP boundary, the other thing that is not real: it follows the contract of the adapter and answers what a test says. */
+    @Bean
+    ScriptedTransfer transfer() {
+        return new ScriptedTransfer();
     }
 
     /** One pool serves as the {@code TaskScheduler} (timers) and the {@code TaskExecutor} (the dispatcher and the executions). */

@@ -86,7 +86,7 @@ class JdbcHistoryQueryTest {
     }
 
     @Test
-    @DisplayName("RC-B-393: the metadata of one operation is read by its id; an unknown id answers nothing")
+    @DisplayName("the metadata of one operation is read by its id; an unknown id answers nothing")
     void publicMetadataByIdOrNothing() {
         Operation accepted = journal.accept(fx.command("meta", "alpha", "echo", new ConflictKey.None())).operation();
         assertThat(history.publicMetadata(accepted.id()).map(Operation::snapshot)).contains(accepted.snapshot());

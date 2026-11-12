@@ -2,6 +2,7 @@ package io.github.jaeseongs95.portal.server.assembly;
 
 import java.util.List;
 
+import io.github.jaeseongs95.portal.app.capacity.ConfiguredTargets;
 import io.github.jaeseongs95.portal.app.target.TargetSource;
 import io.github.jaeseongs95.portal.domain.id.Digester;
 import io.github.jaeseongs95.portal.domain.id.TargetId;
@@ -17,7 +18,6 @@ import io.github.jaeseongs95.portal.domain.target.Target;
 import io.github.jaeseongs95.portal.domain.target.TargetDisplayName;
 import io.github.jaeseongs95.portal.domain.target.TargetLookup;
 import io.github.jaeseongs95.portal.domain.target.TargetOs;
-import io.github.jaeseongs95.portal.domain.target.Targets;
 import io.github.jaeseongs95.portal.domain.target.Toggle;
 import io.github.jaeseongs95.portal.domain.target.TtyMode;
 import io.github.jaeseongs95.portal.domain.target.WindowsRuntime;
@@ -26,7 +26,7 @@ import io.github.jaeseongs95.portal.domain.target.WindowsRuntime;
  * The targets of the assembly tests: a Linux target and a Windows target with documentation host names only, and a way to change the Linux one (another display name gives
  * another revision) or to switch it off, which is what a change of the administrator's configuration looks like to a use case. The configuration reader is stage 4's.
  */
-final class FakeTargets implements TargetSource {
+final class FakeTargets implements TargetSource, ConfiguredTargets {
 
     static final TargetId LINUX_ID = new TargetId("web-1");
     static final TargetId WINDOWS_ID = new TargetId("win-1");
@@ -62,8 +62,9 @@ final class FakeTargets implements TargetSource {
     }
 
     /** The configured targets, for the capacity defaults. */
-    Targets configured() {
-        return new Targets(List.of(linux.target(), windows.target()));
+    @Override
+    public List<Target> entries() {
+        return List.of(linux.target(), windows.target());
     }
 
     void changeLinux(String displayName) {

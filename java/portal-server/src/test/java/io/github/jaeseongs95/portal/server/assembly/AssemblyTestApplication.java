@@ -14,7 +14,6 @@ import io.github.jaeseongs95.portal.app.artifact.StagingTimes;
 import io.github.jaeseongs95.portal.app.target.TargetPlatformRegistry;
 import io.github.jaeseongs95.portal.domain.id.Digester;
 import io.github.jaeseongs95.portal.domain.target.TargetOs;
-import io.github.jaeseongs95.portal.domain.target.Targets;
 import io.github.jaeseongs95.portal.store.artifact.ArtifactLimits;
 
 /**
@@ -24,7 +23,7 @@ import io.github.jaeseongs95.portal.store.artifact.ArtifactLimits;
  */
 @Configuration(proxyBeanMethods = false)
 @EnableAutoConfiguration
-@Import({PortalAssembly.class, TargetPlatformRegistry.class})
+@Import({CoreAssembly.class, TargetPlatformRegistry.class})
 class AssemblyTestApplication {
 
     @Bean
@@ -42,11 +41,6 @@ class AssemblyTestApplication {
     @Bean
     FakeTargets targets(Digester digester) {
         return new FakeTargets(digester);
-    }
-
-    @Bean
-    Targets configuredTargets(FakeTargets targets) {
-        return targets.configured();
     }
 
     @Bean
