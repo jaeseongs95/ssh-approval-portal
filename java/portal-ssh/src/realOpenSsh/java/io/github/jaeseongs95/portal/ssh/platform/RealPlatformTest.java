@@ -37,6 +37,19 @@ class RealPlatformTest {
             : new PreparedCommand(posixText, io.github.jaeseongs95.portal.app.remote.StdinBytes.none(), io.github.jaeseongs95.portal.app.remote.CommandKind.COMMAND);
     }
 
+    /**
+     * The interpreter the administrator configured for the Windows target: the product runs a Python source with it by its absolute path and never searches the PATH (the
+     * receiver checks that the file exists), as 2.x did. The path comes from the Gradle property of the task; there is no default, because a guessed path is a test that
+     * fails for a reason that is not the product's.
+     */
+    private static String windowsPython() {
+        String path = System.getProperty("portal.test.openssh.windows-python");
+        if (path == null || path.isBlank()) {
+            throw new IllegalStateException("the system property portal.test.openssh.windows-python is not set: the realOpenSshTest task passes it for a Windows server");
+        }
+        return path;
+    }
+
     @Test
     @DisplayName("S3-RW-01 RC-B-604 text with Korean letters and both kinds of quotes comes back as it was written, and the exit code and the standard error are the command's own")
     void textExitCodeAndStandardError() throws IOException {
@@ -72,7 +85,7 @@ class RealPlatformTest {
             SourceArguments arguments = new SourceArguments(List.of("literal ' $(touch ignored) ; &", "한글"));
             PreparedCommand prepared = server.isWindows()
                 ? receiver.prepareWindows(source, arguments, new io.github.jaeseongs95.portal.domain.target.WindowsDirectory("C:\\"),
-                    new io.github.jaeseongs95.portal.domain.target.WindowsPythonExecutable(System.getProperty("portal.test.openssh.windows-python", "C:\\Python313\\python.exe")), false)
+                    new io.github.jaeseongs95.portal.domain.target.WindowsPythonExecutable(windowsPython()), false)
                 : receiver.prepareLinux(source, arguments, "/", false);
 
             RealServer.Result result = run(server, prepared);

@@ -15,7 +15,8 @@ rem      by SYSTEM and Administrators only, as sshd requires; the account must a
 rem   4. writes an sshd_config for a random loopback port and starts that sshd as SYSTEM in a scheduled task; the system sshd service is not touched;
 rem   5. writes known_hosts with the host public key only, so that host key checking stays on in the tests;
 rem   6. appends the connection values (no secret: the key is named by its path) to %GITHUB_ENV% for the next workflow step:
-rem      PORTAL_OPENSSH_PORT, PORTAL_OPENSSH_USER, PORTAL_OPENSSH_KEY_FILE, PORTAL_OPENSSH_KNOWN_HOSTS
+rem      PORTAL_OPENSSH_PORT, PORTAL_OPENSSH_USER, PORTAL_OPENSSH_KEY_FILE, PORTAL_OPENSSH_KNOWN_HOSTS, PORTAL_OPENSSH_WINDOWS_PYTHON (the path of the runner's python.exe)
+rem   and gives the account the right to create symbolic links (the policy "Create symbolic links"), for the link tests
 rem
 rem Usage: openssh-windows.cmd          prepare (default)
 rem        openssh-windows.cmd stop     stop sshd and remove the task and the account (the workflow calls it with if: always())
@@ -63,6 +64,18 @@ if errorlevel 1 (
     exit /b 1
 )
 > "%CLIENT%\user" echo %CI_USER%
+rem The test account may make symbolic links (S3-RW-04 makes a file link and a junction to show that the adapter refuses them): a file symbolic link needs the user right
+rem "Create symbolic links" (SeCreateSymbolicLinkPrivilege), which only Administrators have by default. The right is given to this account by the local security policy,
+rem the standard way (the policy "Create symbolic links":
+rem https://learn.microsoft.com/en-us/windows/security/threat-protection/security-policy-settings/create-symbolic-links ), with secedit
+rem (https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/secedit-configure ): the rights are exported, the account's SID is added to the line of
+rem the right, and the file is applied again. The runner is a throw-away machine. Sessions of sshd that start after this get the right in their token.
+secedit /export /cfg "%CLIENT%\rights.inf" /areas USER_RIGHTS >nul
+if errorlevel 1 goto :rightsfail
+powershell -NoProfile -NonInteractive -Command "$f = '%CLIENT%\rights.inf'; $sid = (New-Object Security.Principal.NTAccount('%CI_USER%')).Translate([Security.Principal.SecurityIdentifier]).Value; $t = @(Get-Content -LiteralPath $f); $i = -1; for ($n = 0; $n -lt $t.Count; $n++) { if ($t[$n] -like 'SeCreateSymbolicLinkPrivilege*') { $i = $n } }; if ($i -ge 0) { $t[$i] = $t[$i] + ',*' + $sid } else { $j = [array]::IndexOf($t, '[Privilege Rights]'); if ($j -lt 0) { exit 4 }; $t = $t[0..$j] + @('SeCreateSymbolicLinkPrivilege = *' + $sid) + $t[($j + 1)..($t.Count - 1)] }; Set-Content -LiteralPath $f -Value $t -Encoding Unicode"
+if errorlevel 1 goto :rightsfail
+secedit /configure /db "%CLIENT%\rights.sdb" /cfg "%CLIENT%\rights.inf" /areas USER_RIGHTS >nul
+if errorlevel 1 goto :rightsfail
 rem sshd runs as SYSTEM with StrictModes on: the server side directory is owned and written by SYSTEM and Administrators only; the account may read and traverse it.
 icacls "%SRV%" /inheritance:r /grant:r *S-1-5-18:(OI)(CI)(F) *S-1-5-32-544:(OI)(CI)(F) "%CI_USER%:(OI)(CI)(RX)" >nul
 if errorlevel 1 goto :keyfail
@@ -133,6 +146,13 @@ set "KEY_F=%KEY_F:\=/%"
 set "KNOWN_F=%CLIENT%\known_hosts"
 set "KNOWN_F=%KNOWN_F:\=/%"
 
+rem 6b. The Python of the target. The product runs a Python source with the interpreter the administrator configured for the target, by its absolute path (as 2.x did;
+rem the receiver checks that the file exists and never searches the PATH), and the session of sshd does not see the PATH of this step. The tests (RC-B-473, RC-B-349) are
+rem given the path of the runner's Python instead: the first python.exe on the PATH of this step, which the test account may run (it is in the Users group).
+set "PYEXE="
+for /f "delims=" %%p in ('where python.exe 2^>nul') do if not defined PYEXE set "PYEXE=%%p"
+if not defined PYEXE goto :nopython
+
 rem 7. sshd needs SYSTEM, so it runs in a scheduled task (as in the 2.x script); the paths contain no space, so no quoting is needed in the argument.
 powershell -NoProfile -NonInteractive -Command "$a = New-ScheduledTaskAction -Execute '%SSHD%' -Argument '-D -f %SRV%\sshd_config -E %SRV%\sshd.log'; $p = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest; $s = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 45); Register-ScheduledTask -TaskName '%TASK%' -Action $a -Principal $p -Settings $s | Out-Null; Start-ScheduledTask -TaskName '%TASK%'"
 if errorlevel 1 (
@@ -155,6 +175,7 @@ goto :wait
 >> "%GITHUB_ENV%" echo PORTAL_OPENSSH_USER=%CI_USER%
 >> "%GITHUB_ENV%" echo PORTAL_OPENSSH_KEY_FILE=%KEY_F%
 >> "%GITHUB_ENV%" echo PORTAL_OPENSSH_KNOWN_HOSTS=%KNOWN_F%
+>> "%GITHUB_ENV%" echo PORTAL_OPENSSH_WINDOWS_PYTHON=%PYEXE%
 echo Real Windows OpenSSH server ready on 127.0.0.1:%PORT% for account %CI_USER%.
 exit /b 0
 
@@ -191,6 +212,14 @@ exit /b 0
 
 :keyfail
 echo Preparing the keys failed.>&2
+exit /b 1
+
+:nopython
+echo No python.exe on the PATH of the runner: the Python source tests need the path of an interpreter.>&2
+exit /b 1
+
+:rightsfail
+echo Giving the test account the right to create symbolic links failed.>&2
 exit /b 1
 
 :nosshd

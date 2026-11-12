@@ -87,7 +87,8 @@ jobs:
             -Pportal.test.openssh.user="$PORTAL_OPENSSH_USER" \
             -Pportal.test.openssh.key-file="$PORTAL_OPENSSH_KEY_FILE" \
             -Pportal.test.openssh.known-hosts="$PORTAL_OPENSSH_KNOWN_HOSTS" \
-            -Pportal.test.openssh.platform=windows
+            -Pportal.test.openssh.platform=windows \
+            -Pportal.test.openssh.windows-python="$PORTAL_OPENSSH_WINDOWS_PYTHON"
       - name: Stop the OpenSSH server and remove the account
         if: always()
         shell: cmd

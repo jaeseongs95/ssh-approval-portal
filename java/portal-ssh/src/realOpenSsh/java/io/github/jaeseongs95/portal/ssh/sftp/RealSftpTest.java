@@ -35,6 +35,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.time.Clock;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.sshd.sftp.client.SftpClient;
 import org.apache.sshd.sftp.common.SftpException;
@@ -211,21 +212,36 @@ class RealSftpTest {
         RemotePath real = path("real.bin");
         transfer.upload(upload(real, original, OverwriteMode.FAIL_IF_EXISTS), source(original), control());
         String home = server.isWindows() ? "%USERPROFILE%\\" + directoryName : "$HOME/" + directoryName;
-        if (server.isWindows()) {
-            server.exec("cmd /c mkdir \"" + home + "\\realdir\" && mklink /J \"" + home + "\\linkdir\" \"" + home + "\\realdir\" && mklink \"" + home + "\\link.bin\" \"" + home
-                + "\\real.bin\"");
-        } else {
-            server.exec("mkdir \"" + home + "/realdir\" && ln -s \"" + home + "/realdir\" \"" + home + "/linkdir\" && ln -s \"" + home + "/real.bin\" \"" + home + "/link.bin\"");
+        // The preparation is checked, not assumed: each command must end with 0 (a file symbolic link needs the privilege the CI preparation gives the account), and the
+        // links must be there (the server resolves them with stat) before the adapter is asked anything.
+        List<String> preparation = server.isWindows()
+            ? List.of("cmd /c mkdir \"" + home + "\\realdir\"", "cmd /c mklink /J \"" + home + "\\linkdir\" \"" + home + "\\realdir\"",
+                "cmd /c mklink \"" + home + "\\link.bin\" \"" + home + "\\real.bin\"")
+            : List.of("mkdir \"" + home + "/realdir\"", "ln -s \"" + home + "/realdir\" \"" + home + "/linkdir\"", "ln -s \"" + home + "/real.bin\" \"" + home + "/link.bin\"");
+        for (String command : preparation) {
+            RealServer.Result prepared = server.exec(command);
+            assertThat(prepared.exitStatus()).as("%s: stdout [%s] stderr [%s]", command, prepared.stdout(), prepared.stderr()).isZero();
+        }
+        try (SftpClient sftp = new SftpChannels().open(server.session())) {
+            for (String name : new String[] {"link.bin", "linkdir"}) {
+                String sftpPath = new SftpLocation(path(name)).file();
+                SftpClient.Attributes lstat = sftp.lstat(sftpPath);
+                // What the server answers to lstat and to canonicalPath for a link is the knowledge S3-RW-04 is for; it is logged for every run.
+                System.getLogger(RealSftpTest.class.getName()).log(System.Logger.Level.INFO, "server answers for {0}: lstat symlink={1} directory={2} regular={3} type={4} permissions={5}; "
+                    + "stat size={6}", name, lstat.isSymbolicLink(), lstat.isDirectory(), lstat.isRegularFile(), lstat.getType(), Integer.toOctalString(lstat.getPermissions()),
+                    sftp.stat(sftpPath).getSize());
+                System.getLogger(RealSftpTest.class.getName()).log(System.Logger.Level.INFO, "server answers for {0}: canonicalPath={1}", name, sftp.canonicalPath(sftpPath));
+            }
         }
         byte[] content = "through the link".getBytes(StandardCharsets.UTF_8);
 
         UploadResult asFile = transfer.upload(upload(path("link.bin"), content, OverwriteMode.REPLACE), source(content), control());
         UploadResult asDirectory = transfer.upload(upload(path("linkdir/x.bin"), content, OverwriteMode.FAIL_IF_EXISTS), source(content), control());
 
-        // The server decides what it reports for a link (S3-RW-04 for Win32-OpenSSH): a refusal as unsafe is the result where it reports the link.
-        assertThat(asFile).isInstanceOf(UploadResult.Refused.class);
+        // A server that reports a link as a link lets the adapter refuse it; one that does not is a defect of the product (the test is not weakened for it).
+        assertThat(asFile).as("a link as the file: %s", asFile).isInstanceOf(UploadResult.Refused.class);
         assertThat(((UploadResult.Refused) asFile).code()).isEqualTo(TransferErrorCode.UNSAFE_PATH);
-        assertThat(asDirectory).isInstanceOf(UploadResult.Refused.class);
+        assertThat(asDirectory).as("a link as a directory of the path: %s", asDirectory).isInstanceOf(UploadResult.Refused.class);
         assertThat(((UploadResult.Refused) asDirectory).code()).isEqualTo(TransferErrorCode.UNSAFE_PATH);
         java.io.ByteArrayOutputStream kept = new java.io.ByteArrayOutputStream();
         fetch(real, kept);

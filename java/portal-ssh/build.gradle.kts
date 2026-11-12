@@ -49,6 +49,8 @@ dependencies {
 //   portal.test.openssh.key-file     the PATH of the private key file of that account
 //   portal.test.openssh.known-hosts  the PATH of the known_hosts file that holds the server's host key
 //   portal.test.openssh.platform     the operating system of the server: linux or windows
+//   portal.test.openssh.windows-python  only with platform windows: the absolute path of a python.exe on the server (the product runs a Python source with the interpreter
+//                                    configured for the target, by its path, and never searches the PATH; the Linux server uses /usr/bin/python3 and needs none)
 // This script never reads the key file: the paths go to the test JVM as system properties and the tests read what they point to. A missing property fails the task with a
 // message. A run in which Gradle finds no test fails as well (Test.failOnNoDiscoveredTests, https://docs.gradle.org/current/dsl/org.gradle.api.tasks.testing.Test.html).
 val javaSourceSets = extensions.getByType<SourceSetContainer>()
@@ -63,6 +65,7 @@ configurations.named("realOpenSshRuntimeOnly") { extendsFrom(configurations.getB
 
 val openSshSettings = listOf("host", "port", "user", "key-file", "known-hosts", "platform")
     .associateWith { providers.gradleProperty("portal.test.openssh.$it") }
+val windowsPython = providers.gradleProperty("portal.test.openssh.windows-python")
 
 tasks.register<Test>("realOpenSshTest") {
     description = "Runs the tests against a real OpenSSH server (Gradle properties portal.test.openssh.host, .port, .user, .key-file, .known-hosts, .platform); not part of check."
@@ -85,5 +88,14 @@ tasks.register<Test>("realOpenSshTest") {
             )
         }
         openSshSettings.forEach { (name, value) -> forked.systemProperty("portal.test.openssh.$name", value.get()) }
+        if (openSshSettings.getValue("platform").get() == "windows") {
+            if (!windowsPython.isPresent || windowsPython.get().isBlank()) {
+                throw GradleException(
+                    "realOpenSshTest against a Windows server needs the Gradle property portal.test.openssh.windows-python: the absolute path of a python.exe on that server " +
+                        "(the Python source tests run the interpreter by its path, as the product does).",
+                )
+            }
+            forked.systemProperty("portal.test.openssh.windows-python", windowsPython.get())
+        }
     }
 }
