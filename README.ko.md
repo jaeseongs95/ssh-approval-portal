@@ -260,4 +260,10 @@ npm run package:release -- --output /absolute/new/portal-2.4.2-release
 
 패키징은 서버·클라이언트의 `.tar.gz`·`.zip`과 체크섬을 만듭니다. Node.js·cloudflared·인증 정보·사용자 세션은 포함하지 않습니다. 소스·fixture·실제 호스트·클라이언트 UI·배포 검사는 서로 다른 근거입니다. 명령이 있다는 이유만으로 시험이 통과했다고 판단하지 않습니다. 공개한 자산은 고정하고 사용 전에 릴리스 체크섬과 대조하세요.
 
-[MIT 라이선스](LICENSE).
+## 라이선스
+
+SSH Approval Portal은 3.0.0부터 [GNU Affero General Public License 3판 단독](LICENSE)(SPDX 식별자 `AGPL-3.0-only`)으로 배포합니다. 2.4.2 이하 릴리스는 공개 당시의 MIT 라이선스를 그대로 따릅니다.
+
+자체 라이선스 고지가 있는 파일은 그 라이선스를 유지합니다. 해당 파일은 `native/freerdp-input/`(Apache-2.0, FreeRDP 패치)과 Gradle wrapper(`java/gradlew`, `java/gradlew.bat`, `java/gradle/wrapper/`, Apache-2.0)입니다.
+
+프로그램을 수정해 네트워크로 사용자에게 제공하면, 라이선스 13조에 따라 그 사용자에게 수정판의 대응 소스 코드를 받을 수 있는 방법을 제공해야 합니다.
